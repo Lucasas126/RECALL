@@ -1,7 +1,5 @@
 # RECALL
 
-[🇪🇸 Spanish Version](README.ES.md)
-
 recall is a framework for deploying AI agents with context and tools
 initially, it will only use telegram to talk to the user/terminal for local development, and openrouter as the AI model provider
 for the backend, I was thinking of using langgraph/langchain
