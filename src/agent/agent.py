@@ -18,6 +18,8 @@ class Agent:
         self.messages: list[dict] = [
             {"role": "system", "content": config.personality_prompt}
         ]
+        # thinking tokens from the last reply, kept apart from the answer
+        self.last_reasoning: str = ""
 
     @classmethod
     def from_config(cls, user_id: str, agent_id: Optional[str] = None) -> "Agent":
@@ -42,16 +44,35 @@ class Agent:
         self.messages.append({"role": "user", "content": user_input})
         return self._stream() if stream else self._complete()
 
-    def _stream(self) -> Iterator[str]:
-        reply = ""
-        for chunk in self.provider.invoke(self.messages, self.config.models.chat, stream=True):
-            if isinstance(chunk, str):
-                reply += chunk
+    def _stream(self) -> Iterator[tuple]:
+        reasoning, reply = "", ""
+        for chunk in self.provider.invoke(
+            self.messages, self.config.models.chat,
+            stream=True, reasoning=self.config.reasoning, reasoning_tokens=self.config.reasoning_tokens,
+        ):
+            if isinstance(chunk, tuple):
+                kind, text = chunk
+                if kind == "reasoning":
+                    reasoning += text
+                else:
+                    reply += text
                 yield chunk
-        self.messages.append({"role": "assistant", "content": reply})
+        self.last_reasoning = reasoning
+        self._remember_reply(reply, reasoning)
 
     def _complete(self) -> str:
-        result = self.provider.invoke(self.messages, self.config.models.chat, stream=False)
+        result = self.provider.invoke(
+            self.messages, self.config.models.chat,
+            stream=False, reasoning=self.config.reasoning, reasoning_tokens=self.config.reasoning_tokens,
+        )
+        self.last_reasoning = result.get("reasoning", "")
         reply = result["response"]
-        self.messages.append({"role": "assistant", "content": reply})
+        self._remember_reply(reply, self.last_reasoning)
         return reply
+
+    def _remember_reply(self, reply: str, reasoning: str) -> None:
+        """Append the assistant reply to memory, optionally keeping the thinking with it."""
+        message = {"role": "assistant", "content": reply}
+        if self.config.keep_reasoning_in_memory and reasoning:
+            message["reasoning"] = reasoning
+        self.messages.append(message)

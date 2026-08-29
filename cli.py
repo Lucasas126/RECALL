@@ -1,3 +1,5 @@
+import sys
+
 import dotenv
 
 from src.agent.agent import Agent
@@ -7,8 +9,13 @@ dotenv.load_dotenv()
 USER_ID = dotenv.get_key(".env", "USER_ID")
 AGENT_ID = dotenv.get_key(".env", "AGENT_ID")
 
+GRAY_ITALIC = "\033[3;90m"
+RESET = "\033[0m"
 
 def main():
+    # Enable colors and UTF-8 output
+    sys.stdout.reconfigure(encoding="utf-8")
+
     agent = Agent.from_config(USER_ID, AGENT_ID)
 
     print(f"{agent.name} cli — type 'exit' or 'quit' to stop.\n")
@@ -26,14 +33,22 @@ def main():
             print("Bye!")
             break
 
-        print(f"\n{agent.name}: ", end="", flush=True)
         result = agent.invoke(user_input)
         if isinstance(result, str):
-            print(result, end="", flush=True)
+            print(f"\n{agent.name}: {result}\n")
         else:
-            for chunk in result:
-                print(chunk, end="", flush=True)
-        print("\n")
+            mode = None
+            for kind, text in result:
+                if kind != mode:
+                    if mode == "reasoning":
+                        print(RESET, end="")  # close reasoning styling
+                    if kind == "reasoning":
+                        print(f"\n{GRAY_ITALIC}thinking: ", end="", flush=True)
+                    else:
+                        print(f"\n{agent.name}: ", end="", flush=True)
+                    mode = kind
+                print(text, end="", flush=True)
+            print(RESET + "\n")
 
 
 if __name__ == "__main__":

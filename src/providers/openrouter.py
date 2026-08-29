@@ -22,18 +22,21 @@ class OpenRouterProvider(LLMProvider):
         super().__init__(**data)
         # self.api_key = os.environ.get("OPENROUTER_API_KEY", "")
 
-    def invoke(self, messages: list[dict], model: str, stream=True):
+    def invoke(self, messages: list[dict], model: str, stream=True, reasoning=False, reasoning_tokens=None):
         """
         Invokes the OpenRouter API with the given messages and model.
-        If stream is True, yields text chunks and a final dict with usage info.
+        If stream is True, yields (kind, text) tuples then a final dict with usage info.
         If stream is False, returns a dict directly.
         """
         if stream:
-            return self.invoke_stream(messages, model, self.api_key)
-        return self.invoke_sync(messages, model, self.api_key)
+            return self.invoke_stream(messages, model, self.api_key, reasoning=reasoning, reasoning_tokens=reasoning_tokens)
+        return self.invoke_sync(messages, model, self.api_key, reasoning=reasoning, reasoning_tokens=reasoning_tokens)
 
-    def invoke_stream(self, messages: list[dict], model: str, api_key: str):
-        """Streaming variant — yields str chunks then a final dict with usage info."""
+    def invoke_stream(self, messages: list[dict], model: str, api_key: str, reasoning=False, reasoning_tokens=None):
+        """Streaming variant — yields (kind, text) tuples then a final dict with usage info.
+
+        kind is either "reasoning" (thinking tokens) or "content" (the actual answer).
+        """
 
         url = "https://openrouter.ai/api/v1/chat/completions"
         headers = {
@@ -45,12 +48,16 @@ class OpenRouterProvider(LLMProvider):
             "messages": messages,
             "stream": True,
         }
+        if reasoning:
+            payload["reasoning"] = {"max_tokens": reasoning_tokens} if reasoning_tokens else {}
 
         try:
             response_text = ""
+            reasoning_text = ""
             usage_info = None
             buffer = ""
             with requests.post(url, headers=headers, json=payload, stream=True) as r:
+                r.encoding = "utf-8"  # SSE defaults to latin-1; force utf-8 to avoid mojibake
                 for chunk in r.iter_content(chunk_size=1024, decode_unicode=True):
                     buffer += chunk
                     while True:
@@ -74,10 +81,17 @@ class OpenRouterProvider(LLMProvider):
 
                                 try:
                                     data_obj = json.loads(data)
-                                    content = data_obj["choices"][0]["delta"].get("content")
+                                    delta = data_obj["choices"][0]["delta"]
+
+                                    reasoning_chunk = delta.get("reasoning")
+                                    if reasoning_chunk:
+                                        reasoning_text += reasoning_chunk
+                                        yield ("reasoning", reasoning_chunk)
+
+                                    content = delta.get("content")
                                     if content:
-                                        response_text += content 
-                                        yield content # Yield each chunk of content as it arrives
+                                        response_text += content
+                                        yield ("content", content)
 
                                     # Capture usage info if present in the final message
                                     if "usage" in data_obj:
@@ -89,7 +103,7 @@ class OpenRouterProvider(LLMProvider):
                             break
 
             # Yield the final result with usage info after streaming is complete
-            yield {"response": response_text, "usage": usage_info, "model": model}
+            yield {"reasoning": reasoning_text, "response": response_text, "usage": usage_info, "model": model}
 
         except requests.RequestException as e:
             logger.warning(f"Error during streaming from OpenRouter API: {e}, retrying without streaming")
@@ -97,8 +111,10 @@ class OpenRouterProvider(LLMProvider):
                 response = requests.post(url, headers=headers, json={**payload, "stream": False})
                 response.raise_for_status()
                 response_data = response.json()
+                msg = response_data["choices"][0]["message"]
                 yield {
-                    "response": response_data["choices"][0]["message"]["content"],
+                    "reasoning": msg.get("reasoning", ""),
+                    "response": msg.get("content", ""),
                     "usage": response_data.get("usage"),
                     "model": model
                 }
@@ -109,20 +125,24 @@ class OpenRouterProvider(LLMProvider):
             logger.error(f"Unexpected error during streaming: {e}")
             raise
 
-    def invoke_sync(self, messages: list[dict], model: str, api_key: str) -> dict:
-        """Non-streaming variant — returns a dict with response, usage and model."""
+    def invoke_sync(self, messages: list[dict], model: str, api_key: str, reasoning=False, reasoning_tokens=None) -> dict:
+        """Non-streaming variant — returns a dict with reasoning, response, usage and model."""
         url = "https://openrouter.ai/api/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
         payload = {"model": model, "messages": messages, "stream": False}
+        if reasoning:
+            payload["reasoning"] = {"max_tokens": reasoning_tokens} if reasoning_tokens else {}
         try:
             response = requests.post(url, headers=headers, json=payload)
             response.raise_for_status()
             response_data = response.json()
+            msg = response_data["choices"][0]["message"]
             return {
-                "response": response_data["choices"][0]["message"]["content"],
+                "reasoning": msg.get("reasoning", ""),
+                "response": msg.get("content", ""),
                 "usage": response_data.get("usage"),
                 "model": model
             }
