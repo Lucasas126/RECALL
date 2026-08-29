@@ -56,7 +56,6 @@ resources:
   folders:
     refs: /home/user/refs
 agents: [aria, scout]
-default_agent: aria
 ```
 
 ```yaml
@@ -101,7 +100,7 @@ raw yaml ─▶ pydantic validate ─▶ merge with defaults ─▶ resolve refs
 the whole config is validated when the platform boots; any error aborts startup instead of failing later mid-conversation. checks:
 
 - unique `user_id` and, per user, unique `agent_id`.
-- `default_agent` is in the user's `agents` list, and every listed agent has a file.
+- every listed agent has a file.
 - every `resource:` reference exists in the owner's `resources`.
 - every tool in `allow`/`deny` is a known tool (tools.md).
 - `overlay ∈ {safe, auto}`.

@@ -2,6 +2,8 @@ import os
 import requests
 import json
 import logging
+from typing import ClassVar
+
 from src.providers.provider import LLMProvider
 
 import dotenv
@@ -12,11 +14,13 @@ logger = logging.getLogger(__name__)
 
 class OpenRouterProvider(LLMProvider):
 
+    name: ClassVar[str] = "openrouter"
+
     api_key: str = ""
 
     def __init__(self, **data):
         super().__init__(**data)
-        self.api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        # self.api_key = os.environ.get("OPENROUTER_API_KEY", "")
 
     def invoke(self, messages: list[dict], model: str, stream=True):
         """

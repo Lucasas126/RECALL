@@ -25,11 +25,10 @@ resources:                     # owned by the user, bound by their agents
   folders:
     refs: /home/user/refs
 agents: [aria, scout]
-default_agent: aria
 ```
 
 - **resources** are things the user owns (vaults, folders). agents bind to them by reference in their own config (see agents.md), so paths live in one place.
-- **agents** lists the agent ids owned by this user; **default_agent** is used when the channel doesn't specify one.
+- **agents** lists the agent ids owned by this user.
 
 ## data layout
 
@@ -49,7 +48,7 @@ everything an agent produces lives under its user's folder. the vector index nam
 
 1. read the channel identity (e.g. telegram user id).
 2. map it to a `user_id`; unknown identities are rejected (or onboarded).
-3. pick the target agent: explicit selection, else the user's `default_agent`.
+3. pick the target agent: explicit selection, else the user's first agent.
 4. build that agent's `SourceRegistry` (scoped to user + agent) and handle the message.
 
 ## separation guarantees

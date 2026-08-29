@@ -1,0 +1,6 @@
+id: johndoe
+name: johndoe
+provider:
+  name: openrouter
+  api_key: OPENROUTER_JOHNDOE_API_KEY
+agents: [example_agent]
