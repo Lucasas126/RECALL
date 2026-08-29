@@ -1,0 +1,51 @@
+# sources & addressing
+
+the data plane (L1) is a set of **sources**: named, typed locations the agent can access. every tool that touches memory goes through this layer.
+
+## source types
+
+| source | owner | access | indexed | overlay |
+|---|---|---|---|---|
+| `mind_palace` | the agent | read/write | yes | none |
+| `conversations` | the system | read (append-only) | yes | none |
+| `obsidian` | the user | read/write | yes | safe or auto |
+| `user_folder` | the user | read-only | yes | none |
+
+- **mind_palace**: the agent's private space. obsidian-like structure (folders, frontmatter, tags). the user does not normally read it.
+- **conversations**: past conversations with the user, written by the system, never edited by the agent. the agent can read and search them.
+- **obsidian**: the user's vault, bound per agent (see agents.md). accessed through the safe/auto overlay (see overlay.md).
+- **user_folder**: extra reference material the user drops in. read-only.
+
+sources are configurable per agent — an agent may have no obsidian, or several user folders.
+
+## addressing
+
+every memory is addressed as `source:relative/path`:
+
+```
+mind_palace:hobbies/arte.md
+obsidian:projects/recall.md
+conversations:2026-08-28/session-3.md
+```
+
+- the prefix before `:` is the source name; the rest is a path relative to that source's root.
+- tools that target one file (`read`, `write`, `edit`, `move`, `delete`) take a full `memory_path` in this form.
+- tools that scan (`list`, `search`, `query_memory`, `list_tags`, `find_notes_by_tag`) take an optional `source` filter, which is just the source name (`mind_palace`, `obsidian`, ...); with none they span all sources.
+- `move`'s `new_path` must stay in the **same** source as its `memory_path`.
+
+## SourceRegistry
+
+each agent gets its own `SourceRegistry`, built from that agent's config. it is the single entry point to L1 and is injected into every capability and tool.
+
+responsibilities:
+- **hold** the configured sources for this agent (isolated from other agents).
+- **resolve** a `source:path` string into a real, validated filesystem path.
+- **guard** against path traversal: the resolved path must stay inside the source root, or resolution fails.
+- **expose** typed accessors (`mind_palace()`, `obsidian()`, `conversations()`, `vector()`), each returning a source handle with its declared capabilities (`readable`, `writable`, `indexed`, `overlay`).
+- **route** writes/reads through the overlay when the source declares one.
+
+a capability never opens files directly — it always asks the registry, so isolation, overlay and path-safety are enforced in one place.
+
+## indexing
+
+sources marked `indexed: true` feed the shared vector index. each chunk carries metadata: `agent_id`, `source`, `path`, `md5`, and (for obsidian-like sources) `tags`. the index is **namespaced per agent** so retrieval never crosses agents (see agents.md). the overlay is applied before indexing, so vectors reflect the agent's view, not the raw user files.
