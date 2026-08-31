@@ -7,7 +7,10 @@ from typing import Optional
 
 LOGS_DIR = Path("logs")
 
-_FMT = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+# local time with an explicit utc offset (e.g. 2026-08-31T12:22:45+0200)
+_FMT = logging.Formatter(
+    "%(asctime)s %(levelname)s %(name)s: %(message)s", datefmt="%Y-%m-%dT%H:%M:%S%z"
+)
 
 # current run's log dir and the components requested so far (for re-attaching on setup)
 _run_dir: Optional[Path] = None
@@ -23,7 +26,7 @@ def setup_logging(run: str = "cli", level: int = logging.DEBUG) -> Path:
     """
     global _run_dir, _level
     _level = level
-    _run_dir = LOGS_DIR / f"{datetime.now():%Y%m%d_%H%M%S}_{run}"
+    _run_dir = LOGS_DIR / f"{datetime.now().astimezone():%Y%m%d_%H%M%S%z}_{run}"
     _run_dir.mkdir(parents=True, exist_ok=True)
 
     # root: combined file with everything

@@ -8,7 +8,7 @@ from src.utils.logger import get_logger
 
 from typing import ClassVar
 
-logger = get_logger("ollama")
+logger = get_logger("provider-ollama")
 
 DEFAULT_HOST = "http://localhost:11434"
 

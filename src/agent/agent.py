@@ -6,6 +6,7 @@ import src.providers.openrouter  # noqa: F401  (registers the openrouter provide
 import src.providers.ollama  # noqa: F401  (registers the ollama provider)
 from src.config.loader import load_agent
 from src.config.models import ResolvedAgent
+from src.core.sources.registry import SourceRegistry
 from src.utils.logger import get_logger
 from src.providers.provider import LLMProvider, get_provider
 
@@ -18,6 +19,10 @@ class Agent:
     def __init__(self, config: ResolvedAgent, provider: LLMProvider):
         self.config = config
         self.provider = provider
+        # per-agent access to the data plane (mind palace, conversations, ...)
+        self.sources = SourceRegistry.for_agent(config.user_id, config.id)
+        # start a persisted conversation (one jsonl file, one turn per line)
+        self.conversation = self.sources.conversations().start(config.personality_prompt)
         # conversation history is the memory
         self.messages: list[dict] = [
             {"role": "system", "content": config.personality_prompt}
@@ -49,6 +54,7 @@ class Agent:
         if not self.config.has_memory:
             self.messages = [{"role": "system", "content": self.config.personality_prompt}]
         self.messages.append({"role": "user", "content": user_input})
+        self._log_turn("user", user_input)
         return self._stream() if stream else self._complete()
 
     def _stream(self) -> Iterator[tuple]:
@@ -83,3 +89,9 @@ class Agent:
         if self.config.keep_reasoning_in_memory and reasoning:
             message["reasoning"] = reasoning
         self.messages.append(message)
+        self._log_turn("assistant", reply, reasoning=reasoning or None)
+
+    def _log_turn(self, role: str, content: str, **extra) -> None:
+        """Persist a turn to the conversation jsonl (independent of in-context memory)."""
+        extra = {k: v for k, v in extra.items() if v is not None}
+        self.sources.conversations().append(self.conversation, role, content, **extra)

@@ -9,7 +9,7 @@ from src.utils.logger import get_logger
 import dotenv
 
 dotenv.load_dotenv()
-logger = get_logger("openrouter")
+logger = get_logger("provider-openrouter")
 
 
 class OpenRouterProvider(LLMProvider):
