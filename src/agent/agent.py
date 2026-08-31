@@ -25,6 +25,9 @@ class Agent:
         self.messages: list[dict] = [
             {"role": "system", "content": config.personality_prompt}
         ]
+        # whether older turns were dropped from the in-context window
+        self._truncated = False
+        self._load_recent_context()
         # thinking tokens from the last reply, kept apart from the answer
         self.last_reasoning: str = ""
         logger.debug("initialized agent: %s", config)
@@ -51,14 +54,16 @@ class Agent:
         # without memory, each turn starts fresh from the system prompt
         if not self.config.has_memory:
             self.messages = [{"role": "system", "content": self.config.personality_prompt}]
+            self._truncated = False
         self.messages.append({"role": "user", "content": user_input})
         self._log_turn("user", user_input)
+        self._trim_context()
         return self._stream() if stream else self._complete()
 
     def _stream(self) -> Iterator[tuple]:
         reasoning, reply = "", ""
         for chunk in self.provider.invoke(
-            self.messages, self.config.models.chat,
+            self._context(), self.config.models.chat,
             stream=True, reasoning=self.config.reasoning, reasoning_tokens=self.config.reasoning_tokens,
         ):
             if isinstance(chunk, tuple):
@@ -73,7 +78,7 @@ class Agent:
 
     def _complete(self) -> str:
         result = self.provider.invoke(
-            self.messages, self.config.models.chat,
+            self._context(), self.config.models.chat,
             stream=False, reasoning=self.config.reasoning, reasoning_tokens=self.config.reasoning_tokens,
         )
         self.last_reasoning = result.get("reasoning", "")
@@ -93,3 +98,34 @@ class Agent:
         """Persist a turn to the conversation jsonl (independent of in-context memory)."""
         extra = {k: v for k, v in extra.items() if v is not None}
         self.sources.conversations().append(role, content, **extra)
+
+    # ------------------------------------------------------------------ context window
+
+    def _load_recent_context(self) -> None:
+        """Seed the context with the last N turns from past conversations (across days)."""
+        n = self.config.conversation_messages_retained
+        if not (self.config.has_memory and n):
+            return
+        history, truncated = self.sources.conversations().last_turns(n)
+        self.messages += [
+            {"role": t["role"], "content": t["content"]}
+            for t in history
+            if t.get("role") in ("user", "assistant")
+        ]
+        self._truncated = truncated
+
+    def _trim_context(self) -> None:
+        """Keep only the last N turns (system prompt aside), flagging that older ones were cut."""
+        n = self.config.conversation_messages_retained
+        if not n:
+            return
+        rest = self.messages[1:]
+        if len(rest) > n:
+            self.messages = [self.messages[0]] + rest[-n:]
+            self._truncated = True
+
+    def _context(self) -> list[dict]:
+        """The messages actually sent to the model, with a cutoff marker if history was dropped."""
+        if self._truncated:
+            return [self.messages[0], {"role": "system", "content": "[CUTOFF CONVERSATION]"}] + self.messages[1:]
+        return self.messages

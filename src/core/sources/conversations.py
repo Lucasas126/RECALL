@@ -47,3 +47,21 @@ class ConversationsSource(Source):
         """List conversation ids (days), most recent last."""
         return sorted(p.name for p in self.root.iterdir() if p.suffix == ".jsonl")
 
+    def last_turns(self, n: int) -> tuple[list[dict], bool]:
+        """Return the last *n* turns across day files, and whether older turns were dropped.
+
+        Walks day files newest-first until it has n turns or runs out.
+        """
+        if n <= 0:
+            return [], False
+        files = self.conversations()  # oldest -> newest
+        collected: list[dict] = []
+        consumed = 0
+        for day in reversed(files):
+            collected = self.load(day) + collected
+            consumed += 1
+            if len(collected) >= n:
+                break
+        truncated = len(collected) > n or consumed < len(files)
+        return collected[-n:], truncated
+

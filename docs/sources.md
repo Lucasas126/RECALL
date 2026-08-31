@@ -12,7 +12,7 @@ the data plane (L1) is a set of **sources**: named, typed locations the agent ca
 | `user_folder` | the user | read-only | yes | none |
 
 - **mind_palace**: the agent's private space. obsidian-like structure (folders, frontmatter, tags). the user does not normally read it.
-- **conversations**: past conversations with the user, written by the system, never edited by the agent. the agent can read and search them.
+- **conversations**: past conversations with the user, written by the system, never edited by the agent. stored as one JSONL file per UTC day (one turn per line, timestamped). the agent can read and search them.
 - **obsidian**: the user's vault, bound per agent (see agents.md). accessed through the safe/auto overlay (see overlay.md).
 - **user_folder**: extra reference material the user drops in. read-only.
 
@@ -25,7 +25,7 @@ every memory is addressed as `source:relative/path`:
 ```
 mind_palace:hobbies/arte.md
 obsidian:projects/recall.md
-conversations:2026-08-28/session-3.md
+conversations:2026-08-31.jsonl
 ```
 
 - the prefix before `:` is the source name; the rest is a path relative to that source's root.
@@ -49,3 +49,9 @@ a capability never opens files directly — it always asks the registry, so isol
 ## indexing
 
 sources marked `indexed: true` feed the shared vector index. each chunk carries metadata: `agent_id`, `source`, `path`, `md5`, and (for obsidian-like sources) `tags`. the index is **namespaced per agent** so retrieval never crosses agents (see agents.md). the overlay is applied before indexing, so vectors reflect the agent's view, not the raw user files.
+
+## status
+
+implemented: the `SourceRegistry` (address resolution `source:path` + traversal guard), the `mind_palace` and `conversations` sources, and read/write/list/delete over them. source roots are derived by convention as `data/<user_id>/<agent_id>/<source>` (per-agent source config is planned).
+
+planned: the `obsidian` source + safe/auto overlay, the `user_folder` source, and the vector index (`query_memory`, tags) described above.
