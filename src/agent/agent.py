@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Iterator, Optional, Union
 
 import src.providers.openrouter  # noqa: F401  (registers the openrouter provider)
+import src.providers.ollama  # noqa: F401  (registers the ollama provider)
 from src.config.loader import load_agent
 from src.config.models import ResolvedAgent
 from src.utils.logger import get_logger

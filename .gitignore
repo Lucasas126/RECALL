@@ -220,7 +220,7 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Config folder
-config/
+.config/
 
 # Logs
 /logs

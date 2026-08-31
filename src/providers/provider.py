@@ -5,6 +5,17 @@ from typing import ClassVar
 from pydantic import BaseModel
 
 
+def format_completion(kind: str, reasoning: str, response: str, usage, model: str) -> str:
+    """Render a model completion as a readable multi-line block for the logs."""
+    return (
+        f"\n=== {kind} response ===\n"
+        f"model: {model}\n"
+        f"usage: {usage}\n"
+        f"\n-- reasoning --\n{reasoning or '(none)'}\n"
+        f"\n-- response --\n{response or '(none)'}\n"
+    )
+
+
 class LLMProvider(BaseModel):
 
     # name that config providers must match to select this class

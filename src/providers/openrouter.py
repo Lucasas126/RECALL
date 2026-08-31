@@ -3,24 +3,13 @@ import requests
 import json
 from typing import ClassVar
 
-from src.providers.provider import LLMProvider
+from src.providers.provider import LLMProvider, format_completion
 from src.utils.logger import get_logger
 
 import dotenv
 
 dotenv.load_dotenv()
 logger = get_logger("openrouter")
-
-
-def _fmt_completion(kind: str, reasoning: str, response: str, usage, model: str) -> str:
-    """Render a model completion as a readable multi-line block for the logs."""
-    return (
-        f"\n=== {kind} response ===\n"
-        f"model: {model}\n"
-        f"usage: {usage}\n"
-        f"\n-- reasoning --\n{reasoning or '(none)'}\n"
-        f"\n-- response --\n{response or '(none)'}\n"
-    )
 
 
 class OpenRouterProvider(LLMProvider):
@@ -116,7 +105,7 @@ class OpenRouterProvider(LLMProvider):
                             break
 
             # Yield the final result with usage info after streaming is complete
-            logger.debug(_fmt_completion("streaming", reasoning_text, response_text, usage_info, model))
+            logger.debug(format_completion("streaming", reasoning_text, response_text, usage_info, model))
             yield {"reasoning": reasoning_text, "response": response_text, "usage": usage_info, "model": model}
 
         except requests.RequestException as e:
@@ -155,7 +144,7 @@ class OpenRouterProvider(LLMProvider):
             response.raise_for_status()
             response_data = response.json()
             msg = response_data["choices"][0]["message"]
-            logger.debug(_fmt_completion("non-streaming", msg.get("reasoning", ""), msg.get("content", ""), response_data.get("usage"), model))
+            logger.debug(format_completion("non-streaming", msg.get("reasoning", ""), msg.get("content", ""), response_data.get("usage"), model))
             return {
                 "reasoning": msg.get("reasoning", ""),
                 "response": msg.get("content", ""),
