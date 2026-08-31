@@ -1,15 +1,26 @@
 import os
 import requests
 import json
-import logging
 from typing import ClassVar
 
 from src.providers.provider import LLMProvider
+from src.utils.logger import get_logger
 
 import dotenv
 
 dotenv.load_dotenv()
-logger = logging.getLogger(__name__)
+logger = get_logger("openrouter")
+
+
+def _fmt_completion(kind: str, reasoning: str, response: str, usage, model: str) -> str:
+    """Render a model completion as a readable multi-line block for the logs."""
+    return (
+        f"\n=== {kind} response ===\n"
+        f"model: {model}\n"
+        f"usage: {usage}\n"
+        f"\n-- reasoning --\n{reasoning or '(none)'}\n"
+        f"\n-- response --\n{response or '(none)'}\n"
+    )
 
 
 class OpenRouterProvider(LLMProvider):
@@ -28,6 +39,7 @@ class OpenRouterProvider(LLMProvider):
         If stream is True, yields (kind, text) tuples then a final dict with usage info.
         If stream is False, returns a dict directly.
         """
+        logger.debug("request model=%s stream=%s reasoning=%s msgs=%d", model, stream, reasoning, len(messages))
         if stream:
             return self.invoke_stream(messages, model, self.api_key, reasoning=reasoning, reasoning_tokens=reasoning_tokens)
         return self.invoke_sync(messages, model, self.api_key, reasoning=reasoning, reasoning_tokens=reasoning_tokens)
@@ -48,6 +60,7 @@ class OpenRouterProvider(LLMProvider):
             "messages": messages,
             "stream": True,
         }
+        logger.debug("openrouter streaming request; payload=%s", payload)
         if reasoning:
             payload["reasoning"] = {"max_tokens": reasoning_tokens} if reasoning_tokens else {}
 
@@ -103,6 +116,7 @@ class OpenRouterProvider(LLMProvider):
                             break
 
             # Yield the final result with usage info after streaming is complete
+            logger.debug(_fmt_completion("streaming", reasoning_text, response_text, usage_info, model))
             yield {"reasoning": reasoning_text, "response": response_text, "usage": usage_info, "model": model}
 
         except requests.RequestException as e:
@@ -133,6 +147,7 @@ class OpenRouterProvider(LLMProvider):
             "Content-Type": "application/json"
         }
         payload = {"model": model, "messages": messages, "stream": False}
+        logger.debug("openrouter non-streaming request; payload=%s", payload)
         if reasoning:
             payload["reasoning"] = {"max_tokens": reasoning_tokens} if reasoning_tokens else {}
         try:
@@ -140,6 +155,7 @@ class OpenRouterProvider(LLMProvider):
             response.raise_for_status()
             response_data = response.json()
             msg = response_data["choices"][0]["message"]
+            logger.debug(_fmt_completion("non-streaming", msg.get("reasoning", ""), msg.get("content", ""), response_data.get("usage"), model))
             return {
                 "reasoning": msg.get("reasoning", ""),
                 "response": msg.get("content", ""),
@@ -162,12 +178,14 @@ class OpenRouterProvider(LLMProvider):
             "Content-Type": "application/json",
         }
         payload = {"model": model, "input": list(input)}
+        logger.debug("openrouter embeddings request; payload=%s", payload)
         response = requests.post(
             "https://openrouter.ai/api/v1/embeddings",
             json=payload,
             headers=headers,
             timeout=60,
         )
+        logger.debug("openrouter embeddings response; status_code=%s response_text=%s", response.status_code, response.text)
         response.raise_for_status()
         data = response.json()["data"]
         # data is a list of {"index": int, "embedding": list[float]}

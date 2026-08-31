@@ -5,7 +5,10 @@ from typing import Iterator, Optional, Union
 import src.providers.openrouter  # noqa: F401  (registers the openrouter provider)
 from src.config.loader import load_agent
 from src.config.models import ResolvedAgent
+from src.utils.logger import get_logger
 from src.providers.provider import LLMProvider, get_provider
+
+logger = get_logger("agent")
 
 
 class Agent:
@@ -20,11 +23,13 @@ class Agent:
         ]
         # thinking tokens from the last reply, kept apart from the answer
         self.last_reasoning: str = ""
+        logger.debug("initialized agent: %s", config)
 
     @classmethod
     def from_config(cls, user_id: str, agent_id: Optional[str] = None) -> "Agent":
         config = load_agent(user_id, agent_id)
         provider = get_provider(config.provider_name, api_key=config.api_key)
+        logger.debug("loaded agent config: %s", config)
         return cls(config, provider)
 
     @property
@@ -38,6 +43,7 @@ class Agent:
         """
         if stream is None:
             stream = self.config.stream
+        logger.info("invoke user=%s agent=%s stream=%s", self.config.user_id, self.config.id, stream)
         # without memory, each turn starts fresh from the system prompt
         if not self.config.has_memory:
             self.messages = [{"role": "system", "content": self.config.personality_prompt}]

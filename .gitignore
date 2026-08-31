@@ -221,3 +221,6 @@ __marimo__/
 
 # Config folder
 config/
+
+# Logs
+/logs

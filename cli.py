@@ -3,6 +3,7 @@ import sys
 import dotenv
 
 from src.agent.agent import Agent
+from src.utils.logger import setup_logging
 
 dotenv.load_dotenv()
 
@@ -16,9 +17,10 @@ def main():
     # Enable colors and UTF-8 output
     sys.stdout.reconfigure(encoding="utf-8")
 
+    setup_logging("cli")
     agent = Agent.from_config(USER_ID, AGENT_ID)
 
-    print(f"{agent.name} cli — type 'exit' or 'quit' to stop.\n")
+    print(f"{agent.name} cli — type 'exit' or 'quit' to stop.")
 
     while True:
         try:

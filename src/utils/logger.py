@@ -1,0 +1,61 @@
+from __future__ import annotations
+
+import logging
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
+LOGS_DIR = Path("logs")
+
+_FMT = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+# current run's log dir and the components requested so far (for re-attaching on setup)
+_run_dir: Optional[Path] = None
+_components: set[str] = set()
+_level: int = logging.DEBUG
+
+
+def setup_logging(run: str = "cli", level: int = logging.DEBUG) -> Path:
+    """Configure per-execution logging: one folder per run, one file per component.
+
+    Components do not need to be declared in advance — the first get_logger(name)
+    call creates its file automatically. Returns the run's log directory.
+    """
+    global _run_dir, _level
+    _level = level
+    _run_dir = LOGS_DIR / f"{datetime.now():%Y%m%d_%H%M%S}_{run}"
+    _run_dir.mkdir(parents=True, exist_ok=True)
+
+    # root: combined file with everything
+    root = logging.getLogger()
+    root.setLevel(level)
+    root.handlers.clear()
+    combined = logging.FileHandler(_run_dir / "recall.log", encoding="utf-8")
+    combined.setFormatter(_FMT)
+    root.addHandler(combined)
+
+    # (re)attach a file handler for every component already requested
+    for comp in _components:
+        _attach_file_handler(comp)
+
+    return _run_dir
+
+
+def _attach_file_handler(component: str) -> None:
+    logger = logging.getLogger(f"recall.{component}")
+    logger.setLevel(_level)
+    logger.handlers.clear()  # drop a previous run's handler
+    if _run_dir is not None:
+        fh = logging.FileHandler(_run_dir / f"{component}.log", encoding="utf-8")
+        fh.setFormatter(_FMT)
+        logger.addHandler(fh)
+
+
+def get_logger(component: str) -> logging.Logger:
+    """Return the logger for a component; its file is created lazily on first use."""
+    _components.add(component)
+    logger = logging.getLogger(f"recall.{component}")
+    if _run_dir is not None and not logger.handlers:
+        _attach_file_handler(component)
+    return logger
+
