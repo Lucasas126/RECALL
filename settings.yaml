@@ -10,3 +10,6 @@ index:
   collection: memory        # chroma collection name
   file_types: [txt, md, jsonl]  # source files eligible for indexing
   chunk_words: 100          # words per chunk for non-jsonl files
+
+agent:
+  max_tool_hops: 5          # max tool round-trips before forcing a final answer

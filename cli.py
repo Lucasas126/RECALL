@@ -11,6 +11,7 @@ USER_ID = dotenv.get_key(".env", "USER_ID")
 AGENT_ID = dotenv.get_key(".env", "AGENT_ID")
 
 GRAY_ITALIC = "\033[3;90m"
+RED = "\033[91m"
 RESET = "\033[0m"
 
 def main():
@@ -38,21 +39,26 @@ def main():
             break
 
         result = agent.invoke(user_input)
-        if isinstance(result, str):
-            print(f"\n{agent.name}: {result}\n")
-        else:
-            mode = None
-            for kind, text in result:
-                if kind != mode:
-                    if mode == "reasoning":
-                        print(RESET, end="")  # close reasoning styling
-                    if kind == "reasoning":
-                        print(f"\n{GRAY_ITALIC}thinking: ", end="", flush=True)
-                    else:
-                        print(f"\n{agent.name}: ", end="", flush=True)
-                    mode = kind
-                print(text, end="", flush=True)
-            print(RESET + "\n")
+        try:
+            result = agent.invoke(user_input)
+            if isinstance(result, str):
+                print(f"\n{agent.name}: {result}\n")
+            else:
+                mode = None
+                for kind, text in result:
+                    if kind != mode:
+                        if mode == "reasoning":
+                            print(RESET, end="")  # close reasoning styling
+                        if kind == "reasoning":
+                            print(f"\n{GRAY_ITALIC}thinking: ", end="", flush=True)
+                        else:
+                            print(f"\n{agent.name}: ", end="", flush=True)
+                        mode = kind
+                    print(text, end="", flush=True)
+                print(RESET + "\n")
+        except Exception as e:
+            print(f"\n{RED}[error] {e}{RESET}\n")
+            continue
 
         print(f"{GRAY_ITALIC}[usage]\n{agent.last_usage}{RESET}\n")
 

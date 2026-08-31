@@ -16,7 +16,7 @@ query_memory
 - return: the top_k most relevant chunks, each with its content, score and origin (source + path) so the result can be read or edited afterwards.
 
 
-list
+list_memories
 - parameters: source (str, optional), path (str, optional)
 - agent description: lists the available sources, or the files and folders inside a given source and path, so you can discover what memories exist before reading them.
 - background behaviour: with no arguments, returns the configured sources (mind palace, conversations, obsidian). with a source (and optional path), walks that location and returns its entries.
@@ -58,6 +58,13 @@ write
 - return: confirmation, with the resolved path that was actually written.
 
 
+append
+- parameters: memory_path (str), content (str)
+- agent description: adds content to the end of an existing memory without rewriting it (creates it if it does not exist). prefer this over write when you only want to add a note, not replace the whole file.
+- background behaviour: reads the current file at memory_path (or treats it as empty if missing), concatenates content at the end (inserting a newline separator if needed) and writes it back. same overlay and index-refresh rules as write apply.
+- return: confirmation, with the resolved path that was appended to.
+
+
 edit
 - parameters: memory_path (str), old_string (str), new_string (str)
 - agent description: edits part of an existing memory by replacing a specific fragment, without rewriting the whole file.
@@ -95,10 +102,10 @@ web_retrieve
 ## recall mode toolset
 
 in recall mode the subagent keeps only search/read tools — it can look things up but cannot modify anything.
-- exposed: list, read, search, query_memory, list_tags, find_notes_by_tag, web_search, web_retrieve
-- hidden: write, edit, move, delete (and recall_mode itself)
+- exposed: list_memories, read, search, query_memory, list_tags, find_notes_by_tag, web_search, web_retrieve
+- hidden: write, append, edit, move, delete (and recall_mode itself)
 
 ## dream mode toolset
 in dream mode all tools are available except for recall_mode itself.
-- exposed: list, read, search, query_memory, list_tags, find_notes_by_tag, write, edit, move, delete, web_search, web_retrieve
+- exposed: list_memories, read, search, query_memory, list_tags, find_notes_by_tag, write, append, edit, move, delete, web_search, web_retrieve
 - hidden: recall_mode

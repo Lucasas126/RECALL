@@ -1,18 +1,38 @@
 from __future__ import annotations
 
+import json
 from typing import Iterator, Optional, Union
 
 import src.providers.openrouter  # noqa: F401  (registers the openrouter provider)
 import src.providers.ollama  # noqa: F401  (registers the ollama provider)
 from src.agent import usage
+from src.agent.tools import build_tools
 from src.config.loader import load_agent
 from src.config.models import ResolvedAgent
+from src.config.settings import AGENT_MAX_TOOL_HOPS
 from src.core.index import VectorIndex
 from src.core.sources.registry import SourceRegistry
 from src.utils.logger import get_logger
 from src.providers.provider import LLMProvider, get_provider
 
 logger = get_logger("agent")
+
+# appended to the context on the final tool hop to force a direct answer
+_FINAL_NUDGE = "Stop calling tools. Answer the user now using what you already have."
+
+
+def _dedupe_tool_calls(tool_calls: list[dict]) -> list[dict]:
+    """Drop exact-duplicate (name, arguments) calls a model may emit within one turn."""
+    seen: set = set()
+    out: list[dict] = []
+    for tc in tool_calls:
+        args = tc["arguments"]
+        key = (tc["name"], args if isinstance(args, str) else json.dumps(args, sort_keys=True))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(tc)
+    return out
 
 
 class Agent:
@@ -29,6 +49,8 @@ class Agent:
             self._embeddings_provider(), config.models.embeddings,
         )
         self.index.sync()
+        # tools the model may call (memory recall, source read/write/list)
+        self._tool_specs, self._tool_handlers = build_tools(self) if config.tools else ([], {})
         self._max_context = None  # model context window, fetched lazily from the provider
         # real input tokens of the current context (seeded on load, updated each turn)
         self._ctx_input_tokens: Optional[int] = None
@@ -95,36 +117,110 @@ class Agent:
         return self._stream() if stream else self._complete()
 
     def _stream(self) -> Iterator[tuple]:
-        context = self._context()
-        reasoning, reply, usage = "", "", None
-        for chunk in self.provider.invoke(
-            context, self.config.models.chat,
-            stream=True, reasoning=self.config.reasoning, reasoning_tokens=self.config.reasoning_tokens,
-        ):
-            if isinstance(chunk, tuple):
-                kind, text = chunk
-                if kind == "reasoning":
-                    reasoning += text
-                else:
-                    reply += text
-                yield chunk
-            elif isinstance(chunk, dict):
-                usage = chunk.get("usage")
-        self.last_reasoning = reasoning
-        self._remember_reply(reply, reasoning, usage)
-        self._track_usage(context, reply, reasoning, usage)
+        for hop in range(AGENT_MAX_TOOL_HOPS + 1):
+            is_last = hop == AGENT_MAX_TOOL_HOPS
+            tools = None if is_last else (self._tool_specs or None)
+            context = self._context()
+            if is_last:
+                context = context + [{"role": "system", "content": _FINAL_NUDGE}]
+            reasoning, reply, api_usage, tool_calls = "", "", None, None
+            for chunk in self.provider.invoke(
+                context, self.config.models.chat,
+                stream=True, reasoning=self.config.reasoning,
+                reasoning_tokens=self.config.reasoning_tokens,
+                reasoning_effort=self.config.reasoning_effort, tools=tools,
+            ):
+                if isinstance(chunk, tuple):
+                    kind, text = chunk
+                    if kind == "reasoning":
+                        reasoning += text
+                    else:
+                        reply += text
+                    yield chunk
+                elif isinstance(chunk, dict):
+                    api_usage = chunk.get("usage")
+                    tool_calls = chunk.get("tool_calls")
+            if tool_calls and not is_last:
+                tool_calls = _dedupe_tool_calls(tool_calls)
+                self._remember_tool_calls(reply, reasoning, tool_calls)
+                self._run_tools(tool_calls)
+                continue
+            self.last_reasoning = reasoning
+            self._remember_reply(reply, reasoning, api_usage)
+            self._track_usage(context, reply, reasoning, api_usage)
+            return
 
     def _complete(self) -> str:
-        context = self._context()
-        result = self.provider.invoke(
-            context, self.config.models.chat,
-            stream=False, reasoning=self.config.reasoning, reasoning_tokens=self.config.reasoning_tokens,
+        for hop in range(AGENT_MAX_TOOL_HOPS + 1):
+            is_last = hop == AGENT_MAX_TOOL_HOPS
+            tools = None if is_last else (self._tool_specs or None)
+            context = self._context()
+            if is_last:
+                context = context + [{"role": "system", "content": _FINAL_NUDGE}]
+            result = self.provider.invoke(
+                context, self.config.models.chat,
+                stream=False, reasoning=self.config.reasoning,
+                reasoning_tokens=self.config.reasoning_tokens,
+                reasoning_effort=self.config.reasoning_effort, tools=tools,
+            )
+            reasoning = result.get("reasoning") or ""
+            reply = result.get("response") or ""
+            tool_calls = result.get("tool_calls")
+            if tool_calls and not is_last:
+                tool_calls = _dedupe_tool_calls(tool_calls)
+                self._remember_tool_calls(reply, reasoning, tool_calls)
+                self._run_tools(tool_calls)
+                continue
+            self.last_reasoning = reasoning
+            self._remember_reply(reply, reasoning, result.get("usage"))
+            self._track_usage(context, reply, reasoning, result.get("usage"))
+            return reply
+        return ""  # unreachable: the final hop runs without tools and finalizes
+
+    def _remember_tool_calls(self, reply: str, reasoning: str, tool_calls: list[dict]) -> None:
+        """Append the model's tool-call turn to the in-context memory (OpenAI shape)."""
+        self.messages.append(
+            {
+                "role": "assistant",
+                "content": reply or "",
+                "tool_calls": [
+                    {
+                        "id": tc["id"],
+                        "type": "function",
+                        "function": {
+                            "name": tc["name"],
+                            "arguments": tc["arguments"]
+                            if isinstance(tc["arguments"], str)
+                            else json.dumps(tc["arguments"]),
+                        },
+                    }
+                    for tc in tool_calls
+                ],
+            }
         )
-        self.last_reasoning = result.get("reasoning", "")
-        reply = result["response"]
-        self._remember_reply(reply, self.last_reasoning, result.get("usage"))
-        self._track_usage(context, reply, self.last_reasoning, result.get("usage"))
-        return reply
+
+    def _run_tools(self, tool_calls: list[dict]) -> None:
+        """Execute each requested tool and append its result to the context."""
+        for tc in tool_calls:
+            name = tc["name"]
+            args = tc["arguments"]
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args) if args.strip() else {}
+                except json.JSONDecodeError:
+                    args = {}
+            handler = self._tool_handlers.get(name)
+            if handler is None:
+                result = f"error: unknown tool '{name}'"
+            else:
+                try:
+                    result = handler(**args)
+                except Exception as e:  # surfaced back to the model, not fatal
+                    result = f"error: {e}"
+            logger.info("tool %s(%s)", name, args)
+            self.messages.append(
+                {"role": "tool", "tool_call_id": tc["id"], "name": name, "content": result}
+            )
 
     def _remember_reply(self, reply: str, reasoning: str, api_usage) -> None:
         """Append the assistant reply to memory and persist the turn (with its real usage)."""
@@ -169,7 +265,11 @@ class Agent:
             return
         rest = self.messages[1:]
         if len(rest) > n:
-            self.messages = [self.messages[0]] + rest[-n:]
+            kept = rest[-n:]
+            # never start on an orphan tool result (its assistant tool_calls would be gone)
+            while kept and kept[0].get("role") == "tool":
+                kept.pop(0)
+            self.messages = [self.messages[0]] + kept
             self._truncated = True
 
     def _context(self) -> list[dict]:
@@ -186,7 +286,7 @@ class Agent:
         """On load, show how loaded the context is, using the last persisted real input tokens."""
         if self._ctx_input_tokens is None:
             return  # nothing loaded / no real data yet; wait for the first turn
-        breakdown, approx = usage.context_breakdown(self.messages, self._ctx_input_tokens)
+        breakdown, approx = usage.context_breakdown(self.messages, self._ctx_input_tokens, self._tool_specs or None)
         self._ensure_max_context()
         self._prev_breakdown = breakdown
         self.last_usage = usage.format_context(breakdown, approx, self._max_context or None)
@@ -197,7 +297,7 @@ class Agent:
         api_usage = api_usage or {}
         prompt_tokens = api_usage.get("prompt_tokens")
         completion_tokens = api_usage.get("completion_tokens")
-        breakdown, approx = usage.turn_breakdown(context, reply, reasoning, prompt_tokens, completion_tokens)
+        breakdown, approx = usage.turn_breakdown(context, reply, reasoning, prompt_tokens, completion_tokens, self._tool_specs or None)
         if approx:
             logger.warning("token usage approximated with chars/4 (provider returned no usage)")
         self._ensure_max_context()

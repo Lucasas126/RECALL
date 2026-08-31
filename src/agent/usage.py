@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 
 def _est_tokens(chars: int) -> int:
     """Rough token estimate (~4 chars/token); used ONLY as a fallback when the api gives no usage."""
@@ -19,19 +21,34 @@ def _split(shares: dict[str, int], total: int) -> dict[str, int]:
     return out
 
 
-def _chars_by_role(messages: list[dict]) -> dict[str, int]:
+def _tool_chars(messages: list[dict], tool_specs: list[dict] | None) -> int:
+    """Chars the tools add to the prompt: their definitions plus any calls/results in context."""
+    total = len(json.dumps(tool_specs)) if tool_specs else 0
+    for m in messages:
+        if m.get("role") == "tool":
+            total += len(m.get("content") or "")
+        for tc in m.get("tool_calls") or []:
+            fn = tc.get("function", {})
+            args = fn.get("arguments", "")
+            total += len(fn.get("name", "")) + len(args if isinstance(args, str) else json.dumps(args))
+    return total
+
+
+def _chars_by_role(messages: list[dict], tool_specs: list[dict] | None = None) -> dict[str, int]:
     return {
-        "system_tokens": sum(len(m["content"]) for m in messages if m["role"] == "system"),
-        "user_tokens": sum(len(m["content"]) for m in messages if m["role"] == "user"),
-        "agent_tokens": sum(len(m["content"]) for m in messages if m["role"] == "assistant"),
+        "system_tokens": sum(len(m.get("content") or "") for m in messages if m["role"] == "system"),
+        "user_tokens": sum(len(m.get("content") or "") for m in messages if m["role"] == "user"),
+        "agent_tokens": sum(len(m.get("content") or "") for m in messages if m["role"] == "assistant"),
+        "tool_tokens": _tool_chars(messages, tool_specs),
     }
 
 
 def turn_breakdown(context: list[dict], reply: str, reasoning: str,
-                   prompt_tokens: int | None, completion_tokens: int | None) -> tuple[dict, bool]:
+                   prompt_tokens: int | None, completion_tokens: int | None,
+                   tool_specs: list[dict] | None = None) -> tuple[dict, bool]:
     """Split one interaction's real in/out tokens by char-share. Returns (breakdown, approx)."""
     approx = prompt_tokens is None or completion_tokens is None
-    in_shares = _chars_by_role(context)
+    in_shares = _chars_by_role(context, tool_specs)
     in_total = prompt_tokens if prompt_tokens is not None else _est_tokens(sum(in_shares.values()))
     out_shares = {"response": len(reply), "thinking": len(reasoning)}
     out_total = completion_tokens if completion_tokens is not None else _est_tokens(sum(out_shares.values()))
@@ -42,10 +59,11 @@ def turn_breakdown(context: list[dict], reply: str, reasoning: str,
     return breakdown, approx
 
 
-def context_breakdown(messages: list[dict], in_tokens: int | None) -> tuple[dict, bool]:
+def context_breakdown(messages: list[dict], in_tokens: int | None,
+                      tool_specs: list[dict] | None = None) -> tuple[dict, bool]:
     """Split the current in-memory context's input tokens by char-share. Returns (breakdown, approx)."""
     approx = in_tokens is None
-    shares = _chars_by_role(messages)
+    shares = _chars_by_role(messages, tool_specs)
     total = in_tokens if in_tokens is not None else _est_tokens(sum(shares.values()))
     breakdown = {"in": total, **_split(shares, total)}
     return breakdown, approx
@@ -64,12 +82,13 @@ def format_turn(b: dict, prev: dict | None, approx: bool, max_context: int | Non
     d_sys = b["system_tokens"] - p.get("system_tokens", 0)
     d_usr = b["user_tokens"] - p.get("user_tokens", 0)
     d_agt = b["agent_tokens"] - p.get("agent_tokens", 0)
+    d_tool = b["tool_tokens"] - p.get("tool_tokens", 0)
     return (
         f"context: {_pct(b['in'], max_context)} | {in_s} {out_s}{note}\n"
-        f"  ~ system_tokens={b['system_tokens']} user_tokens={b['user_tokens']} agent_tokens={b['agent_tokens']}"
+        f"  ~ system_tokens={b['system_tokens']} user_tokens={b['user_tokens']} agent_tokens={b['agent_tokens']} tool_tokens={b['tool_tokens']}"
         f"  ·  response={b['response']} thinking={b['thinking']}\n"
         f"turn Δ: in={d_in:+d} out={b['out']}\n"
-        f"  ~ system_tokens={d_sys:+d} user_tokens={d_usr:+d} agent_tokens={d_agt:+d}"
+        f"  ~ system_tokens={d_sys:+d} user_tokens={d_usr:+d} agent_tokens={d_agt:+d} tool_tokens={d_tool:+d}"
         f"  ·  response={b['response']} thinking={b['thinking']}"
     )
 
@@ -79,7 +98,7 @@ def format_context(b: dict, approx: bool, max_context: int | None) -> str:
     note = "  (approx)" if approx else ""
     return (
         f"context loaded: {_pct(b['in'], max_context)} | {in_s}{note}\n"
-        f"  ~ system_tokens={b['system_tokens']} user_tokens={b['user_tokens']} agent_tokens={b['agent_tokens']}"
+        f"  ~ system_tokens={b['system_tokens']} user_tokens={b['user_tokens']} agent_tokens={b['agent_tokens']} tool_tokens={b['tool_tokens']}"
     )
 
 
