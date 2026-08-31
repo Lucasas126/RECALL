@@ -21,7 +21,7 @@ class LLMProvider(BaseModel):
     # name that config providers must match to select this class
     name: ClassVar[str] = ""
 
-    def invoke(self, messages: list[dict], model: str, stream=True, reasoning=False, reasoning_tokens=None, tools=None):
+    def invoke(self, messages: list[dict], model: str, stream=True, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None):
         """
         Invokes the LLM provider API with the given messages and model.
         If stream is True, it will print the response in real-time.

@@ -25,6 +25,15 @@ def _raise_openrouter_error(status_code, body) -> None:
     raise RuntimeError(f"openrouter API error {status_code}: {message}")
 
 
+def _reasoning_payload(effort, tokens) -> dict:
+    """Build the openrouter `reasoning` config: effort takes priority over a token budget."""
+    if effort:
+        return {"effort": effort}
+    if tokens:
+        return {"max_tokens": tokens}
+    return {}
+
+
 def _normalize_tool_calls(tool_calls):
     """Map OpenAI-style tool_calls to the neutral {id, name, arguments} shape."""
     if not tool_calls:
@@ -79,7 +88,7 @@ class OpenRouterProvider(LLMProvider):
         super().__init__(**data)
         # self.api_key = os.environ.get("OPENROUTER_API_KEY", "")
 
-    def invoke(self, messages: list[dict], model: str, stream=True, reasoning=False, reasoning_tokens=None, tools=None):
+    def invoke(self, messages: list[dict], model: str, stream=True, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None):
         """
         Invokes the OpenRouter API with the given messages and model.
         If stream is True, yields (kind, text) tuples then a final dict with usage info.
@@ -87,10 +96,10 @@ class OpenRouterProvider(LLMProvider):
         """
         logger.debug("request model=%s stream=%s reasoning=%s msgs=%d", model, stream, reasoning, len(messages))
         if stream:
-            return self.invoke_stream(messages, model, self.api_key, reasoning=reasoning, reasoning_tokens=reasoning_tokens, tools=tools)
-        return self.invoke_sync(messages, model, self.api_key, reasoning=reasoning, reasoning_tokens=reasoning_tokens, tools=tools)
+            return self.invoke_stream(messages, model, self.api_key, reasoning=reasoning, reasoning_tokens=reasoning_tokens, reasoning_effort=reasoning_effort, tools=tools)
+        return self.invoke_sync(messages, model, self.api_key, reasoning=reasoning, reasoning_tokens=reasoning_tokens, reasoning_effort=reasoning_effort, tools=tools)
 
-    def invoke_stream(self, messages: list[dict], model: str, api_key: str, reasoning=False, reasoning_tokens=None, tools=None):
+    def invoke_stream(self, messages: list[dict], model: str, api_key: str, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None):
         """Streaming variant — yields (kind, text) tuples then a final dict with usage info.
 
         kind is either "reasoning" (thinking tokens) or "content" (the actual answer).
@@ -108,7 +117,7 @@ class OpenRouterProvider(LLMProvider):
         }
         logger.debug("openrouter streaming request; payload=%s", payload)
         if reasoning:
-            payload["reasoning"] = {"max_tokens": reasoning_tokens} if reasoning_tokens else {}
+            payload["reasoning"] = _reasoning_payload(reasoning_effort, reasoning_tokens)
         if tools:
             payload["tools"] = tools
 
@@ -225,7 +234,7 @@ class OpenRouterProvider(LLMProvider):
             logger.error(f"Unexpected error during streaming: {e}")
             raise
 
-    def invoke_sync(self, messages: list[dict], model: str, api_key: str, reasoning=False, reasoning_tokens=None, tools=None) -> dict:
+    def invoke_sync(self, messages: list[dict], model: str, api_key: str, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None) -> dict:
         """Non-streaming variant — returns a dict with reasoning, response, usage and model."""
         url = "https://openrouter.ai/api/v1/chat/completions"
         headers = {
@@ -235,7 +244,7 @@ class OpenRouterProvider(LLMProvider):
         payload = {"model": model, "messages": messages, "stream": False}
         logger.debug("openrouter non-streaming request; payload=%s", payload)
         if reasoning:
-            payload["reasoning"] = {"max_tokens": reasoning_tokens} if reasoning_tokens else {}
+            payload["reasoning"] = _reasoning_payload(reasoning_effort, reasoning_tokens)
         if tools:
             payload["tools"] = tools
         try:
@@ -301,3 +310,19 @@ class OpenRouterProvider(LLMProvider):
                 logger.warning("could not fetch model contexts: %s", e)
                 return None
         return _MODEL_CONTEXT.get(model)
+
+    def reasoning_options(self, model: str) -> dict | None:
+        """Return a model's reasoning capabilities (supported_efforts, default_effort, ...) or None."""
+        try:
+            r = requests.get(
+                "https://openrouter.ai/api/v1/models",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                timeout=30,
+            )
+            r.raise_for_status()
+            for m in r.json().get("data", []):
+                if m.get("id") == model:
+                    return m.get("reasoning")
+        except Exception as e:
+            logger.warning("could not fetch reasoning options: %s", e)
+        return None

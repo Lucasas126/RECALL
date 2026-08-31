@@ -56,6 +56,7 @@ def load_agent(user_id: str, agent_id: Optional[str] = None) -> ResolvedAgent:
         stream=agent.chat_config.stream,
         has_memory=agent.chat_config.has_memory,
         reasoning=agent.chat_config.reasoning,
+        reasoning_effort=agent.chat_config.reasoning_effort,
         reasoning_tokens=agent.chat_config.reasoning_tokens,
         keep_reasoning_in_memory=agent.chat_config.keep_reasoning_in_memory,
         conversation_messages_retained=agent.chat_config.conversation_messages_retained,

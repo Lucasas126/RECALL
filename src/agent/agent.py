@@ -127,7 +127,8 @@ class Agent:
             for chunk in self.provider.invoke(
                 context, self.config.models.chat,
                 stream=True, reasoning=self.config.reasoning,
-                reasoning_tokens=self.config.reasoning_tokens, tools=tools,
+                reasoning_tokens=self.config.reasoning_tokens,
+                reasoning_effort=self.config.reasoning_effort, tools=tools,
             ):
                 if isinstance(chunk, tuple):
                     kind, text = chunk
@@ -159,7 +160,8 @@ class Agent:
             result = self.provider.invoke(
                 context, self.config.models.chat,
                 stream=False, reasoning=self.config.reasoning,
-                reasoning_tokens=self.config.reasoning_tokens, tools=tools,
+                reasoning_tokens=self.config.reasoning_tokens,
+                reasoning_effort=self.config.reasoning_effort, tools=tools,
             )
             reasoning = result.get("reasoning") or ""
             reply = result.get("response") or ""

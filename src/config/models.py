@@ -27,6 +27,8 @@ class ChatConfig(BaseModel):
     stream: bool = True
     has_memory: bool = True
     reasoning: bool = False
+    # effort level for models that support it (minimal|low|medium|high|xhigh|max); openrouter maps it
+    reasoning_effort: Optional[str] = None
     reasoning_tokens: Optional[int] = None
     keep_reasoning_in_memory: bool = False
     # last N conversation messages kept in context (None = all); system prompt is always kept
@@ -58,6 +60,7 @@ class ResolvedAgent(BaseModel):
     stream: bool = True
     has_memory: bool = True
     reasoning: bool = False
+    reasoning_effort: Optional[str] = None
     reasoning_tokens: Optional[int] = None
     keep_reasoning_in_memory: bool = False
     conversation_messages_retained: Optional[int] = None

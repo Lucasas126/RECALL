@@ -49,7 +49,7 @@ class OllamaProvider(LLMProvider):
         if not self.base_url:
             self.base_url = os.environ.get("OLLAMA_HOST", DEFAULT_HOST)
 
-    def invoke(self, messages: list[dict], model: str, stream=True, reasoning=False, reasoning_tokens=None, tools=None):
+    def invoke(self, messages: list[dict], model: str, stream=True, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None):
         """
         Invokes the Ollama API with the given messages and model.
         If stream is True, yields (kind, text) tuples then a final dict with usage info.
@@ -57,10 +57,10 @@ class OllamaProvider(LLMProvider):
         """
         logger.debug("request model=%s stream=%s reasoning=%s msgs=%d", model, stream, reasoning, len(messages))
         if stream:
-            return self.invoke_stream(messages, model, reasoning=reasoning, tools=tools)
-        return self.invoke_sync(messages, model, reasoning=reasoning, tools=tools)
+            return self.invoke_stream(messages, model, reasoning=reasoning, reasoning_effort=reasoning_effort, tools=tools)
+        return self.invoke_sync(messages, model, reasoning=reasoning, reasoning_effort=reasoning_effort, tools=tools)
 
-    def invoke_stream(self, messages: list[dict], model: str, reasoning=False, tools=None):
+    def invoke_stream(self, messages: list[dict], model: str, reasoning=False, reasoning_effort=None, tools=None):
         """Streaming variant — yields (kind, text) tuples then a final dict with usage info.
 
         kind is either "reasoning" (thinking tokens) or "content" (the actual answer).
@@ -68,7 +68,7 @@ class OllamaProvider(LLMProvider):
         url = f"{self.base_url}/api/chat"
         payload = {"model": model, "messages": _to_ollama_messages(messages), "stream": True}
         if reasoning:
-            payload["think"] = True
+            payload["think"] = reasoning_effort or True
         if tools:
             payload["tools"] = tools
         logger.debug("ollama streaming request; payload=%s", payload)
@@ -118,12 +118,12 @@ class OllamaProvider(LLMProvider):
             logger.error(f"Error during streaming from Ollama API: {e}")
             raise
 
-    def invoke_sync(self, messages: list[dict], model: str, reasoning=False, tools=None) -> dict:
+    def invoke_sync(self, messages: list[dict], model: str, reasoning=False, reasoning_effort=None, tools=None) -> dict:
         """Non-streaming variant — returns a dict with reasoning, response, usage and model."""
         url = f"{self.base_url}/api/chat"
         payload = {"model": model, "messages": _to_ollama_messages(messages), "stream": False}
         if reasoning:
-            payload["think"] = True
+            payload["think"] = reasoning_effort or True
         if tools:
             payload["tools"] = tools
         logger.debug("ollama non-streaming request; payload=%s", payload)
