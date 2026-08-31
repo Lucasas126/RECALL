@@ -259,7 +259,7 @@ class Agent:
         """On load, show how loaded the context is, using the last persisted real input tokens."""
         if self._ctx_input_tokens is None:
             return  # nothing loaded / no real data yet; wait for the first turn
-        breakdown, approx = usage.context_breakdown(self.messages, self._ctx_input_tokens)
+        breakdown, approx = usage.context_breakdown(self.messages, self._ctx_input_tokens, self._tool_specs or None)
         self._ensure_max_context()
         self._prev_breakdown = breakdown
         self.last_usage = usage.format_context(breakdown, approx, self._max_context or None)
@@ -270,7 +270,7 @@ class Agent:
         api_usage = api_usage or {}
         prompt_tokens = api_usage.get("prompt_tokens")
         completion_tokens = api_usage.get("completion_tokens")
-        breakdown, approx = usage.turn_breakdown(context, reply, reasoning, prompt_tokens, completion_tokens)
+        breakdown, approx = usage.turn_breakdown(context, reply, reasoning, prompt_tokens, completion_tokens, self._tool_specs or None)
         if approx:
             logger.warning("token usage approximated with chars/4 (provider returned no usage)")
         self._ensure_max_context()
