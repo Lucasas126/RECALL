@@ -31,6 +31,8 @@ class ChatConfig(BaseModel):
     keep_reasoning_in_memory: bool = False
     # last N conversation messages kept in context (None = all); system prompt is always kept
     conversation_messages_retained: Optional[int] = None
+    # let the model call tools (memory recall, source read/write/list)
+    tools: bool = True
 
 
 class AgentConfig(BaseModel):
@@ -59,3 +61,4 @@ class ResolvedAgent(BaseModel):
     reasoning_tokens: Optional[int] = None
     keep_reasoning_in_memory: bool = False
     conversation_messages_retained: Optional[int] = None
+    tools: bool = True

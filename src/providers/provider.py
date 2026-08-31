@@ -21,12 +21,13 @@ class LLMProvider(BaseModel):
     # name that config providers must match to select this class
     name: ClassVar[str] = ""
 
-    def invoke(self, messages: list[dict], model: str, stream=True, reasoning=False, reasoning_tokens=None):
+    def invoke(self, messages: list[dict], model: str, stream=True, reasoning=False, reasoning_tokens=None, tools=None):
         """
         Invokes the LLM provider API with the given messages and model.
         If stream is True, it will print the response in real-time.
         If reasoning is True, the provider requests and separates thinking tokens;
         reasoning_tokens optionally caps the reasoning budget.
+        If tools is given (OpenAI-style specs), the model may return tool_calls.
         """
         raise NotImplementedError("This method should be implemented by subclasses.")
 

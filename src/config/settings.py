@@ -17,6 +17,7 @@ with open(_SETTINGS_FILE, "r", encoding="utf-8") as _fh:
 
 _paths = _raw["paths"]
 _index = _raw["index"]
+_agent = _raw["agent"]
 
 # ------------------------------------------------------------------ paths
 CONFIG_DIR = Path(_paths["config_dir"])  # user & agent yaml configs
@@ -28,3 +29,6 @@ INDEX_DIR_NAME = _index["dir_name"]              # index folder inside each agen
 INDEX_COLLECTION = _index["collection"]          # chroma collection name
 INDEX_FILE_TYPES = set(_index["file_types"])     # source files eligible for indexing
 INDEX_CHUNK_WORDS = _index["chunk_words"]        # words per chunk for non-jsonl files
+
+# ------------------------------------------------------------------ agent
+AGENT_MAX_TOOL_HOPS = _agent["max_tool_hops"]    # max tool round-trips per turn
