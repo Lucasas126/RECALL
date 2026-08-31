@@ -21,9 +21,9 @@ def _split(shares: dict[str, int], total: int) -> dict[str, int]:
 
 def _chars_by_role(messages: list[dict]) -> dict[str, int]:
     return {
-        "system_tokens": sum(len(m["content"]) for m in messages if m["role"] == "system"),
-        "user_tokens": sum(len(m["content"]) for m in messages if m["role"] == "user"),
-        "agent_tokens": sum(len(m["content"]) for m in messages if m["role"] == "assistant"),
+        "system_tokens": sum(len(m.get("content") or "") for m in messages if m["role"] == "system"),
+        "user_tokens": sum(len(m.get("content") or "") for m in messages if m["role"] == "user"),
+        "agent_tokens": sum(len(m.get("content") or "") for m in messages if m["role"] == "assistant"),
     }
 
 

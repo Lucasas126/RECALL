@@ -16,6 +16,15 @@ _MODEL_CONTEXT: dict[str, int] = {}
 _MODEL_CONTEXT_LOADED = False
 
 
+def _raise_openrouter_error(status_code, body) -> None:
+    """Raise a clear error carrying OpenRouter's own message (never swallow it)."""
+    try:
+        message = json.loads(body)["error"]["message"] if isinstance(body, str) else body["message"]
+    except Exception:
+        message = str(body)[:300]
+    raise RuntimeError(f"openrouter API error {status_code}: {message}")
+
+
 def _normalize_tool_calls(tool_calls):
     """Map OpenAI-style tool_calls to the neutral {id, name, arguments} shape."""
     if not tool_calls:
@@ -77,6 +86,8 @@ class OpenRouterProvider(LLMProvider):
             tool_calls_acc: dict[int, dict] = {}
             buffer = ""
             with requests.post(url, headers=headers, json=payload, stream=True) as r:
+                if r.status_code != 200:
+                    _raise_openrouter_error(r.status_code, r.text)
                 r.encoding = "utf-8"  # SSE defaults to latin-1; force utf-8 to avoid mojibake
                 for chunk in r.iter_content(chunk_size=1024, decode_unicode=True):
                     buffer += chunk
@@ -101,6 +112,8 @@ class OpenRouterProvider(LLMProvider):
 
                                 try:
                                     data_obj = json.loads(data)
+                                    if data_obj.get("error"):
+                                        _raise_openrouter_error(data_obj.get("code", ""), data_obj["error"])
                                     delta = data_obj["choices"][0]["delta"]
 
                                     reasoning_chunk = delta.get("reasoning")
@@ -130,6 +143,8 @@ class OpenRouterProvider(LLMProvider):
                                 except json.JSONDecodeError:
                                     pass
 
+                        except RuntimeError:
+                            raise  # surfaced API error: never swallow
                         except Exception:
                             break
 
@@ -174,7 +189,8 @@ class OpenRouterProvider(LLMProvider):
             payload["tools"] = tools
         try:
             response = requests.post(url, headers=headers, json=payload)
-            response.raise_for_status()
+            if response.status_code != 200:
+                _raise_openrouter_error(response.status_code, response.text)
             response_data = response.json()
             msg = response_data["choices"][0]["message"]
             logger.debug(format_completion("non-streaming", msg.get("reasoning", ""), msg.get("content", ""), response_data.get("usage"), model))

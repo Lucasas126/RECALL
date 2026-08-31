@@ -137,8 +137,8 @@ class Agent:
                 stream=False, reasoning=self.config.reasoning,
                 reasoning_tokens=self.config.reasoning_tokens, tools=tools,
             )
-            reasoning = result.get("reasoning", "")
-            reply = result.get("response", "")
+            reasoning = result.get("reasoning") or ""
+            reply = result.get("response") or ""
             tool_calls = result.get("tool_calls")
             if tool_calls:
                 self._remember_tool_calls(reply, reasoning, tool_calls)

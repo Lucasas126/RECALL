@@ -51,12 +51,20 @@ def build_tools(agent: "Agent") -> tuple[list[dict], dict[str, Callable[..., str
             "type": "function",
             "function": {
                 "name": "query_memory",
-                "description": "Semantically search your own memory (past conversations and notes). Use this to recall things the user told you before.",
+                "description": (
+                    "Search your own memory (past conversations and notes) by semantic similarity. "
+                    "It embeds your query into a vector and returns the chunks whose embeddings are "
+                    "closest, so matching is by meaning, not exact words. For best results query with "
+                    "the key concepts/entities (keywords or a short noun phrase), not a full "
+                    "conversational sentence or question. E.g. use 'user-a home city favorite color' "
+                    "instead of 'where does the user live and what is their favorite color?'. "
+                    "Run several focused queries rather than one long one when you need different facts."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "query": {"type": "string", "description": "what to look for, in natural language"},
-                        "top_k": {"type": "integer", "description": "how many results to return (default 5)"},
+                        "query": {"type": "string", "description": "key concepts/entities to match (keywords or a short noun phrase), not a full sentence"},
+                        "top_k": {"type": "integer", "description": "how many closest chunks to return (default 5)"},
                     },
                     "required": ["query"],
                 },
