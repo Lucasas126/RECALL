@@ -7,6 +7,7 @@ import src.providers.ollama  # noqa: F401  (registers the ollama provider)
 from src.agent import usage
 from src.config.loader import load_agent
 from src.config.models import ResolvedAgent
+from src.core.index import VectorIndex
 from src.core.sources.registry import SourceRegistry
 from src.utils.logger import get_logger
 from src.providers.provider import LLMProvider, get_provider
@@ -22,6 +23,12 @@ class Agent:
         self.provider = provider
         # per-agent access to the data plane (mind palace, conversations, ...)
         self.sources = SourceRegistry.for_agent(config.user_id, config.id)
+        # semantic index over the indexed sources; kept in sync as memory changes
+        self.index = VectorIndex.for_agent(
+            config.user_id, config.id, self.sources,
+            self._embeddings_provider(), config.models.embeddings,
+        )
+        self.index.sync()
         self._max_context = None  # model context window, fetched lazily from the provider
         # real input tokens of the current context (seeded on load, updated each turn)
         self._ctx_input_tokens: Optional[int] = None
@@ -51,6 +58,24 @@ class Agent:
     @property
     def name(self) -> str:
         return self.config.name
+
+    def _embeddings_provider(self) -> LLMProvider:
+        """The provider used for embeddings, reusing the chat provider when identical."""
+        if (
+            self.config.embeddings_provider_name == self.config.provider_name
+            and self.config.embeddings_api_key == self.config.api_key
+        ):
+            return self.provider
+        return get_provider(
+            self.config.embeddings_provider_name, api_key=self.config.embeddings_api_key
+        )
+
+    def query_memory(self, query: str, top_k: int = 5) -> list[dict]:
+        """Semantic recall over the agent's indexed memory (exposed to the model as a tool)."""
+        self.index.sync()
+        results = self.index.query(query, top_k)
+        logger.debug("query_memory %r -> %d hits", query, len(results))
+        return results
 
     def invoke(self, user_input: str, stream: Optional[bool] = None) -> Union[str, Iterator[str]]:
         """Send a user message and return the reply, updating conversation memory.

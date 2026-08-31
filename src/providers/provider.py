@@ -30,9 +30,9 @@ class LLMProvider(BaseModel):
         """
         raise NotImplementedError("This method should be implemented by subclasses.")
 
-    def invoke_embeddings(self, text: str, model: str):
+    def invoke_embeddings(self, input: list[str], model: str):
         """
-        Invokes the LLM provider API to get embeddings for the given text.
+        Invokes the LLM provider API to get embeddings for a batch of texts.
         """
         raise NotImplementedError("This method should be implemented by subclasses.")
 

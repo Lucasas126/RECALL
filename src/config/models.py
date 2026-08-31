@@ -13,7 +13,8 @@ class ProviderConfig(BaseModel):
 class UserConfig(BaseModel):
     id: str
     name: str
-    provider: ProviderConfig
+    provider: ProviderConfig  # chat provider
+    embeddings_provider: Optional[ProviderConfig] = None  # falls back to `provider`
     agents: list[str]
 
 
@@ -50,6 +51,8 @@ class ResolvedAgent(BaseModel):
     models: ModelsConfig
     provider_name: str
     api_key: str
+    embeddings_provider_name: str
+    embeddings_api_key: str
     stream: bool = True
     has_memory: bool = True
     reasoning: bool = False

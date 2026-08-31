@@ -36,6 +36,14 @@ def load_agent(user_id: str, agent_id: Optional[str] = None) -> ResolvedAgent:
         if not api_key:
             raise ValueError(f"env var '{user.provider.api_key}' is not set")
 
+    # embeddings provider falls back to the chat provider when not configured
+    embeddings_provider = user.embeddings_provider or user.provider
+    embeddings_api_key = api_key if embeddings_provider is user.provider else ""
+    if embeddings_provider is not user.provider and embeddings_provider.api_key:
+        embeddings_api_key = os.environ.get(embeddings_provider.api_key, "")
+        if not embeddings_api_key:
+            raise ValueError(f"env var '{embeddings_provider.api_key}' is not set")
+
     return ResolvedAgent(
         user_id=user.id,
         id=agent.id,
@@ -44,6 +52,8 @@ def load_agent(user_id: str, agent_id: Optional[str] = None) -> ResolvedAgent:
         models=agent.models,
         provider_name=user.provider.name,
         api_key=api_key,
+        embeddings_provider_name=embeddings_provider.name,
+        embeddings_api_key=embeddings_api_key,
         stream=agent.chat_config.stream,
         has_memory=agent.chat_config.has_memory,
         reasoning=agent.chat_config.reasoning,

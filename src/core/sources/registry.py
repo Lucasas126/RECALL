@@ -38,6 +38,9 @@ class SourceRegistry:
     def names(self) -> list[str]:
         return list(self._sources)
 
+    def indexed_sources(self) -> list[Source]:
+        return [s for s in self._sources.values() if s.indexed]
+
     def resolve(self, address: str) -> tuple[Source, str]:
         """Split a 'source:path' address into its source and relative path."""
         if ":" not in address:
