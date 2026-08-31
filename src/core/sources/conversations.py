@@ -1,30 +1,25 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from src.core.sources.base import Source
 
 
 class ConversationsSource(Source):
-    """Past conversations with the user, one JSONL file per session (one turn per line)."""
+    """Past conversations with the user, one JSONL file per UTC day (one turn per line)."""
 
     def __init__(self, root: Path):
         super().__init__("conversations", root, readable=True, writable=True, indexed=True)
 
-    def start(self, system_prompt: str | None = None) -> str:
-        """Begin a new conversation file and return its id (relative path)."""
-        conversation = f"{datetime.now().astimezone():%Y%m%d_%H%M%S%z}.jsonl"
-        if system_prompt:
-            self.append(conversation, "system", system_prompt)
-        else:
-            self.resolve(conversation).touch()
-        return conversation
+    def current(self) -> str:
+        """The current day's conversation file id (rolls over at UTC midnight)."""
+        return f"{datetime.now(timezone.utc):%Y-%m-%d}.jsonl"
 
-    def append(self, conversation: str, role: str, content: str, **extra) -> dict:
-        """Append a turn to a conversation as one JSONL line."""
-        path = self.resolve(conversation)
+    def append(self, role: str, content: str, **extra) -> dict:
+        """Append a turn to today's conversation as one JSONL line."""
+        path = self.resolve(self.current())
         path.parent.mkdir(parents=True, exist_ok=True)
         turn = {
             "role": role,
@@ -37,7 +32,7 @@ class ConversationsSource(Source):
         return turn
 
     def load(self, conversation: str) -> list[dict]:
-        """Read all turns of a conversation."""
+        """Read all turns of a given day's conversation."""
         path = self.resolve(conversation)
         if not path.exists():
             return []
@@ -49,6 +44,6 @@ class ConversationsSource(Source):
         return turns
 
     def conversations(self) -> list[str]:
-        """List conversation ids, most recent last."""
+        """List conversation ids (days), most recent last."""
         return sorted(p.name for p in self.root.iterdir() if p.suffix == ".jsonl")
 

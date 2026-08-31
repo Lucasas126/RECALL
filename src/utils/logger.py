@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
@@ -11,6 +12,13 @@ LOGS_DIR = Path("logs")
 _FMT = logging.Formatter(
     "%(asctime)s %(levelname)s %(name)s: %(message)s", datefmt="%Y-%m-%dT%H:%M:%S%z"
 )
+
+
+def _make_handler(path: Path) -> TimedRotatingFileHandler:
+    """A file handler that rolls to a new file at every UTC midnight."""
+    handler = TimedRotatingFileHandler(path, when="midnight", utc=True, encoding="utf-8")
+    handler.setFormatter(_FMT)
+    return handler
 
 # current run's log dir and the components requested so far (for re-attaching on setup)
 _run_dir: Optional[Path] = None
@@ -33,9 +41,7 @@ def setup_logging(run: str = "cli", level: int = logging.DEBUG) -> Path:
     root = logging.getLogger()
     root.setLevel(level)
     root.handlers.clear()
-    combined = logging.FileHandler(_run_dir / "recall.log", encoding="utf-8")
-    combined.setFormatter(_FMT)
-    root.addHandler(combined)
+    root.addHandler(_make_handler(_run_dir / "recall.log"))
 
     # (re)attach a file handler for every component already requested
     for comp in _components:
@@ -49,9 +55,7 @@ def _attach_file_handler(component: str) -> None:
     logger.setLevel(_level)
     logger.handlers.clear()  # drop a previous run's handler
     if _run_dir is not None:
-        fh = logging.FileHandler(_run_dir / f"{component}.log", encoding="utf-8")
-        fh.setFormatter(_FMT)
-        logger.addHandler(fh)
+        logger.addHandler(_make_handler(_run_dir / f"{component}.log"))
 
 
 def get_logger(component: str) -> logging.Logger:

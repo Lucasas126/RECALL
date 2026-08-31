@@ -21,8 +21,6 @@ class Agent:
         self.provider = provider
         # per-agent access to the data plane (mind palace, conversations, ...)
         self.sources = SourceRegistry.for_agent(config.user_id, config.id)
-        # start a persisted conversation (one jsonl file, one turn per line)
-        self.conversation = self.sources.conversations().start(config.personality_prompt)
         # conversation history is the memory
         self.messages: list[dict] = [
             {"role": "system", "content": config.personality_prompt}
@@ -94,4 +92,4 @@ class Agent:
     def _log_turn(self, role: str, content: str, **extra) -> None:
         """Persist a turn to the conversation jsonl (independent of in-context memory)."""
         extra = {k: v for k, v in extra.items() if v is not None}
-        self.sources.conversations().append(self.conversation, role, content, **extra)
+        self.sources.conversations().append(role, content, **extra)
