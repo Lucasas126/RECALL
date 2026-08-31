@@ -36,6 +36,39 @@ def _normalize_tool_calls(tool_calls):
     return out or None
 
 
+# DeepSeek models (e.g. R1) leak tool calls as inline special tokens in the
+# streamed content instead of standard tool_calls deltas. These mark them.
+_DS_BEGIN = "<｜tool▁calls▁begin｜>"
+_DS_CALL = "<｜tool▁call▁begin｜>"
+_DS_SEP = "<｜tool▁sep｜>"
+_DS_PREFIX = "<｜tool"  # any deepseek tool marker starts with this
+
+
+def _parse_deepseek_tool_calls(text: str):
+    """Split DeepSeek inline tool-call markers out of streamed content.
+
+    Returns (clean_text, tool_calls) where tool_calls is the neutral shape or None.
+    """
+    if _DS_BEGIN not in text:
+        return text, None
+    clean, block = text.split(_DS_BEGIN, 1)
+    calls = []
+    for part in block.split(_DS_CALL)[1:]:
+        if _DS_SEP not in part:
+            continue
+        after = part.split(_DS_SEP, 1)[1]
+        name = after.split("\n", 1)[0].split("```", 1)[0].strip()
+        args = ""
+        if "```" in after:
+            inner = after.split("```", 1)[1]
+            if inner.startswith("json"):
+                inner = inner[4:]
+            args = inner.split("```", 1)[0].strip()
+        if name:
+            calls.append({"id": f"call_{len(calls)}", "name": name, "arguments": args})
+    return clean.rstrip(), (calls or None)
+
+
 class OpenRouterProvider(LLMProvider):
 
     name: ClassVar[str] = "openrouter"
@@ -84,6 +117,8 @@ class OpenRouterProvider(LLMProvider):
             reasoning_text = ""
             usage_info = None
             tool_calls_acc: dict[int, dict] = {}
+            emitted = 0  # chars of response_text already yielded to the caller
+            ds_started = False  # a deepseek inline tool-call marker has appeared
             buffer = ""
             with requests.post(url, headers=headers, json=payload, stream=True) as r:
                 if r.status_code != 200:
@@ -124,7 +159,19 @@ class OpenRouterProvider(LLMProvider):
                                     content = delta.get("content")
                                     if content:
                                         response_text += content
-                                        yield ("content", content)
+                                        # hold back deepseek tool markers instead of leaking them
+                                        if not ds_started:
+                                            pos = response_text.find(_DS_PREFIX)
+                                            if pos == -1:
+                                                safe = len(response_text) - len(_DS_PREFIX)
+                                                if safe > emitted:
+                                                    yield ("content", response_text[emitted:safe])
+                                                    emitted = safe
+                                            else:
+                                                if pos > emitted:
+                                                    yield ("content", response_text[emitted:pos])
+                                                emitted = pos
+                                                ds_started = True
 
                                     for tc in delta.get("tool_calls") or []:
                                         idx = tc.get("index", 0)
@@ -149,9 +196,13 @@ class OpenRouterProvider(LLMProvider):
                             break
 
             # Yield the final result with usage info after streaming is complete
-            tool_calls = [tc for tc in tool_calls_acc.values() if tc["name"]] or None
-            logger.debug(format_completion("streaming", reasoning_text, response_text, usage_info, model))
-            yield {"reasoning": reasoning_text, "response": response_text, "usage": usage_info, "model": model, "tool_calls": tool_calls}
+            if not ds_started and emitted < len(response_text):
+                yield ("content", response_text[emitted:])  # flush the guarded tail
+            clean_text, ds_tool_calls = _parse_deepseek_tool_calls(response_text)
+            tool_calls = [tc for tc in tool_calls_acc.values() if tc["name"]] or ds_tool_calls or None
+            final_response = clean_text if ds_tool_calls else response_text
+            logger.debug(format_completion("streaming", reasoning_text, final_response, usage_info, model))
+            yield {"reasoning": reasoning_text, "response": final_response, "usage": usage_info, "model": model, "tool_calls": tool_calls}
 
         except requests.RequestException as e:
             logger.warning(f"Error during streaming from OpenRouter API: {e}, retrying without streaming")
