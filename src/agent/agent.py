@@ -17,6 +17,23 @@ from src.providers.provider import LLMProvider, get_provider
 
 logger = get_logger("agent")
 
+# appended to the context on the final tool hop to force a direct answer
+_FINAL_NUDGE = "Stop calling tools. Answer the user now using what you already have."
+
+
+def _dedupe_tool_calls(tool_calls: list[dict]) -> list[dict]:
+    """Drop exact-duplicate (name, arguments) calls a model may emit within one turn."""
+    seen: set = set()
+    out: list[dict] = []
+    for tc in tool_calls:
+        args = tc["arguments"]
+        key = (tc["name"], args if isinstance(args, str) else json.dumps(args, sort_keys=True))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(tc)
+    return out
+
 
 class Agent:
     """Orchestration entry point: wraps an agent's config, provider and conversation memory."""
@@ -101,8 +118,11 @@ class Agent:
 
     def _stream(self) -> Iterator[tuple]:
         for hop in range(AGENT_MAX_TOOL_HOPS + 1):
-            tools = None if hop == AGENT_MAX_TOOL_HOPS else (self._tool_specs or None)
+            is_last = hop == AGENT_MAX_TOOL_HOPS
+            tools = None if is_last else (self._tool_specs or None)
             context = self._context()
+            if is_last:
+                context = context + [{"role": "system", "content": _FINAL_NUDGE}]
             reasoning, reply, api_usage, tool_calls = "", "", None, None
             for chunk in self.provider.invoke(
                 context, self.config.models.chat,
@@ -119,7 +139,8 @@ class Agent:
                 elif isinstance(chunk, dict):
                     api_usage = chunk.get("usage")
                     tool_calls = chunk.get("tool_calls")
-            if tool_calls:
+            if tool_calls and not is_last:
+                tool_calls = _dedupe_tool_calls(tool_calls)
                 self._remember_tool_calls(reply, reasoning, tool_calls)
                 self._run_tools(tool_calls)
                 continue
@@ -130,8 +151,11 @@ class Agent:
 
     def _complete(self) -> str:
         for hop in range(AGENT_MAX_TOOL_HOPS + 1):
-            tools = None if hop == AGENT_MAX_TOOL_HOPS else (self._tool_specs or None)
+            is_last = hop == AGENT_MAX_TOOL_HOPS
+            tools = None if is_last else (self._tool_specs or None)
             context = self._context()
+            if is_last:
+                context = context + [{"role": "system", "content": _FINAL_NUDGE}]
             result = self.provider.invoke(
                 context, self.config.models.chat,
                 stream=False, reasoning=self.config.reasoning,
@@ -140,7 +164,8 @@ class Agent:
             reasoning = result.get("reasoning") or ""
             reply = result.get("response") or ""
             tool_calls = result.get("tool_calls")
-            if tool_calls:
+            if tool_calls and not is_last:
+                tool_calls = _dedupe_tool_calls(tool_calls)
                 self._remember_tool_calls(reply, reasoning, tool_calls)
                 self._run_tools(tool_calls)
                 continue
@@ -148,7 +173,7 @@ class Agent:
             self._remember_reply(reply, reasoning, result.get("usage"))
             self._track_usage(context, reply, reasoning, result.get("usage"))
             return reply
-        return ""  # unreachable: the final hop runs without tools and returns
+        return ""  # unreachable: the final hop runs without tools and finalizes
 
     def _remember_tool_calls(self, reply: str, reasoning: str, tool_calls: list[dict]) -> None:
         """Append the model's tool-call turn to the in-context memory (OpenAI shape)."""
