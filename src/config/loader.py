@@ -7,8 +7,7 @@ from typing import Optional
 import yaml
 
 from src.config.models import AgentConfig, ResolvedAgent, UserConfig
-
-CONFIG_DIR = Path(".config")
+from src.config.settings import CONFIG_DIR
 
 
 def _load_yaml(path: Path) -> dict:

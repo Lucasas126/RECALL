@@ -6,7 +6,7 @@ from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
-LOGS_DIR = Path("logs")
+from src.config.settings import LOGS_DIR
 
 # local time with an explicit utc offset (e.g. 2026-08-31T12:22:45+0200)
 _FMT = logging.Formatter(

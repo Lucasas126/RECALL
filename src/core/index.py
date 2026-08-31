@@ -8,15 +8,19 @@ from typing import Any
 import chromadb
 import chromadb.utils.embedding_functions as ef
 
+from src.config.settings import (
+    DATA_DIR,
+    INDEX_CHUNK_WORDS,
+    INDEX_COLLECTION,
+    INDEX_DIR_NAME,
+    INDEX_FILE_TYPES,
+)
 from src.core.sources.base import Source
-from src.core.sources.registry import DATA_DIR, SourceRegistry
+from src.core.sources.registry import SourceRegistry
 from src.providers.provider import LLMProvider
 from src.utils.logger import get_logger
 
 logger = get_logger("vector-index")
-
-FILE_TYPES = {"txt", "md", "jsonl"}
-CHUNK_WORDS = 100
 
 
 class _ProviderEmbeddingFunction(ef.EmbeddingFunction):
@@ -47,14 +51,14 @@ class VectorIndex:
         self._embedding_fn = _ProviderEmbeddingFunction(provider, model)
         self._client = chromadb.PersistentClient(path=str(path))
         self._collection = self._client.get_or_create_collection(
-            name="memory", embedding_function=self._embedding_fn
+            name=INDEX_COLLECTION, embedding_function=self._embedding_fn
         )
 
     @classmethod
     def for_agent(
         cls, user_id: str, agent_id: str, registry: SourceRegistry, provider: LLMProvider, model: str
     ) -> "VectorIndex":
-        path = DATA_DIR / user_id / agent_id / ".index"
+        path = DATA_DIR / user_id / agent_id / INDEX_DIR_NAME
         path.mkdir(parents=True, exist_ok=True)
         return cls(path, registry, provider, model)
 
@@ -125,7 +129,7 @@ class VectorIndex:
         files: dict[str, str] = {}
         root = source.root.resolve()
         for path in root.rglob("*"):
-            if not path.is_file() or path.suffix.lstrip(".").lower() not in FILE_TYPES:
+            if not path.is_file() or path.suffix.lstrip(".").lower() not in INDEX_FILE_TYPES:
                 continue
             try:
                 text = path.read_text(encoding="utf-8", errors="ignore")
@@ -166,7 +170,7 @@ class VectorIndex:
             return docs
         words = text.split()
         return [
-            " ".join(words[i : i + CHUNK_WORDS])
-            for i in range(0, len(words), CHUNK_WORDS)
-            if words[i : i + CHUNK_WORDS]
+            " ".join(words[i : i + INDEX_CHUNK_WORDS])
+            for i in range(0, len(words), INDEX_CHUNK_WORDS)
+            if words[i : i + INDEX_CHUNK_WORDS]
         ]

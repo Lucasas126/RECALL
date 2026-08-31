@@ -1,0 +1,12 @@
+# framework-level settings for recall (system config, not user/agent config)
+
+paths:
+  config_dir: .config   # user & agent yaml configs
+  data_dir: data        # per-agent data plane (sources + index)
+  logs_dir: logs        # per-run log folders
+
+index:
+  dir_name: .index          # index folder inside each agent's data dir
+  collection: memory        # chroma collection name
+  file_types: [txt, md, jsonl]  # source files eligible for indexing
+  chunk_words: 100          # words per chunk for non-jsonl files

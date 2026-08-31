@@ -3,13 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from src.core.sources.base import Source
+from src.config.settings import DATA_DIR
 from src.core.sources.conversations import ConversationsSource
 from src.core.sources.mind_palace import MindPalaceSource
 from src.utils.logger import get_logger
 
 logger = get_logger("sources")
-
-DATA_DIR = Path("data")
 
 
 class SourceRegistry:
