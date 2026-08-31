@@ -119,3 +119,16 @@ class OllamaProvider(LLMProvider):
         response = requests.post(f"{self.base_url}/api/embed", json=payload, timeout=60)
         response.raise_for_status()
         return response.json()["embeddings"]
+
+    def context_window(self, model: str):
+        """Return the model's context length from ollama's /api/show, or None if unknown."""
+        try:
+            r = requests.post(f"{self.base_url}/api/show", json={"model": model}, timeout=30)
+            r.raise_for_status()
+            info = r.json().get("model_info", {})
+            for key, value in info.items():
+                if key.endswith(".context_length"):
+                    return value
+        except Exception as e:
+            logger.warning("could not fetch ollama context: %s", e)
+        return None

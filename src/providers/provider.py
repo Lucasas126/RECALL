@@ -36,6 +36,10 @@ class LLMProvider(BaseModel):
         """
         raise NotImplementedError("This method should be implemented by subclasses.")
 
+    def context_window(self, model: str):
+        """Return the model's maximum context length in tokens, or None if unknown."""
+        return None
+
 
 def get_provider(name: str, **kwargs) -> LLMProvider:
     """Return an instance of the LLMProvider subclass whose `name` matches."""

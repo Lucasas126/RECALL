@@ -4,6 +4,7 @@ from typing import Iterator, Optional, Union
 
 import src.providers.openrouter  # noqa: F401  (registers the openrouter provider)
 import src.providers.ollama  # noqa: F401  (registers the ollama provider)
+from src.agent import usage
 from src.config.loader import load_agent
 from src.config.models import ResolvedAgent
 from src.core.sources.registry import SourceRegistry
@@ -21,6 +22,11 @@ class Agent:
         self.provider = provider
         # per-agent access to the data plane (mind palace, conversations, ...)
         self.sources = SourceRegistry.for_agent(config.user_id, config.id)
+        self._max_context = None  # model context window, fetched lazily from the provider
+        # real input tokens of the current context (seeded on load, updated each turn)
+        self._ctx_input_tokens: Optional[int] = None
+        # previous usage breakdown, to compute per-category turn deltas
+        self._prev_breakdown: Optional[dict] = None
         # conversation history is the memory
         self.messages: list[dict] = [
             {"role": "system", "content": config.personality_prompt}
@@ -30,6 +36,9 @@ class Agent:
         self._load_recent_context()
         # thinking tokens from the last reply, kept apart from the answer
         self.last_reasoning: str = ""
+        # formatted usage breakdown of the last reply (for the caller to display)
+        self.last_usage: str = ""
+        self._reconstruct_context()
         logger.debug("initialized agent: %s", config)
 
     @classmethod
@@ -61,9 +70,10 @@ class Agent:
         return self._stream() if stream else self._complete()
 
     def _stream(self) -> Iterator[tuple]:
-        reasoning, reply = "", ""
+        context = self._context()
+        reasoning, reply, usage = "", "", None
         for chunk in self.provider.invoke(
-            self._context(), self.config.models.chat,
+            context, self.config.models.chat,
             stream=True, reasoning=self.config.reasoning, reasoning_tokens=self.config.reasoning_tokens,
         ):
             if isinstance(chunk, tuple):
@@ -73,26 +83,34 @@ class Agent:
                 else:
                     reply += text
                 yield chunk
+            elif isinstance(chunk, dict):
+                usage = chunk.get("usage")
         self.last_reasoning = reasoning
-        self._remember_reply(reply, reasoning)
+        self._remember_reply(reply, reasoning, usage)
+        self._track_usage(context, reply, reasoning, usage)
 
     def _complete(self) -> str:
+        context = self._context()
         result = self.provider.invoke(
-            self._context(), self.config.models.chat,
+            context, self.config.models.chat,
             stream=False, reasoning=self.config.reasoning, reasoning_tokens=self.config.reasoning_tokens,
         )
         self.last_reasoning = result.get("reasoning", "")
         reply = result["response"]
-        self._remember_reply(reply, self.last_reasoning)
+        self._remember_reply(reply, self.last_reasoning, result.get("usage"))
+        self._track_usage(context, reply, self.last_reasoning, result.get("usage"))
         return reply
 
-    def _remember_reply(self, reply: str, reasoning: str) -> None:
-        """Append the assistant reply to memory, optionally keeping the thinking with it."""
+    def _remember_reply(self, reply: str, reasoning: str, api_usage) -> None:
+        """Append the assistant reply to memory and persist the turn (with its real usage)."""
         message = {"role": "assistant", "content": reply}
         if self.config.keep_reasoning_in_memory and reasoning:
             message["reasoning"] = reasoning
         self.messages.append(message)
-        self._log_turn("assistant", reply, reasoning=reasoning or None)
+        extra = {"reasoning": reasoning or None}
+        if api_usage:
+            extra["usage"] = {"in": api_usage.get("prompt_tokens"), "out": api_usage.get("completion_tokens")}
+        self._log_turn("assistant", reply, **extra)
 
     def _log_turn(self, role: str, content: str, **extra) -> None:
         """Persist a turn to the conversation jsonl (independent of in-context memory)."""
@@ -107,11 +125,16 @@ class Agent:
         if not (self.config.has_memory and n):
             return
         history, truncated = self.sources.conversations().last_turns(n)
-        self.messages += [
-            {"role": t["role"], "content": t["content"]}
-            for t in history
-            if t.get("role") in ("user", "assistant")
-        ]
+        for t in history:
+            if t.get("role") not in ("user", "assistant"):
+                continue
+            self.messages.append({"role": t["role"], "content": t["content"]})
+        # seed the context input size from the most recent persisted usage
+        for t in reversed(history):
+            u = t.get("usage")
+            if u and u.get("in") is not None:
+                self._ctx_input_tokens = u["in"]
+                break
         self._truncated = truncated
 
     def _trim_context(self) -> None:
@@ -129,3 +152,31 @@ class Agent:
         if self._truncated:
             return [self.messages[0], {"role": "system", "content": "[CUTOFF CONVERSATION]"}] + self.messages[1:]
         return self.messages
+
+    def _ensure_max_context(self) -> None:
+        if self._max_context is None:
+            self._max_context = self.provider.context_window(self.config.models.chat) or 0
+
+    def _reconstruct_context(self) -> None:
+        """On load, show how loaded the context is, using the last persisted real input tokens."""
+        if self._ctx_input_tokens is None:
+            return  # nothing loaded / no real data yet; wait for the first turn
+        breakdown, approx = usage.context_breakdown(self.messages, self._ctx_input_tokens)
+        self._ensure_max_context()
+        self._prev_breakdown = breakdown
+        self.last_usage = usage.format_context(breakdown, approx, self._max_context or None)
+        logger.info("usage\n%s", self.last_usage)
+
+    def _track_usage(self, context: list[dict], reply: str, reasoning: str, api_usage) -> None:
+        """Split this turn's real in/out tokens and record how loaded the context now is."""
+        api_usage = api_usage or {}
+        prompt_tokens = api_usage.get("prompt_tokens")
+        completion_tokens = api_usage.get("completion_tokens")
+        breakdown, approx = usage.turn_breakdown(context, reply, reasoning, prompt_tokens, completion_tokens)
+        if approx:
+            logger.warning("token usage approximated with chars/4 (provider returned no usage)")
+        self._ensure_max_context()
+        self.last_usage = usage.format_turn(breakdown, self._prev_breakdown, approx, self._max_context or None)
+        self._prev_breakdown = breakdown
+        self._ctx_input_tokens = breakdown["in"]  # for the next reconstruct
+        logger.info("usage\n%s", self.last_usage)

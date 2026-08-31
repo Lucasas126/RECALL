@@ -21,6 +21,8 @@ def main():
     agent = Agent.from_config(USER_ID, AGENT_ID)
 
     print(f"{agent.name} cli — type 'exit' or 'quit' to stop.")
+    if agent.last_usage:
+        print(f"{GRAY_ITALIC}[context]\n{agent.last_usage}{RESET}")
 
     while True:
         try:
@@ -51,6 +53,8 @@ def main():
                     mode = kind
                 print(text, end="", flush=True)
             print(RESET + "\n")
+
+        print(f"{GRAY_ITALIC}[usage]\n{agent.last_usage}{RESET}\n")
 
 
 if __name__ == "__main__":

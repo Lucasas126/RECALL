@@ -11,6 +11,10 @@ import dotenv
 dotenv.load_dotenv()
 logger = get_logger("provider-openrouter")
 
+# cache of model id -> context length, fetched once from the models endpoint
+_MODEL_CONTEXT: dict[str, int] = {}
+_MODEL_CONTEXT_LOADED = False
+
 
 class OpenRouterProvider(LLMProvider):
 
@@ -180,3 +184,23 @@ class OpenRouterProvider(LLMProvider):
         # data is a list of {"index": int, "embedding": list[float]}
         data.sort(key=lambda x: x["index"])
         return [item["embedding"] for item in data]
+
+    def context_window(self, model: str):
+        """Return the model's max context length from OpenRouter's models list (cached)."""
+        global _MODEL_CONTEXT_LOADED
+        if not _MODEL_CONTEXT_LOADED:
+            try:
+                r = requests.get(
+                    "https://openrouter.ai/api/v1/models",
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    timeout=30,
+                )
+                r.raise_for_status()
+                for m in r.json().get("data", []):
+                    if m.get("context_length"):
+                        _MODEL_CONTEXT[m["id"]] = m["context_length"]
+                _MODEL_CONTEXT_LOADED = True
+            except Exception as e:
+                logger.warning("could not fetch model contexts: %s", e)
+                return None
+        return _MODEL_CONTEXT.get(model)
