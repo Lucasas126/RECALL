@@ -11,7 +11,8 @@ class ConversationsSource(Source):
     """Past conversations with the user, one JSONL file per UTC day (one turn per line)."""
 
     def __init__(self, root: Path):
-        super().__init__("conversations", root, readable=True, writable=True, indexed=True)
+        # not writable to the agent's tools; the log is append-only via append() below
+        super().__init__("conversations", root, readable=True, writable=False, indexed=True)
 
     def current(self) -> str:
         """The current day's conversation file id (rolls over at UTC midnight)."""

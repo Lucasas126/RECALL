@@ -53,6 +53,13 @@ def build_tools(agent: "Agent") -> tuple[list[dict], dict[str, Callable[..., str
         names = [source] if source else sources.names()
         return [sources.get(n) for n in names if sources.get(n).readable]
 
+    def _readonly_error(memory_path: str) -> Optional[str]:
+        """Return an error message if the target source is not writable by the agent's tools."""
+        source, _ = sources.resolve(memory_path)
+        if not source.writable:
+            return f"error: source '{source.name}' is read-only; you can only write to note sources like mind_palace"
+        return None
+
     @tool
     def query_memory(
         query: Annotated[str, "key concepts/entities to match (keywords or a short noun phrase), not a full sentence"],
@@ -166,6 +173,8 @@ def build_tools(agent: "Agent") -> tuple[list[dict], dict[str, Callable[..., str
     ) -> str:
         """Create a new memory or overwrite an existing one at the given 'source:path' address.
         Use edit or append for partial changes to avoid rewriting the whole file."""
+        if error := _readonly_error(memory_path):
+            return error
         path = sources.write(memory_path, content)
         agent.index.sync_source(memory_path.split(":", 1)[0])  # reindex-on-edit
         return f"wrote {path}"
@@ -177,6 +186,8 @@ def build_tools(agent: "Agent") -> tuple[list[dict], dict[str, Callable[..., str
     ) -> str:
         """Add content to the end of a memory without rewriting it (creates it if missing).
         Prefer this over write when you only want to add a note, not replace the file."""
+        if error := _readonly_error(memory_path):
+            return error
         source, rel = sources.resolve(memory_path)
         existing = source.read(rel) if source.exists(rel) else ""
         joined = content if not existing else existing + ("" if existing.endswith("\n") else "\n") + content
@@ -192,6 +203,8 @@ def build_tools(agent: "Agent") -> tuple[list[dict], dict[str, Callable[..., str
     ) -> str:
         """Edit part of an existing memory by replacing a specific fragment, without rewriting
         the whole file. old_string must match exactly and appear exactly once."""
+        if error := _readonly_error(memory_path):
+            return error
         source, rel = sources.resolve(memory_path)
         content = source.read(rel)
         count = content.count(old_string)
@@ -209,6 +222,8 @@ def build_tools(agent: "Agent") -> tuple[list[dict], dict[str, Callable[..., str
         new_path: Annotated[str, "the new 'source:path' address"],
     ) -> str:
         """Move or rename a memory from one address to another. Use it to reorganize your mind palace."""
+        if error := (_readonly_error(memory_path) or _readonly_error(new_path)):
+            return error
         source, rel = sources.resolve(memory_path)
         content = source.read(rel)
         dst = sources.write(new_path, content)
@@ -220,6 +235,8 @@ def build_tools(agent: "Agent") -> tuple[list[dict], dict[str, Callable[..., str
     @tool
     def delete(memory_path: Annotated[str, "the 'source:path' address to delete"]) -> str:
         """Delete a memory at the given address. From your point of view it stops existing."""
+        if error := _readonly_error(memory_path):
+            return error
         sources.delete(memory_path)
         agent.index.sync_source(memory_path.split(":", 1)[0])
         return f"deleted {memory_path}"
