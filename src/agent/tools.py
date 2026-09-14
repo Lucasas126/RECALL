@@ -1,14 +1,42 @@
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Annotated, Callable, Optional
 
+import yaml
+
 from src.agent.tooling import tool
+from src.config.settings import INDEX_FILE_TYPES
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
     from src.agent.agent import Agent
 
 logger = get_logger("tools")
+
+_MAX_SEARCH_HITS = 50
+_TAG_RE = re.compile(r"(?<!\w)#([A-Za-z0-9_][\w/-]*)")
+
+
+def _note_tags(text: str) -> set[str]:
+    """Extract tags from a note: YAML frontmatter ``tags:`` plus inline ``#tags``."""
+    tags: set[str] = set()
+    body = text
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end != -1:
+            try:
+                meta = yaml.safe_load(text[3:end]) or {}
+                value = meta.get("tags")
+                if isinstance(value, str):
+                    tags.update(re.split(r"[,\s]+", value.strip()))
+                elif isinstance(value, list):
+                    tags.update(str(v) for v in value)
+            except yaml.YAMLError:
+                pass
+            body = text[end + 4:]
+    tags.update(m.group(1) for m in _TAG_RE.finditer(body))
+    return {t.lstrip("#").strip() for t in tags if t and t.strip()}
 
 
 def build_tools(agent: "Agent") -> tuple[list[dict], dict[str, Callable[..., str]]]:
@@ -19,6 +47,11 @@ def build_tools(agent: "Agent") -> tuple[list[dict], dict[str, Callable[..., str
     return a string (what the model sees back); writes keep the index in sync.
     """
     sources = agent.sources
+
+    def _targets(source: str) -> list:
+        """The readable sources to scan: a single one if named, else all of them."""
+        names = [source] if source else sources.names()
+        return [sources.get(n) for n in names if sources.get(n).readable]
 
     @tool
     def query_memory(
@@ -38,6 +71,28 @@ def build_tools(agent: "Agent") -> tuple[list[dict], dict[str, Callable[..., str
         return "\n".join(f"[{h['address']}] {h['document']}" for h in hits)
 
     @tool
+    def search(
+        query: Annotated[str, "text to find (case-insensitive, literal match)"],
+        source: Annotated[str, "source name; omit to search all sources"] = "",
+    ) -> str:
+        """Find exact text matches across your memories (complements query_memory, which is semantic).
+        Returns each match as 'source:path:line'. Use it when you know the wording you're looking for."""
+        needle = query.lower()
+        hits = []
+        for src in _targets(source):
+            for rel in src.walk(INDEX_FILE_TYPES):
+                try:
+                    text = src.read(rel)
+                except OSError:
+                    continue
+                for n, line in enumerate(text.splitlines(), 1):
+                    if needle in line.lower():
+                        hits.append(f"[{src.name}:{rel}:{n}] {line.strip()}")
+                        if len(hits) >= _MAX_SEARCH_HITS:
+                            return "\n".join(hits) + f"\n... (stopped at {_MAX_SEARCH_HITS} matches)"
+        return "\n".join(hits) if hits else "no matches."
+
+    @tool
     def list_memories(
         source: Annotated[str, "source name; omit to list all sources"] = "",
         path: Annotated[str, "folder inside the source"] = "",
@@ -46,6 +101,46 @@ def build_tools(agent: "Agent") -> tuple[list[dict], dict[str, Callable[..., str
         so you can discover what memories exist before reading them."""
         entries = sources.list(source, path)
         return "\n".join(entries) if entries else "(empty)"
+
+    @tool
+    def list_tags(source: Annotated[str, "source name; omit to scan all sources"] = "") -> str:
+        """List the tags used across your notes (frontmatter and inline #tags), so you can navigate
+        by topic. Your mind palace is obsidian-like, so tag your notes to make this useful."""
+        counts: dict[str, int] = {}
+        for src in _targets(source):
+            for rel in src.walk({"md"}):
+                try:
+                    tags = _note_tags(src.read(rel))
+                except OSError:
+                    continue
+                for tag in tags:
+                    counts[tag] = counts.get(tag, 0) + 1
+        if not counts:
+            return "no tags."
+        return "\n".join(f"#{t} ({c})" for t, c in sorted(counts.items(), key=lambda x: (-x[1], x[0])))
+
+    @tool
+    def find_notes_by_tag(
+        tags: Annotated[list[str], "tags to match (with or without the leading #)"],
+        source: Annotated[str, "source name; omit to scan all sources"] = "",
+        mode: Annotated[str, "'any' (at least one tag) or 'all' (every tag); default 'any'"] = "any",
+    ) -> str:
+        """Find the notes tagged with the given tags. mode 'any' returns notes with at least one of
+        the tags; mode 'all' returns only notes that have all of them."""
+        want = {t.lstrip("#").strip() for t in tags if t.strip()}
+        if not want:
+            return "no tags given."
+        matches = []
+        for src in _targets(source):
+            for rel in src.walk({"md"}):
+                try:
+                    note_tags = _note_tags(src.read(rel))
+                except OSError:
+                    continue
+                matched = want <= note_tags if mode == "all" else bool(want & note_tags)
+                if matched:
+                    matches.append(f"{src.name}:{rel}")
+        return "\n".join(matches) if matches else "no notes found."
 
     @tool
     def read(
@@ -129,7 +224,7 @@ def build_tools(agent: "Agent") -> tuple[list[dict], dict[str, Callable[..., str
         agent.index.sync_source(memory_path.split(":", 1)[0])
         return f"deleted {memory_path}"
 
-    funcs = [query_memory, list_memories, read, write, append, edit, move, delete]
+    funcs = [query_memory, search, list_memories, list_tags, find_notes_by_tag, read, write, append, edit, move, delete]
     specs = [f.tool_spec for f in funcs]
     handlers = {f.tool_spec["function"]["name"]: f for f in funcs}
     return specs, handlers

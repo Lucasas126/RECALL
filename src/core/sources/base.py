@@ -64,3 +64,15 @@ class Source:
             rel = child.relative_to(root).as_posix()
             entries.append(rel + "/" if child.is_dir() else rel)
         return sorted(entries)
+
+    def walk(self, exts: set[str] | None = None) -> list[str]:
+        """Recursively list file paths under the source, optionally filtered by extension."""
+        root = self.root.resolve()
+        out = []
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            if exts and path.suffix.lstrip(".").lower() not in exts:
+                continue
+            out.append(path.relative_to(root).as_posix())
+        return sorted(out)
