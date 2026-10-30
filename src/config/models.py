@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class TavilyConfig(BaseModel):
+    """Global web access settings; api_key names an environment variable, not a secret."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    api_key: str = Field(default="TAVILY_API_KEY", pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
+    timeout_seconds: float = Field(default=30, ge=1, le=60, allow_inf_nan=False)
+    max_content_chars: int = Field(default=16000, ge=1000, le=100000, strict=True)
 
 
 class ProviderConfig(BaseModel):

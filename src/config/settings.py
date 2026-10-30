@@ -4,6 +4,8 @@ from pathlib import Path
 
 import yaml
 
+from src.config.models import TavilyConfig
+
 """Framework-level settings, loaded from `settings.yaml` at the repo root.
 
 This is the RECALL system's own configuration, distinct from the per-user
@@ -38,6 +40,9 @@ AGENT_MAX_TOOL_HOPS = _agent["max_tool_hops"]    # max tool round-trips per turn
 # ------------------------------------------------------------------ web
 WEB_HOST = _web["host"]                          # interface the web ui binds to
 WEB_PORT = _web["port"]                          # port the web ui listens on
+
+# ------------------------------------------------------------------ external web access
+TAVILY = TavilyConfig.model_validate(_raw.get("tavily", {}))
 
 # ------------------------------------------------------------------ associative memory
 ASSOC_CONTEXT_MESSAGES = _assoc["context_messages"]   # recent messages the memory subagent sees

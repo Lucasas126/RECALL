@@ -10,11 +10,12 @@ from src.agent import associative
 from src.agent.tools import build_tools
 from src.config.loader import load_agent
 from src.config.models import ResolvedAgent
-from src.config.settings import AGENT_MAX_TOOL_HOPS
+from src.config.settings import AGENT_MAX_TOOL_HOPS, TAVILY
 from src.core.index import VectorIndex
 from src.core.sources.registry import SourceRegistry
 from src.utils.logger import get_logger
 from src.providers.provider import LLMProvider, get_provider
+from src.providers.tavily import TavilyClient
 
 logger = get_logger("agent")
 
@@ -52,8 +53,9 @@ class Agent:
             self._embeddings_provider(), config.models.embeddings,
         )
         self.index.sync()
-        # tools the model may call (memory recall, source read/write/list)
-        self._tool_specs, self._tool_handlers = build_tools(self) if config.tools else ([], {})
+        self._tool_specs, self._tool_handlers = (
+            build_tools(self, TavilyClient.from_config(TAVILY)) if config.tools else ([], {})
+        )
         self._max_context = None  # model context window, fetched lazily from the provider
         self.open_chat(chat_id)
         logger.debug("initialized agent: %s", config)

@@ -29,6 +29,51 @@ provider:
 
 api keys never live in yaml. agents inherit their owner's provider; they only pick model names, never keys.
 
+## shared web access (tavily)
+
+Tavily uses a **framework-wide key**, shared by all users and agents. This is
+separate from each user's chat/embedding provider credentials and shares one
+Tavily account's quota and billing. Put the key in the ignored root `.env` file
+(the normal entry points load it), or set it in the process environment:
+
+```dotenv
+TAVILY_API_KEY=your_tavily_api_key
+```
+
+The root `settings.yaml` references the variable name, never its value:
+
+```yaml
+tavily:
+  api_key: TAVILY_API_KEY
+  timeout_seconds: 30
+  max_content_chars: 16000
+```
+
+`timeout_seconds` must be between 1 and 60; `max_content_chars` must be an
+integer between 1,000 and 100,000. The client resolves the key when constructed,
+not when settings are imported. An unset/blank key leaves web access unavailable;
+it does not prevent normal chat. Restart after changing configuration or the key.
+
+Implemented: the standalone client in `src/providers/tavily.py`, basic search
+(1-10 results, at most 2,000 excerpt characters per result), and Markdown
+extraction with optional query-focused passages and explicit truncation.
+Extraction checks public HTTP(S) URLs and their locally resolved addresses,
+rejects credentials and nonstandard ports, and delegates fetching to Tavily.
+These checks do not control Tavily's own DNS resolution or page redirects.
+Provider errors, empty extraction and per-URL failures are surfaced explicitly.
+No automatic advanced extraction, retries, persistence or memory indexing is used.
+The client sends only the supplied query/URL, not agent history or memory;
+callers must not supply secrets or private data. Web content is untrusted data,
+not instructions.
+
+Agents with `chat_config.tools: true` (the default) register `web_search` and
+`web_retrieve` when the shared key is set. Without the key they keep their existing
+memory tools; with `tools: false` no tools are registered and the key is not
+resolved. Web actions use the same chat events and history display as memory
+actions. The complete result enters the active context, while the action preview
+stored with the turn is truncated to 500 characters.
+Per-user Tavily credentials and per-agent web policies are not implemented.
+
 ## config files
 
 ```yaml
