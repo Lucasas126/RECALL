@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -79,15 +80,44 @@ class WebSteeringTests(steering.SteeringFixture):
 
     def test_associative_matches_are_sent_and_persisted(self) -> None:
         self.associative_memory = True
+        provider = self.providers[("user-one", "agent-one")]
+        original_invoke = provider.invoke.side_effect
+
+        def delayed_model(*args, **kwargs):
+            time.sleep(0.03)
+            return original_invoke(*args, **kwargs)
+
+        provider.invoke.side_effect = delayed_model
+
+        def delayed_recall(*args, **kwargs):
+            time.sleep(0.03)
+            return "[associative memory] remembered detail", 2
+
         with steering.patch(
             "src.agent.agent.associative.recall",
-            return_value=("[associative memory] remembered detail", 2),
+            side_effect=delayed_recall,
         ):
             response = self.client.post(self.messages_url, json={"content": "Question"})
 
         events = _events(response)
         self.assertEqual([event["event"] for event in events], ["memory", "text", "usage", "done"])
         self.assertEqual(events[0]["data"], {"matches": 2})
+        report = self.agents[("user-one", "agent-one")].last_latency_report
+        self.assertIn(report, events[2]["data"])
+        total_match = re.search(r"latency: total=(\d+) ms", report)
+        assoc_match = re.search(r"associative memory: (\d+) ms \(([\d.]+)%\)", report)
+        model_match = re.search(r"model calls: (\d+) ms \(([\d.]+)%\)", report)
+        self.assertIsNotNone(total_match)
+        self.assertIsNotNone(assoc_match)
+        self.assertIsNotNone(model_match)
+        total_ms = int(total_match.group(1))
+        assoc_ms, assoc_pct = int(assoc_match.group(1)), float(assoc_match.group(2))
+        model_ms, model_pct = int(model_match.group(1)), float(model_match.group(2))
+        self.assertGreaterEqual(assoc_ms, 20)
+        self.assertGreaterEqual(model_ms, 20)
+        self.assertAlmostEqual(assoc_pct, assoc_ms / total_ms * 100, delta=2)
+        self.assertAlmostEqual(model_pct, model_ms / total_ms * 100, delta=2)
+        self.assertIn("tools/other:", report)
         self.assertIn(
             "[associative memory] remembered detail",
             self.calls[("user-one", "agent-one")][-1]["context"][-1]["content"],
@@ -97,6 +127,7 @@ class WebSteeringTests(steering.SteeringFixture):
         ).json()["messages"]
         self.assertEqual(history[-1]["associative_matches"], 2)
         self.assertIn("context:", history[-1]["usage_report"])
+        self.assertNotIn("latency:", history[-1]["usage_report"])
         self.assertEqual(history[-1]["usage"], {"in": 10, "out": 5})
 
     def test_validation_precedes_sse_response(self) -> None:

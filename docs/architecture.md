@@ -108,6 +108,11 @@ assistant message so the web UI can show the indicator after reopening a chat.
 Assistant history also stores its formatted `usage_report`, allowing the web
 context panel to be restored when reopening a chat. Older turns that predate
 `usage_report` show their saved input/output token totals, when available.
+The current response's `usage` event also appends ephemeral latency measurements:
+total agent processing time, associative-memory lookup, summed main-model calls,
+and remaining tools/overhead time, each in milliseconds and as a share of total.
+Latency is not stored in conversation history; model-call time includes waiting
+for streamed tokens and excludes the separate associative-memory query call.
 `interrupted` carries
 `{"content": "...", "reasoning": "...", "actions": [...]}` and is followed by
 `done`. Streams disable proxy buffering; a connection that ends without `done`

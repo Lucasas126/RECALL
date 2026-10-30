@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from time import perf_counter
 from contextlib import closing
 from typing import Iterator, Optional, Union
 
@@ -84,12 +85,16 @@ class Agent:
         # transient associative-memory hint, injected into the context of the current turn only
         self._assoc_suggestion: Optional[str] = None
         self._assoc_match_count = 0
+        self._assoc_elapsed = 0.0
+        self._model_elapsed = 0.0
+        self._turn_started_at = 0.0
         # thinking tokens from the last reply, kept apart from the answer
         self.last_reasoning: str = ""
         # tool calls made during the last turn (name, arguments, truncated result, error flag)
         self.last_actions: list[dict] = []
         # formatted usage breakdown of the last reply (for the caller to display)
         self.last_usage: str = ""
+        self.last_latency_report: str = ""
         self.last_reply: str = ""
         self._load_recent_context()
         self._reconstruct_context()
@@ -140,6 +145,7 @@ class Agent:
         if stream is None:
             stream = self.config.stream
         logger.info("invoke user=%s agent=%s stream=%s", self.config.user_id, self.config.id, stream)
+        self._turn_started_at = perf_counter()
         # without memory, each turn starts fresh from the system prompt
         if not self.config.has_memory and not continuation:
             self.messages = [{"role": "system", "content": self.config.personality_prompt}]
@@ -147,17 +153,22 @@ class Agent:
         # associative memory: run before logging the turn so the search can't match this message
         self._assoc_suggestion = None
         self._assoc_match_count = 0
+        self._assoc_elapsed = 0.0
+        self._model_elapsed = 0.0
         self.last_actions = []
         self.last_reasoning = ""
         self.last_usage = ""
+        self.last_latency_report = ""
         self.last_reply = ""
         try:
             if cancellation is not None:
                 cancellation.raise_if_cancelled()
             if self.config.has_memory and self.config.associative_memory:
+                assoc_started_at = perf_counter()
                 self._assoc_suggestion, self._assoc_match_count = associative.recall(
                     self, user_input, cancellation
                 )
+                self._assoc_elapsed = perf_counter() - assoc_started_at
             if cancellation is not None:
                 cancellation.raise_if_cancelled()
         except GenerationCancelled:
@@ -204,6 +215,7 @@ class Agent:
             if is_last:
                 context = context + [{"role": "system", "content": _FINAL_NUDGE}]
             reasoning, reply, api_usage, tool_calls = "", "", None, None
+            model_started_at = perf_counter()
             with closing(self.provider.invoke(
                 context, self.config.models.chat,
                 stream=True, reasoning=self.config.reasoning,
@@ -223,6 +235,7 @@ class Agent:
                     elif isinstance(chunk, dict):
                         api_usage = chunk.get("usage")
                         tool_calls = chunk.get("tool_calls")
+            self._model_elapsed += perf_counter() - model_started_at
             cancellation.raise_if_cancelled()
             if tool_calls and not is_last:
                 tool_calls = _dedupe_tool_calls(tool_calls)
@@ -235,6 +248,7 @@ class Agent:
             with cancellation._commit():
                 self._remember_reply(reply, reasoning, api_usage, usage_report=usage_report)
             self._track_usage(context, reply, reasoning, api_usage)
+            self._record_latency_report()
             return
 
     def _complete(self) -> str:
@@ -244,12 +258,14 @@ class Agent:
             context = self._context()
             if is_last:
                 context = context + [{"role": "system", "content": _FINAL_NUDGE}]
+            model_started_at = perf_counter()
             result = self.provider.invoke(
                 context, self.config.models.chat,
                 stream=False, reasoning=self.config.reasoning,
                 reasoning_tokens=self.config.reasoning_tokens,
                 reasoning_effort=self.config.reasoning_effort, tools=tools,
             )
+            self._model_elapsed += perf_counter() - model_started_at
             reasoning = result.get("reasoning") or ""
             reply = result.get("response") or ""
             tool_calls = result.get("tool_calls")
@@ -266,6 +282,7 @@ class Agent:
                 reply, reasoning, result.get("usage"), usage_report=usage_report
             )
             self._track_usage(context, reply, reasoning, result.get("usage"))
+            self._record_latency_report()
             return reply
         return ""  # unreachable: the final hop runs without tools and finalizes
 
@@ -446,6 +463,26 @@ class Agent:
         )
         return usage.format_turn(
             breakdown, self._prev_breakdown, approx, self._max_context or None
+        )
+
+    def _record_latency_report(self) -> None:
+        """Format ephemeral wall-clock timings for the latest completed response."""
+        total = max(0.0, perf_counter() - self._turn_started_at)
+        assoc = self._assoc_elapsed
+        model = self._model_elapsed
+        other = max(0.0, total - assoc - model)
+
+        def part(name: str, seconds: float) -> str:
+            percentage = seconds / total * 100 if total else 0.0
+            return f"  {name}: {seconds * 1000:.0f} ms ({percentage:.1f}%)"
+
+        self.last_latency_report = "\n".join(
+            [
+                f"latency: total={total * 1000:.0f} ms",
+                part("associative memory", assoc),
+                part("model calls", model),
+                part("tools/other", other),
+            ]
         )
 
     def _reconstruct_context(self) -> None:

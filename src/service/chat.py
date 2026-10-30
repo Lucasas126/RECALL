@@ -271,7 +271,10 @@ class ChatService:
                 )
                 return
             if agent.last_usage:
-                yield ChatEvent("usage", agent.last_usage, generation_id=run.generation_id)
+                report = agent.last_usage
+                if agent.last_latency_report:
+                    report += "\n\n" + agent.last_latency_report
+                yield ChatEvent("usage", report, generation_id=run.generation_id)
 
     # ------------------------------------------------------------------ internals
 
