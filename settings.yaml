@@ -13,3 +13,8 @@ index:
 
 agent:
   max_tool_hops: 5          # max tool round-trips before forcing a final answer
+
+associative_memory:
+  context_messages: 6       # recent messages the memory subagent sees
+  top_n: 3                  # fragments injected into the active agent
+  score_threshold: 0.25     # minimum similarity for a fragment to be injected
