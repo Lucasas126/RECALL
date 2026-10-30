@@ -15,5 +15,6 @@ dependencies = [
     "pyyaml>=6.0.3",
     "requests>=2.34.2",
     "python-telegram-bot>=22.6",
+    "telegramify-markdown>=1.0.0",
     "uvicorn>=0.52.4",
 ]
