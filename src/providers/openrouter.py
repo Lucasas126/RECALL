@@ -1,9 +1,14 @@
 import os
 import requests
 import json
+from contextlib import closing
 from typing import ClassVar
 
+import httpx
+
+from src.providers.cancellation import CancellationToken, GenerationCancelled
 from src.providers.provider import LLMProvider, format_completion
+from src.providers.transport import post_chat, stream_chat
 from src.utils.logger import get_logger
 
 import dotenv
@@ -88,7 +93,7 @@ class OpenRouterProvider(LLMProvider):
         super().__init__(**data)
         # self.api_key = os.environ.get("OPENROUTER_API_KEY", "")
 
-    def invoke(self, messages: list[dict], model: str, stream=True, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None):
+    def invoke(self, messages: list[dict], model: str, stream=True, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None):
         """
         Invokes the OpenRouter API with the given messages and model.
         If stream is True, yields (kind, text) tuples then a final dict with usage info.
@@ -96,10 +101,10 @@ class OpenRouterProvider(LLMProvider):
         """
         logger.debug("request model=%s stream=%s reasoning=%s msgs=%d", model, stream, reasoning, len(messages))
         if stream:
-            return self.invoke_stream(messages, model, self.api_key, reasoning=reasoning, reasoning_tokens=reasoning_tokens, reasoning_effort=reasoning_effort, tools=tools)
-        return self.invoke_sync(messages, model, self.api_key, reasoning=reasoning, reasoning_tokens=reasoning_tokens, reasoning_effort=reasoning_effort, tools=tools)
+            return self.invoke_stream(messages, model, self.api_key, reasoning=reasoning, reasoning_tokens=reasoning_tokens, reasoning_effort=reasoning_effort, tools=tools, cancellation=cancellation)
+        return self.invoke_sync(messages, model, self.api_key, reasoning=reasoning, reasoning_tokens=reasoning_tokens, reasoning_effort=reasoning_effort, tools=tools, cancellation=cancellation)
 
-    def invoke_stream(self, messages: list[dict], model: str, api_key: str, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None):
+    def invoke_stream(self, messages: list[dict], model: str, api_key: str, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None):
         """Streaming variant — yields (kind, text) tuples then a final dict with usage info.
 
         kind is either "reasoning" (thinking tokens) or "content" (the actual answer).
@@ -128,81 +133,54 @@ class OpenRouterProvider(LLMProvider):
             tool_calls_acc: dict[int, dict] = {}
             emitted = 0  # chars of response_text already yielded to the caller
             ds_started = False  # a deepseek inline tool-call marker has appeared
-            buffer = ""
-            with requests.post(url, headers=headers, json=payload, stream=True) as r:
-                if r.status_code != 200:
-                    _raise_openrouter_error(r.status_code, r.text)
-                r.encoding = "utf-8"  # SSE defaults to latin-1; force utf-8 to avoid mojibake
-                for chunk in r.iter_content(chunk_size=1024, decode_unicode=True):
-                    buffer += chunk
-                    while True:
-                        try:
-                            line_end = buffer.find('\n')
-                            if line_end == -1:
-                                break
-
-                            line = buffer[:line_end].strip()
-                            buffer = buffer[line_end + 1:]
-
-                            # Skip SSE comments (lines starting with ":"), e.g. the
-                            # ": OPENROUTER PROCESSING" keep-alive — they are not JSON
-                            if line.startswith(':'):
-                                continue
-
-                            if line.startswith('data: '):
-                                data = line[6:]
-                                if data == '[DONE]':
-                                    break
-
-                                try:
-                                    data_obj = json.loads(data)
-                                    if data_obj.get("error"):
-                                        _raise_openrouter_error(data_obj.get("code", ""), data_obj["error"])
-                                    delta = data_obj["choices"][0]["delta"]
-
-                                    reasoning_chunk = delta.get("reasoning")
-                                    if reasoning_chunk:
-                                        reasoning_text += reasoning_chunk
-                                        yield ("reasoning", reasoning_chunk)
-
-                                    content = delta.get("content")
-                                    if content:
-                                        response_text += content
-                                        # hold back deepseek tool markers instead of leaking them
-                                        if not ds_started:
-                                            pos = response_text.find(_DS_PREFIX)
-                                            if pos == -1:
-                                                safe = len(response_text) - len(_DS_PREFIX)
-                                                if safe > emitted:
-                                                    yield ("content", response_text[emitted:safe])
-                                                    emitted = safe
-                                            else:
-                                                if pos > emitted:
-                                                    yield ("content", response_text[emitted:pos])
-                                                emitted = pos
-                                                ds_started = True
-
-                                    for tc in delta.get("tool_calls") or []:
-                                        idx = tc.get("index", 0)
-                                        slot = tool_calls_acc.setdefault(idx, {"id": "", "name": "", "arguments": ""})
-                                        if tc.get("id"):
-                                            slot["id"] = tc["id"]
-                                        fn = tc.get("function") or {}
-                                        if fn.get("name"):
-                                            slot["name"] = fn["name"]
-                                        if fn.get("arguments"):
-                                            slot["arguments"] += fn["arguments"]
-
-                                    # Capture usage info if present in the final message
-                                    if "usage" in data_obj:
-                                        usage_info = data_obj["usage"]
-                                except json.JSONDecodeError:
-                                    pass
-
-                        except RuntimeError:
-                            raise  # surfaced API error: never swallow
-                        except Exception:
-                            break
+            with closing(stream_chat(url, payload, headers=headers, cancellation=cancellation)) as lines:
+                for line in lines:
+                    if not line.startswith("data: "):
+                        continue
+                    data = line[6:]
+                    if data == "[DONE]":
+                        break
+                    try:
+                        data_obj = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    if data_obj.get("error"):
+                        _raise_openrouter_error(data_obj.get("code", ""), data_obj["error"])
+                    if "usage" in data_obj:
+                        usage_info = data_obj["usage"]
+                    choices = data_obj.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta") or {}
+                    reasoning_chunk = delta.get("reasoning")
+                    if reasoning_chunk:
+                        reasoning_text += reasoning_chunk
+                        yield ("reasoning", reasoning_chunk)
+                    content = delta.get("content")
+                    if content:
+                        response_text += content
+                        if not ds_started:
+                            pos = response_text.find(_DS_PREFIX)
+                            if pos == -1:
+                                safe = len(response_text) - len(_DS_PREFIX)
+                                if safe > emitted:
+                                    yield ("content", response_text[emitted:safe])
+                                    emitted = safe
+                            else:
+                                if pos > emitted:
+                                    yield ("content", response_text[emitted:pos])
+                                emitted = pos
+                                ds_started = True
+                    for tc in delta.get("tool_calls") or []:
+                        idx = tc.get("index", 0)
+                        slot = tool_calls_acc.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+                        if tc.get("id"):
+                            slot["id"] = tc["id"]
+                        fn = tc.get("function") or {}
+                        if fn.get("name"):
+                            slot["name"] = fn["name"]
+                        if fn.get("arguments"):
+                            slot["arguments"] += fn["arguments"]
 
             # Yield the final result with usage info after streaming is complete
             if not ds_started and emitted < len(response_text):
@@ -213,13 +191,22 @@ class OpenRouterProvider(LLMProvider):
             logger.debug(format_completion("streaming", reasoning_text, final_response, usage_info, model))
             yield {"reasoning": reasoning_text, "response": final_response, "usage": usage_info, "model": model, "tool_calls": tool_calls}
 
-        except requests.RequestException as e:
+        except httpx.HTTPStatusError as e:
+            _raise_openrouter_error(e.response.status_code, e.response.text)
+        except httpx.RequestError as e:
+            if cancellation is not None:
+                cancellation.raise_if_cancelled()
+            if response_text or reasoning_text or tool_calls_acc:
+                logger.error("OpenRouter stream failed after partial output: %s", e)
+                raise
             logger.warning(f"Error during streaming from OpenRouter API: {e}, retrying without streaming")
             try:
-                response = requests.post(url, headers=headers, json={**payload, "stream": False})
-                response.raise_for_status()
-                response_data = response.json()
+                response_data = post_chat(url, {**payload, "stream": False}, headers=headers, cancellation=cancellation)
                 msg = response_data["choices"][0]["message"]
+                if msg.get("reasoning"):
+                    yield ("reasoning", msg["reasoning"])
+                if msg.get("content"):
+                    yield ("content", msg["content"])
                 yield {
                     "reasoning": msg.get("reasoning", ""),
                     "response": msg.get("content", ""),
@@ -227,14 +214,18 @@ class OpenRouterProvider(LLMProvider):
                     "model": model,
                     "tool_calls": _normalize_tool_calls(msg.get("tool_calls")),
                 }
+            except GenerationCancelled:
+                raise
             except Exception as retry_error:
                 logger.error(f"Fallback to non-streaming also failed: {retry_error}")
                 raise
+        except GenerationCancelled:
+            raise
         except Exception as e:
             logger.error(f"Unexpected error during streaming: {e}")
             raise
 
-    def invoke_sync(self, messages: list[dict], model: str, api_key: str, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None) -> dict:
+    def invoke_sync(self, messages: list[dict], model: str, api_key: str, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None) -> dict:
         """Non-streaming variant — returns a dict with reasoning, response, usage and model."""
         url = "https://openrouter.ai/api/v1/chat/completions"
         headers = {
@@ -248,10 +239,7 @@ class OpenRouterProvider(LLMProvider):
         if tools:
             payload["tools"] = tools
         try:
-            response = requests.post(url, headers=headers, json=payload)
-            if response.status_code != 200:
-                _raise_openrouter_error(response.status_code, response.text)
-            response_data = response.json()
+            response_data = post_chat(url, payload, headers=headers, cancellation=cancellation)
             msg = response_data["choices"][0]["message"]
             logger.debug(format_completion("non-streaming", msg.get("reasoning", ""), msg.get("content", ""), response_data.get("usage"), model))
             return {
@@ -261,11 +249,15 @@ class OpenRouterProvider(LLMProvider):
                 "model": model,
                 "tool_calls": _normalize_tool_calls(msg.get("tool_calls")),
             }
-        except requests.RequestException as e:
+        except httpx.HTTPStatusError as e:
+            _raise_openrouter_error(e.response.status_code, e.response.text)
+        except httpx.RequestError as e:
             logger.error(f"Error invoking OpenRouter API (non-streaming): {e}")
             raise
         except (KeyError, IndexError) as e:
             logger.error(f"Unexpected response format from OpenRouter API: {e}")
+            raise
+        except GenerationCancelled:
             raise
         except Exception as e:
             logger.error(f"Unexpected error: {e}")

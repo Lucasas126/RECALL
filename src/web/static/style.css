@@ -27,6 +27,8 @@ main { display: flex; flex-direction: column; min-width: 0; height: 100vh; }
 .msg { max-width: 820px; word-break: break-word; padding: 10px 14px; border-radius: 10px; background: var(--panel); }
 .msg.user { align-self: flex-end; background: #25334a; white-space: pre-wrap; }
 .msg.error { color: #f28b82; }
+.msg.interrupted { border-left: 3px solid var(--muted); }
+.interruption { margin-top: 8px; color: var(--muted); font-size: .85em; }
 .body > :first-child { margin-top: 0; }
 .body > :last-child { margin-bottom: 0; }
 .body p, .body ul, .body ol, .body pre, .body blockquote, .body table { margin: 0 0 .8em; }

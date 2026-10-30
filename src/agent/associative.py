@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from contextlib import closing
 from typing import TYPE_CHECKING, Optional
 
 from src.config.settings import ASSOC_CONTEXT_MESSAGES, ASSOC_SCORE_THRESHOLD, ASSOC_TOP_N
+from src.providers.cancellation import CancellationToken, GenerationCancelled
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -25,12 +27,16 @@ _SYSTEM_PROMPT = (
 _FRAGMENT_LIMIT = 200
 
 
-def recall(agent: "Agent", user_input: str) -> Optional[str]:
+def recall(agent: "Agent", user_input: str, cancellation: CancellationToken | None = None) -> Optional[str]:
     """Propose a query via the memory subagent, search, and return a transient hint block or None."""
-    query = _propose_query(agent, user_input)
+    query = _propose_query(agent, user_input, cancellation)
+    if cancellation is not None:
+        cancellation.raise_if_cancelled()
     if not query:
         return None
     hits = [h for h in agent.query_memory(query, ASSOC_TOP_N) if h["score"] >= ASSOC_SCORE_THRESHOLD]
+    if cancellation is not None:
+        cancellation.raise_if_cancelled()
     if not hits:
         logger.debug("query=%r -> no hits above threshold %.2f", query, ASSOC_SCORE_THRESHOLD)
         return None
@@ -42,7 +48,7 @@ def recall(agent: "Agent", user_input: str) -> Optional[str]:
     )
 
 
-def _propose_query(agent: "Agent", user_input: str) -> Optional[str]:
+def _propose_query(agent: "Agent", user_input: str, cancellation: CancellationToken | None = None) -> Optional[str]:
     """Ask the memory subagent (trimmed context) for a search query, or None."""
     recent = [
         {"role": m["role"], "content": m["content"]}
@@ -53,13 +59,17 @@ def _propose_query(agent: "Agent", user_input: str) -> Optional[str]:
     try:
         # streamed to stay reliable on models whose non-streaming content can come back empty (e.g. R1)
         text = ""
-        for chunk in agent.provider.invoke(
-            messages, agent.config.models.chat, stream=True, reasoning=False, tools=None
-        ):
-            if isinstance(chunk, tuple) and chunk[0] == "content":
-                text += chunk[1]
-            elif isinstance(chunk, dict):
-                text = chunk.get("response") or text
+        with closing(agent.provider.invoke(
+            messages, agent.config.models.chat, stream=True, reasoning=False, tools=None,
+            cancellation=cancellation,
+        )) as chunks:
+            for chunk in chunks:
+                if isinstance(chunk, tuple) and chunk[0] == "content":
+                    text += chunk[1]
+                elif isinstance(chunk, dict):
+                    text = chunk.get("response") or text
+    except GenerationCancelled:
+        raise
     except Exception as e:  # a failed lookup must never break the turn
         logger.warning("query proposal failed: %s", e)
         return None

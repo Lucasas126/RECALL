@@ -26,8 +26,9 @@ class MessageIn(BaseModel):
     content: str
 
 
-def _sse(event: str, data) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+def _sse(event: str, data, generation_id: str = "") -> str:
+    event_id = f"id: {generation_id}\n" if generation_id else ""
+    return f"{event_id}event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 def create_app(service: Optional[ChatService] = None) -> FastAPI:
@@ -110,15 +111,24 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
         events = service.send(user_id, agent_id, chat_id, body.content, stream=True)
 
         def stream() -> Iterator[str]:
+            generation_id = ""
             try:
                 for event in events:
-                    yield _sse(event.kind, event.data if event.kind == "tool" else event.text)
+                    generation_id = event.generation_id
+                    if event.kind == "interrupted":
+                        data = {"content": event.text, **(event.data or {})}
+                    else:
+                        data = event.data if event.kind == "tool" else event.text
+                    yield _sse(event.kind, data, generation_id)
             except Exception as e:  # the response has started: report the failure in-band
                 logger.exception("reply failed for %s/%s/%s", user_id, agent_id, chat_id)
-                yield _sse("error", str(e))
-            yield _sse("done", "")
+                yield _sse("error", str(e), generation_id)
+            yield _sse("done", "", generation_id)
 
-        return StreamingResponse(stream(), media_type="text/event-stream")
+        return StreamingResponse(
+            stream(), media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     # ------------------------------------------------------------------ frontend
 

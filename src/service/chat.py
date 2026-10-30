@@ -2,14 +2,19 @@ from __future__ import annotations
 
 import re
 import threading
-from dataclasses import dataclass
+from collections import deque
+from contextlib import closing
+from dataclasses import dataclass, field
+from queue import SimpleQueue
 from typing import Callable, Iterator, Literal, Optional
+from uuid import uuid4
 
 from src.agent.agent import Agent
 from src.config.loader import load_agent_config, load_user
 from src.config.models import UserConfig
 from src.core.sources.conversations import ConversationsSource
 from src.core.sources.registry import SourceRegistry
+from src.providers.cancellation import CancellationToken, GenerationCancelled
 from src.utils.logger import get_logger
 
 logger = get_logger("service")
@@ -41,20 +46,38 @@ class ChatEvent:
 
     `kind` is `reasoning` (thinking tokens), `text` (answer tokens), `tool` (an action the agent
     took, in `data`: name, arguments, result, error) or `usage` (context report, emitted once
-    after the reply). Non-streaming replies arrive as `tool` events followed by one `text` event.
+    after the reply) or `interrupted` (partial answer in `text`, reasoning/actions in `data`).
+    Non-streaming replies arrive as `tool` events followed by one `text` event. All events
+    carry a generation id so adapters can distinguish overlapping deliveries.
     """
 
-    kind: Literal["reasoning", "text", "tool", "usage"]
+    kind: Literal["reasoning", "text", "tool", "usage", "interrupted"]
     text: str = ""
     data: Optional[dict] = None
+    generation_id: str = ""
+
+
+@dataclass
+class _MessageRun:
+    chat_id: str
+    text: str
+    stream: Optional[bool]
+    continuation: bool = False
+    generation_id: str = field(default_factory=lambda: uuid4().hex)
+    cancellation: CancellationToken = field(default_factory=CancellationToken)
+    events: SimpleQueue[ChatEvent | Exception | None] = field(default_factory=SimpleQueue)
 
 
 class _AgentSlot:
-    """A lazily built agent plus the lock that serializes access to it (one active chat at a time)."""
+    """A lazily built agent, its worker queue and locks for execution and scheduling."""
 
     def __init__(self) -> None:
         self.agent: Optional[Agent] = None
         self.lock = threading.Lock()
+        self.state = threading.Lock()
+        self.pending: deque[_MessageRun] = deque()
+        self.active: _MessageRun | None = None
+        self.worker: threading.Thread | None = None
 
 
 class ChatService:
@@ -89,22 +112,29 @@ class ChatService:
     def list_chats(self, user_id: str, agent_id: str, keep: Optional[str] = None) -> list[dict]:
         """Chat summaries, most recently active first; unused empty chats (except `keep`) are removed."""
         conversations = self._conversations(user_id, agent_id)
-        conversations.prune_empty(keep)
+        slot = self._slot(user_id, agent_id)
+        with slot.state:
+            conversations.prune_empty(self._kept_chats(slot, keep))
         summaries = [conversations.summary(chat_id) for chat_id in conversations.chats()]
         return sorted(summaries, key=lambda s: s["updated"], reverse=True)
 
     def create_chat(self, user_id: str, agent_id: str) -> dict:
         """Create a chat, discarding any other unused empty ones so they never pile up."""
         conversations = self._conversations(user_id, agent_id)
-        conversations.prune_empty()
-        return conversations.summary(conversations.create())
+        slot = self._slot(user_id, agent_id)
+        with slot.state:
+            conversations.prune_empty(self._kept_chats(slot))
+            return conversations.summary(conversations.create())
 
     def get_chat(self, user_id: str, agent_id: str, chat_id: str) -> dict:
         """A chat's summary and its user/assistant messages."""
         conversations = self._conversations(user_id, agent_id)
         turns = self._load(conversations, chat_id)
         messages = [
-            {k: t[k] for k in ("role", "content", "ts", "reasoning", "actions") if t.get(k) is not None}
+            {
+                k: t[k] for k in ("role", "content", "ts", "reasoning", "actions", "interrupted")
+                if t.get(k) is not None
+            }
             for t in turns
             if t.get("role") in ("user", "assistant")
         ]
@@ -128,40 +158,123 @@ class ChatService:
     ) -> Iterator[ChatEvent]:
         """Send a user message to a chat and yield the reply as events.
 
-        Validation happens immediately; the agent runs as the iterator is consumed. Messages to
-        the same agent are serialized. `stream=None` follows the agent's config.
+        Validation and scheduling happen immediately, independently of event consumption.
+        A new message interrupts an unfinished reply to the same chat and continues its turn.
+        Other chats on the agent remain serialized. `stream=None` follows the agent's config.
         """
         conversations = self._conversations(user_id, agent_id)
-        self._load(conversations, chat_id)  # raises UnknownChat
         if not text.strip():
             raise ValueError("message is empty")
-        return self._run(user_id, agent_id, chat_id, text, stream)
+        slot = self._slot(user_id, agent_id)
+        run = _MessageRun(chat_id, text, stream)
+        with slot.state:
+            try:
+                if not conversations.exists_chat(chat_id):
+                    raise UnknownChat(f"unknown chat: {chat_id}")
+            except ValueError as e:
+                raise UnknownChat(f"unknown chat: {chat_id}") from e
+            same_chat = [
+                i for i, queued in enumerate(slot.pending) if queued.chat_id == chat_id
+            ]
+            active = slot.active
+            if active is not None and active.chat_id == chat_id:
+                run.continuation = active.cancellation.cancel()
+            for index in same_chat:
+                slot.pending[index].cancellation.cancel()
+                run.continuation = True
+            if same_chat:
+                slot.pending.insert(same_chat[-1] + 1, run)
+            elif run.continuation:
+                slot.pending.appendleft(run)
+            else:
+                slot.pending.append(run)
+            if slot.worker is None:
+                slot.worker = threading.Thread(
+                    target=self._work, args=(user_id, agent_id, slot), daemon=True,
+                )
+                slot.worker.start()
+        return self._events(run)
+
+    @staticmethod
+    def _events(run: _MessageRun) -> Iterator[ChatEvent]:
+        while True:
+            event = run.events.get()
+            if event is None:
+                return
+            if isinstance(event, Exception):
+                raise event
+            yield event
+
+    def _work(self, user_id: str, agent_id: str, slot: _AgentSlot) -> None:
+        while True:
+            with slot.state:
+                if not slot.pending:
+                    slot.worker = None
+                    slot.active = None
+                    return
+                run = slot.pending.popleft()
+                slot.active = run
+            try:
+                for event in self._run(user_id, agent_id, slot, run):
+                    run.events.put(event)
+            except Exception as e:  # worker failures are delivered to the requesting channel
+                logger.exception("reply failed for %s/%s/%s", user_id, agent_id, run.chat_id)
+                run.events.put(e)
+            finally:
+                run.events.put(None)
+                with slot.state:
+                    slot.active = None
 
     def _run(
-        self, user_id: str, agent_id: str, chat_id: str, text: str, stream: Optional[bool]
+        self, user_id: str, agent_id: str, slot: _AgentSlot, run: _MessageRun,
     ) -> Iterator[ChatEvent]:
-        slot = self._slot(user_id, agent_id)
         with slot.lock:
             if slot.agent is None:
-                slot.agent = self._agent_factory(user_id, agent_id, chat_id)
-            elif slot.agent.chat_id != chat_id:
-                slot.agent.open_chat(chat_id)
+                slot.agent = self._agent_factory(user_id, agent_id, run.chat_id)
+            elif slot.agent.chat_id != run.chat_id:
+                slot.agent.open_chat(run.chat_id)
             agent = slot.agent
-            result = agent.invoke(text, stream=stream)
-            if isinstance(result, str):
-                for action in agent.last_actions:
-                    yield ChatEvent("tool", data=action)
-                yield ChatEvent("text", result)
-            else:
-                for kind, chunk in result:
-                    if kind == "tool":
-                        yield ChatEvent("tool", data=chunk)
-                    else:
-                        yield ChatEvent("reasoning" if kind == "reasoning" else "text", chunk)
+            try:
+                result = agent.invoke(
+                    run.text, stream=run.stream, cancellation=run.cancellation,
+                    continuation=run.continuation,
+                )
+                if isinstance(result, str):
+                    for action in agent.last_actions:
+                        yield ChatEvent("tool", data=action, generation_id=run.generation_id)
+                    yield ChatEvent("text", result, generation_id=run.generation_id)
+                else:
+                    with closing(result) as chunks:
+                        for kind, chunk in chunks:
+                            if kind == "tool" and isinstance(chunk, dict):
+                                yield ChatEvent("tool", data=chunk, generation_id=run.generation_id)
+                            elif kind in ("reasoning", "content") and isinstance(chunk, str):
+                                yield ChatEvent(
+                                    "reasoning" if kind == "reasoning" else "text",
+                                    chunk, generation_id=run.generation_id,
+                                )
+                            else:
+                                raise ValueError(f"invalid agent event: {kind!r}")
+            except GenerationCancelled:
+                yield ChatEvent(
+                    "interrupted", agent.last_reply,
+                    {"reasoning": agent.last_reasoning, "actions": agent.last_actions},
+                    generation_id=run.generation_id,
+                )
+                return
             if agent.last_usage:
-                yield ChatEvent("usage", agent.last_usage)
+                yield ChatEvent("usage", agent.last_usage, generation_id=run.generation_id)
 
     # ------------------------------------------------------------------ internals
+
+    @staticmethod
+    def _kept_chats(slot: _AgentSlot, keep: str | None = None) -> set[str]:
+        kept = {run.chat_id for run in slot.pending}
+        if slot.active is not None:
+            kept.add(slot.active.chat_id)
+        if keep is not None:
+            kept.add(keep)
+        return kept
 
     @staticmethod
     def _check_id(kind: str, value: str, error: type[ServiceError]) -> None:

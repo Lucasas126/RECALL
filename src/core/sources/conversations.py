@@ -5,6 +5,7 @@ import re
 import secrets
 from datetime import datetime
 from pathlib import Path
+from typing import Collection
 
 from src.core.sources.base import Source
 
@@ -70,11 +71,12 @@ class ConversationsSource(Source):
         """List chat ids, oldest first."""
         return sorted(p.stem for p in self.root.iterdir() if p.suffix == ".jsonl")
 
-    def prune_empty(self, keep: str | None = None) -> list[str]:
-        """Delete chats with no turns (never used), except *keep*; returns the removed ids."""
+    def prune_empty(self, keep: str | Collection[str] | None = None) -> list[str]:
+        """Delete unused chats except the given chat id(s); return the removed ids."""
         removed = []
+        kept = {keep} if isinstance(keep, str) else set(keep or ())
         for path in self.root.iterdir():
-            if path.suffix != ".jsonl" or path.stem == keep:
+            if path.suffix != ".jsonl" or path.stem in kept:
                 continue
             if not path.read_text(encoding="utf-8").strip():
                 path.unlink(missing_ok=True)

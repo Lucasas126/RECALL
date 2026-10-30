@@ -16,6 +16,14 @@ the data plane (L1) is a set of **sources**: named, typed locations the agent ca
 - **obsidian**: the user's vault, bound per agent (see agents.md). accessed through the safe/auto overlay (see overlay.md).
 - **user_folder**: extra reference material the user drops in. read-only.
 
+Cancelled agent generations append an assistant turn with `interrupted: true`,
+the emitted partial `content` (possibly empty), partial `reasoning` and completed
+`actions`. The stored content stays unmodified; the agent adds an interruption
+marker when using it as context, including after reopening the chat.
+`ChatService.get_chat` exposes the flag and the web UI labels interrupted replies. Active
+and queued chats are protected from empty-chat pruning. See
+[generation cancellation](architecture.md#generation-cancellation).
+
 sources are configurable per agent — an agent may have no obsidian, or several user folders.
 
 ## addressing

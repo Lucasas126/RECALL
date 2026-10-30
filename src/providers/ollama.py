@@ -1,9 +1,13 @@
 import json
 import os
+from contextlib import closing
 
 import requests
+import httpx
 
 from src.providers.provider import LLMProvider, format_completion
+from src.providers.cancellation import CancellationToken
+from src.providers.transport import post_chat, stream_chat
 from src.utils.logger import get_logger
 
 from typing import ClassVar
@@ -49,7 +53,7 @@ class OllamaProvider(LLMProvider):
         if not self.base_url:
             self.base_url = os.environ.get("OLLAMA_HOST", DEFAULT_HOST)
 
-    def invoke(self, messages: list[dict], model: str, stream=True, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None):
+    def invoke(self, messages: list[dict], model: str, stream=True, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None):
         """
         Invokes the Ollama API with the given messages and model.
         If stream is True, yields (kind, text) tuples then a final dict with usage info.
@@ -57,10 +61,10 @@ class OllamaProvider(LLMProvider):
         """
         logger.debug("request model=%s stream=%s reasoning=%s msgs=%d", model, stream, reasoning, len(messages))
         if stream:
-            return self.invoke_stream(messages, model, reasoning=reasoning, reasoning_effort=reasoning_effort, tools=tools)
-        return self.invoke_sync(messages, model, reasoning=reasoning, reasoning_effort=reasoning_effort, tools=tools)
+            return self.invoke_stream(messages, model, reasoning=reasoning, reasoning_effort=reasoning_effort, tools=tools, cancellation=cancellation)
+        return self.invoke_sync(messages, model, reasoning=reasoning, reasoning_effort=reasoning_effort, tools=tools, cancellation=cancellation)
 
-    def invoke_stream(self, messages: list[dict], model: str, reasoning=False, reasoning_effort=None, tools=None):
+    def invoke_stream(self, messages: list[dict], model: str, reasoning=False, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None):
         """Streaming variant — yields (kind, text) tuples then a final dict with usage info.
 
         kind is either "reasoning" (thinking tokens) or "content" (the actual answer).
@@ -78,9 +82,8 @@ class OllamaProvider(LLMProvider):
             reasoning_text = ""
             usage_info = None
             tool_calls: list[dict] = []
-            with requests.post(url, json=payload, stream=True) as r:
-                r.raise_for_status()
-                for line in r.iter_lines(decode_unicode=True):
+            with closing(stream_chat(url, payload, cancellation=cancellation)) as lines:
+                for line in lines:
                     if not line:
                         continue
                     try:
@@ -114,11 +117,11 @@ class OllamaProvider(LLMProvider):
             logger.debug(format_completion("streaming", reasoning_text, response_text, usage_info, model))
             yield {"reasoning": reasoning_text, "response": response_text, "usage": usage_info, "model": model, "tool_calls": tool_calls or None}
 
-        except requests.RequestException as e:
+        except httpx.HTTPError as e:
             logger.error(f"Error during streaming from Ollama API: {e}")
             raise
 
-    def invoke_sync(self, messages: list[dict], model: str, reasoning=False, reasoning_effort=None, tools=None) -> dict:
+    def invoke_sync(self, messages: list[dict], model: str, reasoning=False, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None) -> dict:
         """Non-streaming variant — returns a dict with reasoning, response, usage and model."""
         url = f"{self.base_url}/api/chat"
         payload = {"model": model, "messages": _to_ollama_messages(messages), "stream": False}
@@ -128,9 +131,7 @@ class OllamaProvider(LLMProvider):
             payload["tools"] = tools
         logger.debug("ollama non-streaming request; payload=%s", payload)
         try:
-            response = requests.post(url, json=payload)
-            response.raise_for_status()
-            data_obj = response.json()
+            data_obj = post_chat(url, payload, cancellation=cancellation)
             message = data_obj.get("message", {})
             usage_info = {
                 "prompt_tokens": data_obj.get("prompt_eval_count"),
@@ -148,7 +149,7 @@ class OllamaProvider(LLMProvider):
                 "model": model,
                 "tool_calls": tool_calls,
             }
-        except requests.RequestException as e:
+        except httpx.HTTPError as e:
             logger.error(f"Error invoking Ollama API (non-streaming): {e}")
             raise
 

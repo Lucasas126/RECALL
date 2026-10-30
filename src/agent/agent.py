@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import closing
 from typing import Iterator, Optional, Union
 
 import src.providers.openrouter  # noqa: F401  (registers the openrouter provider)
@@ -15,6 +16,7 @@ from src.core.index import VectorIndex
 from src.core.sources.registry import SourceRegistry
 from src.utils.logger import get_logger
 from src.providers.provider import LLMProvider, get_provider
+from src.providers.cancellation import CancellationToken, GenerationCancelled
 from src.providers.tavily import TavilyClient
 
 logger = get_logger("agent")
@@ -23,6 +25,7 @@ logger = get_logger("agent")
 _FINAL_NUDGE = "Stop calling tools. Answer the user now using what you already have."
 # max characters of a tool result shown to channels and stored with the turn
 _ACTION_RESULT_CHARS = 500
+_INTERRUPTED_MARKER = "[Response interrupted by user.]"
 
 
 def _dedupe_tool_calls(tool_calls: list[dict]) -> list[dict]:
@@ -86,6 +89,7 @@ class Agent:
         self.last_actions: list[dict] = []
         # formatted usage breakdown of the last reply (for the caller to display)
         self.last_usage: str = ""
+        self.last_reply: str = ""
         self._load_recent_context()
         self._reconstruct_context()
         return chat_id
@@ -121,60 +125,110 @@ class Agent:
         logger.debug("query_memory %r -> %d hits", query, len(results))
         return results
 
-    def invoke(self, user_input: str, stream: Optional[bool] = None) -> Union[str, Iterator[str]]:
+    def invoke(
+        self, user_input: str, stream: Optional[bool] = None,
+        cancellation: CancellationToken | None = None,
+        *, continuation: bool = False,
+    ) -> Union[str, Iterator[tuple[str, str | dict]]]:
         """Send a user message and return the reply, updating conversation memory.
 
-        Returns a string when not streaming, or a generator of text chunks when streaming.
+        Returns a string or a generator of (kind, payload) events. Cancellation preserves
+        the accepted input and partial reply as an interrupted turn, then raises
+        GenerationCancelled. A steering continuation retains the active turn even without memory.
         """
         if stream is None:
             stream = self.config.stream
         logger.info("invoke user=%s agent=%s stream=%s", self.config.user_id, self.config.id, stream)
         # without memory, each turn starts fresh from the system prompt
-        if not self.config.has_memory:
+        if not self.config.has_memory and not continuation:
             self.messages = [{"role": "system", "content": self.config.personality_prompt}]
             self._truncated = False
         # associative memory: run before logging the turn so the search can't match this message
         self._assoc_suggestion = None
         self.last_actions = []
-        if self.config.has_memory and self.config.associative_memory:
-            self._assoc_suggestion = associative.recall(self, user_input)
+        self.last_reasoning = ""
+        self.last_usage = ""
+        self.last_reply = ""
+        try:
+            if cancellation is not None:
+                cancellation.raise_if_cancelled()
+            if self.config.has_memory and self.config.associative_memory:
+                self._assoc_suggestion = associative.recall(self, user_input, cancellation)
+            if cancellation is not None:
+                cancellation.raise_if_cancelled()
+        except GenerationCancelled:
+            self.messages.append({"role": "user", "content": user_input})
+            self._log_turn("user", user_input)
+            if not continuation:
+                self._trim_context()
+            self._remember_interrupted("", "")
+            raise
         self.messages.append({"role": "user", "content": user_input})
         self._log_turn("user", user_input)
-        self._trim_context()
-        return self._stream() if stream else self._complete()
+        if not continuation:
+            self._trim_context()
+        if stream:
+            return self._stream(cancellation)
+        if cancellation is not None:
+            # Keep internal streaming for cancellation and partial history, regardless of channel.
+            for _ in self._stream(cancellation):
+                pass
+            return self.messages[-1]["content"]
+        return self._complete()
 
-    def _stream(self) -> Iterator[tuple]:
+    def _stream(self, cancellation: CancellationToken | None = None) -> Iterator[tuple[str, str | dict]]:
+        cancellation = cancellation or CancellationToken()
+        reply, reasoning = "", ""
+        try:
+            with closing(self._stream_reply(cancellation)) as events:
+                for kind, chunk in events:
+                    if kind == "content" and isinstance(chunk, str):
+                        reply += chunk
+                    elif kind == "reasoning" and isinstance(chunk, str):
+                        reasoning += chunk
+                    yield kind, chunk
+        except GenerationCancelled:
+            self._remember_interrupted(reply, reasoning)
+            raise
+
+    def _stream_reply(self, cancellation: CancellationToken) -> Iterator[tuple]:
         for hop in range(AGENT_MAX_TOOL_HOPS + 1):
+            cancellation.raise_if_cancelled()
             is_last = hop == AGENT_MAX_TOOL_HOPS
             tools = None if is_last else (self._tool_specs or None)
             context = self._context()
             if is_last:
                 context = context + [{"role": "system", "content": _FINAL_NUDGE}]
             reasoning, reply, api_usage, tool_calls = "", "", None, None
-            for chunk in self.provider.invoke(
+            with closing(self.provider.invoke(
                 context, self.config.models.chat,
                 stream=True, reasoning=self.config.reasoning,
                 reasoning_tokens=self.config.reasoning_tokens,
                 reasoning_effort=self.config.reasoning_effort, tools=tools,
-            ):
-                if isinstance(chunk, tuple):
-                    kind, text = chunk
-                    if kind == "reasoning":
-                        reasoning += text
-                    else:
-                        reply += text
-                    yield chunk
-                elif isinstance(chunk, dict):
-                    api_usage = chunk.get("usage")
-                    tool_calls = chunk.get("tool_calls")
+                cancellation=cancellation,
+            )) as chunks:
+                for chunk in chunks:
+                    cancellation.raise_if_cancelled()
+                    if isinstance(chunk, tuple):
+                        kind, text = chunk
+                        if kind == "reasoning":
+                            reasoning += text
+                        else:
+                            reply += text
+                        yield chunk
+                    elif isinstance(chunk, dict):
+                        api_usage = chunk.get("usage")
+                        tool_calls = chunk.get("tool_calls")
+            cancellation.raise_if_cancelled()
             if tool_calls and not is_last:
                 tool_calls = _dedupe_tool_calls(tool_calls)
                 self._remember_tool_calls(reply, reasoning, tool_calls)
-                for action in self._run_tools(tool_calls):
+                for action in self._run_tools(tool_calls, cancellation):
                     yield ("tool", action)
                 continue
             self.last_reasoning = reasoning
-            self._remember_reply(reply, reasoning, api_usage)
+            with cancellation._commit():
+                self._remember_reply(reply, reasoning, api_usage)
             self._track_usage(context, reply, reasoning, api_usage)
             return
 
@@ -227,10 +281,14 @@ class Agent:
             }
         )
 
-    def _run_tools(self, tool_calls: list[dict]) -> list[dict]:
+    def _run_tools(
+        self, tool_calls: list[dict], cancellation: CancellationToken | None = None,
+    ) -> list[dict]:
         """Execute each requested tool, append its result to the context and return the actions taken."""
         actions = []
         for tc in tool_calls:
+            if cancellation is not None:
+                cancellation.raise_if_cancelled()
             name = tc["name"]
             args = tc["arguments"]
             if isinstance(args, str):
@@ -245,6 +303,8 @@ class Agent:
             else:
                 try:
                     result = handler(**args)
+                except GenerationCancelled:
+                    raise
                 except Exception as e:  # surfaced back to the model, not fatal
                     result, failed = f"error: {e}", True
             logger.info("tool %s(%s)", name, args)
@@ -255,19 +315,45 @@ class Agent:
             if len(text) > _ACTION_RESULT_CHARS:
                 text = text[:_ACTION_RESULT_CHARS] + "…"
             actions.append({"name": name, "arguments": args, "result": text, "error": failed})
-        self.last_actions.extend(actions)
+            self.last_actions.append(actions[-1])
+        if cancellation is not None:
+            cancellation.raise_if_cancelled()
         return actions
 
-    def _remember_reply(self, reply: str, reasoning: str, api_usage) -> None:
+    def _remember_interrupted(self, reply: str, reasoning: str) -> None:
+        pending: dict[str, dict] = {}
+        for message in self.messages:
+            for call in message.get("tool_calls", []):
+                pending[call["id"]] = call
+            if message.get("role") == "tool":
+                pending.pop(message["tool_call_id"], None)
+        for call in pending.values():
+            self.messages.append({
+                "role": "tool", "tool_call_id": call["id"],
+                "name": call["function"]["name"],
+                "content": "not executed: generation interrupted by user",
+            })
+        self.last_reasoning = reasoning
+        self.last_usage = ""
+        self._remember_reply(reply, reasoning, None, interrupted=True)
+
+    def _remember_reply(self, reply: str, reasoning: str, api_usage, interrupted: bool = False) -> None:
         """Append the assistant reply to memory and persist the turn (with its real usage)."""
-        message = {"role": "assistant", "content": reply}
+        message = {"role": "assistant", "content": self._reply_content(reply, interrupted)}
         if self.config.keep_reasoning_in_memory and reasoning:
             message["reasoning"] = reasoning
         self.messages.append(message)
+        self.last_reply = reply
         extra = {"reasoning": reasoning or None, "actions": self.last_actions or None}
+        if interrupted:
+            extra["interrupted"] = True
         if api_usage:
             extra["usage"] = {"in": api_usage.get("prompt_tokens"), "out": api_usage.get("completion_tokens")}
         self._log_turn("assistant", reply, **extra)
+
+    @staticmethod
+    def _reply_content(reply: str, interrupted: bool) -> str:
+        return f"{reply}\n\n{_INTERRUPTED_MARKER}" if interrupted else reply
 
     def _log_turn(self, role: str, content: str, **extra) -> None:
         """Persist a turn to the active chat's jsonl (independent of in-context memory)."""
@@ -288,7 +374,10 @@ class Agent:
         for t in history:
             if t.get("role") not in ("user", "assistant"):
                 continue
-            self.messages.append({"role": t["role"], "content": t["content"]})
+            self.messages.append({
+                "role": t["role"],
+                "content": self._reply_content(t["content"], bool(t.get("interrupted"))),
+            })
         # seed the context input size from the most recent persisted usage
         for t in reversed(history):
             u = t.get("usage")
