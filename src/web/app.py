@@ -12,7 +12,15 @@ from pydantic import BaseModel, Field
 from src.config.favorites import FavoriteModelId, FavoritesError
 from src.core.sources.conversations import ChatMetadataError
 from src.providers.catalog import CatalogUnavailable
-from src.service.chat import AgentBusy, ChatService, ServiceError, UnknownAgent, UnknownChat, UnknownUser
+from src.service.chat import (
+    AgentBusy,
+    ChatAttachment,
+    ChatService,
+    ServiceError,
+    UnknownAgent,
+    UnknownChat,
+    UnknownUser,
+)
 from src.utils.logger import get_logger
 
 logger = get_logger("web")
@@ -26,7 +34,8 @@ class LoginIn(BaseModel):
 
 
 class MessageIn(BaseModel):
-    content: str
+    content: str = ""
+    attachments: list[ChatAttachment] = Field(default_factory=list)
 
 
 class ModelIn(BaseModel):
@@ -153,7 +162,10 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
     def send_message(
         agent_id: str, chat_id: str, body: MessageIn, user_id: str = Depends(current_user)
     ):
-        events = service.send(user_id, agent_id, chat_id, body.content, stream=True)
+        events = service.send(
+            user_id, agent_id, chat_id, body.content, stream=True,
+            attachments=[attachment.model_dump() for attachment in body.attachments],
+        )
 
         def stream() -> Iterator[str]:
             generation_id = ""

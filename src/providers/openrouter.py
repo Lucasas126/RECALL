@@ -8,6 +8,7 @@ import httpx
 
 from src.providers.cancellation import CancellationToken, GenerationCancelled
 from src.providers.provider import LLMProvider, format_completion
+from src.providers.catalog import list_openrouter_models
 from src.providers.transport import post_chat, stream_chat
 from src.utils.logger import get_logger
 
@@ -92,6 +93,12 @@ class OpenRouterProvider(LLMProvider):
     def __init__(self, **data):
         super().__init__(**data)
         # self.api_key = os.environ.get("OPENROUTER_API_KEY", "")
+
+    def supported_modalities(self, model: str) -> set[str]:
+        """Read the selected model's declared input modalities from OpenRouter."""
+        matches = list_openrouter_models(model, zdr=False)
+        selected = next((item for item in matches if item.id == model), None)
+        return set(selected.input_modalities) if selected else set()
 
     def invoke(self, messages: list[dict], model: str, stream=True, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None, *, zdr: bool = True):
         """

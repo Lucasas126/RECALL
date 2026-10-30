@@ -16,7 +16,12 @@ from src.config.settings import AGENT_MAX_TOOL_HOPS, TAVILY
 from src.core.index import VectorIndex
 from src.core.sources.registry import SourceRegistry
 from src.utils.logger import get_logger
-from src.providers.provider import LLMProvider, get_provider
+from src.providers.provider import (
+    LLMProvider,
+    UnsupportedModalityError,
+    get_provider,
+    unsupported_modality_message,
+)
 from src.providers.cancellation import CancellationToken, GenerationCancelled
 from src.providers.tavily import TavilyClient
 
@@ -63,7 +68,10 @@ class Agent:
         )
         self._max_context = None  # model context window, fetched lazily from the provider
         self.open_chat(chat_id)
-        logger.debug("initialized agent: %s", config)
+        logger.debug(
+            "initialized agent user=%s agent=%s provider=%s model=%s",
+            config.user_id, config.id, config.provider_name, config.models.chat,
+        )
 
     def open_chat(self, chat_id: Optional[str] = None) -> str:
         """Switch to a chat (a new empty one when None), rebuilding the context from its history."""
@@ -115,7 +123,10 @@ class Agent:
     ) -> "Agent":
         config = load_agent(user_id, agent_id)
         provider = get_provider(config.provider_name, api_key=config.api_key)
-        logger.debug("loaded agent config: %s", config)
+        logger.debug(
+            "loaded agent user=%s agent=%s provider=%s model=%s",
+            config.user_id, config.id, config.provider_name, config.models.chat,
+        )
         return cls(config, provider, chat_id)
 
     @property
@@ -143,7 +154,7 @@ class Agent:
     def invoke(
         self, user_input: str, stream: Optional[bool] = None,
         cancellation: CancellationToken | None = None,
-        *, continuation: bool = False,
+        *, continuation: bool = False, attachments: Optional[list[dict]] = None,
     ) -> Union[str, Iterator[tuple[str, str | dict]]]:
         """Send a user message and return the reply, updating conversation memory.
 
@@ -153,6 +164,9 @@ class Agent:
         """
         if stream is None:
             stream = self.config.stream
+        attachments = attachments or []
+        self._validate_modalities(attachments)
+        user_content = self._user_content(user_input, attachments)
         logger.info("invoke user=%s agent=%s stream=%s", self.config.user_id, self.config.id, stream)
         self._turn_started_at = perf_counter()
         # without memory, each turn starts fresh from the system prompt
@@ -181,14 +195,14 @@ class Agent:
             if cancellation is not None:
                 cancellation.raise_if_cancelled()
         except GenerationCancelled:
-            self.messages.append({"role": "user", "content": user_input})
-            self._log_turn("user", user_input)
+            self.messages.append({"role": "user", "content": user_content})
+            self._log_turn("user", user_content)
             if not continuation:
                 self._trim_context()
             self._remember_interrupted("", "")
             raise
-        self.messages.append({"role": "user", "content": user_input})
-        self._log_turn("user", user_input)
+        self.messages.append({"role": "user", "content": user_content})
+        self._log_turn("user", user_content)
         if not continuation:
             self._trim_context()
         if stream:
@@ -199,6 +213,41 @@ class Agent:
                 pass
             return self.messages[-1]["content"]
         return self._complete()
+
+    def _validate_modalities(self, attachments: list[dict]) -> None:
+        """Reject attachments unless the selected provider explicitly advertises support."""
+        if not attachments:
+            return
+        supported = self.provider.supported_modalities(self.config.models.chat)
+        for attachment in attachments:
+            modality = attachment["modality"]
+            if modality not in supported:
+                raise UnsupportedModalityError(
+                    unsupported_modality_message(self.config.language, modality)
+                )
+
+    @staticmethod
+    def _user_content(text: str, attachments: list[dict]) -> str | list[dict]:
+        """Build the OpenAI-compatible content parts for a user turn."""
+        if not attachments:
+            return text
+        parts: list[dict] = [{"type": "text", "text": text}] if text else []
+        for attachment in attachments:
+            modality = attachment["modality"]
+            data_url = attachment["data_url"]
+            if modality == "image":
+                parts.append({"type": "image_url", "image_url": {"url": data_url}})
+            elif modality == "audio":
+                parts.append({
+                    "type": "input_audio",
+                    "input_audio": {
+                        "data": data_url.split(",", 1)[1],
+                        "format": attachment["format"],
+                    },
+                })
+            elif modality == "video":
+                parts.append({"type": "video_url", "video_url": {"url": data_url}})
+        return parts
 
     def _stream(self, cancellation: CancellationToken | None = None) -> Iterator[tuple[str, str | dict]]:
         cancellation = cancellation or CancellationToken()
@@ -400,10 +449,14 @@ class Agent:
         self._log_turn("assistant", reply, **extra)
 
     @staticmethod
-    def _reply_content(reply: str, interrupted: bool) -> str:
-        return f"{reply}\n\n{_INTERRUPTED_MARKER}" if interrupted else reply
+    def _reply_content(reply: str | list[dict], interrupted: bool) -> str | list[dict]:
+        if not interrupted:
+            return reply
+        if isinstance(reply, list):
+            return [*reply, {"type": "text", "text": _INTERRUPTED_MARKER}]
+        return f"{reply}\n\n{_INTERRUPTED_MARKER}"
 
-    def _log_turn(self, role: str, content: str, **extra) -> None:
+    def _log_turn(self, role: str, content: str | list[dict], **extra) -> None:
         """Persist a turn to the active chat's jsonl (independent of in-context memory)."""
         extra = {k: v for k, v in extra.items() if v is not None}
         self.sources.conversations().append(self.chat_id, role, content, **extra)

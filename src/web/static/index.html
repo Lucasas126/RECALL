@@ -36,6 +36,8 @@
       <details id="usage" hidden><summary></summary><pre></pre></details>
       <form id="composer">
         <textarea id="input" rows="2" placeholder="Write a message…" disabled></textarea>
+        <input id="file-input" type="file" accept="image/*,video/*,audio/*" multiple hidden>
+        <button id="attach" type="button" disabled title="Attach image, video or audio">Attach</button>
         <button id="send" type="submit" disabled>Send</button>
       </form>
     </main>
@@ -90,7 +92,8 @@
       <p class="model-note">Prices are starting rates in USD per 1M tokens; provider,
         context tiers, caching and extras may change charges.</p>
       <p class="model-note">Capability filters use catalog metadata, not a routing guarantee.
-        Image input describes the model; this chat currently accepts text only.
+        Image input describes the model; the composer also accepts image, video
+        and audio attachments when the selected model declares support.
         Filters do not enable tools or reasoning in the agent.</p>
       <p class="model-note">OpenRouter's ZDR policy includes caching and legal exceptions;
         embeddings and external tools have separate policies.

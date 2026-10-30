@@ -2,6 +2,7 @@ const $ = (id) => document.getElementById(id);
 const state = {
   user: null, agentId: null, chatId: null, busy: false, session: 0,
   requests: new Set(), latest: null, sendQueue: Promise.resolve(),
+  attachments: [],
   model: null, modelCatalog: null, modelCatalogZdr: null, modelFavorites: [],
   modelBusy: false, modelLoading: false, modelRequest: 0,
   modelFavoritesOnly: false,
@@ -28,9 +29,21 @@ async function api(path, options = {}) {
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || `HTTP ${res.status}`);
+    throw new Error(formatApiError(body.detail) || `HTTP ${res.status}`);
   }
   return res.status === 204 ? null : res.json();
+}
+
+function formatApiError(detail) {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((item) => {
+      if (typeof item === "string") return item;
+      const location = Array.isArray(item.loc) ? item.loc.join(".") : "";
+      return location ? `${location}: ${item.msg || JSON.stringify(item)}` : (item.msg || JSON.stringify(item));
+    }).join("; ");
+  }
+  return detail ? JSON.stringify(detail) : "";
 }
 
 const chatsUrl = (suffix = "") => `/api/agents/${state.agentId}/chats${suffix}`;
@@ -43,6 +56,8 @@ function showLogin() {
   state.agentId = null;
   state.chatId = null;
   state.model = null;
+  state.attachments = [];
+  renderPendingAttachments();
   updateModelControls();
   renderMessages([]);
   setComposer(false);
@@ -413,6 +428,7 @@ $("model-zdr").addEventListener("change", () => refreshModels());
 
 function setComposer(enabled) {
   $("input").disabled = !enabled || state.modelBusy;
+  $("attach").disabled = !enabled || state.modelBusy;
   $("send").disabled = !enabled || state.modelBusy;
 }
 
@@ -445,6 +461,8 @@ function resetStreams() {
   state.modelBusy = false;
   state.modelLoading = false;
   state.modelRequest++;
+  state.attachments = [];
+  renderPendingAttachments();
   $("model-dialog").close();
   $("model-list").replaceChildren();
   $("model-error").textContent = "";
@@ -494,6 +512,7 @@ function addMessage(role) {
   let thinking = null;
   let memoryIndicator = null;
   let actionCount = 0;
+  let attachmentBox = null;
   el.append(body);
   $("messages").append(el);
   function renderBody() {
@@ -507,11 +526,35 @@ function addMessage(role) {
       body.textContent = raw;
     }
   }
+  function renderAttachmentNames(attachments) {
+    if (!attachments?.length) return;
+    if (!attachmentBox) {
+      attachmentBox = document.createElement("div");
+      attachmentBox.className = "message-attachments";
+      el.insertBefore(attachmentBox, body);
+    }
+    attachmentBox.replaceChildren(...attachments.map((attachment) => {
+      const item = document.createElement("span");
+      item.className = "attachment-name";
+      item.textContent = attachment.name || attachment.modality || "attachment";
+      return item;
+    }));
+  }
   return {
     text(chunk) {
+      if (Array.isArray(chunk)) {
+        const textParts = chunk.filter((part) => part.type === "text").map((part) => part.text);
+        raw += textParts.join("");
+        renderAttachmentNames(chunk.filter((part) => part.type !== "text").map((part) => ({
+          name: part.name || part.type,
+        })));
+        renderBody();
+        return;
+      }
       raw += chunk;
       renderBody();
     },
+    attachments: renderAttachmentNames,
     thinking(chunk) {
       if (!thinking) {
         thinking = document.createElement("details");
@@ -589,12 +632,86 @@ function scrollDown() {
   box.scrollTop = box.scrollHeight;
 }
 
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_TOTAL_FILE_BYTES = 25 * 1024 * 1024;
+
+function attachmentModality(file) {
+  if (file.type.startsWith("image/")) return "image";
+  if (file.type.startsWith("video/")) return "video";
+  if (file.type.startsWith("audio/")) return "audio";
+  return null;
+}
+
+function readAttachment(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve({
+      modality: attachmentModality(file),
+      name: file.name,
+      mime_type: file.type,
+      format: file.type.split("/")[1].split(";")[0],
+      data_url: reader.result,
+      size: file.size,
+    });
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderPendingAttachments() {
+  let box = $("pending-attachments");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "pending-attachments";
+    $("composer").insertBefore(box, $("input"));
+  }
+  box.replaceChildren(...state.attachments.map((attachment, index) => {
+    const item = document.createElement("span");
+    item.className = "pending-attachment";
+    item.textContent = attachment.name;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "×";
+    remove.title = `Remove ${attachment.name}`;
+    remove.addEventListener("click", () => {
+      state.attachments.splice(index, 1);
+      renderPendingAttachments();
+    });
+    item.append(remove);
+    return item;
+  }));
+}
+
+$("attach").addEventListener("click", () => $("file-input").click());
+$("file-input").addEventListener("change", async (event) => {
+  const files = [...event.target.files];
+  event.target.value = "";
+  try {
+    const valid = files.map((file) => {
+      if (!attachmentModality(file)) throw new Error(`${file.name}: only image, video and audio files are supported`);
+      if (file.size > MAX_FILE_BYTES) throw new Error(`${file.name}: maximum size is 10 MB`);
+      return file;
+    });
+    const total = state.attachments.reduce((sum, item) => sum + item.size, 0)
+      + valid.reduce((sum, file) => sum + file.size, 0);
+    if (total > MAX_TOTAL_FILE_BYTES) throw new Error("Attachments exceed the 25 MB total limit");
+    state.attachments.push(...await Promise.all(valid.map(readAttachment)));
+    renderPendingAttachments();
+  } catch (err) {
+    addMessage("assistant").error(err.message);
+  }
+});
+
 $("composer").addEventListener("submit", async (e) => {
   e.preventDefault();
   const content = $("input").value.trim();
-  if (!content || !state.user || !state.chatId || state.modelBusy) return;
+  if ((!content && !state.attachments.length) || !state.user || !state.chatId || state.modelBusy) return;
+  const attachments = state.attachments.splice(0);
+  renderPendingAttachments();
   $("input").value = "";
-  addMessage("user").text(content);
+  const userMessage = addMessage("user");
+  userMessage.text(content);
+  userMessage.attachments(attachments);
   const reply = addMessage("assistant");
   const request = {
     userId: state.user.id, agentId: state.agentId, chatId: state.chatId,
@@ -607,7 +724,7 @@ $("composer").addEventListener("submit", async (e) => {
   updateBusy();
   scrollDown();
   try {
-    await streamReply(content, request);
+    await streamReply(content, attachments, request);
   } catch (err) {
     request.controller.abort();
     if (isCurrent(request) && err.name !== "AbortError") reply.error(err.message);
@@ -634,14 +751,17 @@ $("input").addEventListener("keydown", (e) => {
   }
 });
 
-async function streamReply(content, request) {
+async function streamReply(content, attachments, request) {
   // Serialize acceptance, not generation, so rapid sends reach the service in order.
   const response = state.sendQueue.then(() => {
     if (!isCurrent(request)) throw new DOMException("Session changed", "AbortError");
     return fetch(`/api/agents/${request.agentId}/chats/${request.chatId}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({
+        content,
+        attachments: attachments.map(({ size, ...attachment }) => attachment),
+      }),
       signal: request.controller.signal,
     });
   });
@@ -653,7 +773,7 @@ async function streamReply(content, request) {
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || `HTTP ${res.status}`);
+    throw new Error(formatApiError(body.detail) || `HTTP ${res.status}`);
   }
 
   const reader = res.body.getReader();

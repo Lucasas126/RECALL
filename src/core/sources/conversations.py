@@ -136,6 +136,11 @@ class ConversationsSource(Source):
         """Chat metadata: title (first user message), turn count and last activity."""
         turns = self.load(chat_id)
         first_user = next((t["content"] for t in turns if t.get("role") == "user"), "")
+        if isinstance(first_user, list):
+            first_user = next(
+                (part.get("text", "") for part in first_user if part.get("type") == "text"),
+                "[attachment]",
+            )
         title = " ".join(first_user.split())
         if len(title) > _TITLE_CHARS:
             title = title[: _TITLE_CHARS - 1] + "…"

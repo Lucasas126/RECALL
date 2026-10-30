@@ -9,6 +9,8 @@ from queue import SimpleQueue
 from typing import Callable, Iterator, Literal, Optional
 from uuid import uuid4
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from src.agent.agent import Agent
 from src.config.favorites import ModelFavorites
 from src.config.loader import load_agent_config, load_user
@@ -47,6 +49,18 @@ class AgentBusy(ServiceError):
     pass
 
 
+class ChatAttachment(BaseModel):
+    """A validated data URL attached to a user message."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    modality: Literal["image", "video", "audio"]
+    name: str = Field(min_length=1, max_length=255)
+    mime_type: str = Field(min_length=1, max_length=128)
+    format: str = Field(min_length=1, max_length=16)
+    data_url: str = Field(min_length=32, max_length=30_000_000)
+
+
 @dataclass(frozen=True)
 class ChatEvent:
     """One piece of an agent reply, independent of the channel that delivers it.
@@ -68,6 +82,7 @@ class ChatEvent:
 class _MessageRun:
     chat_id: str
     text: str
+    attachments: list[dict]
     stream: Optional[bool]
     continuation: bool = False
     generation_id: str = field(default_factory=lambda: uuid4().hex)
@@ -105,7 +120,13 @@ class ChatService:
     def login(self, user_id: str) -> dict:
         """Resolve an existing user and return their profile and agents; raises UnknownUser."""
         user = self._user(user_id)
-        return {"id": user_id, "name": user.name, "provider": user.provider.name, "agents": self.list_agents(user_id)}
+        return {
+            "id": user_id,
+            "name": user.name,
+            "language": user.language,
+            "provider": user.provider.name,
+            "agents": self.list_agents(user_id),
+        }
 
     def list_agents(self, user_id: str) -> list[dict]:
         user = self._user(user_id)
@@ -216,7 +237,8 @@ class ChatService:
     # ------------------------------------------------------------------ messaging
 
     def send(
-        self, user_id: str, agent_id: str, chat_id: str, text: str, stream: Optional[bool] = None
+        self, user_id: str, agent_id: str, chat_id: str, text: str,
+        stream: Optional[bool] = None, attachments: Optional[list[dict]] = None,
     ) -> Iterator[ChatEvent]:
         """Send a user message to a chat and yield the reply as events.
 
@@ -225,10 +247,11 @@ class ChatService:
         Other chats on the agent remain serialized. `stream=None` follows the agent's config.
         """
         conversations = self._conversations(user_id, agent_id)
-        if not text.strip():
+        attachments = [ChatAttachment.model_validate(item).model_dump() for item in (attachments or [])]
+        if not text.strip() and not attachments:
             raise ValueError("message is empty")
         slot = self._slot(user_id, agent_id)
-        run = _MessageRun(chat_id, text, stream)
+        run = _MessageRun(chat_id, text, attachments, stream)
         with slot.state:
             try:
                 if not conversations.exists_chat(chat_id):
@@ -299,7 +322,7 @@ class ChatService:
             try:
                 result = agent.invoke(
                     run.text, stream=run.stream, cancellation=run.cancellation,
-                    continuation=run.continuation,
+                    continuation=run.continuation, attachments=run.attachments,
                 )
                 if agent._assoc_match_count:
                     yield ChatEvent(

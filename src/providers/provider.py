@@ -7,6 +7,26 @@ from pydantic import BaseModel
 from src.providers.cancellation import CancellationToken
 
 
+class UnsupportedModalityError(RuntimeError):
+    """The selected model cannot accept one of the requested input modalities."""
+
+
+def unsupported_modality_message(language: str, modality: str) -> str:
+    """Return a localized explanation for an unsupported attachment modality."""
+    messages = {
+        "en": "This model does not support {modality} input.",
+        "es": "Este modelo no admite entradas de {modality}.",
+    }
+    labels = {
+        "en": {"image": "image", "video": "video", "audio": "audio"},
+        "es": {"image": "imagen", "video": "vídeo", "audio": "audio"},
+    }
+    language = language.split("-", 1)[0].lower()
+    language_messages = messages.get(language, messages["en"])
+    language_labels = labels.get(language, labels["en"])
+    return language_messages.format(modality=language_labels.get(modality, modality))
+
+
 def format_completion(kind: str, reasoning: str, response: str, usage, model: str) -> str:
     """Render a model completion as a readable multi-line block for the logs."""
     return (
@@ -44,6 +64,10 @@ class LLMProvider(BaseModel):
     def context_window(self, model: str):
         """Return the model's maximum context length in tokens, or None if unknown."""
         return None
+
+    def supported_modalities(self, model: str) -> set[str]:
+        """Return the input modalities explicitly supported by a model."""
+        return set()
 
 
 def get_provider(name: str, **kwargs) -> LLMProvider:

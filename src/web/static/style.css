@@ -91,5 +91,9 @@ details.action pre { margin: 4px 0 0; padding: 8px; background: var(--bg); borde
 #usage { padding: 4px 20px; color: var(--muted); font: 12px/1.4 ui-monospace, monospace; }
 #usage summary { cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #usage pre { margin: 4px 0 0; white-space: pre-wrap; max-height: 140px; overflow-y: auto; }
-#composer { display: flex; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--line); }
+#composer { display: flex; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--line); align-items: flex-end; flex-wrap: wrap; }
 #input { flex: 1; resize: none; }
+#pending-attachments { flex-basis: 100%; display: flex; gap: 6px; flex-wrap: wrap; }
+.pending-attachment, .attachment-name { display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border-radius: 12px; background: var(--line); font-size: .85em; }
+.pending-attachment button { border: 0; background: transparent; padding: 0 2px; cursor: pointer; }
+.message-attachments { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }

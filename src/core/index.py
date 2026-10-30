@@ -23,6 +23,25 @@ from src.utils.logger import get_logger
 logger = get_logger("vector-index")
 
 
+def _indexable_content(content: Any) -> str:
+    """Convert persisted turn content to text without indexing attachment payloads."""
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return str(content) if content is not None else ""
+    parts: list[str] = []
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        if part.get("type") == "text":
+            text = part.get("text")
+            if isinstance(text, str):
+                parts.append(text)
+        elif part.get("type") in {"image_url", "input_audio", "video_url"}:
+            parts.append(f"[{part['type']}]")
+    return " ".join(parts)
+
+
 class _ProviderEmbeddingFunction(ef.EmbeddingFunction):
     """Adapts a provider's batched invoke_embeddings so ChromaDB can call it."""
 
@@ -166,7 +185,7 @@ class VectorIndex:
                     turn = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                content = (turn.get("content") or "").strip()
+                content = _indexable_content(turn.get("content")).strip()
                 if content:
                     docs.append(f"{turn.get('role', '')}: {content}".strip(": "))
             return docs

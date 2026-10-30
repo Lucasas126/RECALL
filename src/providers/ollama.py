@@ -173,3 +173,10 @@ class OllamaProvider(LLMProvider):
         except Exception as e:
             logger.warning("could not fetch ollama context: %s", e)
         return None
+
+    def supported_modalities(self, model: str) -> set[str]:
+        """Read Ollama's declared model capabilities without guessing unsupported inputs."""
+        response = requests.post(f"{self.base_url}/api/show", json={"model": model}, timeout=30)
+        response.raise_for_status()
+        capabilities = response.json().get("capabilities", [])
+        return {"image"} if "vision" in capabilities else set()

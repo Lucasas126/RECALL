@@ -48,6 +48,12 @@ cli (cli.py, direct) ─┘
 
 status: implemented for the web channel; the cli still uses `Agent` directly.
 
+The web composer sends image, audio and video attachments as validated
+OpenAI-compatible content parts. Providers expose declared input modalities;
+unsupported attachments are rejected before model invocation with a message
+localized using the user's `language` setting. Audio is direct model input;
+speech-to-text fallback is not part of the current implementation.
+
 ### model catalog and chat selection
 
 The provider layer fetches OpenRouter's public model and ZDR endpoint catalogs;

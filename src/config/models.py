@@ -23,6 +23,7 @@ class ProviderConfig(BaseModel):
 class UserConfig(BaseModel):
     id: str
     name: str
+    language: str = Field(default="en", pattern=r"^[a-z]{2}(?:-[A-Z]{2})?$")
     provider: ProviderConfig  # chat provider
     embeddings_provider: Optional[ProviderConfig] = None  # falls back to `provider`
     agents: list[str]
@@ -61,6 +62,7 @@ class ResolvedAgent(BaseModel):
     """An agent with its config merged and references (like the provider key) resolved."""
 
     user_id: str
+    language: str = "en"
     id: str
     name: str
     personality_prompt: str

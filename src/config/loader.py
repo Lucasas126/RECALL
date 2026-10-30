@@ -55,6 +55,7 @@ def load_agent(user_id: str, agent_id: Optional[str] = None) -> ResolvedAgent:
 
     return ResolvedAgent(
         user_id=user.id,
+        language=user.language,
         id=agent.id,
         name=agent.name,
         personality_prompt=agent.personality_prompt,
