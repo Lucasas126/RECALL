@@ -23,8 +23,8 @@
 - Framework defaults live in the root `settings.yaml`. User and agent configuration lives under `.config/<user_id>/` and is excluded from Git.
 - Put user-level provider settings in `.config/<user_id>/user.yaml` and agent settings in `.config/<user_id>/agents/<agent_id>.yaml`. Agent IDs must belong to the configured user.
 - Put provider secrets in environment variables (typically loaded from the ignored `.env` file); configure the environment-variable name in user YAML, not the secret itself.
-- Install/sync project dependencies with `uv sync`. For the configured CLI, set `USER_ID` and `AGENT_ID` in `.env`, then run `uv run python cli.py`.
-- The repository currently has no automated test suite configured. For Python changes, run `uv run python -m compileall src cli.py main.py`; exercise the relevant behavior manually when it requires configured providers or data.
+- Install/sync project dependencies with `uv sync`. For the configured CLI, set `USER_ID` and `AGENT_ID` in `.env`, then run `uv run python cli.py` (continues the agent's most recent chat). For the web UI run `uv run python web.py` (host/port in `settings.yaml`).
+- The repository currently has no automated test suite configured. For Python changes, run `uv run python -m compileall src cli.py main.py web.py`; exercise the relevant behavior manually when it requires configured providers or data.
 
 ## More specific guidance
 

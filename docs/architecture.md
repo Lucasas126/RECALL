@@ -31,6 +31,23 @@ L1  data / sources plane      mind palace, conversations, obsidian (+overlay), v
 - **tools** = mutations or reasoning: `remember`, `obsidian_write`, `associative_search`, `deep_recall`, `consolidate`.
 - dream/sleep are **not** tools — they are background daemons in L2 that write to L1. at most, expose a manual `consolidate()` trigger.
 
+## channels and the chat service
+
+channels (web, telegram, cli) are thin adapters over one channel-agnostic `ChatService` (`src/service/chat.py`), so adding a channel never touches the agent or the data plane.
+
+```
+web (src/web)  ─┐
+telegram (planned) ─┼─▶ ChatService ─▶ Agent ─▶ SourceRegistry
+cli (cli.py, direct) ─┘
+```
+
+- a channel resolves its own identity to a `user_id` (web: login cookie; telegram: a telegram id → user, planned) and then calls the service with that `user_id`. the service never trusts ids to be well formed: it validates user, agent ownership and chat ids.
+- operations: `login`, `list_agents`, `list_chats`, `create_chat`, `get_chat`, `delete_chat`, `send`. they return plain dicts.
+- `send` yields `ChatEvent`s (`reasoning`, `text`, `tool`, `usage`), not channel formats. the web adapter maps them to server-sent events; a telegram adapter would call `send(..., stream=False)`, deliver the `text` event as a message and may ignore or summarize `tool` events. rendering and transport stay in the adapter.
+- one `Agent` is kept per (user, agent) and switches between that agent's chats with `open_chat`; messages to the same agent are serialized.
+
+status: implemented for the web channel (see [features.md](features.md)); the cli still uses `Agent` directly.
+
 ## first approach: no mcp
 
 the mcp (L3) is purely an exposure surface for external clients. **for the first approach it will not be used.** the agent uses `core/` + `capabilities/` directly, so recall, dream, associative memory and the obsidian overlay all work without it.

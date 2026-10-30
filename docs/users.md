@@ -46,8 +46,10 @@ everything an agent produces lives under its user's folder. the vector index nam
 
 ## identity resolution (incoming message)
 
-1. read the channel identity (e.g. telegram user id).
+1. read the channel identity (e.g. telegram user id; for the web ui, the user id typed at login).
 2. map it to a `user_id`; unknown identities are rejected (or onboarded).
+
+note: the web login is identification only. it checks that `.config/<user_id>/user.yaml` exists and stores the id in a cookie; there is no password, so anyone reaching the server can act as any user. keep it bound to localhost (`web.host` in `settings.yaml`) until real authentication exists.
 3. pick the target agent: explicit selection, else the user's first agent.
 4. build that agent's `SourceRegistry` (scoped to user + agent) and handle the message.
 

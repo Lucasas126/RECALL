@@ -12,7 +12,7 @@ the data plane (L1) is a set of **sources**: named, typed locations the agent ca
 | `user_folder` | the user | read-only | yes | none |
 
 - **mind_palace**: the agent's private space. obsidian-like structure (folders, frontmatter, tags). the user does not normally read it.
-- **conversations**: past conversations with the user, written by the system, never edited by the agent. stored as one JSONL file per UTC day (one turn per line, timestamped). the agent can read and search them.
+- **conversations**: chats with the user, written by the system, never edited by the agent. stored as one JSONL file per chat, `conversations:<chat_id>.jsonl` (one turn per line, timestamped). a chat title is derived from its first user message. assistant turns may carry `reasoning` and `actions` (the tool calls of that turn, with truncated results) for display. the agent can read and search all of its chats. chats are created, appended to and deleted through `ConversationsSource` methods (`create`, `append`, `delete_chat`), not through the generic write/delete. chat ids match `[A-Za-z0-9_-]{1,64}`; new ids look like `20261030-114140-3ad2f3`. older per-day files (`2026-08-31.jsonl`) are valid chats whose id is the day.
 - **obsidian**: the user's vault, bound per agent (see agents.md). accessed through the safe/auto overlay (see overlay.md).
 - **user_folder**: extra reference material the user drops in. read-only.
 
