@@ -6,6 +6,7 @@ from typing import Iterator, Optional, Union
 import src.providers.openrouter  # noqa: F401  (registers the openrouter provider)
 import src.providers.ollama  # noqa: F401  (registers the ollama provider)
 from src.agent import usage
+from src.agent import associative
 from src.agent.tools import build_tools
 from src.config.loader import load_agent
 from src.config.models import ResolvedAgent
@@ -62,6 +63,8 @@ class Agent:
         ]
         # whether older turns were dropped from the in-context window
         self._truncated = False
+        # transient associative-memory hint, injected into the context of the current turn only
+        self._assoc_suggestion: Optional[str] = None
         self._load_recent_context()
         # thinking tokens from the last reply, kept apart from the answer
         self.last_reasoning: str = ""
@@ -111,6 +114,10 @@ class Agent:
         if not self.config.has_memory:
             self.messages = [{"role": "system", "content": self.config.personality_prompt}]
             self._truncated = False
+        # associative memory: run before logging the turn so the search can't match this message
+        self._assoc_suggestion = None
+        if self.config.has_memory and self.config.associative_memory:
+            self._assoc_suggestion = associative.recall(self, user_input)
         self.messages.append({"role": "user", "content": user_input})
         self._log_turn("user", user_input)
         self._trim_context()
@@ -274,9 +281,12 @@ class Agent:
 
     def _context(self) -> list[dict]:
         """The messages actually sent to the model, with a cutoff marker if history was dropped."""
+        ctx = self.messages
         if self._truncated:
-            return [self.messages[0], {"role": "system", "content": "[CUTOFF CONVERSATION]"}] + self.messages[1:]
-        return self.messages
+            ctx = [self.messages[0], {"role": "system", "content": "[CUTOFF CONVERSATION]"}] + self.messages[1:]
+        if self._assoc_suggestion:
+            ctx = ctx + [{"role": "system", "content": self._assoc_suggestion}]
+        return ctx
 
     def _ensure_max_context(self) -> None:
         if self._max_context is None:

@@ -18,6 +18,7 @@ with open(_SETTINGS_FILE, "r", encoding="utf-8") as _fh:
 _paths = _raw["paths"]
 _index = _raw["index"]
 _agent = _raw["agent"]
+_assoc = _raw["associative_memory"]
 
 # ------------------------------------------------------------------ paths
 CONFIG_DIR = Path(_paths["config_dir"])  # user & agent yaml configs
@@ -32,3 +33,8 @@ INDEX_CHUNK_WORDS = _index["chunk_words"]        # words per chunk for non-jsonl
 
 # ------------------------------------------------------------------ agent
 AGENT_MAX_TOOL_HOPS = _agent["max_tool_hops"]    # max tool round-trips per turn
+
+# ------------------------------------------------------------------ associative memory
+ASSOC_CONTEXT_MESSAGES = _assoc["context_messages"]   # recent messages the memory subagent sees
+ASSOC_TOP_N = _assoc["top_n"]                        # fragments injected per turn
+ASSOC_SCORE_THRESHOLD = _assoc["score_threshold"]    # min similarity to inject a fragment

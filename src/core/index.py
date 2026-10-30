@@ -51,7 +51,9 @@ class VectorIndex:
         self._embedding_fn = _ProviderEmbeddingFunction(provider, model)
         self._client = chromadb.PersistentClient(path=str(path))
         self._collection = self._client.get_or_create_collection(
-            name=INDEX_COLLECTION, embedding_function=self._embedding_fn
+            name=INDEX_COLLECTION,
+            embedding_function=self._embedding_fn,
+            metadata={"hnsw:space": "cosine"},  # similarity = 1 - cosine distance, ~[0, 1]
         )
 
     @classmethod

@@ -35,6 +35,8 @@ class ChatConfig(BaseModel):
     conversation_messages_retained: Optional[int] = None
     # let the model call tools (memory recall, source read/write/list)
     tools: bool = True
+    # run a memory subagent each turn that suggests relevant fragments from long-term memory
+    associative_memory: bool = True
 
 
 class AgentConfig(BaseModel):
@@ -65,3 +67,4 @@ class ResolvedAgent(BaseModel):
     keep_reasoning_in_memory: bool = False
     conversation_messages_retained: Optional[int] = None
     tools: bool = True
+    associative_memory: bool = True
