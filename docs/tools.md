@@ -1,5 +1,17 @@
 tools that the agent should be able to see, the description for the agent, and their actual functionalities in the background
 
+## implementation layout
+
+The tool specifications and handlers are assembled by `src/agent/tools.py`.
+Implementations are grouped under `src/agent/toolsets/`: `memory.py` contains
+memory search, listing and reading; `tags.py` contains tag lookup;
+`editing.py` contains memory mutations; and `web.py` contains public web
+search and retrieval. Shared source checks are in `common.py`.
+
+When adding a tool, implement it in the module for its responsibility and add
+it to the registration order in `build_tools`. Web tools are registered only
+when a Tavily client is configured.
+
 # main agent toolset
 
 recall_mode
