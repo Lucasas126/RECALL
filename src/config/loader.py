@@ -17,16 +17,26 @@ def _load_yaml(path: Path) -> dict:
         return yaml.safe_load(fh)
 
 
+def load_user(user_id: str) -> UserConfig:
+    """Load a user's config; raises FileNotFoundError if the user does not exist."""
+    return UserConfig(**_load_yaml(CONFIG_DIR / user_id / "user.yaml"))
+
+
+def load_agent_config(user_id: str, agent_id: str) -> AgentConfig:
+    """Load one agent's own config (no provider resolution)."""
+    return AgentConfig(**_load_yaml(CONFIG_DIR / user_id / "agents" / f"{agent_id}.yaml"))
+
+
 def load_agent(user_id: str, agent_id: Optional[str] = None) -> ResolvedAgent:
     """Load a user and one of its agents, resolving the provider key from the environment."""
 
-    user = UserConfig(**_load_yaml(CONFIG_DIR / user_id / "user.yaml"))
+    user = load_user(user_id)
 
     agent_id = agent_id or user.agents[0]
     if agent_id not in user.agents:
         raise ValueError(f"agent '{agent_id}' is not owned by user '{user_id}'")
 
-    agent = AgentConfig(**_load_yaml(CONFIG_DIR / user_id / "agents" / f"{agent_id}.yaml"))
+    agent = load_agent_config(user_id, agent_id)
 
     # local providers (e.g. ollama) need no key; only resolve one if configured
     api_key = ""

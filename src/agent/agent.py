@@ -20,6 +20,8 @@ logger = get_logger("agent")
 
 # appended to the context on the final tool hop to force a direct answer
 _FINAL_NUDGE = "Stop calling tools. Answer the user now using what you already have."
+# max characters of a tool result shown to channels and stored with the turn
+_ACTION_RESULT_CHARS = 500
 
 
 def _dedupe_tool_calls(tool_calls: list[dict]) -> list[dict]:
@@ -39,7 +41,7 @@ def _dedupe_tool_calls(tool_calls: list[dict]) -> list[dict]:
 class Agent:
     """Orchestration entry point: wraps an agent's config, provider and conversation memory."""
 
-    def __init__(self, config: ResolvedAgent, provider: LLMProvider):
+    def __init__(self, config: ResolvedAgent, provider: LLMProvider, chat_id: Optional[str] = None):
         self.config = config
         self.provider = provider
         # per-agent access to the data plane (mind palace, conversations, ...)
@@ -53,32 +55,47 @@ class Agent:
         # tools the model may call (memory recall, source read/write/list)
         self._tool_specs, self._tool_handlers = build_tools(self) if config.tools else ([], {})
         self._max_context = None  # model context window, fetched lazily from the provider
+        self.open_chat(chat_id)
+        logger.debug("initialized agent: %s", config)
+
+    def open_chat(self, chat_id: Optional[str] = None) -> str:
+        """Switch to a chat (a new empty one when None), rebuilding the context from its history."""
+        conversations = self.sources.conversations()
+        if chat_id is None:
+            chat_id = conversations.create()
+        elif not conversations.exists_chat(chat_id):
+            raise FileNotFoundError(f"chat not found: {chat_id}")
+        self.chat_id = chat_id
         # real input tokens of the current context (seeded on load, updated each turn)
         self._ctx_input_tokens: Optional[int] = None
         # previous usage breakdown, to compute per-category turn deltas
         self._prev_breakdown: Optional[dict] = None
         # conversation history is the memory
         self.messages: list[dict] = [
-            {"role": "system", "content": config.personality_prompt}
+            {"role": "system", "content": self.config.personality_prompt}
         ]
         # whether older turns were dropped from the in-context window
         self._truncated = False
         # transient associative-memory hint, injected into the context of the current turn only
         self._assoc_suggestion: Optional[str] = None
-        self._load_recent_context()
         # thinking tokens from the last reply, kept apart from the answer
         self.last_reasoning: str = ""
+        # tool calls made during the last turn (name, arguments, truncated result, error flag)
+        self.last_actions: list[dict] = []
         # formatted usage breakdown of the last reply (for the caller to display)
         self.last_usage: str = ""
+        self._load_recent_context()
         self._reconstruct_context()
-        logger.debug("initialized agent: %s", config)
+        return chat_id
 
     @classmethod
-    def from_config(cls, user_id: str, agent_id: Optional[str] = None) -> "Agent":
+    def from_config(
+        cls, user_id: str, agent_id: Optional[str] = None, chat_id: Optional[str] = None
+    ) -> "Agent":
         config = load_agent(user_id, agent_id)
         provider = get_provider(config.provider_name, api_key=config.api_key)
         logger.debug("loaded agent config: %s", config)
-        return cls(config, provider)
+        return cls(config, provider, chat_id)
 
     @property
     def name(self) -> str:
@@ -116,6 +133,7 @@ class Agent:
             self._truncated = False
         # associative memory: run before logging the turn so the search can't match this message
         self._assoc_suggestion = None
+        self.last_actions = []
         if self.config.has_memory and self.config.associative_memory:
             self._assoc_suggestion = associative.recall(self, user_input)
         self.messages.append({"role": "user", "content": user_input})
@@ -150,7 +168,8 @@ class Agent:
             if tool_calls and not is_last:
                 tool_calls = _dedupe_tool_calls(tool_calls)
                 self._remember_tool_calls(reply, reasoning, tool_calls)
-                self._run_tools(tool_calls)
+                for action in self._run_tools(tool_calls):
+                    yield ("tool", action)
                 continue
             self.last_reasoning = reasoning
             self._remember_reply(reply, reasoning, api_usage)
@@ -206,8 +225,9 @@ class Agent:
             }
         )
 
-    def _run_tools(self, tool_calls: list[dict]) -> None:
-        """Execute each requested tool and append its result to the context."""
+    def _run_tools(self, tool_calls: list[dict]) -> list[dict]:
+        """Execute each requested tool, append its result to the context and return the actions taken."""
+        actions = []
         for tc in tool_calls:
             name = tc["name"]
             args = tc["arguments"]
@@ -217,17 +237,24 @@ class Agent:
                 except json.JSONDecodeError:
                     args = {}
             handler = self._tool_handlers.get(name)
+            failed = False
             if handler is None:
-                result = f"error: unknown tool '{name}'"
+                result, failed = f"error: unknown tool '{name}'", True
             else:
                 try:
                     result = handler(**args)
                 except Exception as e:  # surfaced back to the model, not fatal
-                    result = f"error: {e}"
+                    result, failed = f"error: {e}", True
             logger.info("tool %s(%s)", name, args)
             self.messages.append(
                 {"role": "tool", "tool_call_id": tc["id"], "name": name, "content": result}
             )
+            text = str(result)
+            if len(text) > _ACTION_RESULT_CHARS:
+                text = text[:_ACTION_RESULT_CHARS] + "…"
+            actions.append({"name": name, "arguments": args, "result": text, "error": failed})
+        self.last_actions.extend(actions)
+        return actions
 
     def _remember_reply(self, reply: str, reasoning: str, api_usage) -> None:
         """Append the assistant reply to memory and persist the turn (with its real usage)."""
@@ -235,24 +262,27 @@ class Agent:
         if self.config.keep_reasoning_in_memory and reasoning:
             message["reasoning"] = reasoning
         self.messages.append(message)
-        extra = {"reasoning": reasoning or None}
+        extra = {"reasoning": reasoning or None, "actions": self.last_actions or None}
         if api_usage:
             extra["usage"] = {"in": api_usage.get("prompt_tokens"), "out": api_usage.get("completion_tokens")}
         self._log_turn("assistant", reply, **extra)
 
     def _log_turn(self, role: str, content: str, **extra) -> None:
-        """Persist a turn to the conversation jsonl (independent of in-context memory)."""
+        """Persist a turn to the active chat's jsonl (independent of in-context memory)."""
         extra = {k: v for k, v in extra.items() if v is not None}
-        self.sources.conversations().append(role, content, **extra)
+        self.sources.conversations().append(self.chat_id, role, content, **extra)
 
     # ------------------------------------------------------------------ context window
 
     def _load_recent_context(self) -> None:
-        """Seed the context with the last N turns from past conversations (across days)."""
-        n = self.config.conversation_messages_retained
-        if not (self.config.has_memory and n):
+        """Seed the context with the last N turns of the active chat (all of them when N is unset)."""
+        if not self.config.has_memory:
             return
-        history, truncated = self.sources.conversations().last_turns(n)
+        history = self.sources.conversations().load(self.chat_id)
+        n = self.config.conversation_messages_retained
+        truncated = bool(n) and len(history) > n
+        if n:
+            history = history[-n:]
         for t in history:
             if t.get("role") not in ("user", "assistant"):
                 continue

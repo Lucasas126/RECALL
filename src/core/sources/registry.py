@@ -72,5 +72,5 @@ class SourceRegistry:
     def mind_palace(self) -> Source:
         return self.get("mind_palace")
 
-    def conversations(self) -> Source:
+    def conversations(self) -> ConversationsSource:
         return self.get("conversations")

@@ -14,6 +14,10 @@ index:
 agent:
   max_tool_hops: 5          # max tool round-trips before forcing a final answer
 
+web:
+  host: 127.0.0.1           # interface the web ui binds to (no real auth yet: keep it local)
+  port: 8000
+
 associative_memory:
   context_messages: 6       # recent messages the memory subagent sees
   top_n: 3                  # fragments injected into the active agent

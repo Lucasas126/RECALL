@@ -3,6 +3,8 @@ import sys
 import dotenv
 
 from src.agent.agent import Agent
+from src.config.loader import load_agent
+from src.core.sources.registry import SourceRegistry
 from src.utils.logger import setup_logging
 
 dotenv.load_dotenv()
@@ -19,9 +21,12 @@ def main():
     sys.stdout.reconfigure(encoding="utf-8")
 
     setup_logging("cli")
-    agent = Agent.from_config(USER_ID, AGENT_ID)
+    # continue the most recent chat, or start a new one
+    agent_id = load_agent(USER_ID, AGENT_ID).id
+    latest = SourceRegistry.for_agent(USER_ID, agent_id).conversations().latest()
+    agent = Agent.from_config(USER_ID, agent_id, chat_id=latest)
 
-    print(f"{agent.name} cli — type 'exit' or 'quit' to stop.")
+    print(f"{agent.name} cli (chat {agent.chat_id}) — type 'exit' or 'quit' to stop.")
     if agent.last_usage:
         print(f"{GRAY_ITALIC}[context]\n{agent.last_usage}{RESET}")
 
@@ -38,7 +43,6 @@ def main():
             print("Bye!")
             break
 
-        result = agent.invoke(user_input)
         try:
             result = agent.invoke(user_input)
             if isinstance(result, str):
@@ -46,6 +50,11 @@ def main():
             else:
                 mode = None
                 for kind, text in result:
+                    if kind == "tool":
+                        args = ", ".join(f"{k}={v!r}" for k, v in text["arguments"].items())
+                        print(f"\n{GRAY_ITALIC}[tool] {text['name']}({args}){RESET}", end="")
+                        mode = None
+                        continue
                     if kind != mode:
                         if mode == "reasoning":
                             print(RESET, end="")  # close reasoning styling
