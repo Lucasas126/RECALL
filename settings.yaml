@@ -18,6 +18,9 @@ web:
   host: 127.0.0.1           # interface the web ui binds to (no real auth yet: keep it local)
   port: 8000
 
+telegram:
+  allowed_users_env: TELEGRAM_ALLOWED_USERS  # comma-separated telegram_id=recall_user_id entries
+
 tavily:
   api_key: TAVILY_API_KEY   # shared env var NAME, never the secret; unset = no web access
   timeout_seconds: 30

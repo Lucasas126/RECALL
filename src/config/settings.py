@@ -22,6 +22,7 @@ _index = _raw["index"]
 _agent = _raw["agent"]
 _assoc = _raw["associative_memory"]
 _web = _raw["web"]
+_telegram = _raw["telegram"]
 
 # ------------------------------------------------------------------ paths
 CONFIG_DIR = Path(_paths["config_dir"])  # user & agent yaml configs
@@ -40,6 +41,9 @@ AGENT_MAX_TOOL_HOPS = _agent["max_tool_hops"]    # max tool round-trips per turn
 # ------------------------------------------------------------------ web
 WEB_HOST = _web["host"]                          # interface the web ui binds to
 WEB_PORT = _web["port"]                          # port the web ui listens on
+
+# ------------------------------------------------------------------ telegram
+TELEGRAM_ALLOWED_USERS_ENV = _telegram["allowed_users_env"]
 
 # ------------------------------------------------------------------ external web access
 TAVILY = TavilyConfig.model_validate(_raw.get("tavily", {}))
