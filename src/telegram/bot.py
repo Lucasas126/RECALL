@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import mimetypes
 import os
 import secrets
@@ -207,42 +208,42 @@ def _shift_entities(entities: list[MessageEntity], offset: int) -> list[MessageE
     return shifted
 
 
-def _clip_entities(text: str, entities: list[MessageEntity]) -> list[MessageEntity]:
-    text_length = _utf16_len(text)
-    clipped = []
-    for entity in entities:
-        data = entity.to_dict()
-        start = data["offset"]
-        end = min(start + data["length"], text_length)
-        if start < text_length and end > start:
-            data["length"] = end - start
-            clipped.append(MessageEntity(**data))
-    return clipped
-
-
 def _generation_message(
-    thinking: str, response: str, notice: str = "", *, truncate: bool = True,
+    parts: list[tuple[str, str]], notice: str = "",
 ) -> tuple[str, list[MessageEntity]]:
-    """Build a Telegram-formatted message with collapsible thinking."""
-    notice_plain, notice_entities = _convert_markdown(notice) if notice else ("", [])
-    thinking_plain, thinking_entities = _convert_markdown(thinking) if thinking.strip() else ("", [])
-    response_plain, response_entities = _convert_markdown(response) if response.strip() else ("", [])
-    text = notice_plain + thinking_plain + response_plain
-    entities: list[MessageEntity] = []
-    entities.extend(notice_entities)
-    if thinking_plain:
+    """Render reasoning, text and actions in their original event order."""
+    text, entities = _convert_markdown(notice) if notice else ("", [])
+    quote_start: int | None = None
+    for kind, content in parts:
+        thinking = kind in ("reasoning", "reasoning_tool")
+        if not thinking and quote_start is not None:
+            text += "\n\n"
+            entities.append(MessageEntity(
+                type=MessageEntity.EXPANDABLE_BLOCKQUOTE,
+                offset=quote_start, length=_utf16_len(text) - quote_start,
+            ))
+            quote_start = None
+        if thinking and quote_start is None:
+            if text and not text.endswith("\n"):
+                text += "\n\n"
+            quote_start = _utf16_len(text)
+        if kind in ("tool", "reasoning_tool"):
+            if text and not text.endswith("\n"):
+                text += "\n"
+            entities.append(MessageEntity(
+                type=MessageEntity.ITALIC, offset=_utf16_len(text), length=_utf16_len(content),
+            ))
+            text += content + "\n\n"
+        else:
+            plain, part_entities = _convert_markdown(content)
+            entities.extend(_shift_entities(part_entities, _utf16_len(text)))
+            text += plain
+    if quote_start is not None and _utf16_len(text) > quote_start:
         entities.append(MessageEntity(
             type=MessageEntity.EXPANDABLE_BLOCKQUOTE,
-            offset=_utf16_len(notice_plain),
-            length=_utf16_len(thinking_plain),
+            offset=quote_start, length=_utf16_len(text) - quote_start,
         ))
-        entities.extend(_shift_entities(thinking_entities, _utf16_len(notice_plain)))
-    response_offset = _utf16_len(notice_plain) + _utf16_len(thinking_plain)
-    entities.extend(_shift_entities(response_entities, response_offset))
-    if not truncate:
-        return text, entities
-    text = text[:_MAX_TELEGRAM_MESSAGE_CHARS]
-    return text, _clip_entities(text, entities)
+    return text, sorted(entities, key=lambda entity: (entity.offset, -entity.length))
 
 
 async def _show_model_page(
@@ -642,50 +643,79 @@ async def _next_event(events) -> tuple[bool, ChatEvent | None]:
     return await asyncio.to_thread(take_next)
 
 
-def _split_markdown(text: str, limit: int) -> list[str]:
-    """Split Markdown source into chunks, preferring paragraph, line and word breaks."""
-    chunks = []
-    while len(text) > limit:
-        cut = -1
-        for separator in ("\n\n", "\n", " "):
-            cut = text.rfind(separator, 0, limit)
-            if cut >= limit // 3:
+def _format_actions(actions: list[dict]) -> str:
+    return "\n".join(
+        f">{action['name']}("
+        + ", ".join(
+            f"{name}={json.dumps(value, ensure_ascii=False)}"
+            for name, value in action["arguments"].items()
+        )
+        + ")"
+        for action in actions
+    )
+
+
+def _final_messages(
+    parts: list[tuple[str, str]], notice: str = "",
+) -> list[tuple[str, list[MessageEntity]]]:
+    """Split the rendered timeline without discarding text or entity formatting."""
+    text, entities = _generation_message(parts, notice)
+    messages: list[tuple[str, list[MessageEntity]]] = []
+    start = offset = 0
+    while start < len(text):
+        end = start
+        length = 0
+        while end < len(text):
+            units = 2 if ord(text[end]) > 0xFFFF else 1
+            if length + units > _MAX_TELEGRAM_MESSAGE_CHARS:
                 break
-        if cut < limit // 3:
-            cut = limit
-        chunks.append(text[:cut])
-        text = text[cut:].lstrip()
-    if text:
-        chunks.append(text)
-    return chunks
-
-
-def _preview_message(thinking: str, answer: str, notice: str) -> tuple[str, list[MessageEntity]]:
-    """A streaming preview that keeps the newest content visible once the limit is reached."""
-    text, entities = _generation_message(thinking, answer, notice, truncate=False)
-    if len(text) <= _MAX_TELEGRAM_MESSAGE_CHARS:
-        return text, entities
-    tail = _MAX_TELEGRAM_MESSAGE_CHARS - 300
-    if answer.strip():
-        return _generation_message("", "…" + answer[-tail:])
-    return _generation_message("…" + thinking[-tail:], "", notice)
-
-
-def _final_messages(thinking: str, answer: str, notice: str) -> list[tuple[str, list[MessageEntity]]]:
-    """The persistent reply, split into Telegram-sized formatted messages."""
-    text, entities = _generation_message(thinking, answer, notice, truncate=False)
-    if len(text) <= _MAX_TELEGRAM_MESSAGE_CHARS:
-        return [(text, entities)]
-    messages = []
-    if thinking.strip() or notice:
-        limit = _MAX_TELEGRAM_MESSAGE_CHARS - 300
-        shown = thinking if len(thinking) <= limit else "…" + thinking[-limit:]
-        messages.append(_generation_message(shown, "", notice))
-    for chunk in _split_markdown(answer, 3500):
-        plain, chunk_entities = _convert_markdown(chunk)
-        plain = plain[:_MAX_TELEGRAM_MESSAGE_CHARS]
-        messages.append((plain, _clip_entities(plain, chunk_entities)))
+            length += units
+            end += 1
+        chunk_entities = []
+        for entity in entities:
+            left = max(entity.offset, offset)
+            right = min(entity.offset + entity.length, offset + length)
+            if left < right:
+                data = entity.to_dict()
+                data.update(offset=left - offset, length=right - left)
+                chunk_entities.append(MessageEntity(**data))
+        messages.append((text[start:end], chunk_entities))
+        start = end
+        offset += length
     return messages
+
+
+@dataclass
+class _ReplyContent:
+    parts: list[tuple[str, str]] = field(default_factory=list)
+    actions: list[dict] = field(default_factory=list)
+
+    def append(self, kind: str, text: str) -> None:
+        if not text:
+            return
+        if self.parts and self.parts[-1][0] == kind and kind in ("text", "reasoning"):
+            self.parts[-1] = (kind, self.parts[-1][1] + text)
+        else:
+            self.parts.append((kind, text))
+
+    def add_action(self, action: dict) -> None:
+        # Tool events have no phase field; retain the latest emitted token context.
+        thinking = self.parts and self.parts[-1][0] in ("reasoning", "reasoning_tool")
+        self.append("reasoning_tool" if thinking else "tool", _format_actions([action]))
+        self.actions.append(action)
+
+    def reconcile(self, event: ChatEvent) -> None:
+        if event.data is not None:
+            for kind, snapshot in (("reasoning", event.data["reasoning"]), ("text", event.text)):
+                received = "".join(text for part_kind, text in self.parts if part_kind == kind)
+                if not snapshot.startswith(received):
+                    raise ValueError(f"Interrupted Telegram {kind} snapshot does not match the stream")
+                self.append(kind, snapshot[len(received):])
+            actions = event.data["actions"]
+            if actions[:len(self.actions)] != self.actions:
+                raise ValueError("Interrupted Telegram actions do not match the stream")
+            for action in actions[len(self.actions):]:
+                self.add_action(action)
 
 
 class _ReplyStream:
@@ -789,8 +819,7 @@ async def _send_generation(
     chat = update.effective_chat
     stream = _ReplyStream(context.bot, chat.id, use_draft=chat.type == ChatType.PRIVATE)
     await stream.start()
-    answer = ""
-    thinking = ""
+    content = _ReplyContent()
     notice = "**_New chat started_**\n\n" if new_chat_notice else ""
     try:
         # Sending may transcribe audio first; keep that blocking work off the event loop.
@@ -806,20 +835,26 @@ async def _send_generation(
             if event is None:
                 continue
             if event.kind == "interrupted":
-                answer = event.text or "_(generation interrupted)_"
-                answer += "\n\n_[Interrupted — your latest message is being processed.]_"
-                await stream.finish(_final_messages(thinking, answer, notice))
+                content.reconcile(event)
+                content.append(
+                    "text", "\n\n_[Interrupted — your latest message is being processed.]_",
+                )
+                await stream.finish(_final_messages(content.parts, notice))
                 return
-            if event.kind == "text":
-                answer += event.text
-            elif event.kind == "reasoning":
-                thinking += event.text
+            if event.kind in ("text", "reasoning"):
+                content.append(event.kind, event.text)
+            elif event.kind == "tool":
+                if event.data is None:
+                    raise ValueError("Telegram tool event is missing its action data")
+                content.add_action(event.data)
             else:
                 continue
-            await stream.update(*_preview_message(thinking, answer, notice))
-        if not answer:
-            answer = "_(The model returned no text.)_"
-        await stream.finish(_final_messages(thinking, answer, notice))
+            preview = _final_messages(content.parts, notice)
+            if preview:
+                await stream.update(*preview[-1])
+        if not any(kind == "text" for kind, _ in content.parts):
+            content.append("text", "_(The model returned no text.)_")
+        await stream.finish(_final_messages(content.parts, notice))
     except Exception as exc:
         logger.exception("Telegram generation failed")
         await stream.finish([(f"Generation failed: {exc}", [])])

@@ -55,8 +55,17 @@ messages are sent through `ChatService` with real provider streaming. Sending
 another message to the active chat steers the generation through the service's
 normal cancellation and continuation behavior. `/selectagent` changes the
 active agent and requires `/newchat` before sending to that agent.
-Thinking tokens are streamed into a collapsible Telegram expandable blockquote,
-while the answer is rendered with Telegram entities converted from Markdown.
+Thinking tokens are streamed into collapsible Telegram expandable blockquotes,
+while normal text is rendered with Telegram entities converted from Markdown.
+Completed tool calls are shown in italics as literal
+`>query_memory(query="example", top_k=5)` lines in event order, interleaved with
+thinking and normal text rather than grouped separately. Tool events do not
+carry a reasoning-phase flag: a call following thinking stays inside that
+collapsible block; a call following normal text, or with no preceding tokens,
+stays outside. Arguments are displayed without interpreting their Markdown;
+tool results are not included. Final and interrupted replies preserve the
+sequence without duplicating received calls. Long replies are split across
+messages without discarding earlier thinking or actions.
 In private chats, replies stream through Telegram's native `sendMessageDraft`
 (an animated ephemeral draft that starts with Telegram's "Thinking..."
 placeholder) and are then persisted with a normal message. If drafts are
