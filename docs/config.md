@@ -44,7 +44,8 @@ and `/stt`. Telegram's native command menu is populated at startup, and
 `/help` prints the same command list in the chat.
 Telegram creates a chat automatically on the first message after the bot
 restarts, and after one hour without a user message. The first assistant
-message in each automatically created chat begins with `New chat started`.
+message in each automatically created chat begins with bold-italic
+`New chat started`.
 Model selection uses Telegram's regular reply keyboard: each option is sent as
 an ordinary text message, the keyboard is removed after selection, and the
 choice is persisted per chat. Results are ordered by input price, then output
@@ -56,6 +57,10 @@ normal cancellation and continuation behavior. `/selectagent` changes the
 active agent and requires `/newchat` before sending to that agent.
 Thinking tokens are streamed into a collapsible Telegram expandable blockquote,
 while the answer is rendered with Telegram entities converted from Markdown.
+In private chats, replies stream through Telegram's native `sendMessageDraft`
+(an animated ephemeral draft that starts with Telegram's "Thinking..."
+placeholder) and are then persisted with a normal message. If drafts are
+unavailable, the bot falls back to sending one message and editing it.
 
 ### speech-to-text
 

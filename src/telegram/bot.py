@@ -4,6 +4,7 @@ import asyncio
 import base64
 import mimetypes
 import os
+import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -11,7 +12,8 @@ from typing import Any
 
 import telegramify_markdown
 from telegram import BotCommand, MessageEntity, ReplyKeyboardMarkup, ReplyKeyboardRemove, Update
-from telegram.error import TelegramError
+from telegram.constants import ChatType
+from telegram.error import BadRequest, RetryAfter, TelegramError
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -219,7 +221,7 @@ def _clip_entities(text: str, entities: list[MessageEntity]) -> list[MessageEnti
 
 
 def _generation_message(
-    thinking: str, response: str, notice: str = "",
+    thinking: str, response: str, notice: str = "", *, truncate: bool = True,
 ) -> tuple[str, list[MessageEntity]]:
     """Build a Telegram-formatted message with collapsible thinking."""
     notice_plain, notice_entities = _convert_markdown(notice) if notice else ("", [])
@@ -237,6 +239,8 @@ def _generation_message(
         entities.extend(_shift_entities(thinking_entities, _utf16_len(notice_plain)))
     response_offset = _utf16_len(notice_plain) + _utf16_len(thinking_plain)
     entities.extend(_shift_entities(response_entities, response_offset))
+    if not truncate:
+        return text, entities
     text = text[:_MAX_TELEGRAM_MESSAGE_CHARS]
     return text, _clip_entities(text, entities)
 
@@ -638,6 +642,137 @@ async def _next_event(events) -> tuple[bool, ChatEvent | None]:
     return await asyncio.to_thread(take_next)
 
 
+def _split_markdown(text: str, limit: int) -> list[str]:
+    """Split Markdown source into chunks, preferring paragraph, line and word breaks."""
+    chunks = []
+    while len(text) > limit:
+        cut = -1
+        for separator in ("\n\n", "\n", " "):
+            cut = text.rfind(separator, 0, limit)
+            if cut >= limit // 3:
+                break
+        if cut < limit // 3:
+            cut = limit
+        chunks.append(text[:cut])
+        text = text[cut:].lstrip()
+    if text:
+        chunks.append(text)
+    return chunks
+
+
+def _preview_message(thinking: str, answer: str, notice: str) -> tuple[str, list[MessageEntity]]:
+    """A streaming preview that keeps the newest content visible once the limit is reached."""
+    text, entities = _generation_message(thinking, answer, notice, truncate=False)
+    if len(text) <= _MAX_TELEGRAM_MESSAGE_CHARS:
+        return text, entities
+    tail = _MAX_TELEGRAM_MESSAGE_CHARS - 300
+    if answer.strip():
+        return _generation_message("", "…" + answer[-tail:])
+    return _generation_message("…" + thinking[-tail:], "", notice)
+
+
+def _final_messages(thinking: str, answer: str, notice: str) -> list[tuple[str, list[MessageEntity]]]:
+    """The persistent reply, split into Telegram-sized formatted messages."""
+    text, entities = _generation_message(thinking, answer, notice, truncate=False)
+    if len(text) <= _MAX_TELEGRAM_MESSAGE_CHARS:
+        return [(text, entities)]
+    messages = []
+    if thinking.strip() or notice:
+        limit = _MAX_TELEGRAM_MESSAGE_CHARS - 300
+        shown = thinking if len(thinking) <= limit else "…" + thinking[-limit:]
+        messages.append(_generation_message(shown, "", notice))
+    for chunk in _split_markdown(answer, 3500):
+        plain, chunk_entities = _convert_markdown(chunk)
+        plain = plain[:_MAX_TELEGRAM_MESSAGE_CHARS]
+        messages.append((plain, _clip_entities(plain, chunk_entities)))
+    return messages
+
+
+class _ReplyStream:
+    """Delivers one streamed reply with native drafts, falling back to message edits."""
+
+    _DRAFT_INTERVAL = 0.3
+    _EDIT_INTERVAL = 1.0
+
+    def __init__(self, bot, chat_id: int, use_draft: bool) -> None:
+        self.bot = bot
+        self.chat_id = chat_id
+        self.use_draft = use_draft
+        self.draft_id = secrets.randbelow(2**31 - 2) + 1
+        self.message = None
+        self.last_text = ""
+        self.last_push = 0.0
+        self.paused_until = 0.0
+
+    async def start(self) -> None:
+        if self.use_draft:
+            # An empty draft shows Telegram's native "Thinking..." placeholder.
+            if await self._push_draft("", []):
+                return
+        await self.bot.send_chat_action(self.chat_id, "typing")
+
+    async def update(self, text: str, entities: list[MessageEntity]) -> None:
+        loop_time = asyncio.get_running_loop().time()
+        interval = self._DRAFT_INTERVAL if self.use_draft else self._EDIT_INTERVAL
+        if (
+            not text or text == self.last_text
+            or loop_time < self.paused_until or loop_time - self.last_push < interval
+        ):
+            return
+        self.last_push = loop_time
+        if self.use_draft and await self._push_draft(text, entities):
+            self.last_text = text
+            return
+        try:
+            if self.message is None:
+                self.message = await self.bot.send_message(self.chat_id, text, entities=entities)
+            else:
+                await self.message.edit_text(text, entities=entities)
+            self.last_text = text
+        except RetryAfter as exc:
+            self.paused_until = loop_time + exc.retry_after
+        except BadRequest as exc:
+            if "not modified" not in str(exc).lower():
+                logger.warning("Telegram streaming edit failed: %s", exc)
+
+    async def finish(self, messages: list[tuple[str, list[MessageEntity]]]) -> None:
+        first, *rest = messages
+        if self.message is not None:
+            try:
+                if first[0] != self.last_text:
+                    await self.message.edit_text(first[0], entities=first[1])
+            except BadRequest as exc:
+                if "not modified" not in str(exc).lower():
+                    raise
+        else:
+            await self._send(*first)
+        for text, entities in rest:
+            await self._send(text, entities)
+
+    async def _push_draft(self, text: str, entities: list[MessageEntity]) -> bool:
+        try:
+            await self.bot.send_message_draft(
+                self.chat_id, self.draft_id, text=text, entities=entities or None,
+            )
+            return True
+        except RetryAfter as exc:
+            self.paused_until = asyncio.get_running_loop().time() + exc.retry_after
+            return True
+        except TelegramError as exc:
+            logger.warning("Telegram drafts unavailable, falling back to edits: %s", exc)
+            self.use_draft = False
+            return False
+
+    async def _send(self, text: str, entities: list[MessageEntity]) -> None:
+        for _ in range(3):
+            try:
+                await self.bot.send_message(self.chat_id, text, entities=entities)
+                return
+            except RetryAfter as exc:
+                await asyncio.sleep(exc.retry_after + 1)
+        await self.bot.send_message(self.chat_id, text, entities=entities)
+
+
 async def _send_generation(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -651,15 +786,16 @@ async def _send_generation(
     if session is None or session.chat_id is None:
         await update.effective_message.reply_text("Create a chat first with /newchat.")
         return
-    await context.bot.send_chat_action(update.effective_chat.id, "typing")
-    reply = await update.effective_message.reply_text("…")
+    chat = update.effective_chat
+    stream = _ReplyStream(context.bot, chat.id, use_draft=chat.type == ChatType.PRIVATE)
+    await stream.start()
     answer = ""
     thinking = ""
     notice = "**_New chat started_**\n\n" if new_chat_notice else ""
-    last_sent = ""
-    last_edit = 0.0
     try:
-        events = state.service.send(
+        # Sending may transcribe audio first; keep that blocking work off the event loop.
+        events = await asyncio.to_thread(
+            state.service.send,
             session.user_id, session.agent_id, session.chat_id, text,
             stream=True, attachments=attachments, transcription_model=session.stt_model,
         )
@@ -669,49 +805,24 @@ async def _send_generation(
                 break
             if event is None:
                 continue
+            if event.kind == "interrupted":
+                answer = event.text or "_(generation interrupted)_"
+                answer += "\n\n_[Interrupted — your latest message is being processed.]_"
+                await stream.finish(_final_messages(thinking, answer, notice))
+                return
             if event.kind == "text":
                 answer += event.text
-                now = asyncio.get_running_loop().time()
-                preview, entities = _generation_message(thinking, answer, notice)
-                if now - last_edit >= 0.35 and preview and preview != last_sent:
-                    await reply.edit_text(preview, entities=entities)
-                    last_sent = preview
-                    last_edit = now
             elif event.kind == "reasoning":
                 thinking += event.text
-                now = asyncio.get_running_loop().time()
-                preview, entities = _generation_message(thinking, answer, notice)
-                if now - last_edit >= 0.35 and preview and preview != last_sent:
-                    await reply.edit_text(preview, entities=entities)
-                    last_sent = preview
-                    last_edit = now
-            elif event.kind == "interrupted":
-                answer = event.text
-                final_text, entities = _generation_message(thinking, answer, notice)
-                interrupted = final_text or "(generation interrupted)"
-                suffix = "\n\n[Interrupted — your latest message is being processed.]"
-                available = _MAX_TELEGRAM_MESSAGE_CHARS - len(suffix)
-                await reply.edit_text(
-                    interrupted[:available] + suffix,
-                    entities=_clip_entities(interrupted[:available], entities),
-                )
-                return
+            else:
+                continue
+            await stream.update(*_preview_message(thinking, answer, notice))
         if not answer:
-            answer = "(The model returned no text.)"
-        first_chunk, entities = _generation_message(thinking, answer, notice)
-        if first_chunk != last_sent:
-            await reply.edit_text(first_chunk, entities=entities)
-        if len(answer) > _MAX_TELEGRAM_MESSAGE_CHARS:
-            for start in range(_MAX_TELEGRAM_MESSAGE_CHARS, len(answer), _MAX_TELEGRAM_MESSAGE_CHARS):
-                chunk, chunk_entities = _convert_markdown(
-                    answer[start:start + _MAX_TELEGRAM_MESSAGE_CHARS],
-                )
-                await context.bot.send_message(
-                    update.effective_chat.id, chunk, entities=chunk_entities,
-                )
+            answer = "_(The model returned no text.)_"
+        await stream.finish(_final_messages(thinking, answer, notice))
     except Exception as exc:
         logger.exception("Telegram generation failed")
-        await reply.edit_text(f"Generation failed: {exc}")
+        await stream.finish([(f"Generation failed: {exc}", [])])
 
 
 async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -749,7 +860,6 @@ async def media_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         attachment = await _download_attachment(update.effective_message, context.bot)
         text = update.effective_message.caption or ""
         new_chat_notice = _prepare_message_session(session, state.service)
-        await update.effective_message.reply_text("Attachment received. Generating a response...")
         asyncio.create_task(
             _send_generation(
                 update, context, text, [attachment],
