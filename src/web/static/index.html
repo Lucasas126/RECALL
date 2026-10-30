@@ -27,6 +27,11 @@
       <ul id="chat-list"></ul>
     </aside>
     <main>
+      <header id="model-bar">
+        <span>Chat model</span>
+        <button id="model-picker" type="button" disabled aria-haspopup="dialog">No chat selected</button>
+        <span id="model-policy"></span>
+      </header>
       <div id="messages"></div>
       <details id="usage" hidden><summary></summary><pre></pre></details>
       <form id="composer">
@@ -35,6 +40,50 @@
       </form>
     </main>
   </section>
+
+  <dialog id="model-dialog" aria-labelledby="model-title">
+    <div class="model-heading">
+      <h2 id="model-title">OpenRouter models</h2>
+      <button id="model-close" type="button" aria-label="Close model selector">Close</button>
+    </div>
+    <p class="model-note">The ZDR filter starts checked every time you open this selector.
+      Choosing a model saves the filter's routing policy only for this chat. Favorites are shared across your agents.
+      Prices start at the cheapest listed route; provider, context tiers, caching and extras may change charges.</p>
+    <div class="model-toolbar">
+      <input id="model-search" type="search" placeholder="Search by model name or ID" aria-label="Search models">
+      <button id="model-refresh" type="button">Refresh</button>
+    </div>
+    <label class="model-filter"><input id="model-zdr" type="checkbox" checked> Zero Data Retention (ZDR) only</label>
+    <label class="model-filter"><input id="model-favorites-only" type="checkbox"> Favorites only</label>
+    <div class="model-capabilities" role="group" aria-label="Model capabilities">
+      <label class="model-filter"><input id="model-tools" type="checkbox"> Tools</label>
+      <label class="model-filter"><input id="model-images" type="checkbox"> Image input</label>
+      <label class="model-filter"><input id="model-reasoning" type="checkbox"> Reasoning</label>
+    </div>
+    <p class="model-note">Capability filters use catalog metadata, not a routing guarantee.
+      Image input describes the model; this chat currently accepts text only.
+      Filters do not enable tools or reasoning in the agent.</p>
+    <label class="model-filter" for="model-sort">Sort by
+      <select id="model-sort">
+        <option value="favorites">Favorites first</option>
+        <option value="name">Name A-Z</option>
+        <option value="prompt-asc">Input price: low to high</option>
+        <option value="prompt-desc">Input price: high to low</option>
+        <option value="completion-asc">Output price: low to high</option>
+        <option value="completion-desc">Output price: high to low</option>
+      </select>
+    </label>
+    <p id="model-zdr-warning" class="model-note" role="status" hidden>
+      ZDR is not required for your next selection. Providers may retain your prompts and replies.
+      Your OpenRouter account may still enforce ZDR.</p>
+    <p id="model-status" role="status"></p>
+    <p id="model-error" class="error" role="alert"></p>
+    <ul id="model-list"></ul>
+    <p class="model-note">When required, ZDR follows OpenRouter's policy, which includes caching
+      and legal exceptions; embeddings and external tools have separate policies.
+      <a href="https://openrouter.ai/docs/guides/features/zdr" target="_blank" rel="noopener noreferrer">Policy details</a>
+    </p>
+  </dialog>
 
   <script src="/static/vendor/marked.umd.js"></script>
   <script src="/static/vendor/purify.min.js"></script>

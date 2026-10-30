@@ -2,9 +2,18 @@ const $ = (id) => document.getElementById(id);
 const state = {
   user: null, agentId: null, chatId: null, busy: false, session: 0,
   requests: new Set(), latest: null, sendQueue: Promise.resolve(),
+  model: null, modelCatalog: null, modelCatalogZdr: null, modelFavorites: [],
+  modelBusy: false, modelLoading: false, modelRequest: 0,
 };
 // thinking blocks start open (streamed live); closing one keeps them closed from then on
 const prefs = { thinkingOpen: localStorage.getItem("thinkingOpen") !== "false" };
+const tokenPriceFormat = new Intl.NumberFormat("en-US", {
+  style: "currency", currency: "USD", maximumSignificantDigits: 6,
+});
+
+function tokenPrice(value) {
+  return value == null ? "unavailable" : `from ${tokenPriceFormat.format(value)}`;
+}
 
 async function api(path, options = {}) {
   const session = state.session;
@@ -32,6 +41,8 @@ function showLogin() {
   state.user = null;
   state.agentId = null;
   state.chatId = null;
+  state.model = null;
+  updateModelControls();
   renderMessages([]);
   setComposer(false);
   $("app").hidden = true;
@@ -84,9 +95,11 @@ $("logout").addEventListener("click", async () => {
 // ------------------------------------------------------------------ agents & chats
 
 async function selectAgent(agentId) {
-  if (state.busy) return;
+  if (state.busy || state.modelBusy) return;
   state.agentId = agentId;
   state.chatId = null;
+  state.model = null;
+  updateModelControls();
   $("agent-select").value = agentId ?? "";
   renderMessages([]);
   setComposer(false);
@@ -127,7 +140,7 @@ async function refreshChats() {
 }
 
 async function newChat() {
-  if (state.busy || !state.agentId) return;
+  if (state.busy || state.modelBusy || !state.agentId) return;
   const session = state.session;
   const agentId = state.agentId;
   const chat = await api(chatsUrl(), { method: "POST" });
@@ -138,12 +151,14 @@ async function newChat() {
 $("new-chat").addEventListener("click", newChat);
 
 async function openChat(chatId) {
-  if (state.busy) return;
+  if (state.busy || state.modelBusy) return;
   const session = state.session;
   const agentId = state.agentId;
   const data = await api(chatsUrl(`/${chatId}`));
-  if (session !== state.session || agentId !== state.agentId || state.busy) return;
+  if (session !== state.session || agentId !== state.agentId || state.busy || state.modelBusy) return;
   state.chatId = chatId;
+  state.model = data.model;
+  updateModelControls();
   renderMessages(data.messages);
   setComposer(true);
   await refreshChats();
@@ -151,28 +166,251 @@ async function openChat(chatId) {
 }
 
 async function deleteChat(chat) {
-  if (state.busy || !confirm(`Delete "${chat.title || "New chat"}"?`)) return;
+  if (state.busy || state.modelBusy || !confirm(`Delete "${chat.title || "New chat"}"?`)) return;
   await api(chatsUrl(`/${chat.id}`), { method: "DELETE" });
   if (state.chatId === chat.id) {
     state.chatId = null;
+    state.model = null;
+    updateModelControls();
     renderMessages([]);
     setComposer(false);
   }
   await refreshChats();
 }
 
+// ------------------------------------------------------------------ models
+
+function updateModelControls() {
+  const openrouter = state.user?.provider === "openrouter";
+  $("model-picker").textContent = state.model?.id ?? "No chat selected";
+  $("model-picker").title = openrouter ? "Choose a model and routing policy for this chat" : "Model browsing requires OpenRouter";
+  $("model-picker").disabled = !openrouter || !state.chatId || state.busy || state.modelBusy;
+  const required = state.model?.zdr !== false;
+  $("model-policy").textContent = state.model
+    ? (openrouter ? (required ? "ZDR required" : "ZDR not required") : state.model.provider) : "";
+  $("model-policy").classList.toggle("privacy-warning", openrouter && !required);
+  $("model-refresh").disabled = state.modelLoading || state.modelBusy;
+  $("model-close").disabled = state.modelBusy;
+  $("model-zdr").disabled = state.modelBusy || state.modelLoading;
+  $("model-zdr-warning").hidden = $("model-zdr").checked;
+}
+
+function compareModels(a, b, order, favorites) {
+  const byName = () => a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
+  if (order === "favorites") {
+    return Number(favorites.has(b.id)) - Number(favorites.has(a.id)) || byName();
+  }
+  if (order === "name") return byName();
+  const [field, direction] = order.split("-");
+  const aPrice = a.pricing?.[field];
+  const bPrice = b.pricing?.[field];
+  if (aPrice == null || bPrice == null) {
+    return Number(aPrice == null) - Number(bPrice == null) || byName();
+  }
+  const difference = Number(aPrice) - Number(bPrice);
+  return (direction === "desc" ? -difference : difference) || byName();
+}
+
+function matchesCapabilities(model, { tools, images, reasoning }) {
+  if (images && !model.input_modalities?.includes("image")) return false;
+  if (!tools && !reasoning) return true;
+  return (model.parameter_routes ?? []).some((parameters) =>
+    (!tools || parameters.includes("tools"))
+    && (!reasoning || parameters.includes("reasoning") || parameters.includes("reasoning_effort"))
+  );
+}
+
+function renderModelList() {
+  const list = $("model-list");
+  list.replaceChildren();
+  updateModelControls();
+  if (state.modelLoading) {
+    $("model-status").textContent = "Loading current model catalog...";
+    return;
+  }
+  if (!state.modelCatalog || state.modelCatalogZdr !== $("model-zdr").checked) {
+    $("model-status").textContent = "Catalog unavailable. Use Refresh to retry.";
+    return;
+  }
+  const saved = new Set(state.modelFavorites);
+  const availableIds = new Set(state.modelCatalog.map((model) => model.id));
+  const models = new Map(state.modelCatalog.map((model) => [model.id, model]));
+  for (const id of saved) {
+    if (!models.has(id)) models.set(id, { id, name: id, zdr_providers: [] });
+  }
+  const query = $("model-search").value.trim().toLocaleLowerCase();
+  const capabilities = {
+    tools: $("model-tools").checked,
+    images: $("model-images").checked,
+    reasoning: $("model-reasoning").checked,
+  };
+  const matches = [...models.values()].filter((model) =>
+    (!$("model-favorites-only").checked || saved.has(model.id))
+    && matchesCapabilities(model, capabilities)
+    && (!query || model.id.toLocaleLowerCase().includes(query) || model.name.toLocaleLowerCase().includes(query))
+  ).sort((a, b) => compareModels(a, b, $("model-sort").value, saved));
+  $("model-status").textContent = matches.length
+    ? `${matches.length} model${matches.length === 1 ? "" : "s"} - ${$("model-zdr").checked ? "ZDR only" : "all routes allowed"}`
+    : "No models match. Try another search or relax the filters.";
+  for (const model of matches) {
+    const available = availableIds.has(model.id);
+    const row = document.createElement("li");
+    row.className = "model-row";
+    const choose = document.createElement("button");
+    choose.type = "button";
+    choose.className = "model-choice";
+    choose.disabled = !available || state.busy || state.modelBusy;
+    choose.setAttribute("aria-pressed", String(
+      model.id === state.model?.id && (state.model?.zdr !== false) === $("model-zdr").checked
+    ));
+    const name = document.createElement("strong");
+    name.textContent = model.name;
+    const id = document.createElement("small");
+    id.textContent = model.id;
+    const providers = document.createElement("small");
+    providers.textContent = !available ? "Unavailable under the current filter"
+      : model.zdr_providers.length ? `ZDR routes: ${model.zdr_providers.join(", ")}`
+      : "No active ZDR routes";
+    const pricing = document.createElement("small");
+    pricing.textContent = `USD / 1M tokens: input ${tokenPrice(model.pricing?.prompt)}`
+      + ` | output ${tokenPrice(model.pricing?.completion)}`;
+    choose.append(name, id, pricing, providers);
+    choose.addEventListener("click", () => selectModel(model.id));
+    const star = document.createElement("button");
+    star.type = "button";
+    star.className = "model-star";
+    star.textContent = saved.has(model.id) ? "\u2605" : "\u2606";
+    const label = saved.has(model.id) ? `Remove ${model.id} from favorites` : `Add ${model.id} to favorites`;
+    star.setAttribute("aria-label", label);
+    star.setAttribute("aria-pressed", String(saved.has(model.id)));
+    star.title = label;
+    star.disabled = state.modelBusy || state.busy;
+    star.addEventListener("click", () => toggleFavorite(model.id));
+    row.append(choose, star);
+    list.append(row);
+  }
+}
+
+async function refreshModels(initial = false) {
+  if (state.modelBusy) return;
+  const session = state.session;
+  const request = ++state.modelRequest;
+  const zdr = $("model-zdr").checked;
+  state.modelLoading = true;
+  $("model-error").textContent = "";
+  renderModelList();
+  try {
+    const [models, favorites] = await Promise.all([
+      api(`/api/models?zdr=${zdr}`), api("/api/models/favorites"),
+    ]);
+    if (session !== state.session || request !== state.modelRequest) return;
+    state.modelCatalog = models;
+    state.modelCatalogZdr = zdr;
+    state.modelFavorites = favorites;
+    if (initial) $("model-favorites-only").checked = favorites.length > 0;
+  } catch (err) {
+    if (session !== state.session || request !== state.modelRequest) return;
+    state.modelCatalog = null;
+    state.modelCatalogZdr = null;
+    $("model-error").textContent = err.message;
+  } finally {
+    if (session === state.session && request === state.modelRequest) {
+      state.modelLoading = false;
+      renderModelList();
+    }
+  }
+}
+
+async function toggleFavorite(modelId) {
+  if (state.modelBusy || state.busy || state.modelLoading) return;
+  const session = state.session;
+  const saved = state.modelFavorites.includes(modelId);
+  const zdr = $("model-zdr").checked;
+  state.modelBusy = true;
+  $("model-error").textContent = "";
+  updateBusy();
+  try {
+    const favorites = await api(`/api/models/favorites${saved ? "/" + encodeURIComponent(modelId) : ""}`, {
+      method: saved ? "DELETE" : "POST",
+      ...(saved ? {} : { body: JSON.stringify({ model_id: modelId, zdr }) }),
+    });
+    if (session === state.session) state.modelFavorites = favorites;
+  } catch (err) {
+    if (session === state.session) $("model-error").textContent = err.message;
+  } finally {
+    if (session === state.session) {
+      state.modelBusy = false;
+      updateBusy();
+    }
+  }
+}
+
+async function selectModel(modelId) {
+  if (state.modelBusy || state.busy || state.modelLoading || !state.chatId) return;
+  const session = state.session;
+  const agentId = state.agentId;
+  const chatId = state.chatId;
+  const zdr = $("model-zdr").checked;
+  state.modelBusy = true;
+  $("model-error").textContent = "";
+  updateBusy();
+  try {
+    const model = await api(chatsUrl(`/${chatId}/model`), {
+      method: "PUT", body: JSON.stringify({ model_id: modelId, zdr }),
+    });
+    if (session !== state.session || agentId !== state.agentId || chatId !== state.chatId) return;
+    state.model = model;
+    $("usage").hidden = true;
+    $("model-dialog").close();
+  } catch (err) {
+    if (session === state.session) $("model-error").textContent = err.message;
+  } finally {
+    if (session === state.session) {
+      state.modelBusy = false;
+      updateBusy();
+    }
+  }
+}
+
+$("model-picker").addEventListener("click", () => {
+  if ($("model-picker").disabled) return;
+  $("model-search").value = "";
+  $("model-error").textContent = "";
+  $("model-zdr").checked = true;
+  $("model-favorites-only").checked = state.modelFavorites.length > 0;
+  $("model-dialog").showModal();
+  $("model-search").focus();
+  if (!state.modelCatalog || state.modelCatalogZdr !== true || state.modelLoading) refreshModels(true);
+  else renderModelList();
+});
+$("model-close").addEventListener("click", () => $("model-dialog").close());
+$("model-dialog").addEventListener("cancel", (event) => {
+  if (state.modelBusy) event.preventDefault();
+});
+$("model-refresh").addEventListener("click", () => refreshModels());
+$("model-search").addEventListener("input", renderModelList);
+$("model-favorites-only").addEventListener("change", renderModelList);
+$("model-sort").addEventListener("change", renderModelList);
+for (const id of ["model-tools", "model-images", "model-reasoning"]) {
+  $(id).addEventListener("change", renderModelList);
+}
+$("model-zdr").addEventListener("change", () => refreshModels());
+
 // ------------------------------------------------------------------ messages
 
 function setComposer(enabled) {
-  $("input").disabled = !enabled;
-  $("send").disabled = !enabled;
+  $("input").disabled = !enabled || state.modelBusy;
+  $("send").disabled = !enabled || state.modelBusy;
 }
 
 function updateBusy() {
   state.busy = state.requests.size > 0;
-  $("agent-select").disabled = state.busy;
-  $("new-chat").disabled = state.busy;
-  for (const button of $("chat-list").querySelectorAll(".del")) button.disabled = state.busy;
+  $("agent-select").disabled = state.busy || state.modelBusy;
+  $("new-chat").disabled = state.busy || state.modelBusy;
+  for (const button of $("chat-list").querySelectorAll(".del")) button.disabled = state.busy || state.modelBusy;
+  setComposer(Boolean(state.chatId));
+  updateModelControls();
+  if ($("model-dialog").open) renderModelList();
   $("send").textContent = state.busy ? "Steer" : "Send";
   $("input").placeholder = state.busy
     ? "Send another message to steer the response..."
@@ -185,6 +423,17 @@ function resetStreams() {
   state.requests.clear();
   state.latest = null;
   state.sendQueue = Promise.resolve();
+  state.modelCatalog = null;
+  state.modelCatalogZdr = null;
+  $("model-sort").value = "favorites";
+  for (const id of ["model-tools", "model-images", "model-reasoning"]) $(id).checked = false;
+  state.modelFavorites = [];
+  state.modelBusy = false;
+  state.modelLoading = false;
+  state.modelRequest++;
+  $("model-dialog").close();
+  $("model-list").replaceChildren();
+  $("model-error").textContent = "";
   $("usage").hidden = true;
   updateBusy();
 }
@@ -329,7 +578,7 @@ function scrollDown() {
 $("composer").addEventListener("submit", async (e) => {
   e.preventDefault();
   const content = $("input").value.trim();
-  if (!content || !state.user || !state.chatId) return;
+  if (!content || !state.user || !state.chatId || state.modelBusy) return;
   $("input").value = "";
   addMessage("user").text(content);
   const reply = addMessage("assistant");

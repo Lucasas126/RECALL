@@ -5,12 +5,29 @@ import re
 import secrets
 from datetime import datetime
 from pathlib import Path
-from typing import Collection
+from typing import Collection, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from src.core.sources.base import Source
+from src.utils.files import atomic_write_text
 
 _CHAT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _TITLE_CHARS = 60
+
+
+class ChatModel(BaseModel):
+    """A persistent chat-specific OpenRouter model selection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: Literal["openrouter"] = "openrouter"
+    id: str = Field(strict=True, min_length=1, max_length=256)
+    zdr: bool = Field(default=True, strict=True)
+
+
+class ChatMetadataError(RuntimeError):
+    """Chat model metadata could not be read or saved."""
 
 
 class ConversationsSource(Source):
@@ -28,6 +45,31 @@ class ConversationsSource(Source):
     def exists_chat(self, chat_id: str) -> bool:
         return self._path(chat_id).is_file()
 
+    def _model_path(self, chat_id: str) -> Path:
+        if not self.exists_chat(chat_id):
+            raise FileNotFoundError(f"chat not found: {chat_id}")
+        return self.resolve(f"{chat_id}.model.json")
+
+    def model_selection(self, chat_id: str) -> ChatModel | None:
+        """Read a chat's model override; older chats have no override."""
+        path = self._model_path(chat_id)
+        try:
+            return ChatModel.model_validate_json(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
+        except (OSError, UnicodeError, ValidationError) as exc:
+            raise ChatMetadataError(f"Could not read model selection for chat {chat_id}.") from exc
+
+    def set_model(self, chat_id: str, model_id: str, *, zdr: bool = True) -> ChatModel:
+        """Persist an override after the caller validates model availability."""
+        path = self._model_path(chat_id)
+        selection = ChatModel(id=model_id, zdr=zdr)
+        try:
+            atomic_write_text(path, selection.model_dump_json() + "\n")
+        except OSError as exc:
+            raise ChatMetadataError(f"Could not save model selection for chat {chat_id}.") from exc
+        return selection
+
     def create(self) -> str:
         """Create an empty chat and return its id."""
         chat_id = f"{datetime.now():%Y%m%d-%H%M%S}-{secrets.token_hex(3)}"
@@ -38,7 +80,9 @@ class ConversationsSource(Source):
         path = self._path(chat_id)
         if not path.is_file():
             raise FileNotFoundError(f"chat not found: {chat_id}")
+        metadata = self._model_path(chat_id)
         path.unlink()
+        metadata.unlink(missing_ok=True)
 
     def append(self, chat_id: str, role: str, content: str, **extra) -> dict:
         """Append a turn to an existing chat as one JSONL line."""
@@ -79,7 +123,7 @@ class ConversationsSource(Source):
             if path.suffix != ".jsonl" or path.stem in kept:
                 continue
             if not path.read_text(encoding="utf-8").strip():
-                path.unlink(missing_ok=True)
+                self.delete_chat(path.stem)
                 removed.append(path.stem)
         return removed
 

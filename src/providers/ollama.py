@@ -53,11 +53,12 @@ class OllamaProvider(LLMProvider):
         if not self.base_url:
             self.base_url = os.environ.get("OLLAMA_HOST", DEFAULT_HOST)
 
-    def invoke(self, messages: list[dict], model: str, stream=True, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None):
+    def invoke(self, messages: list[dict], model: str, stream=True, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None, *, zdr: bool = True):
         """
         Invokes the Ollama API with the given messages and model.
         If stream is True, yields (kind, text) tuples then a final dict with usage info.
         If stream is False, returns a dict directly.
+        zdr has no effect on local Ollama requests.
         """
         logger.debug("request model=%s stream=%s reasoning=%s msgs=%d", model, stream, reasoning, len(messages))
         if stream:

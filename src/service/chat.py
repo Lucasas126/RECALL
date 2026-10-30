@@ -10,11 +10,14 @@ from typing import Callable, Iterator, Literal, Optional
 from uuid import uuid4
 
 from src.agent.agent import Agent
+from src.config.favorites import ModelFavorites
 from src.config.loader import load_agent_config, load_user
 from src.config.models import UserConfig
+from src.config.settings import CONFIG_DIR
 from src.core.sources.conversations import ConversationsSource
 from src.core.sources.registry import SourceRegistry
 from src.providers.cancellation import CancellationToken, GenerationCancelled
+from src.providers.catalog import list_openrouter_models
 from src.utils.logger import get_logger
 
 logger = get_logger("service")
@@ -37,6 +40,10 @@ class UnknownAgent(ServiceError):
 
 
 class UnknownChat(ServiceError):
+    pass
+
+
+class AgentBusy(ServiceError):
     pass
 
 
@@ -91,13 +98,14 @@ class ChatService:
         self._agent_factory = agent_factory
         self._slots: dict[tuple[str, str], _AgentSlot] = {}
         self._slots_guard = threading.Lock()
+        self._favorites = ModelFavorites(CONFIG_DIR)
 
     # ------------------------------------------------------------------ users & agents
 
     def login(self, user_id: str) -> dict:
         """Resolve an existing user and return their profile and agents; raises UnknownUser."""
         user = self._user(user_id)
-        return {"id": user_id, "name": user.name, "agents": self.list_agents(user_id)}
+        return {"id": user_id, "name": user.name, "provider": user.provider.name, "agents": self.list_agents(user_id)}
 
     def list_agents(self, user_id: str) -> list[dict]:
         user = self._user(user_id)
@@ -106,6 +114,29 @@ class ChatService:
             cfg = load_agent_config(user_id, agent_id)
             agents.append({"id": cfg.id, "name": cfg.name})
         return agents
+
+    def list_models(self, user_id: str, query: str = "", *, zdr: bool = True) -> list[dict]:
+        """List searchable chat models for an OpenRouter user, requiring ZDR by default."""
+        user = self._user(user_id)
+        if user.provider.name != "openrouter":
+            raise ValueError("model browsing is only available for the OpenRouter chat provider")
+        return [model.model_dump() for model in list_openrouter_models(query, zdr=zdr)]
+
+    def list_favorite_models(self, user_id: str) -> list[str]:
+        """Return saved OpenRouter IDs, including favorites no longer in the ZDR catalog."""
+        self._user(user_id)
+        return self._favorites.list(user_id)
+
+    def add_favorite_model(self, user_id: str, model_id: str, *, zdr: bool = True) -> list[str]:
+        """Save a model after checking availability under the explicit catalog filter."""
+        models = self.list_models(user_id, model_id, zdr=zdr)
+        if not any(model["id"] == model_id for model in models):
+            raise ValueError("model is not available in the OpenRouter chat catalog with the selected ZDR filter")
+        return self._favorites.update(user_id, model_id, favorite=True)
+
+    def remove_favorite_model(self, user_id: str, model_id: str) -> list[str]:
+        self._user(user_id)
+        return self._favorites.update(user_id, model_id, favorite=False)
 
     # ------------------------------------------------------------------ chats
 
@@ -141,7 +172,35 @@ class ChatService:
             for t in turns
             if t.get("role") in ("user", "assistant")
         ]
-        return {"chat": conversations.summary(chat_id), "messages": messages}
+        selection = conversations.model_selection(chat_id)
+        model = selection.model_dump() if selection is not None else {
+            "provider": self._user(user_id).provider.name,
+            "id": load_agent_config(user_id, agent_id).models.chat,
+            "zdr": True,
+        }
+        return {"chat": conversations.summary(chat_id), "messages": messages, "model": model}
+
+    def set_chat_model(
+        self, user_id: str, agent_id: str, chat_id: str, model_id: str, *, zdr: bool = True,
+    ) -> dict:
+        """Persist an idle chat's model and routing policy without changing other chats."""
+        conversations = self._conversations(user_id, agent_id)
+        self._load(conversations, chat_id)
+        models = self.list_models(user_id, model_id, zdr=zdr)
+        if not any(model["id"] == model_id for model in models):
+            raise ValueError("model is not available in the OpenRouter chat catalog with the selected ZDR filter")
+        slot = self._slot(user_id, agent_id)
+        with slot.state:
+            if slot.active is not None or slot.pending:
+                raise AgentBusy("wait for this agent's active and queued replies before changing models")
+            with slot.lock:
+                try:
+                    selection = conversations.set_model(chat_id, model_id, zdr=zdr)
+                except FileNotFoundError as exc:
+                    raise UnknownChat(f"unknown chat: {chat_id}") from exc
+                if slot.agent is not None and slot.agent.chat_id == chat_id:
+                    slot.agent = None
+        return selection.model_dump()
 
     def delete_chat(self, user_id: str, agent_id: str, chat_id: str) -> None:
         conversations = self._conversations(user_id, agent_id)

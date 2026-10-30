@@ -65,6 +65,7 @@ def _propose_query(agent: "Agent", user_input: str, cancellation: CancellationTo
         with closing(agent.provider.invoke(
             messages, agent.config.models.chat, stream=True, reasoning=False, tools=None,
             cancellation=cancellation,
+            zdr=agent.zdr_required,
         )) as chunks:
             for chunk in chunks:
                 if isinstance(chunk, tuple) and chunk[0] == "content":

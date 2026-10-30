@@ -47,7 +47,8 @@ class Agent:
     """Orchestration entry point: wraps an agent's config, provider and conversation memory."""
 
     def __init__(self, config: ResolvedAgent, provider: LLMProvider, chat_id: Optional[str] = None):
-        self.config = config
+        self.config = config.model_copy(deep=True)
+        self._default_chat_model = config.models.chat
         self.provider = provider
         # per-agent access to the data plane (mind palace, conversations, ...)
         self.sources = SourceRegistry.for_agent(config.user_id, config.id)
@@ -71,6 +72,14 @@ class Agent:
             chat_id = conversations.create()
         elif not conversations.exists_chat(chat_id):
             raise FileNotFoundError(f"chat not found: {chat_id}")
+        selection = conversations.model_selection(chat_id)
+        if selection is not None and selection.provider != self.config.provider_name:
+            raise ValueError("this chat's model requires the OpenRouter chat provider")
+        model = selection.id if selection is not None else self._default_chat_model
+        self.zdr_required = selection.zdr if selection is not None else True
+        if model != self.config.models.chat:
+            self._max_context = None
+        self.config.models = self.config.models.model_copy(update={"chat": model})
         self.chat_id = chat_id
         # real input tokens of the current context (seeded on load, updated each turn)
         self._ctx_input_tokens: Optional[int] = None
@@ -222,6 +231,7 @@ class Agent:
                 reasoning_tokens=self.config.reasoning_tokens,
                 reasoning_effort=self.config.reasoning_effort, tools=tools,
                 cancellation=cancellation,
+                zdr=self.zdr_required,
             )) as chunks:
                 for chunk in chunks:
                     cancellation.raise_if_cancelled()
@@ -264,6 +274,7 @@ class Agent:
                 stream=False, reasoning=self.config.reasoning,
                 reasoning_tokens=self.config.reasoning_tokens,
                 reasoning_effort=self.config.reasoning_effort, tools=tools,
+                zdr=self.zdr_required,
             )
             self._model_elapsed += perf_counter() - model_started_at
             reasoning = result.get("reasoning") or ""
@@ -375,6 +386,8 @@ class Agent:
         self.messages.append(message)
         self.last_reply = reply
         extra = {
+            "model": self.config.models.chat,
+            "zdr": self.zdr_required,
             "reasoning": reasoning or None,
             "actions": self.last_actions or None,
             "associative_matches": self._assoc_match_count or None,
@@ -417,7 +430,8 @@ class Agent:
         for t in reversed(history):
             u = t.get("usage")
             if u and u.get("in") is not None:
-                self._ctx_input_tokens = u["in"]
+                if t.get("model", self._default_chat_model) == self.config.models.chat:
+                    self._ctx_input_tokens = u["in"]
                 break
         self._truncated = truncated
 

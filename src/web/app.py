@@ -7,9 +7,12 @@ from typing import Iterator, Optional
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from src.service.chat import ChatService, ServiceError, UnknownAgent, UnknownChat, UnknownUser
+from src.config.favorites import FavoriteModelId, FavoritesError
+from src.core.sources.conversations import ChatMetadataError
+from src.providers.catalog import CatalogUnavailable
+from src.service.chat import AgentBusy, ChatService, ServiceError, UnknownAgent, UnknownChat, UnknownUser
 from src.utils.logger import get_logger
 
 logger = get_logger("web")
@@ -24,6 +27,11 @@ class LoginIn(BaseModel):
 
 class MessageIn(BaseModel):
     content: str
+
+
+class ModelIn(BaseModel):
+    model_id: FavoriteModelId
+    zdr: bool = Field(default=True, strict=True)
 
 
 def _sse(event: str, data, generation_id: str = "") -> str:
@@ -59,6 +67,21 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
     def _bad_request(request: Request, exc: ValueError):
         return _error(400, exc)
 
+    @app.exception_handler(CatalogUnavailable)
+    def _catalog_unavailable(request: Request, exc: CatalogUnavailable):
+        logger.warning("model catalog unavailable: %s", exc)
+        return _error(502, exc)
+
+    @app.exception_handler(FavoritesError)
+    @app.exception_handler(ChatMetadataError)
+    def _model_preferences_error(request: Request, exc: FavoritesError | ChatMetadataError):
+        logger.error("model preferences operation failed: %s", exc)
+        return _error(500, exc)
+
+    @app.exception_handler(AgentBusy)
+    def _agent_busy(request: Request, exc: AgentBusy):
+        return _error(409, exc)
+
     @app.middleware("http")
     async def no_cache(request: Request, call_next):
         response = await call_next(request)
@@ -86,6 +109,22 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
     def me(user_id: str = Depends(current_user)):
         return service.login(user_id)
 
+    @app.get("/api/models")
+    def list_models(q: str = "", zdr: bool = True, user_id: str = Depends(current_user)):
+        return service.list_models(user_id, q, zdr=zdr)
+
+    @app.get("/api/models/favorites")
+    def list_favorites(user_id: str = Depends(current_user)):
+        return service.list_favorite_models(user_id)
+
+    @app.post("/api/models/favorites")
+    def add_favorite(body: ModelIn, user_id: str = Depends(current_user)):
+        return service.add_favorite_model(user_id, body.model_id, zdr=body.zdr)
+
+    @app.delete("/api/models/favorites/{model_id:path}")
+    def remove_favorite(model_id: str, user_id: str = Depends(current_user)):
+        return service.remove_favorite_model(user_id, model_id)
+
     # ------------------------------------------------------------------ chats
 
     @app.get("/api/agents/{agent_id}/chats")
@@ -99,6 +138,12 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
     @app.get("/api/agents/{agent_id}/chats/{chat_id}")
     def get_chat(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):
         return service.get_chat(user_id, agent_id, chat_id)
+
+    @app.put("/api/agents/{agent_id}/chats/{chat_id}/model")
+    def set_chat_model(
+        agent_id: str, chat_id: str, body: ModelIn, user_id: str = Depends(current_user),
+    ):
+        return service.set_chat_model(user_id, agent_id, chat_id, body.model_id, zdr=body.zdr)
 
     @app.delete("/api/agents/{agent_id}/chats/{chat_id}", status_code=204)
     def delete_chat(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):
