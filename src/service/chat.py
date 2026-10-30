@@ -13,13 +13,15 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.agent.agent import Agent
 from src.config.favorites import ModelFavorites
-from src.config.loader import load_agent_config, load_user
+from src.config.loader import load_agent, load_agent_config, load_user
 from src.config.models import UserConfig
-from src.config.settings import CONFIG_DIR
+from src.config.settings import CONFIG_DIR, SPEECH_TO_TEXT
 from src.core.sources.conversations import ConversationsSource
 from src.core.sources.registry import SourceRegistry
 from src.providers.cancellation import CancellationToken, GenerationCancelled
 from src.providers.catalog import list_openrouter_models
+from src.providers.catalog import list_openrouter_transcription_models
+from src.providers.openrouter import OpenRouterProvider
 from src.utils.logger import get_logger
 
 logger = get_logger("service")
@@ -143,6 +145,16 @@ class ChatService:
             raise ValueError("model browsing is only available for the OpenRouter chat provider")
         return [model.model_dump() for model in list_openrouter_models(query, zdr=zdr)]
 
+    def list_transcription_models(self, user_id: str, query: str = "", *, zdr: bool = True) -> list[dict]:
+        """List OpenRouter speech-to-text models for the current user."""
+        user = self._user(user_id)
+        if user.provider.name != "openrouter":
+            raise ValueError("speech-to-text model browsing requires the OpenRouter chat provider")
+        return [
+            model.model_dump()
+            for model in list_openrouter_transcription_models(query, zdr=zdr)
+        ]
+
     def list_favorite_models(self, user_id: str) -> list[str]:
         """Return saved OpenRouter IDs, including favorites no longer in the ZDR catalog."""
         self._user(user_id)
@@ -239,6 +251,7 @@ class ChatService:
     def send(
         self, user_id: str, agent_id: str, chat_id: str, text: str,
         stream: Optional[bool] = None, attachments: Optional[list[dict]] = None,
+        transcription_model: Optional[str] = None,
     ) -> Iterator[ChatEvent]:
         """Send a user message to a chat and yield the reply as events.
 
@@ -248,6 +261,9 @@ class ChatService:
         """
         conversations = self._conversations(user_id, agent_id)
         attachments = [ChatAttachment.model_validate(item).model_dump() for item in (attachments or [])]
+        text, attachments = self._transcribe_audio(
+            user_id, agent_id, text, attachments, transcription_model,
+        )
         if not text.strip() and not attachments:
             raise ValueError("message is empty")
         slot = self._slot(user_id, agent_id)
@@ -279,6 +295,46 @@ class ChatService:
                 )
                 slot.worker.start()
         return self._events(run)
+
+    @staticmethod
+    def _transcription_text(transcription: str) -> str:
+        return f"[Audio transcription]\n{transcription}"
+
+    def _transcribe_audio(
+        self, user_id: str, agent_id: str, text: str, attachments: list[dict],
+        transcription_model: str | None = None,
+    ) -> tuple[str, list[dict]]:
+        audio = [attachment for attachment in attachments if attachment["modality"] == "audio"]
+        if not audio:
+            return text, attachments
+        resolved = load_agent(user_id, agent_id)
+        if resolved.provider_name != "openrouter":
+            raise ValueError("audio messages require an OpenRouter chat provider for speech-to-text")
+        transcriber = OpenRouterProvider(api_key=resolved.api_key)
+        transcripts = []
+        remaining = []
+        for attachment in attachments:
+            if attachment["modality"] != "audio":
+                remaining.append(attachment)
+                continue
+            try:
+                encoded = attachment["data_url"].split(",", 1)[1]
+            except IndexError as exc:
+                raise ValueError(f"invalid audio data for '{attachment['name']}'") from exc
+            transcript = transcriber.transcribe(
+                encoded,
+                attachment["format"],
+                model=transcription_model or SPEECH_TO_TEXT.model,
+                language=SPEECH_TO_TEXT.language,
+                zdr=SPEECH_TO_TEXT.zdr,
+            )
+            if transcript:
+                transcripts.append(transcript)
+        if transcripts:
+            text = "\n\n".join(part for part in [text.strip(), *(
+                self._transcription_text(transcript) for transcript in transcripts
+            )] if part)
+        return text, remaining
 
     @staticmethod
     def _events(run: _MessageRun) -> Iterator[ChatEvent]:

@@ -9,6 +9,7 @@ import httpx
 from src.providers.cancellation import CancellationToken, GenerationCancelled
 from src.providers.provider import LLMProvider, format_completion
 from src.providers.catalog import list_openrouter_models
+from src.providers.catalog import list_openrouter_transcription_models
 from src.providers.transport import post_chat, stream_chat
 from src.utils.logger import get_logger
 
@@ -99,6 +100,35 @@ class OpenRouterProvider(LLMProvider):
         matches = list_openrouter_models(model, zdr=False)
         selected = next((item for item in matches if item.id == model), None)
         return set(selected.input_modalities) if selected else set()
+
+    def transcribe(
+        self, audio_data: str, audio_format: str, *,
+        model: str, language: str | None = None, zdr: bool = True,
+    ) -> str:
+        """Transcribe base64 audio through OpenRouter's dedicated STT endpoint."""
+        if not any(item.id == model for item in list_openrouter_transcription_models("", zdr=zdr)):
+            raise RuntimeError(
+                f"speech-to-text model '{model}' is not available with the selected ZDR policy"
+            )
+        payload = {
+            "model": model,
+            "input_audio": {"data": audio_data, "format": audio_format},
+            "provider": {"zdr": zdr},
+        }
+        if language:
+            payload["language"] = language.split("-", 1)[0].lower()
+        response = requests.post(
+            "https://openrouter.ai/api/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=120,
+        )
+        if not response.ok:
+            _raise_openrouter_error(response.status_code, response.text)
+        text = response.json().get("text")
+        if not isinstance(text, str):
+            raise RuntimeError("OpenRouter speech-to-text returned no transcription text")
+        return text.strip()
 
     def invoke(self, messages: list[dict], model: str, stream=True, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None, *, zdr: bool = True):
         """

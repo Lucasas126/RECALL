@@ -15,6 +15,14 @@ class TavilyConfig(BaseModel):
     max_content_chars: int = Field(default=16000, ge=1000, le=100000, strict=True)
 
 
+class SpeechToTextConfig(BaseModel):
+    """OpenRouter speech-to-text settings."""
+
+    model: str = Field(default="openai/whisper-large-v3-turbo", min_length=1)
+    zdr: bool = Field(default=True, strict=True)
+    language: Optional[str] = Field(default=None, pattern=r"^[a-z]{2}(?:-[A-Z]{2})?$")
+
+
 class ProviderConfig(BaseModel):
     name: str
     api_key: Optional[str] = None  # name of the env var holding the actual key (not needed for local providers)

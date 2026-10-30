@@ -38,14 +38,38 @@ through the environment variable named by `telegram.allowed_users_env` in
 `123456789=user-a,987654321=user-c`. Messages from IDs that are not listed are
 ignored completely. The bot token remains in `TELEGRAM_BOT_TOKEN`.
 
-The initial Telegram UX is English-only for now and provides `/start`, `/newchat`
-and `/selectmodel`.
+The initial Telegram UX is English-only for now and provides `/help`,
+`/newchat`, `/selectmodel`, `/selectagent`, `/agent`, `/model`, `/selectstt`,
+and `/stt`. Telegram's native command menu is populated at startup, and
+`/help` prints the same command list in the chat.
+Telegram creates a chat automatically on the first message after the bot
+restarts, and after one hour without a user message. The first assistant
+message in each automatically created chat begins with `New chat started`.
 Model selection uses Telegram's regular reply keyboard: each option is sent as
 an ordinary text message, the keyboard is removed after selection, and the
 choice is persisted per chat. Results are ordered by input price, then output
 price, with ten models per page and `Previous`/`Next` navigation.
-Text messages are acknowledged while the channel integration is validated; LLM
-message delivery is the next implementation phase.
+Telegram text, image, audio, voice, video, and supported media-document
+messages are sent through `ChatService` with real provider streaming. Sending
+another message to the active chat steers the generation through the service's
+normal cancellation and continuation behavior. `/selectagent` changes the
+active agent and requires `/newchat` before sending to that agent.
+Thinking tokens are streamed into a collapsible Telegram expandable blockquote,
+while the answer is rendered with Telegram entities converted from Markdown.
+
+### speech-to-text
+
+Audio is always transcribed before the chat model is invoked. RECALL uses
+OpenRouter's `/api/v1/audio/transcriptions` endpoint with the configured model
+and routing policy, then stores the transcription as text in the conversation.
+This keeps later model changes independent of whether the selected chat model
+supports audio input.
+
+The default STT model is `openai/whisper-large-v3-turbo` with ZDR required.
+The configured model must have an active ZDR transcription endpoint when
+`speech_to_text.zdr` is `true`; otherwise audio requests fail explicitly.
+OpenRouter's current transcription catalog can be queried through
+`GET /api/speech-to-text/models?q=<query>&zdr=true`.
 
 Run the polling process locally with `uv run python run_telegram.py`.
 

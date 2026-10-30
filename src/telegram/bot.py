@@ -5,11 +5,12 @@ import base64
 import mimetypes
 import os
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import telegramify_markdown
-from telegram import MessageEntity, ReplyKeyboardMarkup, ReplyKeyboardRemove, Update
+from telegram import BotCommand, MessageEntity, ReplyKeyboardMarkup, ReplyKeyboardRemove, Update
 from telegram.error import TelegramError
 from telegram.ext import (
     Application,
@@ -20,7 +21,7 @@ from telegram.ext import (
     filters,
 )
 
-from src.config.settings import TELEGRAM_ALLOWED_USERS_ENV
+from src.config.settings import SPEECH_TO_TEXT, TELEGRAM_ALLOWED_USERS_ENV
 from src.providers.catalog import CatalogUnavailable
 from src.service.chat import ChatEvent, ChatService, ServiceError
 from src.utils.logger import get_logger
@@ -29,8 +30,11 @@ logger = get_logger("telegram")
 _MODELS_PER_PAGE = 10
 _PREVIOUS_PAGE = "⬅️ Previous"
 _NEXT_PAGE = "➡️ Next"
+_STT_PREVIOUS_PAGE = "⬅️ Previous STT"
+_STT_NEXT_PAGE = "➡️ Next STT"
 _MAX_TELEGRAM_FILE_BYTES = 22_000_000
 _MAX_TELEGRAM_MESSAGE_CHARS = 4_090
+_CHAT_IDLE_TIMEOUT = timedelta(hours=1)
 
 
 @dataclass
@@ -40,6 +44,9 @@ class TelegramSession:
     chat_id: str | None = None
     model_options: dict[str, str] = field(default_factory=dict)
     agent_options: dict[str, str] = field(default_factory=dict)
+    stt_model: str = SPEECH_TO_TEXT.model
+    last_message_at: datetime | None = None
+    pending_new_chat_notice: bool = False
 
 
 @dataclass
@@ -80,16 +87,22 @@ async def _unauthorized(update: Update) -> None:
         logger.info("Ignoring unauthorized Telegram user_id=%s", user.id)
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state: TelegramBotState = context.application.bot_data["state"]
-    session = _session(update, state)
-    if session is None:
+    if _session(update, state) is None:
         await _unauthorized(update)
         return
     await update.effective_message.reply_text(
-        "RECALL is ready.\n\n"
-        "Use /newchat to start a conversation and /selectmodel to choose a model.\n"
-        "This phase is currently focused on testing the Telegram flow."
+        "Available commands:\n\n"
+        "/newchat — Start a new chat for the current agent\n"
+        "/selectagent — Choose the active agent\n"
+        "/agent — Show the active agent\n"
+        "/selectmodel — Browse models, prices, and pages\n"
+        "/model — Show the model selected for the current chat\n"
+        "/selectstt — Choose the speech-to-text model\n"
+        "/stt — Show the current speech-to-text model\n"
+        "/help — Show this help\n\n"
+        "You can send text, images, audio, voice messages, and video directly."
     )
 
 
@@ -101,16 +114,40 @@ async def new_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     chat = state.service.create_chat(session.user_id, session.agent_id)
     session.chat_id = chat["id"]
+    session.last_message_at = datetime.now(timezone.utc)
+    session.pending_new_chat_notice = True
     session.model_options.clear()
     session.agent_options.clear()
     context.user_data.pop("model_options", None)
     context.user_data.pop("model_catalog", None)
     context.user_data.pop("model_page", None)
     context.user_data.pop("agent_options", None)
+    context.user_data.pop("stt_options", None)
+    context.user_data.pop("stt_catalog", None)
+    context.user_data.pop("stt_page", None)
     await update.effective_message.reply_text(
         f"New chat created: {chat['id']}\n"
         "You can now choose a model or send your first message."
     )
+
+
+def _prepare_message_session(session: TelegramSession, service: ChatService) -> bool:
+    now = datetime.now(timezone.utc)
+    starts_new_chat = (
+        session.chat_id is None
+        or (
+            session.last_message_at is not None
+            and now - session.last_message_at > _CHAT_IDLE_TIMEOUT
+        )
+    )
+    if starts_new_chat:
+        chat = service.create_chat(session.user_id, session.agent_id)
+        session.chat_id = chat["id"]
+        session.pending_new_chat_notice = True
+    session.last_message_at = now
+    notice = session.pending_new_chat_notice or starts_new_chat
+    session.pending_new_chat_notice = False
+    return notice
 
 
 def _price_key(value: str | None) -> tuple[int, Decimal]:
@@ -136,6 +173,18 @@ def _sort_models(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _utf16_len(text: str) -> int:
     return len(text.encode("utf-16-le")) // 2
+
+
+def _audio_format(mime_type: str) -> str:
+    return {
+        "audio/ogg": "ogg",
+        "audio/mpeg": "mp3",
+        "audio/mp4": "m4a",
+        "audio/aac": "aac",
+        "audio/flac": "flac",
+        "audio/wav": "wav",
+        "audio/webm": "webm",
+    }.get(mime_type, mime_type.split("/", 1)[-1].split(";")[0])
 
 
 def _convert_markdown(text: str) -> tuple[str, list[MessageEntity]]:
@@ -170,21 +219,24 @@ def _clip_entities(text: str, entities: list[MessageEntity]) -> list[MessageEnti
 
 
 def _generation_message(
-    thinking: str, response: str,
+    thinking: str, response: str, notice: str = "",
 ) -> tuple[str, list[MessageEntity]]:
     """Build a Telegram-formatted message with collapsible thinking."""
+    notice_plain, notice_entities = _convert_markdown(notice) if notice else ("", [])
     thinking_plain, thinking_entities = _convert_markdown(thinking) if thinking.strip() else ("", [])
     response_plain, response_entities = _convert_markdown(response) if response.strip() else ("", [])
-    text = thinking_plain + response_plain
+    text = notice_plain + thinking_plain + response_plain
     entities: list[MessageEntity] = []
+    entities.extend(notice_entities)
     if thinking_plain:
         entities.append(MessageEntity(
             type=MessageEntity.EXPANDABLE_BLOCKQUOTE,
-            offset=0,
+            offset=_utf16_len(notice_plain),
             length=_utf16_len(thinking_plain),
         ))
-        entities.extend(thinking_entities)
-    entities.extend(_shift_entities(response_entities, _utf16_len(thinking_plain)))
+        entities.extend(_shift_entities(thinking_entities, _utf16_len(notice_plain)))
+    response_offset = _utf16_len(notice_plain) + _utf16_len(thinking_plain)
+    entities.extend(_shift_entities(response_entities, response_offset))
     text = text[:_MAX_TELEGRAM_MESSAGE_CHARS]
     return text, _clip_entities(text, entities)
 
@@ -352,6 +404,116 @@ async def show_model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     )
 
 
+async def select_stt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state: TelegramBotState = context.application.bot_data["state"]
+    session = _session(update, state)
+    if session is None:
+        await _unauthorized(update)
+        return
+    query = " ".join(context.args).strip()
+    try:
+        models = state.service.list_transcription_models(session.user_id, query, zdr=True)
+    except (CatalogUnavailable, ServiceError, ValueError) as exc:
+        logger.warning("Could not load Telegram STT models: %s", exc)
+        await update.effective_message.reply_text(
+            "I cannot load speech-to-text models right now. Please try again later."
+        )
+        return
+    if not models:
+        await update.effective_message.reply_text(
+            "No ZDR speech-to-text models found. Try /selectstt followed by a search term."
+        )
+        return
+    context.user_data["stt_catalog"] = models
+    context.user_data["stt_page"] = 0
+    await _show_stt_page(update, context, session)
+
+
+async def _show_stt_page(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, session: TelegramSession,
+) -> None:
+    models = context.user_data["stt_catalog"]
+    page = context.user_data["stt_page"]
+    page_count = (len(models) + _MODELS_PER_PAGE - 1) // _MODELS_PER_PAGE
+    page = max(0, min(page, page_count - 1))
+    context.user_data["stt_page"] = page
+    page_models = models[page * _MODELS_PER_PAGE:(page + 1) * _MODELS_PER_PAGE]
+    options: dict[str, str] = {}
+    keyboard: list[list[str]] = []
+    for index, model in enumerate(page_models, page * _MODELS_PER_PAGE + 1):
+        label = (
+            f"{'✅ ' if model['id'] == session.stt_model else ''}"
+            f"{index}. {model['name'][:34]} | "
+            f"${model.get('pricing_prompt') or 'n/d'} / 1M min"
+        )
+        options[label] = model["id"]
+        keyboard.append([label])
+    navigation = []
+    if page > 0:
+        navigation.append(_STT_PREVIOUS_PAGE)
+    if page < page_count - 1:
+        navigation.append(_STT_NEXT_PAGE)
+    if navigation:
+        keyboard.append(navigation)
+    context.user_data["stt_options"] = options
+    await update.effective_message.reply_text(
+        f"Current STT model: {session.stt_model}\n\n"
+        f"Page {page + 1}/{page_count}. {len(models)} ZDR models available.\n"
+        "Choose a speech-to-text model. Prices are USD per 1 million input tokens:",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard, resize_keyboard=True, one_time_keyboard=True,
+        ),
+    )
+
+
+async def stt_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    action = (update.effective_message.text or "").strip()
+    if action not in {_STT_PREVIOUS_PAGE, _STT_NEXT_PAGE}:
+        return False
+    if not context.user_data.get("stt_catalog"):
+        return False
+    page = context.user_data.get("stt_page", 0)
+    context.user_data["stt_page"] = page + (1 if action == _STT_NEXT_PAGE else -1)
+    session = _session(update, context.application.bot_data["state"])
+    if session is None:
+        await _unauthorized(update)
+        return True
+    await _show_stt_page(update, context, session)
+    return True
+
+
+async def stt_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    selected = (update.effective_message.text or "").strip()
+    model_id = context.user_data.get("stt_options", {}).get(selected)
+    if model_id is None:
+        return False
+    session = _session(update, context.application.bot_data["state"])
+    if session is None:
+        await _unauthorized(update)
+        return True
+    session.stt_model = model_id
+    context.user_data.pop("stt_options", None)
+    context.user_data.pop("stt_catalog", None)
+    context.user_data.pop("stt_page", None)
+    await update.effective_message.reply_text(
+        f"✅ STT model selected:\n{model_id}\n\n"
+        "ZDR: enabled. This model will transcribe future audio messages.",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    return True
+
+
+async def show_stt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state: TelegramBotState = context.application.bot_data["state"]
+    session = _session(update, state)
+    if session is None:
+        await _unauthorized(update)
+        return
+    await update.effective_message.reply_text(
+        f"Current STT model:\n{session.stt_model}\n\nZDR: enabled"
+    )
+
+
 async def select_agent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state: TelegramBotState = context.application.bot_data["state"]
     session = _session(update, state)
@@ -461,7 +623,7 @@ async def _download_attachment(message, bot) -> dict:
         "modality": modality,
         "name": name,
         "mime_type": mime_type,
-        "format": extension.removeprefix(".").split(";")[0],
+        "format": _audio_format(mime_type) if modality == "audio" else extension.removeprefix(".").split(";")[0],
         "data_url": f"data:{mime_type};base64,{base64.b64encode(data).decode('ascii')}",
     }
 
@@ -476,7 +638,14 @@ async def _next_event(events) -> tuple[bool, ChatEvent | None]:
     return await asyncio.to_thread(take_next)
 
 
-async def _send_generation(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, attachments: list[dict]) -> None:
+async def _send_generation(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    text: str,
+    attachments: list[dict],
+    *,
+    new_chat_notice: bool = False,
+) -> None:
     state: TelegramBotState = context.application.bot_data["state"]
     session = _session(update, state)
     if session is None or session.chat_id is None:
@@ -486,12 +655,13 @@ async def _send_generation(update: Update, context: ContextTypes.DEFAULT_TYPE, t
     reply = await update.effective_message.reply_text("…")
     answer = ""
     thinking = ""
+    notice = "**_New chat started_**\n\n" if new_chat_notice else ""
     last_sent = ""
     last_edit = 0.0
     try:
         events = state.service.send(
             session.user_id, session.agent_id, session.chat_id, text,
-            stream=True, attachments=attachments,
+            stream=True, attachments=attachments, transcription_model=session.stt_model,
         )
         while True:
             has_event, event = await _next_event(events)
@@ -502,7 +672,7 @@ async def _send_generation(update: Update, context: ContextTypes.DEFAULT_TYPE, t
             if event.kind == "text":
                 answer += event.text
                 now = asyncio.get_running_loop().time()
-                preview, entities = _generation_message(thinking, answer)
+                preview, entities = _generation_message(thinking, answer, notice)
                 if now - last_edit >= 0.35 and preview and preview != last_sent:
                     await reply.edit_text(preview, entities=entities)
                     last_sent = preview
@@ -510,14 +680,14 @@ async def _send_generation(update: Update, context: ContextTypes.DEFAULT_TYPE, t
             elif event.kind == "reasoning":
                 thinking += event.text
                 now = asyncio.get_running_loop().time()
-                preview, entities = _generation_message(thinking, answer)
+                preview, entities = _generation_message(thinking, answer, notice)
                 if now - last_edit >= 0.35 and preview and preview != last_sent:
                     await reply.edit_text(preview, entities=entities)
                     last_sent = preview
                     last_edit = now
             elif event.kind == "interrupted":
                 answer = event.text
-                final_text, entities = _generation_message(thinking, answer)
+                final_text, entities = _generation_message(thinking, answer, notice)
                 interrupted = final_text or "(generation interrupted)"
                 suffix = "\n\n[Interrupted — your latest message is being processed.]"
                 available = _MAX_TELEGRAM_MESSAGE_CHARS - len(suffix)
@@ -528,7 +698,7 @@ async def _send_generation(update: Update, context: ContextTypes.DEFAULT_TYPE, t
                 return
         if not answer:
             answer = "(The model returned no text.)"
-        first_chunk, entities = _generation_message(thinking, answer)
+        first_chunk, entities = _generation_message(thinking, answer, notice)
         if first_chunk != last_sent:
             await reply.edit_text(first_chunk, entities=entities)
         if len(answer) > _MAX_TELEGRAM_MESSAGE_CHARS:
@@ -552,11 +722,21 @@ async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     if await agent_selected(update, context):
         return
+    if await stt_navigation(update, context):
+        return
+    if await stt_selected(update, context):
+        return
     if await model_page(update, context):
         return
     if await model_selected(update, context):
         return
-    asyncio.create_task(_send_generation(update, context, update.effective_message.text or "", []))
+    new_chat_notice = _prepare_message_session(session, state.service)
+    asyncio.create_task(
+        _send_generation(
+            update, context, update.effective_message.text or "", [],
+            new_chat_notice=new_chat_notice,
+        )
+    )
 
 
 async def media_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -568,8 +748,14 @@ async def media_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     try:
         attachment = await _download_attachment(update.effective_message, context.bot)
         text = update.effective_message.caption or ""
+        new_chat_notice = _prepare_message_session(session, state.service)
         await update.effective_message.reply_text("Attachment received. Generating a response...")
-        asyncio.create_task(_send_generation(update, context, text, [attachment]))
+        asyncio.create_task(
+            _send_generation(
+                update, context, text, [attachment],
+                new_chat_notice=new_chat_notice,
+            )
+        )
     except (TelegramError, ValueError, OSError) as exc:
         await update.effective_message.reply_text(f"Attachment rejected: {exc}")
 
@@ -593,10 +779,26 @@ def build_application(token: str, service: ChatService | None = None) -> Applica
 
     application = ApplicationBuilder().token(token).concurrent_updates(True).build()
     application.bot_data["state"] = state
-    application.add_handler(CommandHandler("start", start))
+    application.bot_data["commands"] = [
+        BotCommand("newchat", "Start a new chat"),
+        BotCommand("selectagent", "Choose the active agent"),
+        BotCommand("agent", "Show the active agent"),
+        BotCommand("selectmodel", "Browse models and prices"),
+        BotCommand("model", "Show the current model"),
+        BotCommand("selectstt", "Choose the STT model"),
+        BotCommand("stt", "Show the current STT model"),
+        BotCommand("help", "Show available commands"),
+    ]
+    async def set_commands(application: Application) -> None:
+        await application.bot.set_my_commands(application.bot_data["commands"])
+
+    application.post_init = set_commands
+    application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("newchat", new_chat))
     application.add_handler(CommandHandler("selectmodel", select_model))
     application.add_handler(CommandHandler("model", show_model))
+    application.add_handler(CommandHandler("selectstt", select_stt))
+    application.add_handler(CommandHandler("stt", show_stt))
     application.add_handler(CommandHandler("selectagent", select_agent))
     application.add_handler(CommandHandler("agent", show_agent))
     application.add_handler(

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Iterable
 
 import httpx
@@ -28,6 +28,15 @@ class OpenRouterModel(BaseModel):
     pricing: ModelPricing = Field(default_factory=ModelPricing)
     input_modalities: list[str] = Field(default_factory=list)
     parameter_routes: list[list[str]] = Field(default_factory=list)
+
+
+class OpenRouterTranscriptionModel(BaseModel):
+    """An OpenRouter model that can return speech transcriptions."""
+
+    id: str
+    name: str
+    pricing_prompt: str | None = None
+    zdr_providers: list[str] = Field(default_factory=list)
 
 
 class _Architecture(BaseModel):
@@ -125,3 +134,61 @@ def list_openrouter_models(query: str = "", *, zdr: bool = True) -> list[OpenRou
             ),
         ))
     return sorted(result, key=lambda model: (model.name.casefold(), model.id))
+
+
+def list_openrouter_transcription_models(
+    query: str = "", *, zdr: bool = True,
+) -> list[OpenRouterTranscriptionModel]:
+    """List OpenRouter speech-to-text models, optionally requiring active ZDR routes."""
+    try:
+        with httpx.Client(timeout=30) as client:
+            response = client.get(
+                "https://openrouter.ai/api/v1/models",
+                params={"output_modalities": "transcription"},
+            )
+            response.raise_for_status()
+            models = _ModelsResponse.model_validate(response.json()).data
+            endpoints_response = client.get("https://openrouter.ai/api/v1/endpoints/zdr")
+            endpoints_response.raise_for_status()
+            endpoints = _EndpointsResponse.model_validate(endpoints_response.json()).data
+    except httpx.HTTPStatusError as exc:
+        raise CatalogUnavailable(
+            f"OpenRouter transcription catalog request failed (HTTP {exc.response.status_code}); retry later."
+        ) from exc
+    except httpx.RequestError as exc:
+        raise CatalogUnavailable("Could not reach the OpenRouter transcription catalog; retry later.") from exc
+    except ValueError as exc:
+        raise CatalogUnavailable("OpenRouter returned an invalid transcription catalog; retry later.") from exc
+
+    routes: dict[str, list[_Endpoint]] = {}
+    for endpoint in endpoints:
+        if endpoint.status == 0:
+            routes.setdefault(endpoint.model_id, []).append(endpoint)
+    needle = query.strip().casefold()
+    result = []
+    for model in models:
+        model_routes = routes.get(model.id, [])
+        if (
+            (zdr and not model_routes)
+            or (needle and needle not in model.id.casefold() and needle not in model.name.casefold())
+        ):
+            continue
+        prices = [endpoint.pricing for endpoint in model_routes] if zdr else [model.pricing]
+        result.append(OpenRouterTranscriptionModel(
+            id=model.id,
+            name=model.name,
+            pricing_prompt=_price_per_million(
+                price.prompt if price is not None else None for price in prices
+            ),
+            zdr_providers=sorted({endpoint.provider_name for endpoint in model_routes}),
+        ))
+    return sorted(result, key=lambda model: (_price_key(model.pricing_prompt), model.name.casefold(), model.id))
+
+
+def _price_key(value: str | None) -> tuple[int, Decimal]:
+    if value is None:
+        return (1, Decimal("Infinity"))
+    try:
+        return (0, Decimal(value))
+    except (InvalidOperation, ValueError):
+        return (1, Decimal("Infinity"))

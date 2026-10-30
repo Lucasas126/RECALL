@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from src.config.models import TavilyConfig
+from src.config.models import SpeechToTextConfig, TavilyConfig
 
 """Framework-level settings, loaded from `settings.yaml` at the repo root.
 
@@ -23,6 +23,7 @@ _agent = _raw["agent"]
 _assoc = _raw["associative_memory"]
 _web = _raw["web"]
 _telegram = _raw["telegram"]
+_speech_to_text = _raw["speech_to_text"]
 
 # ------------------------------------------------------------------ paths
 CONFIG_DIR = Path(_paths["config_dir"])  # user & agent yaml configs
@@ -44,6 +45,9 @@ WEB_PORT = _web["port"]                          # port the web ui listens on
 
 # ------------------------------------------------------------------ telegram
 TELEGRAM_ALLOWED_USERS_ENV = _telegram["allowed_users_env"]
+
+# ------------------------------------------------------------------ speech to text
+SPEECH_TO_TEXT = SpeechToTextConfig.model_validate(_speech_to_text)
 
 # ------------------------------------------------------------------ external web access
 TAVILY = TavilyConfig.model_validate(_raw.get("tavily", {}))

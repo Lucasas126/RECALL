@@ -21,6 +21,11 @@ web:
 telegram:
   allowed_users_env: TELEGRAM_ALLOWED_USERS  # comma-separated telegram_id=recall_user_id entries
 
+speech_to_text:
+  model: openai/whisper-large-v3-turbo
+  zdr: true
+  language: null  # optional ISO-639-1 code; null enables provider auto-detection
+
 tavily:
   api_key: TAVILY_API_KEY   # shared env var NAME, never the secret; unset = no web access
   timeout_seconds: 30

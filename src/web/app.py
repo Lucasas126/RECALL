@@ -122,6 +122,12 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
     def list_models(q: str = "", zdr: bool = True, user_id: str = Depends(current_user)):
         return service.list_models(user_id, q, zdr=zdr)
 
+    @app.get("/api/speech-to-text/models")
+    def list_speech_to_text_models(
+        q: str = "", zdr: bool = True, user_id: str = Depends(current_user),
+    ):
+        return service.list_transcription_models(user_id, q, zdr=zdr)
+
     @app.get("/api/models/favorites")
     def list_favorites(user_id: str = Depends(current_user)):
         return service.list_favorite_models(user_id)

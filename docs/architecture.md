@@ -46,13 +46,15 @@ cli (cli.py, direct) ─┘
 - `send` yields `ChatEvent`s (`reasoning`, `text`, `tool`, `usage`, `interrupted`, and `memory` when associative recall finds matches), not channel formats. the `memory` event carries the number of matched fragments; adapters decide how to display it. a telegram adapter would call `send(..., stream=False)`, deliver the `text` event as a message and handle `interrupted` without claiming a completed answer. rendering and transport stay in the adapter.
 - one `Agent` is kept per (user, agent) and switches between that agent's chats with `open_chat`; execution on an agent is serialized, but a new message can interrupt its active reply to the same chat.
 
-status: implemented for the web channel; the cli still uses `Agent` directly.
+status: implemented for the web and Telegram channels; the cli still uses `Agent` directly.
 
 The web composer sends image, audio and video attachments as validated
 OpenAI-compatible content parts. Providers expose declared input modalities;
 unsupported attachments are rejected before model invocation with a message
-localized using the user's `language` setting. Audio is direct model input;
-speech-to-text fallback is not part of the current implementation.
+localized using the user's `language` setting. Audio is transcribed through
+the configured OpenRouter speech-to-text model before the chat model runs, so
+the resulting conversation turn is text-only and can be reopened with any
+later chat model.
 
 ### model catalog and chat selection
 
@@ -104,9 +106,10 @@ same-chat scheduling, not for resuming arbitrary older chats. Committing a final
 answer and accepting cancellation are mutually exclusive: a message arriving
 after commit starts a normal turn, not an interruption of an already saved reply.
 
-Status: service steering, web integration and interruption metadata in `get_chat`
-are implemented. Telegram remains planned; it can reuse this service without
-changing the agent.
+Status: service steering, web integration, Telegram integration and interruption
+metadata in `get_chat` are implemented. Telegram uses the same service events,
+including streaming text, steering cancellation, and validated image, audio
+and video attachments.
 
 ### web steering
 
