@@ -24,6 +24,20 @@ marker when using it as context, including after reopening the chat.
 and queued chats are protected from empty-chat pruning. See
 [generation cancellation](architecture.md#generation-cancellation).
 
+Each chat may also have a `<chat_id>.model.json` sidecar, managed only through
+`ConversationsSource.model_selection` and `set_model`. It stores
+`{"provider": "openrouter", "id": "vendor/model", "zdr": true}` separately from message
+history, so selecting a model does not add a turn or create another chat.
+Missing metadata means the agent's configured default with ZDR required;
+old sidecars without `zdr` also default to true. Explicit false is per chat
+and persists across restarts. Invalid metadata is an
+explicit error, not a fallback. Writes are atomic and use the source's path
+validation. Deleting/pruning a chat removes its sidecar. These `.json` files are
+not indexed by the default `txt`, `md`, `jsonl` extension filter.
+New assistant turns also record their model ID, so usage from a different
+model is not reused as the current model's input-token count.
+See [per-chat model selection](config.md#choosing-a-model-per-chat).
+
 sources are configurable per agent — an agent may have no obsidian, or several user folders.
 
 ## addressing

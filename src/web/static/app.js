@@ -4,6 +4,7 @@ const state = {
   requests: new Set(), latest: null, sendQueue: Promise.resolve(),
   model: null, modelCatalog: null, modelCatalogZdr: null, modelFavorites: [],
   modelBusy: false, modelLoading: false, modelRequest: 0,
+  modelFavoritesOnly: false,
 };
 // thinking blocks start open (streamed live); closing one keeps them closed from then on
 const prefs = { thinkingOpen: localStorage.getItem("thinkingOpen") !== "false" };
@@ -193,6 +194,13 @@ function updateModelControls() {
   $("model-close").disabled = state.modelBusy;
   $("model-zdr").disabled = state.modelBusy || state.modelLoading;
   $("model-zdr-warning").hidden = $("model-zdr").checked;
+  $("model-favorites-only").setAttribute("aria-pressed", String(state.modelFavoritesOnly));
+  $("model-favorites-only").textContent = state.modelFavoritesOnly ? "\u2605" : "\u2606";
+  $("model-favorites-only").title = state.modelFavoritesOnly ? "Show all models" : "Show favorites only";
+  const activeFilters = ["model-tools", "model-images", "model-reasoning"]
+    .filter((id) => $(id).checked).length;
+  $("model-filters-label").textContent = activeFilters ? `Filters (${activeFilters})` : "Filters";
+  $("model-filters").dataset.active = String(activeFilters > 0);
 }
 
 function compareModels(a, b, order, favorites) {
@@ -245,7 +253,7 @@ function renderModelList() {
     reasoning: $("model-reasoning").checked,
   };
   const matches = [...models.values()].filter((model) =>
-    (!$("model-favorites-only").checked || saved.has(model.id))
+    (!state.modelFavoritesOnly || saved.has(model.id))
     && matchesCapabilities(model, capabilities)
     && (!query || model.id.toLocaleLowerCase().includes(query) || model.name.toLocaleLowerCase().includes(query))
   ).sort((a, b) => compareModels(a, b, $("model-sort").value, saved));
@@ -307,7 +315,7 @@ async function refreshModels(initial = false) {
     state.modelCatalog = models;
     state.modelCatalogZdr = zdr;
     state.modelFavorites = favorites;
-    if (initial) $("model-favorites-only").checked = favorites.length > 0;
+    if (initial) state.modelFavoritesOnly = favorites.length > 0;
   } catch (err) {
     if (session !== state.session || request !== state.modelRequest) return;
     state.modelCatalog = null;
@@ -377,7 +385,9 @@ $("model-picker").addEventListener("click", () => {
   $("model-search").value = "";
   $("model-error").textContent = "";
   $("model-zdr").checked = true;
-  $("model-favorites-only").checked = state.modelFavorites.length > 0;
+  state.modelFavoritesOnly = state.modelFavorites.length > 0;
+  $("model-filters").open = false;
+  $("model-info").open = false;
   $("model-dialog").showModal();
   $("model-search").focus();
   if (!state.modelCatalog || state.modelCatalogZdr !== true || state.modelLoading) refreshModels(true);
@@ -389,7 +399,10 @@ $("model-dialog").addEventListener("cancel", (event) => {
 });
 $("model-refresh").addEventListener("click", () => refreshModels());
 $("model-search").addEventListener("input", renderModelList);
-$("model-favorites-only").addEventListener("change", renderModelList);
+$("model-favorites-only").addEventListener("click", () => {
+  state.modelFavoritesOnly = !state.modelFavoritesOnly;
+  renderModelList();
+});
 $("model-sort").addEventListener("change", renderModelList);
 for (const id of ["model-tools", "model-images", "model-reasoning"]) {
   $(id).addEventListener("change", renderModelList);
@@ -428,6 +441,7 @@ function resetStreams() {
   $("model-sort").value = "favorites";
   for (const id of ["model-tools", "model-images", "model-reasoning"]) $(id).checked = false;
   state.modelFavorites = [];
+  state.modelFavoritesOnly = false;
   state.modelBusy = false;
   state.modelLoading = false;
   state.modelRequest++;

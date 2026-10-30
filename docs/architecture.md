@@ -48,6 +48,24 @@ cli (cli.py, direct) ─┘
 
 status: implemented for the web channel; the cli still uses `Agent` directly.
 
+### model catalog and chat selection
+
+The provider layer fetches OpenRouter's public model and ZDR endpoint catalogs;
+`ChatService` scopes catalog access and persistent favorites to the current
+user. The web channel exposes these operations as HTTP and a searchable model
+selector. Every OpenRouter chat inference request independently receives the
+chat's ZDR routing preference, including auxiliary memory queries and transport
+retries. ZDR is required unless that chat explicitly opted out during model
+selection; the selector resets its filter to checked each time it opens.
+
+Model selection is a chat override stored through `ConversationsSource`, not
+a mutation of the agent YAML or a direct filesystem operation in the channel.
+The service validates model availability and rejects changes while its agent
+has active/queued work. Its cached agent is rebuilt lazily when the current
+chat's selection changes. `Agent.open_chat` restores each chat's override (or
+the configured default), so other chats and CLI reopening behave consistently.
+See [model selection and favorites](config.md#choosing-a-model-per-chat).
+
 ### channel-neutral steering
 
 `ChatService.send` validates and schedules immediately. A transient worker per
@@ -154,7 +172,12 @@ Focused regression checks (no configured providers or private data required):
 ```shell
 uv run python -m unittest discover -s tests -p "test_*.py" -v
 node --check src/web/static/app.js
+node --test tests/test_model_sorting.cjs
 ```
+
+The Node checks cover model ordering, capability matching and selector state
+(favorites toggle, active-filter counts, collapsed filters and session reset).
+Keyboard navigation and responsive layout still require a browser check.
 
 ## first approach: no mcp
 

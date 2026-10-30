@@ -29,6 +29,150 @@ provider:
 
 api keys never live in yaml. agents inherit their owner's provider; they only pick model names, never keys.
 
+### openrouter model catalog and zero data retention
+
+OpenRouter chat requests default to `provider: {"zdr": true}`. This applies
+to streaming, non-streaming, transport retries and auxiliary chat calls such as
+associative-memory query generation. OpenRouter must reject requests with no
+eligible ZDR route; RECALL never relaxes it automatically after a failure.
+A chat can explicitly opt out by selecting a model with the selector's ZDR
+checkbox unchecked, which persists `zdr: false` for that chat and sends
+`provider: {"zdr": false}`. The flag is passed per request, including auxiliary
+queries and retries; it is not mutable state shared by providers or chats.
+New chats and old metadata without the flag still require ZDR. OpenRouter
+account/guardrail policies can still require ZDR even when a chat opts out.
+Ollama accepts but ignores this routing preference; embeddings are unchanged.
+
+The web backend exposes `GET /api/models?q=<name-or-id>&zdr=true` for the current user.
+It is available only when that user's chat provider is OpenRouter. It fetches
+the public `/api/v1/models` and `/api/v1/endpoints/zdr` catalogs without sending
+credentials, conversation content or the search term to OpenRouter. Results
+contain `id`, `name`, `description`, sorted, deduplicated `zdr_providers`, and
+`pricing: {"prompt": "0.1", "completion": "0.5"}`.
+Prices are decimal strings in **USD per million input/output tokens**,
+calculated independently as the minimum known nonnegative base price among
+that model's active ZDR routes when `zdr=true`, not an unrestricted cheaper route.
+With `zdr=false`, prices come from the public model catalog's base pricing.
+Missing or negative (unknown/dynamic) upstream prices become `null`, displayed
+as unavailable rather than free. Zero is a valid free price. The selector
+shows both rates with a "from" label, including in the favorites view.
+These are indicative base rates, not a quote: routing, context-length tiers,
+caching, account discounts and additional charges can change the final cost.
+Only text-output models are returned, sorted by name. By default, an active
+(`status: 0`) ZDR endpoint is also required; `zdr=false` explicitly includes
+models without one. `zdr_providers` always describes known active ZDR routes,
+not the actual route a later request will use. Search matches model names or IDs, case-insensitively.
+An empty result is valid; failed or invalid upstream responses produce an
+explicit HTTP 502, never an unfiltered fallback. The catalog is fetched on
+each request and describes public routes, not account-specific availability,
+credits, access or a guarantee that a route will remain available.
+
+ZDR here means [OpenRouter's policy](https://openrouter.ai/docs/guides/features/zdr):
+it permits in-memory prompt caching and includes legal/CSAM retention exceptions.
+It is not a blanket no-retention guarantee for RECALL, local history/logs,
+embeddings or external tools such as Tavily. No OpenRouter plugins are enabled
+by this integration.
+
+### choosing a model per chat
+
+For OpenRouter users, the web chat header opens a model selector with name/ID
+search, ZDR provider names and a Refresh button. A star beside the search
+field toggles Favorites only; its filled/highlighted state means the filter
+is active. ZDR remains visible, and capability checkboxes live in the collapsed
+**Filters** disclosure with an active-filter count. Closing it keeps filters
+applied; each selector opening collapses it again. **Information** holds the
+longer policy/capability notes; the non-ZDR retention warning remains visible
+whenever ZDR is unchecked. The favorites toggle supports Enter/Space and exposes
+its pressed state to assistive technology; both disclosures use native keyboard
+controls.
+The **ZDR only** checkbox is checked on every opening,
+regardless of the current chat's policy or a previous search. Unchecking it
+fetches the unrestricted text-model catalog and shows a retention warning.
+Editing the search text does not reset the checkbox. Opening the selector or
+changing its filter does not change the chat's policy: choosing a model does.
+The header shows "ZDR required" or "ZDR not required" for the current chat.
+Saved favorites appear first, and reopening the selector defaults to favorites when
+any exist. Favorites missing from the current catalog are visible but cannot
+be selected; they can still be removed. The browser keeps the catalog until
+refresh, a filter change or logout, but additions and selections are revalidated
+on the server. An unrestricted catalog is never reused as a ZDR-filtered one.
+
+The selector's **Sort** menu defaults to Favorites first and also offers
+Name A-Z and input/output prices in either direction. Price ordering uses the
+unrounded numeric rates for the current catalog/filter, not their displayed
+currency strings. Unknown prices always sort last, including when descending;
+zero-priced models are valid. Price and name modes do not pin favorites first.
+Ties sort by name, then ID. Sorting combines with search and Favorites only
+without changing ZDR or chat settings. The choice lasts until logout/reload;
+ZDR still resets to checked whenever the selector opens.
+
+Capability checkboxes filter for **Tools**, **Image input** and **Reasoning**.
+All selected capabilities must match. Tools requires `tools`; reasoning requires
+`reasoning` or `reasoning_effort` in the supported parameters. With ZDR checked,
+one active ZDR endpoint must advertise both when both are selected; capabilities
+from separate routes are not combined. Without ZDR, the public model's supported
+parameters are used. Image input uses the model's declared `input_modalities`,
+not an endpoint-specific guarantee. Missing metadata does not satisfy a filter.
+Filters combine with search, favorites and ordering and reset on logout/reload.
+They do not change the chat routing policy, enable agent tools/reasoning, add
+image attachments, or pin an upstream provider. RECALL's composer remains
+text-only. Prices remain catalog base minima under the ZDR filter, not quotes
+for a capability-filtered route. The API includes `input_modalities` and
+`parameter_routes` (one supported-parameter list per active ZDR endpoint, or a
+single model-level list when ZDR is unchecked) for these client-side filters.
+
+Selecting a model changes **only the current chat**, preserving its messages
+and leaving the agent YAML, other chats and embeddings unchanged. New chats
+use the agent's configured default. A selection survives browser/server restarts
+and is also honored when the CLI opens that chat. A chat with an OpenRouter
+override requires an OpenRouter chat provider; changing the user's provider
+does not silently reinterpret its model ID.
+
+`GET /api/agents/<agent_id>/chats/<chat_id>` includes
+`"model": {"provider": "openrouter", "id": "vendor/model", "zdr": true}` (the override or
+configured default). `PUT` to that chat's `/model` endpoint with
+`{"model_id": "vendor/model", "zdr": true}` validates the exact ID against the
+live catalog with that filter and persists both fields through the conversations
+source. Omission of `zdr` defaults to true; JSON opt-out requires the actual
+boolean `false`, not a string or null. Changing models or routing policy is
+disabled while the agent has active or queued replies; direct callers receive
+HTTP 409. It never interrupts or changes the model of an in-flight reply.
+Reopening/switching chats restores their own model and invalidates the cached
+context-window size when the model changes.
+
+### favorite models
+
+OpenRouter favorites are stored in the ignored
+`.config/<user_id>/openrouter-favorites.json`, separately from user YAML:
+
+```json
+{"model_ids": ["vendor/model"]}
+```
+
+They belong to the user, not an individual agent or browser, and survive
+restarts. IDs retain insertion order; adding/removing an existing/missing
+favorite is idempotent. The backend provides:
+
+- `GET /api/models/favorites`: saved model IDs.
+- `POST /api/models/favorites` with `{"model_id": "vendor/model", "zdr": true}`: add a model
+  only if the user's chat provider is OpenRouter and its exact ID is currently
+  in the catalog under that filter. Explicit `zdr: false` permits favoriting a
+  model without ZDR routes; it does not change any chat's routing policy.
+- `DELETE /api/models/favorites/vendor/model`: remove an ID, even if it is
+  no longer available or the user has switched providers.
+
+Each operation resolves the current user before accessing preferences. Favorite
+IDs are preferences, not proof of availability: listing them does not contact
+OpenRouter, and retired or no-longer-ZDR models stay saved until removed.
+Clients must match them against the current catalog before offering selection.
+Favorite IDs do not store a routing-policy opt-out and never override the
+selector's current filter. Invalid additions return HTTP 400;
+catalog failures return 502. Invalid preference files and storage failures
+return an explicit 500 rather than silently discarding existing favorites.
+Writes use same-directory temporary files and atomic replacement, with updates
+serialized within one service instance. Separate server processes do not
+coordinate concurrent updates; run one process for preference mutations.
+
 ## shared web access (tavily)
 
 Tavily uses a **framework-wide key**, shared by all users and agents. This is
@@ -114,4 +258,8 @@ planned: a `defaults.yaml < user.yaml < agent.yaml` merge, full fail-fast valida
 
 ## mutability
 
-config is read at load time; to change something, edit the yaml and restart. the file-based layout supports runtime agent creation later (write a new `<agent_id>.yaml`) without migration.
+YAML config is read at load time; edit it and restart to change framework/user/
+agent defaults. Model favorites and per-chat selections are the exceptions:
+they are persisted immediately through the APIs above, without restarting.
+The file-based layout supports runtime agent creation later (write a new
+`<agent_id>.yaml`) without migration.
