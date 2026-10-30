@@ -51,7 +51,7 @@ class ChatEvent:
     carry a generation id so adapters can distinguish overlapping deliveries.
     """
 
-    kind: Literal["reasoning", "text", "tool", "usage", "interrupted"]
+    kind: Literal["reasoning", "text", "tool", "usage", "interrupted", "memory"]
     text: str = ""
     data: Optional[dict] = None
     generation_id: str = ""
@@ -132,7 +132,10 @@ class ChatService:
         turns = self._load(conversations, chat_id)
         messages = [
             {
-                k: t[k] for k in ("role", "content", "ts", "reasoning", "actions", "interrupted")
+                k: t[k] for k in (
+                    "role", "content", "ts", "reasoning", "actions", "interrupted",
+                    "associative_matches", "usage", "usage_report",
+                )
                 if t.get(k) is not None
             }
             for t in turns
@@ -239,6 +242,11 @@ class ChatService:
                     run.text, stream=run.stream, cancellation=run.cancellation,
                     continuation=run.continuation,
                 )
+                if agent._assoc_match_count:
+                    yield ChatEvent(
+                        "memory", data={"matches": agent._assoc_match_count},
+                        generation_id=run.generation_id,
+                    )
                 if isinstance(result, str):
                     for action in agent.last_actions:
                         yield ChatEvent("tool", data=action, generation_id=run.generation_id)

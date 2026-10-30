@@ -145,7 +145,6 @@ async function openChat(chatId) {
   if (session !== state.session || agentId !== state.agentId || state.busy) return;
   state.chatId = chatId;
   renderMessages(data.messages);
-  $("usage").hidden = true;
   setComposer(true);
   await refreshChats();
   $("input").focus();
@@ -197,14 +196,30 @@ function isCurrent(request) {
 
 function renderMessages(messages) {
   $("messages").replaceChildren();
+  $("usage").hidden = true;
   for (const m of messages) {
     const view = addMessage(m.role);
     if (m.reasoning) view.thinking(m.reasoning);
     for (const action of m.actions ?? []) view.action(action);
+    if (m.associative_matches) view.memoryMatches(m.associative_matches);
     view.text(m.content);
     if (m.interrupted) view.interrupted();
+    if (m.usage_report) showUsage(m.usage_report);
+    else if (m.role === "assistant" && m.usage?.in != null) {
+      const output = m.usage.out == null ? "unknown" : m.usage.out;
+      showUsage(
+        `context: saved usage | in=${m.usage.in} out=${output}\n`
+        + "Detailed context breakdown is unavailable for this older reply."
+      );
+    }
   }
   scrollDown();
+}
+
+function showUsage(report) {
+  $("usage").hidden = false;
+  $("usage").querySelector("summary").textContent = report.split("\n")[0];
+  $("usage").querySelector("pre").textContent = report;
 }
 
 function addMessage(role) {
@@ -214,6 +229,7 @@ function addMessage(role) {
   body.className = "body";
   let raw = "";
   let thinking = null;
+  let memoryIndicator = null;
   let actionCount = 0;
   el.append(body);
   $("messages").append(el);
@@ -250,6 +266,16 @@ function addMessage(role) {
         el.prepend(thinking);
       }
       thinking.lastChild.textContent += chunk;
+    },
+    memoryMatches(count) {
+      if (!Number.isInteger(count) || count < 1) return;
+      if (!memoryIndicator) {
+        memoryIndicator = document.createElement("div");
+        memoryIndicator.className = "memory-indicator";
+        memoryIndicator.setAttribute("role", "status");
+        el.insertBefore(memoryIndicator, body);
+      }
+      memoryIndicator.textContent = `Associative memory: ${count} match${count === 1 ? "" : "es"}`;
     },
     action(a) {
       actionCount++;
@@ -410,14 +436,13 @@ function handleEvent(raw, request) {
   if (event === "text") reply.text(payload);
   else if (event === "reasoning") reply.thinking(payload);
   else if (event === "tool") reply.action(payload);
+  else if (event === "memory") reply.memoryMatches(payload.matches);
   else if (event === "interrupted") reply.interrupted(payload);
   else if (event === "error") reply.error(payload);
   else if (event === "done") request.done = true;
   else if (event === "usage" && request === state.latest) {
     // the first line is the headline; the full breakdown stays folded until expanded
-    $("usage").hidden = false;
-    $("usage").querySelector("summary").textContent = payload.split("\n")[0];
-    $("usage").querySelector("pre").textContent = payload;
+    showUsage(payload);
   }
 }
 

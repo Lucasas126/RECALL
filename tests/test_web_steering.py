@@ -77,6 +77,28 @@ class WebSteeringTests(steering.SteeringFixture):
         self.assertEqual([e["event"] for e in events], ["error", "done"])
         self.assertIn("provider unavailable", events[0]["data"])
 
+    def test_associative_matches_are_sent_and_persisted(self) -> None:
+        self.associative_memory = True
+        with steering.patch(
+            "src.agent.agent.associative.recall",
+            return_value=("[associative memory] remembered detail", 2),
+        ):
+            response = self.client.post(self.messages_url, json={"content": "Question"})
+
+        events = _events(response)
+        self.assertEqual([event["event"] for event in events], ["memory", "text", "usage", "done"])
+        self.assertEqual(events[0]["data"], {"matches": 2})
+        self.assertIn(
+            "[associative memory] remembered detail",
+            self.calls[("user-one", "agent-one")][-1]["context"][-1]["content"],
+        )
+        history = self.client.get(
+            f"/api/agents/agent-one/chats/{self.chat}"
+        ).json()["messages"]
+        self.assertEqual(history[-1]["associative_matches"], 2)
+        self.assertIn("context:", history[-1]["usage_report"])
+        self.assertEqual(history[-1]["usage"], {"in": 10, "out": 5})
+
     def test_validation_precedes_sse_response(self) -> None:
         response = self.client.post(self.messages_url, json={"content": " "})
         self.assertEqual(response.status_code, 400)

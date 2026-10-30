@@ -118,7 +118,7 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
                     if event.kind == "interrupted":
                         data = {"content": event.text, **(event.data or {})}
                     else:
-                        data = event.data if event.kind == "tool" else event.text
+                        data = event.data if event.kind in ("tool", "memory") else event.text
                     yield _sse(event.kind, data, generation_id)
             except Exception as e:  # the response has started: report the failure in-band
                 logger.exception("reply failed for %s/%s/%s", user_id, agent_id, chat_id)

@@ -27,25 +27,28 @@ _SYSTEM_PROMPT = (
 _FRAGMENT_LIMIT = 200
 
 
-def recall(agent: "Agent", user_input: str, cancellation: CancellationToken | None = None) -> Optional[str]:
-    """Propose a query via the memory subagent, search, and return a transient hint block or None."""
+def recall(
+    agent: "Agent", user_input: str, cancellation: CancellationToken | None = None
+) -> tuple[Optional[str], int]:
+    """Return a transient hint block and the number of matching memory fragments."""
     query = _propose_query(agent, user_input, cancellation)
     if cancellation is not None:
         cancellation.raise_if_cancelled()
     if not query:
-        return None
+        return None, 0
     hits = [h for h in agent.query_memory(query, ASSOC_TOP_N) if h["score"] >= ASSOC_SCORE_THRESHOLD]
     if cancellation is not None:
         cancellation.raise_if_cancelled()
     if not hits:
         logger.debug("query=%r -> no hits above threshold %.2f", query, ASSOC_SCORE_THRESHOLD)
-        return None
+        return None, 0
     logger.info("query=%r -> %d hit(s) injected", query, len(hits))
     lines = "\n".join(f"- [{h['address']}] {_fragment(h['document'])}" for h in hits)
-    return (
+    suggestion = (
         "[associative memory] possibly-relevant fragments from your own memory "
         "(hints only — verify with your tools before relying on them):\n" + lines
     )
+    return suggestion, len(hits)
 
 
 def _propose_query(agent: "Agent", user_input: str, cancellation: CancellationToken | None = None) -> Optional[str]:

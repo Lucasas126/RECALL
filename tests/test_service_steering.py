@@ -26,6 +26,7 @@ class SteeringFixture(unittest.TestCase):
         self.agents: dict[tuple[str, str], Agent] = {}
         self.gates: dict[str, tuple[threading.Event, threading.Event]] = {}
         self.memory = True
+        self.associative_memory = False
         self.retained: int | None = None
         for user in ("user-one", "user-two"):
             for agent in ("agent-one", "agent-two"):
@@ -84,7 +85,7 @@ class SteeringFixture(unittest.TestCase):
             user_id=user, id=agent, name="Test", personality_prompt="Test prompt",
             models=ModelsConfig(), provider_name="ollama", api_key="",
             embeddings_provider_name="ollama", embeddings_api_key="",
-            tools=False, associative_memory=False, has_memory=self.memory,
+            tools=False, associative_memory=self.associative_memory, has_memory=self.memory,
             conversation_messages_retained=self.retained,
         )
         instance = Agent(config, self.providers[(user, agent)], chat_id)

@@ -83,6 +83,7 @@ class Agent:
         self._truncated = False
         # transient associative-memory hint, injected into the context of the current turn only
         self._assoc_suggestion: Optional[str] = None
+        self._assoc_match_count = 0
         # thinking tokens from the last reply, kept apart from the answer
         self.last_reasoning: str = ""
         # tool calls made during the last turn (name, arguments, truncated result, error flag)
@@ -145,6 +146,7 @@ class Agent:
             self._truncated = False
         # associative memory: run before logging the turn so the search can't match this message
         self._assoc_suggestion = None
+        self._assoc_match_count = 0
         self.last_actions = []
         self.last_reasoning = ""
         self.last_usage = ""
@@ -153,7 +155,9 @@ class Agent:
             if cancellation is not None:
                 cancellation.raise_if_cancelled()
             if self.config.has_memory and self.config.associative_memory:
-                self._assoc_suggestion = associative.recall(self, user_input, cancellation)
+                self._assoc_suggestion, self._assoc_match_count = associative.recall(
+                    self, user_input, cancellation
+                )
             if cancellation is not None:
                 cancellation.raise_if_cancelled()
         except GenerationCancelled:
@@ -227,8 +231,9 @@ class Agent:
                     yield ("tool", action)
                 continue
             self.last_reasoning = reasoning
+            usage_report = self._format_usage_report(context, reply, reasoning, api_usage)
             with cancellation._commit():
-                self._remember_reply(reply, reasoning, api_usage)
+                self._remember_reply(reply, reasoning, api_usage, usage_report=usage_report)
             self._track_usage(context, reply, reasoning, api_usage)
             return
 
@@ -254,7 +259,12 @@ class Agent:
                 self._run_tools(tool_calls)
                 continue
             self.last_reasoning = reasoning
-            self._remember_reply(reply, reasoning, result.get("usage"))
+            usage_report = self._format_usage_report(
+                context, reply, reasoning, result.get("usage")
+            )
+            self._remember_reply(
+                reply, reasoning, result.get("usage"), usage_report=usage_report
+            )
             self._track_usage(context, reply, reasoning, result.get("usage"))
             return reply
         return ""  # unreachable: the final hop runs without tools and finalizes
@@ -337,14 +347,22 @@ class Agent:
         self.last_usage = ""
         self._remember_reply(reply, reasoning, None, interrupted=True)
 
-    def _remember_reply(self, reply: str, reasoning: str, api_usage, interrupted: bool = False) -> None:
+    def _remember_reply(
+        self, reply: str, reasoning: str, api_usage, interrupted: bool = False,
+        usage_report: Optional[str] = None,
+    ) -> None:
         """Append the assistant reply to memory and persist the turn (with its real usage)."""
         message = {"role": "assistant", "content": self._reply_content(reply, interrupted)}
         if self.config.keep_reasoning_in_memory and reasoning:
             message["reasoning"] = reasoning
         self.messages.append(message)
         self.last_reply = reply
-        extra = {"reasoning": reasoning or None, "actions": self.last_actions or None}
+        extra = {
+            "reasoning": reasoning or None,
+            "actions": self.last_actions or None,
+            "associative_matches": self._assoc_match_count or None,
+            "usage_report": usage_report or self.last_usage or None,
+        }
         if interrupted:
             extra["interrupted"] = True
         if api_usage:
@@ -412,6 +430,23 @@ class Agent:
     def _ensure_max_context(self) -> None:
         if self._max_context is None:
             self._max_context = self.provider.context_window(self.config.models.chat) or 0
+
+    def _format_usage_report(
+        self, context: list[dict], reply: str, reasoning: str, api_usage
+    ) -> str:
+        """Format a history-safe usage report without delaying the reply commit."""
+        api_usage = api_usage or {}
+        breakdown, approx = usage.turn_breakdown(
+            context,
+            reply,
+            reasoning,
+            api_usage.get("prompt_tokens"),
+            api_usage.get("completion_tokens"),
+            self._tool_specs or None,
+        )
+        return usage.format_turn(
+            breakdown, self._prev_breakdown, approx, self._max_context or None
+        )
 
     def _reconstruct_context(self) -> None:
         """On load, show how loaded the context is, using the last persisted real input tokens."""

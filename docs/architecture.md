@@ -43,7 +43,7 @@ cli (cli.py, direct) ─┘
 
 - a channel resolves its own identity to a `user_id` (web: login cookie; telegram: a telegram id → user, planned) and then calls the service with that `user_id`. the service never trusts ids to be well formed: it validates user, agent ownership and chat ids.
 - operations: `login`, `list_agents`, `list_chats`, `create_chat`, `get_chat`, `delete_chat`, `send`. CRUD returns plain dicts; `send` returns events.
-- `send` yields `ChatEvent`s (`reasoning`, `text`, `tool`, `usage`, `interrupted`), not channel formats. a telegram adapter would call `send(..., stream=False)`, deliver the `text` event as a message and handle `interrupted` without claiming a completed answer. rendering and transport stay in the adapter.
+- `send` yields `ChatEvent`s (`reasoning`, `text`, `tool`, `usage`, `interrupted`, and `memory` when associative recall finds matches), not channel formats. the `memory` event carries the number of matched fragments; adapters decide how to display it. a telegram adapter would call `send(..., stream=False)`, deliver the `text` event as a message and handle `interrupted` without claiming a completed answer. rendering and transport stay in the adapter.
 - one `Agent` is kept per (user, agent) and switches between that agent's chats with `open_chat`; execution on an agent is serialized, but a new message can interrupt its active reply to the same chat.
 
 status: implemented for the web channel; the cli still uses `Agent` directly.
@@ -102,7 +102,13 @@ Detaching a transport does not cancel a service generation on its own.
 
 The messages endpoint returns SSE with the generation id in each event's `id:`
 field. Existing `text`, `reasoning`, `tool`, `usage`, `error` and `done` payloads
-are unchanged. `interrupted` carries
+are unchanged. When associative recall finds fragments, a `memory` event carries
+`{"matches": N}` and the chat history includes `associative_matches` on the
+assistant message so the web UI can show the indicator after reopening a chat.
+Assistant history also stores its formatted `usage_report`, allowing the web
+context panel to be restored when reopening a chat. Older turns that predate
+`usage_report` show their saved input/output token totals, when available.
+`interrupted` carries
 `{"content": "...", "reasoning": "...", "actions": [...]}` and is followed by
 `done`. Streams disable proxy buffering; a connection that ends without `done`
 is shown as an error rather than a completed answer.
