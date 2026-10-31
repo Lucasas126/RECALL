@@ -38,24 +38,31 @@ through the environment variable named by `telegram.allowed_users_env` in
 `123456789=user-a,987654321=user-c`. Messages from IDs that are not listed are
 ignored completely. The bot token remains in `TELEGRAM_BOT_TOKEN`.
 
-The initial Telegram UX is English-only for now and provides `/help`,
-`/newchat`, `/selectmodel`, `/selectagent`, `/agent`, `/model`, `/selectstt`,
+Telegram provides `/help`,
+`/settings`, `/newchat`, `/selectmodel`, `/selectagent`, `/agent`, `/model`, `/selectstt`,
 and `/stt`. Telegram's native command menu is populated at startup, and
 `/help` prints the same command list in the chat.
+Operational notices and errors use the user's saved English/Spanish preference;
+the native command descriptions and `/help` text remain English.
 Telegram creates a chat automatically on the first message after the bot
 restarts, and after one hour without a user message. The first assistant
 message in each automatically created chat begins with bold-italic
 `New chat started`.
 Model selection uses Telegram's regular reply keyboard: each option is sent as
 an ordinary text message, the keyboard is removed after selection, and the
-choice is persisted per chat. Results are ordered by input price, then output
-price, with ten models per page and `Previous`/`Next` navigation.
+choice is persisted per chat. Available user favorites appear first with a star;
+each group is ordered by input price, then output price. There are ten models
+per page and `Previous`/`Next` navigation (localized in Spanish).
 Telegram text, image, audio, voice, video, and supported media-document
 messages are sent through `ChatService` with real provider streaming. Sending
 another message to the active chat steers the generation through the service's
 normal cancellation and continuation behavior. `/selectagent` changes the
-active agent and requires `/newchat` before sending to that agent.
-Thinking tokens are streamed into collapsible Telegram expandable blockquotes,
+active agent and persists the selection. The **Active agent** option inside
+`/settings` opens the same reply-keyboard selector, so `/selectagent` need not
+be typed. Both paths leave the previous chat on its original agent and clear
+the channel's current chat; `/newchat` or the next message creates a chat for
+the selected agent. An already-running reply is not rerouted or interrupted.
+When enabled in `/settings`, thinking tokens stream into expandable blockquotes,
 while normal text is rendered with Telegram entities converted from Markdown.
 Completed tool calls are shown in italics as literal
 `>query_memory(query="example", top_k=5)` lines in event order, interleaved with
@@ -91,6 +98,78 @@ Run the polling process locally with `uv run python run_telegram.py`.
 channel and service when a selected model lacks an input modality. It accepts a
 two-letter language code (`en`, `es`) or a language-region code (`en-US`,
 `es-ES`) and defaults to `en`.
+
+### shared user preferences
+
+User-wide channel preferences are stored separately from YAML in the ignored
+`.config/<user_id>/preferences.json`. Telegram exposes `/settings` using the
+regular reply keyboard, like the existing model and agent selectors, not inline
+buttons. It offers thinking visibility, English/Spanish alerts, the active agent
+and **Close** to remove the keyboard. Menu selections are consumed by the bot,
+not sent to the model. The web sidebar's **Settings** dialog edits only thinking
+and language; agent switching remains in the existing sidebar selector.
+Thinking visibility, preferred-agent selection and English/Spanish operational
+notices/errors are implemented in both channels.
+
+```json
+{"show_thinking": false, "language": "es", "agent_id": "aria"}
+```
+
+- `show_thinking`: a display preference, defaulting to `true`. It does not
+  disable model reasoning or delete saved reasoning.
+- `language`: `en` or `es` for RECALL-generated alerts/errors, not model replies
+  or third-party error text. Without an override, Spanish user YAML language
+  codes resolve to `es`; other codes resolve to `en`.
+- `agent_id`: must identify an agent configured for this user with an existing
+  agent configuration. Without an override, or with `null`, it resolves to the
+  user's first agent; users without agents receive `null`. This preference is
+  used for new chats, not moving existing chats or interrupting replies.
+
+The web refreshes preferences at login, when opening settings or a chat, before
+sending or creating a chat, and when its window regains focus. Hiding thinking
+applies to both existing history and live reply blocks; the separate local
+expanded/collapsed preference is unchanged. The current conversation stays on
+its own agent until a new chat is requested or the user explicitly switches
+agents. Selecting an agent in the web sidebar also saves the shared preference.
+
+Telegram reads the shared agent when creating a chat, including automatic
+first-message/idle-timeout chats. Thinking visibility is read at the beginning
+of each reply and applies to previews, final messages and interrupted replies.
+Tool-call lines stay visible even when their preceding thinking is hidden.
+Previously delivered Telegram messages are not edited retroactively.
+
+Telegram reloads the alert language before each incoming update; choosing a
+language in `/settings` translates that settings menu immediately. The web
+localizes its own error/notification templates, settings controls and retention
+warning after refreshing preferences. HTTP and SSE application errors use the
+saved language; opaque provider errors and low-level technical diagnostics stay
+unchanged. The public `GET /api/localization?language=en|es` catalog keeps Python
+and browser templates consistent. Template values such as filenames, agent IDs
+and provider error text are never translated.
+
+Cached service agents receive the current user language before each generation,
+so unsupported-modality errors also follow preference changes without restarting
+or rebuilding the agent. If preferences cannot be read, the failure is reported
+explicitly: Telegram uses its last successfully read language, while HTTP errors
+use the browser's last-known `Accept-Language` header and log the lookup failure.
+
+`GET /api/preferences` returns all three resolved fields for the current
+cookie user. `PATCH /api/preferences` accepts any subset of the fields and
+returns the resolved result. Omitted fields keep their saved overrides, or
+continue following configuration defaults when never explicitly saved.
+For example, `{"show_thinking": false}` leaves language and agent unchanged.
+Unknown fields, unsupported languages, non-boolean thinking values and malformed
+agent IDs are rejected; an agent belonging to another user is never accepted.
+
+Preference reads are not cached, so separate web and Telegram processes can
+observe each other's changes on their next read without restarting. Updates
+merge under an operating-system file lock and use atomic replacement; the
+adjacent `preferences.lock` file is persistent coordination state, not a stale
+lock to delete between requests. Invalid files, failed writes and saved agents
+that are no longer available produce explicit errors rather than silently
+resetting preferences. A removed agent can be replaced with a valid selection
+or reset with `{"agent_id": null}`. Neither user YAML nor model favorites are
+rewritten.
 
 ### openrouter model catalog and zero data retention
 
@@ -217,7 +296,11 @@ OpenRouter favorites are stored in the ignored
 
 They belong to the user, not an individual agent or browser, and survive
 restarts. IDs retain insertion order; adding/removing an existing/missing
-favorite is idempotent. The backend provides:
+favorite is idempotent. Telegram reads this same list every time `/selectmodel`
+opens, pins favorites present in the current ZDR/search results first and marks
+them with a star. Retired or non-ZDR favorites are not added to Telegram's
+selectable catalog. Favorite additions/removals remain web-only; the web
+selector can also be used from a mobile browser. The backend provides:
 
 - `GET /api/models/favorites`: saved model IDs.
 - `POST /api/models/favorites` with `{"model_id": "vendor/model", "zdr": true}`: add a model

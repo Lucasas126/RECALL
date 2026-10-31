@@ -65,6 +65,9 @@ selector. Every OpenRouter chat inference request independently receives the
 chat's ZDR routing preference, including auxiliary memory queries and transport
 retries. ZDR is required unless that chat explicitly opted out during model
 selection; the selector resets its filter to checked each time it opens.
+Telegram's `/selectmodel` reads the same user favorites, pins available favorites
+before the price-sorted remainder, and marks them with stars without expanding
+the ZDR catalog or exposing favorite mutations in the bot.
 
 Model selection is a chat override stored through `ConversationsSource`, not
 a mutation of the agent YAML or a direct filesystem operation in the channel.
@@ -73,6 +76,34 @@ has active/queued work. Its cached agent is rebuilt lazily when the current
 chat's selection changes. `Agent.open_chat` restores each chat's override (or
 the configured default), so other chats and CLI reopening behave consistently.
 See [model selection and favorites](config.md#choosing-a-model-per-chat).
+
+### shared channel preferences
+
+`ChatService.get_preferences` and `update_preferences` expose user-scoped
+thinking visibility, notification language and a preferred agent for new chats.
+Overrides live in a validated configuration-side store, separate from user YAML
+and conversation sources. Reads bypass caches; updates merge under an
+interprocess file lock before atomic replacement, so web and Telegram processes
+do not overwrite unrelated fields. Agent selections are validated against the
+requesting user's configured agents before saving. Existing chats and agent
+execution are not changed by preference operations.
+
+Status: persistence, `GET`/`PATCH /api/preferences`, Telegram reply-keyboard `/settings`,
+web thinking/language controls, thinking visibility and agent selection are
+implemented. Visibility is enforced by channel renderers without changing
+reasoning generation, stored history or service events. Telegram captures each
+reply's user/agent/chat before asynchronous delivery, so changing a session
+cannot reroute an accepted message. The settings agent option reuses
+`/selectagent`'s selector and handler to change the active Telegram agent, rather
+than just saving a future preference. Web agent switching stays in the sidebar.
+English/Spanish operational notices and
+application errors use a shared translation catalog served to the browser.
+Errors carry their RECALL-owned template separately from opaque interpolation
+values; provider text is not translated. Cached agents receive the latest
+language at generation start for capability errors, without changing models
+or rebuilding context. Static navigation/help text and technical diagnostics
+are not a complete localized interface.
+See [shared user preferences](config.md#shared-user-preferences).
 
 ### channel-neutral steering
 

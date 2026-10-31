@@ -32,6 +32,12 @@ main { display: flex; flex-direction: column; min-width: 0; height: 100vh; }
 #model-dialog[open] { display: flex; flex-direction: column; }
 #model-dialog > * { flex-shrink: 0; }
 #model-dialog::backdrop { background: #0009; }
+#settings-dialog { color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 12px; width: min(440px, calc(100vw - 32px)); max-height: 85vh; padding: 20px; }
+#settings-dialog::backdrop { background: #0009; }
+#settings-form { display: flex; flex-direction: column; gap: 14px; }
+#settings-form label:not(.model-filter) { display: flex; flex-direction: column; gap: 6px; }
+#settings-error:empty { display: none; }
+#messages.hide-thinking .thinking { display: none; }
 .model-heading, .model-toolbar { display: flex; align-items: center; gap: 10px; }
 .model-heading { justify-content: space-between; }
 .model-heading h2 { margin: 0; font-size: 1.2em; }

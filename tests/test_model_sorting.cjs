@@ -9,7 +9,12 @@ function pickerHarness() {
   const element = () => ({
     children: [], attributes: {}, listeners: {}, dataset: {},
     checked: false, value: "", open: false, disabled: false,
-    classList: { toggle() {} },
+    classList: {
+      active: new Set(),
+      toggle(name, enabled) { if (enabled) this.active.add(name); else this.active.delete(name); },
+      add(name) { this.active.add(name); },
+      contains(name) { return this.active.has(name); },
+    },
     addEventListener(name, callback) { this.listeners[name] = callback; },
     setAttribute(name, value) { this.attributes[name] = value; },
     append(...children) { this.children.push(...children); },
@@ -20,6 +25,7 @@ function pickerHarness() {
     focus() { this.focused = true; },
   });
   const context = vm.createContext({
+    addEventListener() {},
     document: {
       getElementById(id) {
         if (!elements.has(id)) elements.set(id, element());
@@ -39,6 +45,12 @@ function pickerHarness() {
   elements.get("model-sort").value = "favorites";
   context.document.getElementById("model-info");
   context.document.getElementById("model-filters");
+  for (const id of ["settings-thinking", "settings-language"]) {
+    context.document.getElementById(id);
+  }
+  vm.runInContext("state", context).translations = new Proxy({}, {
+    get(target, key) { return target[key] ?? key; },
+  });
   return {
     elements, context,
     compareModels: vm.runInContext("compareModels", context),
@@ -48,9 +60,135 @@ function pickerHarness() {
     render: vm.runInContext("renderModelList", context),
     refresh: vm.runInContext("refreshModels", context),
     reset: vm.runInContext("resetStreams", context),
+    applyPreferences: vm.runInContext("applyPreferences", context),
+    refreshPreferences: vm.runInContext("refreshPreferences", context),
+    savePreferences: vm.runInContext("savePreferences", context),
+    newChat: vm.runInContext("newChat", context),
   };
 }
 const { compareModels, matchesCapabilities } = pickerHarness();
+
+test("shared thinking visibility applies to the whole message history", () => {
+  const harness = pickerHarness();
+  harness.applyPreferences({ show_thinking: false, language: "es", agent_id: "agent-a" });
+  assert.equal(harness.elements.get("messages").classList.contains("hide-thinking"), true);
+  harness.applyPreferences({ show_thinking: true, language: "es", agent_id: "agent-a" });
+  assert.equal(harness.elements.get("messages").classList.contains("hide-thinking"), false);
+});
+
+test("refreshing shared settings preserves the open agent and chat", async () => {
+  const harness = pickerHarness();
+  Object.assign(harness.state, { user: { id: "demo" }, agentId: "agent-a", chatId: "existing" });
+  harness.context.fetch = async (url, options) => {
+    assert.equal(url, "/api/preferences");
+    assert.equal(options.cache, "no-store");
+    return { ok: true, json: async () => ({ show_thinking: false, language: "es", agent_id: "agent-b" }) };
+  };
+  await harness.refreshPreferences();
+  assert.equal(harness.state.preferences.agent_id, "agent-b");
+  assert.equal(harness.state.agentId, "agent-a");
+  assert.equal(harness.state.chatId, "existing");
+});
+
+test("an older preferences response cannot undo a completed settings save", async () => {
+  const harness = pickerHarness();
+  harness.state.user = { id: "demo" };
+  let resolveRead;
+  harness.context.fetch = (url, options) => options.method === "PATCH"
+    ? Promise.resolve({
+      ok: true, json: async () => ({ show_thinking: false, language: "en", agent_id: "agent-a" }),
+    })
+    : new Promise((resolve) => { resolveRead = resolve; });
+  const pending = harness.refreshPreferences();
+  await harness.savePreferences({ show_thinking: false });
+  resolveRead({ ok: true, json: async () => ({ show_thinking: true, language: "en", agent_id: "agent-a" }) });
+  await pending;
+  assert.equal(harness.state.preferences.show_thinking, false);
+  assert.equal(harness.state.settingsBusy, false);
+});
+
+test("the settings form patches only fields edited since opening", async () => {
+  const harness = pickerHarness();
+  harness.state.user = { id: "demo", agents: [{ id: "agent-a", name: "First" }] };
+  harness.state.preferences = { show_thinking: true, language: "es", agent_id: "agent-a" };
+  harness.state.settingsOriginal = { show_thinking: true, language: "en", agent_id: "agent-a" };
+  harness.elements.get("settings-thinking").checked = false;
+  harness.elements.get("settings-language").value = "en";
+  let saved;
+  harness.context.fetch = async (url, options) => {
+    saved = JSON.parse(options.body);
+    return { ok: true, json: async () => ({ show_thinking: false, language: "es", agent_id: "agent-a" }) };
+  };
+  await harness.elements.get("settings-form").listeners.submit({ preventDefault() {} });
+  assert.deepEqual(saved, { show_thinking: false });
+  assert.equal(harness.elements.has("settings-agent"), false);
+  assert.equal(harness.state.preferences.language, "es");
+  assert.equal(harness.elements.get("settings-dialog").open, false);
+});
+
+test("settings failures retain prior preferences and expose an error", async () => {
+  const harness = pickerHarness();
+  harness.state.user = { id: "demo" };
+  harness.state.preferences = { show_thinking: true, language: "en", agent_id: "agent-a" };
+  harness.state.settingsOriginal = { ...harness.state.preferences };
+  harness.elements.get("settings-thinking").checked = false;
+  harness.elements.get("settings-language").value = "en";
+  harness.context.fetch = async () => ({ ok: false, status: 500, json: async () => ({ detail: "Cannot save" }) });
+  await harness.elements.get("settings-form").listeners.submit({ preventDefault() {} });
+  assert.equal(harness.elements.get("settings-error").textContent, "Cannot save");
+  assert.equal(harness.state.preferences.show_thinking, true);
+  assert.equal(harness.state.settingsBusy, false);
+});
+
+test("new chats use the agent selected by the other channel", async () => {
+  const harness = pickerHarness();
+  Object.assign(harness.state, {
+    user: { id: "demo", provider: "ollama" }, agentId: "agent-a", chatId: "existing",
+  });
+  const requests = [];
+  harness.context.fetch = async (url, options) => {
+    requests.push([url, options.method]);
+    let data;
+    if (url === "/api/preferences") data = { show_thinking: false, language: "en", agent_id: "agent-b" };
+    else if (options.method === "POST") data = { id: "new-chat" };
+    else if (url.endsWith("/new-chat")) data = { messages: [], model: { id: "local", zdr: true } };
+    else data = [];
+    return { ok: true, json: async () => data };
+  };
+  await harness.newChat();
+  assert.equal(harness.state.agentId, "agent-b");
+  assert.equal(harness.state.chatId, "new-chat");
+  assert.equal(requests.some(([url, method]) => url === "/api/agents/agent-b/chats" && method === "POST"), true);
+});
+
+test("saved language localizes settings and errors without translating interpolated content", () => {
+  const harness = pickerHarness();
+  Object.assign(harness.state.translations, {
+    Settings: "Ajustes",
+    "Show model thinking": "Mostrar el thinking del modelo",
+    "{name}: maximum size is 10 MB": "{name}: el tamaño máximo es de 10 MB.",
+  });
+  harness.applyPreferences({ show_thinking: true, language: "es", agent_id: "agent-a" });
+  assert.equal(harness.elements.get("settings-open").textContent, "Ajustes");
+  assert.equal(harness.elements.get("settings-thinking-label").textContent, "Mostrar el thinking del modelo");
+  const tr = vm.runInContext("tr", harness.context);
+  assert.equal(tr("{name}: maximum size is 10 MB", { name: "Original {raw}.png" }),
+    "Original {raw}.png: el tamaño máximo es de 10 MB.");
+  harness.applyPreferences({ show_thinking: true, language: "en", agent_id: "agent-a" });
+  assert.equal(harness.elements.get("settings-open").textContent, "Settings");
+});
+
+test("API requests carry the current alert language", async () => {
+  const harness = pickerHarness();
+  harness.applyPreferences({ show_thinking: true, language: "es", agent_id: "agent-a" });
+  let language;
+  harness.context.fetch = async (url, options) => {
+    language = options.headers["Accept-Language"];
+    return { ok: true, json: async () => [] };
+  };
+  await vm.runInContext("api", harness.context)("/api/models");
+  assert.equal(language, "es");
+});
 const models = [
   { id: "vendor/z", name: "Zulu", pricing: { prompt: "2", completion: "0" } },
   { id: "vendor/a", name: "Alpha", pricing: { prompt: "10", completion: "0.5" } },

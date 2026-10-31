@@ -8,11 +8,12 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from src.utils.files import atomic_write_text
+from src.utils.i18n import UserMessageError
 
 FavoriteModelId = Annotated[str, Field(strict=True, min_length=1, max_length=256)]
 
 
-class FavoritesError(RuntimeError):
+class FavoritesError(UserMessageError, RuntimeError):
     """Model favorites could not be read, validated or saved."""
 
 

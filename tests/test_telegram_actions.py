@@ -130,6 +130,7 @@ class TelegramActionStreamingTests(unittest.IsolatedAsyncioTestCase):
     async def send_events(self, events: list[ChatEvent]) -> AsyncMock:
         service = Mock()
         service.send.return_value = iter(events)
+        service.get_preferences.return_value = {"show_thinking": True, "language": "en"}
         state = TelegramBotState(service)
         state.sessions[123] = TelegramSession("test-user", "test-agent", "test-chat")
         update = SimpleNamespace(

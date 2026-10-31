@@ -6,12 +6,31 @@ const state = {
   model: null, modelCatalog: null, modelCatalogZdr: null, modelFavorites: [],
   modelBusy: false, modelLoading: false, modelRequest: 0,
   modelFavoritesOnly: false,
+  preferences: null, preferencesRequest: 0, settingsBusy: false, settingsOriginal: null,
+  translations: null,
 };
 // thinking blocks start open (streamed live); closing one keeps them closed from then on
 const prefs = { thinkingOpen: localStorage.getItem("thinkingOpen") !== "false" };
 const tokenPriceFormat = new Intl.NumberFormat("en-US", {
   style: "currency", currency: "USD", maximumSignificantDigits: 6,
 });
+
+function tr(template, values = {}) {
+  const text = state.preferences?.language === "es" ? state.translations[template] : template;
+  if (typeof text !== "string") throw new Error(`Missing translation: ${template}`);
+  return text.replace(/\{(\w+)\}/g, (_, key) => values[key]);
+}
+
+function translateInterface() {
+  for (const [id, text] of [
+    ["settings-open", "Settings"], ["settings-title", "User settings"],
+    ["settings-close", "Close"], ["settings-save", "Save settings"],
+    ["settings-thinking-label", "Show model thinking"],
+    ["settings-language-label", "Alerts and errors"],
+    ["settings-note", "Thinking and language are shared with Telegram."],
+    ["model-zdr-warning", "ZDR is not required for your next selection. Providers may retain your prompts and replies. Your OpenRouter account may still enforce ZDR."],
+  ]) $(id).textContent = tr(text);
+}
 
 function tokenPrice(value) {
   return value == null ? "unavailable" : `from ${tokenPriceFormat.format(value)}`;
@@ -20,16 +39,17 @@ function tokenPrice(value) {
 async function api(path, options = {}) {
   const session = state.session;
   const res = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "Accept-Language": state.preferences?.language ?? "en" },
     ...options,
   });
   if (res.status === 401) {
+    const error = tr("not logged in");
     if (session === state.session) showLogin();
-    throw new Error("not logged in");
+    throw new Error(error);
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(formatApiError(body.detail) || `HTTP ${res.status}`);
+    throw new Error(formatApiError(body.detail) || tr("HTTP {status}", { status: res.status }));
   }
   return res.status === 204 ? null : res.json();
 }
@@ -82,7 +102,9 @@ async function showApp(user) {
     })
   );
   try {
-    await selectAgent(user.agents[0]?.id ?? null);
+    await refreshPreferences();
+    if (session !== state.session) return;
+    await selectAgent(state.preferences.agent_id);
     if (session === state.session && state.agentId) await newChat();
   } catch (err) {
     if (session === state.session) addMessage("assistant").error(err.message);
@@ -122,7 +144,119 @@ async function selectAgent(agentId) {
   await refreshChats();
 }
 
-$("agent-select").addEventListener("change", (e) => selectAgent(e.target.value));
+$("agent-select").addEventListener("change", async (e) => {
+  const session = state.session;
+  const agentId = e.target.value;
+  if (state.busy || state.modelBusy || state.settingsBusy) {
+    $("agent-select").value = state.agentId ?? "";
+    return;
+  }
+  try {
+    await savePreferences({ agent_id: agentId });
+    if (session === state.session) await selectAgent(agentId);
+  } catch (err) {
+    if (session === state.session) {
+      $("agent-select").value = state.agentId ?? "";
+      addMessage("assistant").error(err.message);
+    }
+  }
+});
+
+// ------------------------------------------------------------------ shared settings
+
+function applyPreferences(preferences) {
+  state.preferences = preferences;
+  $("messages").classList.toggle("hide-thinking", !preferences.show_thinking);
+  translateInterface();
+}
+
+async function applyServerPreferences(preferences, session, request) {
+  if (preferences.language === "es" && !state.translations) {
+    state.translations = await api("/api/localization?language=es");
+  }
+  if (session === state.session && request === state.preferencesRequest && state.user) applyPreferences(preferences);
+}
+
+async function refreshPreferences() {
+  if (state.settingsBusy && state.preferences) return state.preferences;
+  const session = state.session;
+  const request = ++state.preferencesRequest;
+  const preferences = await api("/api/preferences", { cache: "no-store" });
+  await applyServerPreferences(preferences, session, request);
+  return preferences;
+}
+
+async function savePreferences(changes) {
+  const session = state.session;
+  const request = ++state.preferencesRequest;
+  state.settingsBusy = true;
+  updateBusy();
+  $("settings-save").disabled = true;
+  try {
+    const preferences = await api("/api/preferences", {
+      method: "PATCH", body: JSON.stringify(changes),
+    });
+    await applyServerPreferences(preferences, session, request);
+    return preferences;
+  } finally {
+    if (session === state.session) {
+      state.settingsBusy = false;
+      $("settings-save").disabled = false;
+      updateBusy();
+    }
+  }
+}
+
+function fillSettings() {
+  state.settingsOriginal = { ...state.preferences };
+  $("settings-thinking").checked = state.preferences.show_thinking;
+  $("settings-language").value = state.preferences.language;
+}
+
+$("settings-open").addEventListener("click", async () => {
+  const session = state.session;
+  state.settingsOriginal = null;
+  $("settings-error").textContent = "";
+  $("settings-save").disabled = true;
+  $("settings-dialog").showModal();
+  try {
+    await refreshPreferences();
+    if (session !== state.session) return;
+    fillSettings();
+    $("settings-save").disabled = state.settingsBusy;
+  } catch (err) {
+    if (session === state.session) $("settings-error").textContent = err.message;
+  }
+});
+
+$("settings-close").addEventListener("click", () => $("settings-dialog").close());
+$("settings-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (state.settingsBusy || !state.settingsOriginal) return;
+  const session = state.session;
+  const changes = {};
+  const thinking = $("settings-thinking").checked;
+  const language = $("settings-language").value;
+  if (thinking !== state.settingsOriginal.show_thinking) changes.show_thinking = thinking;
+  if (language !== state.settingsOriginal.language) changes.language = language;
+  $("settings-error").textContent = "";
+  try {
+    if (Object.keys(changes).length) await savePreferences(changes);
+    if (session === state.session) $("settings-dialog").close();
+  } catch (err) {
+    if (session === state.session) $("settings-error").textContent = err.message;
+  }
+});
+
+globalThis.addEventListener("focus", async () => {
+  if (!state.user || state.settingsBusy || $("settings-dialog").open) return;
+  const session = state.session;
+  try {
+    await refreshPreferences();
+  } catch (err) {
+    if (session === state.session) addMessage("assistant").error(err.message);
+  }
+});
 
 async function refreshChats() {
   if (!state.agentId) return;
@@ -138,7 +272,7 @@ async function refreshChats() {
       li.classList.toggle("active", chat.id === state.chatId);
       const title = document.createElement("span");
       title.className = "title" + (chat.title ? "" : " empty");
-      title.textContent = chat.title || "New chat";
+      title.textContent = chat.title || tr("New chat");
       const del = document.createElement("button");
       del.className = "del";
       del.textContent = "✕";
@@ -156,12 +290,20 @@ async function refreshChats() {
 }
 
 async function newChat() {
-  if (state.busy || state.modelBusy || !state.agentId) return;
+  if (state.busy || state.modelBusy || state.settingsBusy || !state.user) return;
   const session = state.session;
-  const agentId = state.agentId;
-  const chat = await api(chatsUrl(), { method: "POST" });
-  if (session !== state.session || agentId !== state.agentId) return;
-  await openChat(chat.id);
+  try {
+    const preferences = await refreshPreferences();
+    if (session !== state.session || state.busy || state.modelBusy || state.settingsBusy) return;
+    if (!preferences.agent_id) throw new Error(tr("No agents are configured for this user."));
+    if (preferences.agent_id !== state.agentId) await selectAgent(preferences.agent_id);
+    const agentId = state.agentId;
+    const chat = await api(chatsUrl(), { method: "POST" });
+    if (session !== state.session || agentId !== state.agentId) return;
+    await openChat(chat.id);
+  } catch (err) {
+    if (session === state.session) addMessage("assistant").error(err.message);
+  }
 }
 
 $("new-chat").addEventListener("click", newChat);
@@ -170,6 +312,8 @@ async function openChat(chatId) {
   if (state.busy || state.modelBusy) return;
   const session = state.session;
   const agentId = state.agentId;
+  await refreshPreferences();
+  if (session !== state.session || agentId !== state.agentId) return;
   const data = await api(chatsUrl(`/${chatId}`));
   if (session !== state.session || agentId !== state.agentId || state.busy || state.modelBusy) return;
   state.chatId = chatId;
@@ -182,7 +326,7 @@ async function openChat(chatId) {
 }
 
 async function deleteChat(chat) {
-  if (state.busy || state.modelBusy || !confirm(`Delete "${chat.title || "New chat"}"?`)) return;
+  if (state.busy || state.modelBusy || !confirm(tr("Delete \"{title}\"?", { title: chat.title || tr("New chat") }))) return;
   await api(chatsUrl(`/${chat.id}`), { method: "DELETE" });
   if (state.chatId === chat.id) {
     state.chatId = null;
@@ -248,11 +392,11 @@ function renderModelList() {
   list.replaceChildren();
   updateModelControls();
   if (state.modelLoading) {
-    $("model-status").textContent = "Loading current model catalog...";
+    $("model-status").textContent = tr("Loading current model catalog...");
     return;
   }
   if (!state.modelCatalog || state.modelCatalogZdr !== $("model-zdr").checked) {
-    $("model-status").textContent = "Catalog unavailable. Use Refresh to retry.";
+    $("model-status").textContent = tr("Catalog unavailable. Use Refresh to retry.");
     return;
   }
   const saved = new Set(state.modelFavorites);
@@ -273,8 +417,8 @@ function renderModelList() {
     && (!query || model.id.toLocaleLowerCase().includes(query) || model.name.toLocaleLowerCase().includes(query))
   ).sort((a, b) => compareModels(a, b, $("model-sort").value, saved));
   $("model-status").textContent = matches.length
-    ? `${matches.length} model${matches.length === 1 ? "" : "s"} - ${$("model-zdr").checked ? "ZDR only" : "all routes allowed"}`
-    : "No models match. Try another search or relax the filters.";
+    ? `${matches.length} ${tr(matches.length === 1 ? "model" : "models")} - ${tr($("model-zdr").checked ? "ZDR only" : "all routes allowed")}`
+    : tr("No models match. Try another search or relax the filters.");
   for (const model of matches) {
     const available = availableIds.has(model.id);
     const row = document.createElement("li");
@@ -291,7 +435,7 @@ function renderModelList() {
     const id = document.createElement("small");
     id.textContent = model.id;
     const providers = document.createElement("small");
-    providers.textContent = !available ? "Unavailable under the current filter"
+    providers.textContent = !available ? tr("Unavailable under the current filter")
       : model.zdr_providers.length ? `ZDR routes: ${model.zdr_providers.join(", ")}`
       : "No active ZDR routes";
     const pricing = document.createElement("small");
@@ -434,8 +578,9 @@ function setComposer(enabled) {
 
 function updateBusy() {
   state.busy = state.requests.size > 0;
-  $("agent-select").disabled = state.busy || state.modelBusy;
-  $("new-chat").disabled = state.busy || state.modelBusy;
+  $("agent-select").disabled = state.busy || state.modelBusy || state.settingsBusy;
+  $("new-chat").disabled = state.busy || state.modelBusy || state.settingsBusy;
+  $("settings-open").disabled = state.settingsBusy;
   for (const button of $("chat-list").querySelectorAll(".del")) button.disabled = state.busy || state.modelBusy;
   setComposer(Boolean(state.chatId));
   updateModelControls();
@@ -452,6 +597,13 @@ function resetStreams() {
   state.requests.clear();
   state.latest = null;
   state.sendQueue = Promise.resolve();
+  state.preferences = null;
+  state.preferencesRequest++;
+  state.settingsOriginal = null;
+  state.settingsBusy = false;
+  $("settings-dialog").close();
+  $("settings-save").disabled = false;
+  $("messages").classList.toggle("hide-thinking", false);
   state.modelCatalog = null;
   state.modelCatalogZdr = null;
   $("model-sort").value = "favorites";
@@ -614,7 +766,7 @@ function addMessage(role) {
         const note = document.createElement("div");
         note.className = "interruption";
         note.setAttribute("role", "status");
-        note.textContent = "Interrupted by a new message";
+        note.textContent = tr("Interrupted by a new message");
         el.append(note);
       }
     },
@@ -688,13 +840,13 @@ $("file-input").addEventListener("change", async (event) => {
   event.target.value = "";
   try {
     const valid = files.map((file) => {
-      if (!attachmentModality(file)) throw new Error(`${file.name}: only image, video and audio files are supported`);
-      if (file.size > MAX_FILE_BYTES) throw new Error(`${file.name}: maximum size is 10 MB`);
+      if (!attachmentModality(file)) throw new Error(tr("{name}: only image, video and audio files are supported", { name: file.name }));
+      if (file.size > MAX_FILE_BYTES) throw new Error(tr("{name}: maximum size is 10 MB", { name: file.name }));
       return file;
     });
     const total = state.attachments.reduce((sum, item) => sum + item.size, 0)
       + valid.reduce((sum, file) => sum + file.size, 0);
-    if (total > MAX_TOTAL_FILE_BYTES) throw new Error("Attachments exceed the 25 MB total limit");
+    if (total > MAX_TOTAL_FILE_BYTES) throw new Error(tr("Attachments exceed the 25 MB total limit"));
     state.attachments.push(...await Promise.all(valid.map(readAttachment)));
     renderPendingAttachments();
   } catch (err) {
@@ -753,11 +905,13 @@ $("input").addEventListener("keydown", (e) => {
 
 async function streamReply(content, attachments, request) {
   // Serialize acceptance, not generation, so rapid sends reach the service in order.
-  const response = state.sendQueue.then(() => {
+  const response = state.sendQueue.then(async () => {
+    if (!isCurrent(request)) throw new DOMException("Session changed", "AbortError");
+    await refreshPreferences();
     if (!isCurrent(request)) throw new DOMException("Session changed", "AbortError");
     return fetch(`/api/agents/${request.agentId}/chats/${request.chatId}/messages`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "Accept-Language": state.preferences?.language ?? "en" },
       body: JSON.stringify({
         content,
         attachments: attachments.map(({ size, ...attachment }) => attachment),
@@ -768,12 +922,13 @@ async function streamReply(content, attachments, request) {
   state.sendQueue = response.then(() => undefined, () => undefined);
   const res = await response;
   if (res.status === 401) {
+    const error = tr("not logged in");
     if (isCurrent(request)) showLogin();
-    throw new Error("not logged in");
+    throw new Error(error);
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(formatApiError(body.detail) || `HTTP ${res.status}`);
+    throw new Error(formatApiError(body.detail) || tr("HTTP {status}", { status: res.status }));
   }
 
   const reader = res.body.getReader();
@@ -792,7 +947,7 @@ async function streamReply(content, attachments, request) {
       if (isCurrent(request)) scrollDown();
     }
     if (isCurrent(request) && !request.done) {
-      throw new Error("Response stream ended before completion");
+      throw new Error(tr("Response stream ended before completion"));
     }
   } finally {
     reader.releaseLock();
@@ -810,7 +965,7 @@ function handleEvent(raw, request) {
     else if (line.startsWith("id: ")) {
       const id = line.slice(4);
       if (request.generationId && request.generationId !== id) {
-        throw new Error("Generation changed within a response");
+        throw new Error(tr("Generation changed within a response"));
       }
       request.generationId = id;
     }

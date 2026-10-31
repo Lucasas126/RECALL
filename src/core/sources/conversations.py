@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from src.core.sources.base import Source
 from src.utils.files import atomic_write_text
+from src.utils.i18n import InputError, UserMessageError
 
 _CHAT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _TITLE_CHARS = 60
@@ -26,7 +27,7 @@ class ChatModel(BaseModel):
     zdr: bool = Field(default=True, strict=True)
 
 
-class ChatMetadataError(RuntimeError):
+class ChatMetadataError(UserMessageError, RuntimeError):
     """Chat model metadata could not be read or saved."""
 
 
@@ -39,7 +40,7 @@ class ConversationsSource(Source):
 
     def _path(self, chat_id: str) -> Path:
         if not _CHAT_ID_RE.match(chat_id):
-            raise ValueError(f"invalid chat id: {chat_id!r}")
+            raise InputError("invalid {kind} id: {value!r}", kind="chat", value=chat_id)
         return self.resolve(f"{chat_id}.jsonl")
 
     def exists_chat(self, chat_id: str) -> bool:
@@ -58,7 +59,7 @@ class ConversationsSource(Source):
         except FileNotFoundError:
             return None
         except (OSError, UnicodeError, ValidationError) as exc:
-            raise ChatMetadataError(f"Could not read model selection for chat {chat_id}.") from exc
+            raise ChatMetadataError("Could not read model selection for chat {chat_id}.", chat_id=chat_id) from exc
 
     def set_model(self, chat_id: str, model_id: str, *, zdr: bool = True) -> ChatModel:
         """Persist an override after the caller validates model availability."""
@@ -67,7 +68,7 @@ class ConversationsSource(Source):
         try:
             atomic_write_text(path, selection.model_dump_json() + "\n")
         except OSError as exc:
-            raise ChatMetadataError(f"Could not save model selection for chat {chat_id}.") from exc
+            raise ChatMetadataError("Could not save model selection for chat {chat_id}.", chat_id=chat_id) from exc
         return selection
 
     def create(self) -> str:

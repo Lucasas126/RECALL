@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import Iterator, Literal, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from src.config.favorites import FavoriteModelId, FavoritesError
+from src.config.preferences import PreferencesError, UserPreferences
 from src.core.sources.conversations import ChatMetadataError
 from src.providers.catalog import CatalogUnavailable
 from src.service.chat import (
@@ -22,6 +23,7 @@ from src.service.chat import (
     UnknownUser,
 )
 from src.utils.logger import get_logger
+from src.utils.i18n import error_message, message, messages
 
 logger = get_logger("web")
 
@@ -60,36 +62,56 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
     def current_user(request: Request) -> str:
         user_id = request.cookies.get(_COOKIE)
         if not user_id:
-            raise HTTPException(401, "not logged in")
+            raise HTTPException(401, message(request.headers.get("Accept-Language", "en"), "not logged in"))
         return user_id
+
+    def notification_language(request: Request) -> str:
+        language = request.headers.get("Accept-Language", "en").split(",", 1)[0]
+        user_id = request.cookies.get(_COOKIE)
+        if user_id:
+            try:
+                return service.language(user_id)
+            except (PreferencesError, ServiceError, ValueError, OSError) as exc:
+                logger.warning("Could not resolve notification language: %s", exc)
+        return language
+
+    def localized_error(request: Request, status: int, exc: Exception) -> JSONResponse:
+        language = (
+            request.headers.get("Accept-Language", "en").split(",", 1)[0]
+            if isinstance(exc, UnknownUser) else notification_language(request)
+        )
+        return _error(status, exc, language)
 
     @app.exception_handler(UnknownUser)
     def _unknown_user(request: Request, exc: UnknownUser):
-        return _error(401, exc)
+        return localized_error(request, 401, exc)
 
     @app.exception_handler(UnknownAgent)
     @app.exception_handler(UnknownChat)
     def _not_found(request: Request, exc: ServiceError):
-        return _error(404, exc)
+        return localized_error(request, 404, exc)
 
     @app.exception_handler(ValueError)
     def _bad_request(request: Request, exc: ValueError):
-        return _error(400, exc)
+        return localized_error(request, 400, exc)
 
     @app.exception_handler(CatalogUnavailable)
     def _catalog_unavailable(request: Request, exc: CatalogUnavailable):
         logger.warning("model catalog unavailable: %s", exc)
-        return _error(502, exc)
+        return localized_error(request, 502, exc)
 
     @app.exception_handler(FavoritesError)
+    @app.exception_handler(PreferencesError)
     @app.exception_handler(ChatMetadataError)
-    def _model_preferences_error(request: Request, exc: FavoritesError | ChatMetadataError):
-        logger.error("model preferences operation failed: %s", exc)
-        return _error(500, exc)
+    def _preferences_error(
+        request: Request, exc: FavoritesError | PreferencesError | ChatMetadataError,
+    ):
+        logger.error("preferences operation failed: %s", exc)
+        return localized_error(request, 500, exc)
 
     @app.exception_handler(AgentBusy)
     def _agent_busy(request: Request, exc: AgentBusy):
-        return _error(409, exc)
+        return localized_error(request, 409, exc)
 
     @app.middleware("http")
     async def no_cache(request: Request, call_next):
@@ -101,11 +123,11 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
     # ------------------------------------------------------------------ session
 
     @app.post("/api/login")
-    def login(body: LoginIn, response: Response):
+    def login(body: LoginIn, response: Response, request: Request):
         try:
             profile = service.login(body.user_id.strip())
         except UnknownUser as e:
-            raise HTTPException(404, str(e)) from e
+            return localized_error(request, 404, e)
         response.set_cookie(_COOKIE, profile["id"], httponly=True, samesite="strict")
         return profile
 
@@ -117,6 +139,18 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
     @app.get("/api/me")
     def me(user_id: str = Depends(current_user)):
         return service.login(user_id)
+
+    @app.get("/api/localization")
+    def localization(language: Literal["en", "es"] = "en"):
+        return messages(language)
+
+    @app.get("/api/preferences")
+    def get_preferences(user_id: str = Depends(current_user)):
+        return service.get_preferences(user_id)
+
+    @app.patch("/api/preferences")
+    def update_preferences(body: UserPreferences, user_id: str = Depends(current_user)):
+        return service.update_preferences(user_id, body)
 
     @app.get("/api/models")
     def list_models(q: str = "", zdr: bool = True, user_id: str = Depends(current_user)):
@@ -166,8 +200,9 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
 
     @app.post("/api/agents/{agent_id}/chats/{chat_id}/messages")
     def send_message(
-        agent_id: str, chat_id: str, body: MessageIn, user_id: str = Depends(current_user)
+        agent_id: str, chat_id: str, body: MessageIn, user_id: str = Depends(current_user),
     ):
+        language = service.language(user_id)
         events = service.send(
             user_id, agent_id, chat_id, body.content, stream=True,
             attachments=[attachment.model_dump() for attachment in body.attachments],
@@ -185,7 +220,7 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
                     yield _sse(event.kind, data, generation_id)
             except Exception as e:  # the response has started: report the failure in-band
                 logger.exception("reply failed for %s/%s/%s", user_id, agent_id, chat_id)
-                yield _sse("error", str(e), generation_id)
+                yield _sse("error", error_message(language, e), generation_id)
             yield _sse("done", "", generation_id)
 
         return StreamingResponse(
@@ -203,5 +238,5 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
     return app
 
 
-def _error(status: int, exc: Exception) -> JSONResponse:
-    return JSONResponse({"detail": str(exc)}, status_code=status)
+def _error(status: int, exc: Exception, language: str = "en") -> JSONResponse:
+    return JSONResponse({"detail": error_message(language, exc)}, status_code=status)

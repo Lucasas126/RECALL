@@ -23,6 +23,7 @@
         <button id="logout" class="link">Log out</button>
       </div>
       <select id="agent-select"></select>
+      <button id="settings-open" type="button" aria-haspopup="dialog">Settings</button>
       <button id="new-chat">+ New chat</button>
       <ul id="chat-list"></ul>
     </aside>
@@ -42,6 +43,27 @@
       </form>
     </main>
   </section>
+
+  <dialog id="settings-dialog" aria-labelledby="settings-title">
+    <div class="model-heading">
+      <h2 id="settings-title">User settings</h2>
+      <button id="settings-close" type="button">Close</button>
+    </div>
+    <p id="settings-note" class="model-note">Thinking and language are shared with Telegram.</p>
+    <form id="settings-form">
+      <label class="model-filter">
+        <input id="settings-thinking" type="checkbox"> <span id="settings-thinking-label">Show model thinking</span>
+      </label>
+      <label for="settings-language"><span id="settings-language-label">Alerts and errors</span>
+        <select id="settings-language">
+          <option value="en">English</option>
+          <option value="es">Español</option>
+        </select>
+      </label>
+      <p id="settings-error" class="error" role="alert"></p>
+      <button id="settings-save" type="submit">Save settings</button>
+    </form>
+  </dialog>
 
   <dialog id="model-dialog" aria-labelledby="model-title">
     <div class="model-heading">

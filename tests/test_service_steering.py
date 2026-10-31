@@ -53,6 +53,12 @@ class SteeringFixture(unittest.TestCase):
         for patcher in (registry_patch, user_patch, index_patch, agent_patch):
             patcher.start()
             self.addCleanup(patcher.stop)
+        config_root = self.root / "config"
+        for user in ("user-one", "user-two"):
+            (config_root / user).mkdir(parents=True)
+        config_patch = patch("src.service.chat.CONFIG_DIR", config_root)
+        config_patch.start()
+        self.addCleanup(config_patch.stop)
         self.service = ChatService(agent_factory=self._factory)
         self.addCleanup(self._finish_workers)
         self.chat = self.service.create_chat("user-one", "agent-one")["id"]

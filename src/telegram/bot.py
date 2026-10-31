@@ -12,22 +12,30 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import telegramify_markdown
-from telegram import BotCommand, MessageEntity, ReplyKeyboardMarkup, ReplyKeyboardRemove, Update
+from telegram import (
+    BotCommand, MessageEntity,
+    ReplyKeyboardMarkup, ReplyKeyboardRemove, Update,
+)
 from telegram.constants import ChatType
 from telegram.error import BadRequest, RetryAfter, TelegramError
 from telegram.ext import (
     Application,
     ApplicationBuilder,
+    ApplicationHandlerStop,
     CommandHandler,
     ContextTypes,
     MessageHandler,
+    TypeHandler,
     filters,
 )
 
+from src.config.favorites import FavoritesError
+from src.config.preferences import PreferencesError, UserPreferences
 from src.config.settings import SPEECH_TO_TEXT, TELEGRAM_ALLOWED_USERS_ENV
 from src.providers.catalog import CatalogUnavailable
 from src.service.chat import ChatEvent, ChatService, ServiceError
 from src.utils.logger import get_logger
+from src.utils.i18n import InputError, error_message, message
 
 logger = get_logger("telegram")
 _MODELS_PER_PAGE = 10
@@ -50,6 +58,7 @@ class TelegramSession:
     stt_model: str = SPEECH_TO_TEXT.model
     last_message_at: datetime | None = None
     pending_new_chat_notice: bool = False
+    language: str = "en"
 
 
 @dataclass
@@ -84,6 +93,28 @@ def _session(update: Update, state: TelegramBotState) -> TelegramSession | None:
     return state.sessions.get(user.id) if user else None
 
 
+def _msg(session: TelegramSession | None, template: str, **values: object) -> str:
+    return message(session.language if session else "en", template, **values)
+
+
+async def refresh_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state: TelegramBotState = context.application.bot_data["state"]
+    session = _session(update, state)
+    if session is None:
+        return
+    text = update.effective_message.text if update.effective_message else None
+    if text and text.startswith("/"):
+        context.user_data.pop("settings_options", None)
+    try:
+        session.language = state.service.language(session.user_id)
+    except (PreferencesError, ServiceError, ValueError, OSError) as exc:
+        logger.warning("Could not load Telegram notification language: %s", exc)
+        await update.effective_message.reply_text(
+            _msg(session, "Could not load settings. Try /settings again."),
+        )
+        raise ApplicationHandlerStop from exc
+
+
 async def _unauthorized(update: Update) -> None:
     user = update.effective_user
     if user:
@@ -97,6 +128,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     await update.effective_message.reply_text(
         "Available commands:\n\n"
+        "/settings — Thinking, language, and active agent\n"
         "/newchat — Start a new chat for the current agent\n"
         "/selectagent — Choose the active agent\n"
         "/agent — Show the active agent\n"
@@ -109,28 +141,137 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
+def _settings_view(
+    service: ChatService, session: TelegramSession,
+) -> tuple[str, ReplyKeyboardMarkup, dict[str, str]]:
+    preferences = service.get_preferences(session.user_id)
+    agents = service.list_agents(session.user_id)
+    language = preferences["language"]
+    agent_name = next(
+        (agent["name"] for agent in agents if agent["id"] == session.agent_id),
+        message(language, "None"),
+    )
+    visible = message(language, "visible" if preferences["show_thinking"] else "hidden")
+    thinking_label = message(language, "Thinking: {visibility}", visibility=visible)
+    agent_label = message(language, "Active agent")
+    close_label = message(language, "Close")
+    options = {thinking_label: "thinking", agent_label: "agents", close_label: "close"}
+    languages = []
+    for code, label in (("en", "English"), ("es", "Español")):
+        label = f"{'✅ ' if language == code else ''}{label}"
+        options[label] = f"language:{code}"
+        languages.append(label)
+    return (
+        message(language, "Settings\n\nThinking: {visibility}\nAlerts/errors: {language}\nActive agent: {agent}\n\nThinking and language are shared with the web.",
+                visibility=visible, language=language.upper(), agent=agent_name),
+        ReplyKeyboardMarkup(
+            [[thinking_label], languages, [agent_label], [close_label]],
+            resize_keyboard=True, one_time_keyboard=True,
+        ),
+        options,
+    )
+
+
+async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    state: TelegramBotState = context.application.bot_data["state"]
+    session = _session(update, state)
+    if session is None:
+        await _unauthorized(update)
+        return
+    try:
+        text, markup, options = _settings_view(state.service, session)
+    except (PreferencesError, ServiceError, ValueError, OSError) as exc:
+        logger.warning("Could not load Telegram settings: %s", exc)
+        await update.effective_message.reply_text(_msg(session, "Could not load settings. Try /settings again."))
+        return
+    for key in ("agent_options", "model_options", "stt_options"):
+        context.user_data.pop(key, None)
+    session.agent_options.clear()
+    context.user_data["settings_options"] = options
+    await update.effective_message.reply_text(text, reply_markup=markup)
+
+
+async def settings_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    state: TelegramBotState = context.application.bot_data["state"]
+    session = _session(update, state)
+    selected = (update.effective_message.text or "").strip()
+    data = context.user_data.get("settings_options", {}).get(selected)
+    if data is None:
+        return False
+    if session is None:
+        await _unauthorized(update)
+        return True
+    try:
+        if data == "agents":
+            await select_agent(update, context)
+            return True
+        if data == "close":
+            context.user_data.pop("settings_options", None)
+            await update.effective_message.reply_text(
+                _msg(session, "Settings closed."), reply_markup=ReplyKeyboardRemove(),
+            )
+            return True
+        if data == "thinking":
+            current = state.service.get_preferences(session.user_id)
+            changes = UserPreferences(show_thinking=not current["show_thinking"])
+        elif data in ("language:en", "language:es"):
+            changes = UserPreferences.model_validate({"language": data.rsplit(":", 1)[1]})
+        else:
+            raise InputError("Unknown settings option. Open /settings again.")
+        saved = state.service.update_preferences(session.user_id, changes)
+        session.language = saved["language"]
+        await settings_command(update, context)
+    except (PreferencesError, ServiceError, ValueError, OSError) as exc:
+        logger.warning("Could not update Telegram settings: %s", exc)
+        await update.effective_message.reply_text(
+            _msg(session, "Could not load or save settings: {error}\nTry /settings again.",
+                 error=error_message(session.language, exc)),
+        )
+    return True
+
+
+def _create_session_chat(session: TelegramSession, service: ChatService) -> dict:
+    preferences = service.get_preferences(session.user_id)
+    agent_id = preferences["agent_id"]
+    if agent_id is None:
+        raise InputError("No agents are configured for this user.")
+    chat = service.create_chat(session.user_id, agent_id)
+    session.agent_id = agent_id
+    session.chat_id = chat["id"]
+    session.pending_new_chat_notice = True
+    return chat
+
+
 async def new_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state: TelegramBotState = context.application.bot_data["state"]
     session = _session(update, state)
     if session is None:
         await _unauthorized(update)
         return
-    chat = state.service.create_chat(session.user_id, session.agent_id)
-    session.chat_id = chat["id"]
+    try:
+        chat = _create_session_chat(session, state.service)
+    except (PreferencesError, ServiceError, ValueError, OSError) as exc:
+        logger.warning("Could not create Telegram chat: %s", exc)
+        await update.effective_message.reply_text(
+            _msg(session, "Could not create a chat: {error}", error=error_message(session.language, exc)),
+        )
+        return
     session.last_message_at = datetime.now(timezone.utc)
     session.pending_new_chat_notice = True
     session.model_options.clear()
     session.agent_options.clear()
     context.user_data.pop("model_options", None)
     context.user_data.pop("model_catalog", None)
+    context.user_data.pop("model_favorites", None)
     context.user_data.pop("model_page", None)
     context.user_data.pop("agent_options", None)
+    context.user_data.pop("settings_options", None)
     context.user_data.pop("stt_options", None)
     context.user_data.pop("stt_catalog", None)
     context.user_data.pop("stt_page", None)
     await update.effective_message.reply_text(
-        f"New chat created: {chat['id']}\n"
-        "You can now choose a model or send your first message."
+        _msg(session, "New chat created: {chat_id}\nYou can now choose a model or send your first message.",
+             chat_id=chat["id"]),
     )
 
 
@@ -144,9 +285,7 @@ def _prepare_message_session(session: TelegramSession, service: ChatService) -> 
         )
     )
     if starts_new_chat:
-        chat = service.create_chat(session.user_id, session.agent_id)
-        session.chat_id = chat["id"]
-        session.pending_new_chat_notice = True
+        _create_session_chat(session, service)
     session.last_message_at = now
     notice = session.pending_new_chat_notice or starts_new_chat
     session.pending_new_chat_notice = False
@@ -162,10 +301,14 @@ def _price_key(value: str | None) -> tuple[int, Decimal]:
         return (1, Decimal("Infinity"))
 
 
-def _sort_models(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _sort_models(
+    models: list[dict[str, Any]], favorites: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    favorites = favorites if favorites is not None else set()
     return sorted(
         models,
         key=lambda model: (
+            model["id"] not in favorites,
             _price_key(model.get("pricing", {}).get("prompt")),
             _price_key(model.get("pricing", {}).get("completion")),
             model["name"].casefold(),
@@ -209,13 +352,15 @@ def _shift_entities(entities: list[MessageEntity], offset: int) -> list[MessageE
 
 
 def _generation_message(
-    parts: list[tuple[str, str]], notice: str = "",
+    parts: list[tuple[str, str]], notice: str = "", *, show_thinking: bool = True,
 ) -> tuple[str, list[MessageEntity]]:
     """Render reasoning, text and actions in their original event order."""
     text, entities = _convert_markdown(notice) if notice else ("", [])
     quote_start: int | None = None
     for kind, content in parts:
-        thinking = kind in ("reasoning", "reasoning_tool")
+        if kind == "reasoning" and not show_thinking:
+            continue
+        thinking = show_thinking and kind in ("reasoning", "reasoning_tool")
         if not thinking and quote_start is not None:
             text += "\n\n"
             entities.append(MessageEntity(
@@ -263,11 +408,13 @@ async def _show_model_page(
     page_models = models[
         page * _MODELS_PER_PAGE:(page + 1) * _MODELS_PER_PAGE
     ]
+    favorites = context.user_data.get("model_favorites", set())
     model_options: dict[str, str] = {}
     keyboard: list[list[str]] = []
     for index, model in enumerate(page_models, page * _MODELS_PER_PAGE + 1):
         label = (
             f"{'✅ ' if model['id'] == current_model else ''}"
+            f"{'⭐ ' if model['id'] in favorites else ''}"
             f"{index}. {model['name'][:28]} | "
             f"${model['pricing'].get('prompt') or 'n/d'} in / "
             f"${model['pricing'].get('completion') or 'n/d'} out"
@@ -276,9 +423,9 @@ async def _show_model_page(
         keyboard.append([label])
     navigation = []
     if page > 0:
-        navigation.append(_PREVIOUS_PAGE)
+        navigation.append(_msg(session, _PREVIOUS_PAGE))
     if page < page_count - 1:
-        navigation.append(_NEXT_PAGE)
+        navigation.append(_msg(session, _NEXT_PAGE))
     if navigation:
         keyboard.append(navigation)
     context.user_data["model_options"] = model_options
@@ -287,11 +434,8 @@ async def _show_model_page(
         current_model,
     )
     await update.effective_message.reply_text(
-        f"Current model: {current_label}\n\n"
-        f"Page {page + 1}/{page_count}. "
-        f"{len(models)} models available.\n"
-        "Choose another model. Prices are USD per 1 million tokens "
-        "(input / output). ZDR enabled:",
+        _msg(session, "Current model: {model}\n\nPage {page}/{pages}. {count} models available.\nChoose another model. Prices are USD per 1 million tokens (input / output). ZDR enabled:",
+             model=current_label, page=page + 1, pages=page_count, count=len(models)),
         reply_markup=ReplyKeyboardMarkup(
             keyboard, resize_keyboard=True, one_time_keyboard=True,
         ),
@@ -306,38 +450,48 @@ async def select_model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     if session.chat_id is None:
         await update.effective_message.reply_text(
-            "Create a chat first with /newchat."
+            _msg(session, "Create a chat first with /newchat.")
         )
         return
 
     query = " ".join(context.args).strip()
     try:
-        models = _sort_models(state.service.list_models(session.user_id, query, zdr=True))
+        favorites = set(state.service.list_favorite_models(session.user_id))
+        models = _sort_models(state.service.list_models(session.user_id, query, zdr=True), favorites)
+    except FavoritesError as exc:
+        logger.warning("Could not load Telegram model favorites: %s", exc)
+        await update.effective_message.reply_text(
+            _msg(session, "Could not load model favorites: {error}", error=error_message(session.language, exc)),
+        )
+        return
     except (CatalogUnavailable, ServiceError, ValueError) as exc:
         logger.warning("Could not load Telegram model options: %s", exc)
         await update.effective_message.reply_text(
-            "I cannot load the models right now. Please try again in a few seconds."
+            _msg(session, "I cannot load the models right now. Please try again in a few seconds.")
         )
         return
     if not models:
         await update.effective_message.reply_text(
-            "No ZDR models found. Try /selectmodel followed by part of a model name."
+            _msg(session, "No ZDR models found. Try /selectmodel followed by part of a model name.")
         )
         return
     context.user_data["model_catalog"] = models
+    context.user_data["model_favorites"] = favorites
     context.user_data["model_page"] = 0
     await _show_model_page(update, context, session)
 
 
 async def model_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     action = (update.effective_message.text or "").strip()
-    if action not in {_PREVIOUS_PAGE, _NEXT_PAGE}:
+    previous = {_PREVIOUS_PAGE, message("es", _PREVIOUS_PAGE)}
+    following = {_NEXT_PAGE, message("es", _NEXT_PAGE)}
+    if action not in previous | following:
         return False
     models = context.user_data.get("model_catalog")
     if not models:
         return False
     page = context.user_data.get("model_page", 0)
-    context.user_data["model_page"] = page + (1 if action == _NEXT_PAGE else -1)
+    context.user_data["model_page"] = page + (1 if action in following else -1)
     session = _session(update, context.application.bot_data["state"])
     if session is None or session.chat_id is None:
         await _unauthorized(update)
@@ -357,7 +511,7 @@ async def model_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     session = _session(update, state)
     if session is None or session.chat_id is None:
         await update.effective_message.reply_text(
-            "The session has expired. Use /newchat.",
+            _msg(session, "The session has expired. Use /newchat."),
             reply_markup=ReplyKeyboardRemove(),
         )
         return True
@@ -368,20 +522,18 @@ async def model_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     except (CatalogUnavailable, ServiceError, ValueError) as exc:
         logger.warning("Could not select Telegram model %r: %s", model_id, exc)
         await update.effective_message.reply_text(
-            "That model could not be selected.\n"
-            "Use /selectmodel to try again.",
+            _msg(session, "That model could not be selected.\nUse /selectmodel to try again."),
             reply_markup=ReplyKeyboardRemove(),
         )
         return True
     session.model_options.clear()
     context.user_data.pop("model_options", None)
     context.user_data.pop("model_catalog", None)
+    context.user_data.pop("model_favorites", None)
     context.user_data.pop("model_page", None)
     await update.effective_message.reply_text(
-        f"✅ Model selected\n\n"
-        f"{model_id}\n\n"
-        "This selection applies to the current chat.\n"
-        "ZDR: enabled",
+        _msg(session, "✅ Model selected\n\n{model_id}\n\nThis selection applies to the current chat.\nZDR: enabled",
+             model_id=model_id),
         reply_markup=ReplyKeyboardRemove(),
     )
     return True
@@ -394,18 +546,18 @@ async def show_model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await _unauthorized(update)
         return
     if session.chat_id is None:
-        await update.effective_message.reply_text("No active chat. Use /newchat.")
+        await update.effective_message.reply_text(_msg(session, "No active chat. Use /newchat."))
         return
     try:
         chat = state.service.get_chat(session.user_id, session.agent_id, session.chat_id)
     except (ServiceError, ValueError) as exc:
         logger.warning("Could not read Telegram chat model: %s", exc)
-        await update.effective_message.reply_text("I could not read the current chat model.")
+        await update.effective_message.reply_text(_msg(session, "I could not read the current chat model."))
         return
     model = chat["model"]
     await update.effective_message.reply_text(
-        f"Current chat model:\n{model['id']}\n\n"
-        f"ZDR: {'enabled' if model.get('zdr', True) else 'disabled'}"
+        _msg(session, "Current chat model:\n{model_id}\n\nZDR: {policy}",
+             model_id=model["id"], policy=_msg(session, "enabled" if model.get("zdr", True) else "disabled")),
     )
 
 
@@ -421,12 +573,12 @@ async def select_stt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     except (CatalogUnavailable, ServiceError, ValueError) as exc:
         logger.warning("Could not load Telegram STT models: %s", exc)
         await update.effective_message.reply_text(
-            "I cannot load speech-to-text models right now. Please try again later."
+            _msg(session, "I cannot load speech-to-text models right now. Please try again later.")
         )
         return
     if not models:
         await update.effective_message.reply_text(
-            "No ZDR speech-to-text models found. Try /selectstt followed by a search term."
+            _msg(session, "No ZDR speech-to-text models found. Try /selectstt followed by a search term.")
         )
         return
     context.user_data["stt_catalog"] = models
@@ -455,16 +607,15 @@ async def _show_stt_page(
         keyboard.append([label])
     navigation = []
     if page > 0:
-        navigation.append(_STT_PREVIOUS_PAGE)
+        navigation.append(_msg(session, _STT_PREVIOUS_PAGE))
     if page < page_count - 1:
-        navigation.append(_STT_NEXT_PAGE)
+        navigation.append(_msg(session, _STT_NEXT_PAGE))
     if navigation:
         keyboard.append(navigation)
     context.user_data["stt_options"] = options
     await update.effective_message.reply_text(
-        f"Current STT model: {session.stt_model}\n\n"
-        f"Page {page + 1}/{page_count}. {len(models)} ZDR models available.\n"
-        "Choose a speech-to-text model. Prices are USD per 1 million input tokens:",
+        _msg(session, "Current STT model: {model}\n\nPage {page}/{pages}. {count} ZDR models available.\nChoose a speech-to-text model. Prices are USD per 1 million input tokens:",
+             model=session.stt_model, page=page + 1, pages=page_count, count=len(models)),
         reply_markup=ReplyKeyboardMarkup(
             keyboard, resize_keyboard=True, one_time_keyboard=True,
         ),
@@ -473,12 +624,14 @@ async def _show_stt_page(
 
 async def stt_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     action = (update.effective_message.text or "").strip()
-    if action not in {_STT_PREVIOUS_PAGE, _STT_NEXT_PAGE}:
+    previous = {_STT_PREVIOUS_PAGE, message("es", _STT_PREVIOUS_PAGE)}
+    following = {_STT_NEXT_PAGE, message("es", _STT_NEXT_PAGE)}
+    if action not in previous | following:
         return False
     if not context.user_data.get("stt_catalog"):
         return False
     page = context.user_data.get("stt_page", 0)
-    context.user_data["stt_page"] = page + (1 if action == _STT_NEXT_PAGE else -1)
+    context.user_data["stt_page"] = page + (1 if action in following else -1)
     session = _session(update, context.application.bot_data["state"])
     if session is None:
         await _unauthorized(update)
@@ -501,8 +654,8 @@ async def stt_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bo
     context.user_data.pop("stt_catalog", None)
     context.user_data.pop("stt_page", None)
     await update.effective_message.reply_text(
-        f"✅ STT model selected:\n{model_id}\n\n"
-        "ZDR: enabled. This model will transcribe future audio messages.",
+        _msg(session, "✅ STT model selected:\n{model_id}\n\nZDR: enabled. This model will transcribe future audio messages.",
+             model_id=model_id),
         reply_markup=ReplyKeyboardRemove(),
     )
     return True
@@ -515,7 +668,7 @@ async def show_stt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _unauthorized(update)
         return
     await update.effective_message.reply_text(
-        f"Current STT model:\n{session.stt_model}\n\nZDR: enabled"
+        _msg(session, "Current STT model:\n{model}\n\nZDR: enabled", model=session.stt_model),
     )
 
 
@@ -529,22 +682,23 @@ async def select_agent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         agents = state.service.list_agents(session.user_id)
     except ServiceError as exc:
         logger.warning("Could not load Telegram agents: %s", exc)
-        await update.effective_message.reply_text("I could not load your agents right now.")
+        await update.effective_message.reply_text(_msg(session, "I could not load your agents right now."))
         return
     if not agents:
-        await update.effective_message.reply_text("No agents are configured for this user.")
+        await update.effective_message.reply_text(_msg(session, "No agents are configured for this user."))
         return
 
     options: dict[str, str] = {}
     keyboard: list[list[str]] = []
     for agent in agents:
-        label = f"{'✅ ' if agent['id'] == session.agent_id else ''}{agent['name']}"
+        label = f"{'✅ ' if agent['id'] == session.agent_id else ''}{agent['name']} ({agent['id']})"
         options[label] = agent["id"]
         keyboard.append([label])
     session.agent_options = options
+    context.user_data.pop("settings_options", None)
     context.user_data["agent_options"] = options.copy()
     await update.effective_message.reply_text(
-        "Choose the agent for new and incoming messages:",
+        _msg(session, "Choose the agent for new and incoming messages:"),
         reply_markup=ReplyKeyboardMarkup(
             keyboard, resize_keyboard=True, one_time_keyboard=True,
         ),
@@ -561,10 +715,12 @@ async def show_agent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         agents = state.service.list_agents(session.user_id)
     except ServiceError as exc:
         logger.warning("Could not read current Telegram agent: %s", exc)
-        await update.effective_message.reply_text("I could not read the current agent.")
+        await update.effective_message.reply_text(_msg(session, "I could not read the current agent."))
         return
     current = next((agent["name"] for agent in agents if agent["id"] == session.agent_id), session.agent_id)
-    await update.effective_message.reply_text(f"Current agent:\n{current} ({session.agent_id})")
+    await update.effective_message.reply_text(
+        _msg(session, "Current agent:\n{name} ({agent_id})", name=current, agent_id=session.agent_id),
+    )
 
 
 async def agent_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -577,16 +733,26 @@ async def agent_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if session is None:
         await _unauthorized(update)
         return True
+    state: TelegramBotState = context.application.bot_data["state"]
+    try:
+        state.service.update_preferences(session.user_id, UserPreferences(agent_id=agent_id))
+    except (PreferencesError, ServiceError, ValueError, OSError) as exc:
+        logger.warning("Could not save Telegram agent selection: %s", exc)
+        await update.effective_message.reply_text(
+            _msg(session, "Could not select the agent: {error}", error=error_message(session.language, exc)),
+        )
+        return True
     session.agent_id = agent_id
     session.chat_id = None
     session.agent_options.clear()
     context.user_data.pop("agent_options", None)
     context.user_data.pop("model_options", None)
     context.user_data.pop("model_catalog", None)
+    context.user_data.pop("model_favorites", None)
     context.user_data.pop("model_page", None)
     await update.effective_message.reply_text(
-        f"✅ Agent selected: {agent_id}\n"
-        "Use /newchat to create a chat for this agent.",
+        _msg(session, "✅ Agent selected: {agent_id}\nUse /newchat to create a chat for this agent.",
+             agent_id=agent_id),
         reply_markup=ReplyKeyboardRemove(),
     )
     return True
@@ -613,16 +779,16 @@ async def _download_attachment(message, bot) -> dict:
         mime_type = message.document.mime_type or ""
         modality = mime_type.split("/", 1)[0]
         if modality not in {"image", "video", "audio"}:
-            raise ValueError("Only image, video and audio files are supported.")
+            raise InputError("Only image, video and audio files are supported.")
         source = message.document
         name = message.document.file_name or f"attachment.{mime_type.split('/', 1)[1]}"
     if source is None or modality is None or mime_type is None or name is None:
-        raise ValueError("This message does not contain a supported attachment.")
+        raise InputError("This message does not contain a supported attachment.")
 
     telegram_file = await bot.get_file(source.file_id)
     data = bytes(await telegram_file.download_as_bytearray())
     if len(data) > _MAX_TELEGRAM_FILE_BYTES:
-        raise ValueError("Telegram attachments must be 22 MB or smaller.")
+        raise InputError("Telegram attachments must be 22 MB or smaller.")
     extension = mimetypes.guess_extension(mime_type) or f".{modality}"
     return {
         "modality": modality,
@@ -656,10 +822,10 @@ def _format_actions(actions: list[dict]) -> str:
 
 
 def _final_messages(
-    parts: list[tuple[str, str]], notice: str = "",
+    parts: list[tuple[str, str]], notice: str = "", *, show_thinking: bool = True,
 ) -> list[tuple[str, list[MessageEntity]]]:
     """Split the rendered timeline without discarding text or entity formatting."""
-    text, entities = _generation_message(parts, notice)
+    text, entities = _generation_message(parts, notice, show_thinking=show_thinking)
     messages: list[tuple[str, list[MessageEntity]]] = []
     start = offset = 0
     while start < len(text):
@@ -814,19 +980,25 @@ async def _send_generation(
     state: TelegramBotState = context.application.bot_data["state"]
     session = _session(update, state)
     if session is None or session.chat_id is None:
-        await update.effective_message.reply_text("Create a chat first with /newchat.")
+        await update.effective_message.reply_text(_msg(session, "Create a chat first with /newchat."))
         return
+    user_id, agent_id, chat_id = session.user_id, session.agent_id, session.chat_id
+    transcription_model = session.stt_model
     chat = update.effective_chat
     stream = _ReplyStream(context.bot, chat.id, use_draft=chat.type == ChatType.PRIVATE)
     await stream.start()
     content = _ReplyContent()
-    notice = "**_New chat started_**\n\n" if new_chat_notice else ""
+    language = session.language
     try:
+        preferences = state.service.get_preferences(user_id)
+        show_thinking = preferences["show_thinking"]
+        language = preferences["language"]
+        notice = message(language, "**_New chat started_**\n\n") if new_chat_notice else ""
         # Sending may transcribe audio first; keep that blocking work off the event loop.
         events = await asyncio.to_thread(
             state.service.send,
-            session.user_id, session.agent_id, session.chat_id, text,
-            stream=True, attachments=attachments, transcription_model=session.stt_model,
+            user_id, agent_id, chat_id, text,
+            stream=True, attachments=attachments, transcription_model=transcription_model,
         )
         while True:
             has_event, event = await _next_event(events)
@@ -837,9 +1009,9 @@ async def _send_generation(
             if event.kind == "interrupted":
                 content.reconcile(event)
                 content.append(
-                    "text", "\n\n_[Interrupted — your latest message is being processed.]_",
+                    "text", message(language, "\n\n_[Interrupted — your latest message is being processed.]_"),
                 )
-                await stream.finish(_final_messages(content.parts, notice))
+                await stream.finish(_final_messages(content.parts, notice, show_thinking=show_thinking))
                 return
             if event.kind in ("text", "reasoning"):
                 content.append(event.kind, event.text)
@@ -849,15 +1021,17 @@ async def _send_generation(
                 content.add_action(event.data)
             else:
                 continue
-            preview = _final_messages(content.parts, notice)
+            preview = _final_messages(content.parts, notice, show_thinking=show_thinking)
             if preview:
                 await stream.update(*preview[-1])
         if not any(kind == "text" for kind, _ in content.parts):
-            content.append("text", "_(The model returned no text.)_")
-        await stream.finish(_final_messages(content.parts, notice))
+            content.append("text", message(language, "_(The model returned no text.)_"))
+        await stream.finish(_final_messages(content.parts, notice, show_thinking=show_thinking))
     except Exception as exc:
         logger.exception("Telegram generation failed")
-        await stream.finish([(f"Generation failed: {exc}", [])])
+        await stream.finish([(
+            message(language, "Generation failed: {error}", error=error_message(language, exc)), [],
+        )])
 
 
 async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -865,6 +1039,8 @@ async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     session = _session(update, state)
     if session is None:
         await _unauthorized(update)
+        return
+    if await settings_selected(update, context):
         return
     if await agent_selected(update, context):
         return
@@ -876,7 +1052,15 @@ async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     if await model_selected(update, context):
         return
-    new_chat_notice = _prepare_message_session(session, state.service)
+    context.user_data.pop("settings_options", None)
+    try:
+        new_chat_notice = _prepare_message_session(session, state.service)
+    except (PreferencesError, ServiceError, ValueError, OSError) as exc:
+        logger.warning("Could not prepare Telegram chat: %s", exc)
+        await update.effective_message.reply_text(
+            _msg(session, "Could not prepare the chat: {error}", error=error_message(session.language, exc)),
+        )
+        return
     asyncio.create_task(
         _send_generation(
             update, context, update.effective_message.text or "", [],
@@ -901,12 +1085,21 @@ async def media_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 new_chat_notice=new_chat_notice,
             )
         )
-    except (TelegramError, ValueError, OSError) as exc:
-        await update.effective_message.reply_text(f"Attachment rejected: {exc}")
+    except (TelegramError, PreferencesError, ServiceError, ValueError, OSError) as exc:
+        await update.effective_message.reply_text(
+            _msg(session, "Attachment rejected: {error}", error=error_message(session.language, exc)),
+        )
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.error("Telegram handler failed: %s", context.error, exc_info=context.error)
+    if isinstance(update, Update) and update.effective_message is not None:
+        state: TelegramBotState = context.application.bot_data["state"]
+        session = _session(update, state)
+        if session is not None:
+            await update.effective_message.reply_text(
+                _msg(session, "The operation failed. Please try again."),
+            )
 
 
 def build_application(token: str, service: ChatService | None = None) -> Application:
@@ -918,13 +1111,17 @@ def build_application(token: str, service: ChatService | None = None) -> Applica
             profile = state.service.login(user_id)
             if not profile["agents"]:
                 raise ValueError("user has no agents")
-            state.sessions[telegram_id] = TelegramSession(user_id, profile["agents"][0]["id"])
-        except (OSError, ServiceError, ValueError) as exc:
+            preferences = state.service.get_preferences(user_id)
+            state.sessions[telegram_id] = TelegramSession(
+                user_id, preferences["agent_id"], language=preferences["language"],
+            )
+        except (OSError, PreferencesError, ServiceError, ValueError) as exc:
             logger.warning("Ignoring invalid Telegram mapping %s=%s: %s", telegram_id, user_id, exc)
 
     application = ApplicationBuilder().token(token).concurrent_updates(True).build()
     application.bot_data["state"] = state
     application.bot_data["commands"] = [
+        BotCommand("settings", "Thinking, language, and agent"),
         BotCommand("newchat", "Start a new chat"),
         BotCommand("selectagent", "Choose the active agent"),
         BotCommand("agent", "Show the active agent"),
@@ -938,7 +1135,9 @@ def build_application(token: str, service: ChatService | None = None) -> Applica
         await application.bot.set_my_commands(application.bot_data["commands"])
 
     application.post_init = set_commands
+    application.add_handler(TypeHandler(Update, refresh_language), group=-1)
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("settings", settings_command))
     application.add_handler(CommandHandler("newchat", new_chat))
     application.add_handler(CommandHandler("selectmodel", select_model))
     application.add_handler(CommandHandler("model", show_model))

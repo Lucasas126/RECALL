@@ -15,6 +15,7 @@ from src.agent.agent import Agent
 from src.config.favorites import ModelFavorites
 from src.config.loader import load_agent, load_agent_config, load_user
 from src.config.models import UserConfig
+from src.config.preferences import UserPreferences, UserPreferencesStore
 from src.config.settings import CONFIG_DIR, SPEECH_TO_TEXT
 from src.core.sources.conversations import ConversationsSource
 from src.core.sources.registry import SourceRegistry
@@ -23,6 +24,7 @@ from src.providers.catalog import list_openrouter_models
 from src.providers.catalog import list_openrouter_transcription_models
 from src.providers.openrouter import OpenRouterProvider
 from src.utils.logger import get_logger
+from src.utils.i18n import InputError, UserMessageError
 
 logger = get_logger("service")
 
@@ -31,7 +33,7 @@ _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 AgentFactory = Callable[[str, str, Optional[str]], Agent]
 
 
-class ServiceError(Exception):
+class ServiceError(UserMessageError):
     """Base error of the chat service; channels translate subclasses to their own responses."""
 
 
@@ -116,6 +118,7 @@ class ChatService:
         self._slots: dict[tuple[str, str], _AgentSlot] = {}
         self._slots_guard = threading.Lock()
         self._favorites = ModelFavorites(CONFIG_DIR)
+        self._preferences = UserPreferencesStore(CONFIG_DIR)
 
     # ------------------------------------------------------------------ users & agents
 
@@ -138,18 +141,55 @@ class ChatService:
             agents.append({"id": cfg.id, "name": cfg.name})
         return agents
 
+    def get_preferences(self, user_id: str) -> dict:
+        """Read current user-wide preferences, including configuration-derived defaults."""
+        user = self._user(user_id)
+        return self._resolve_preferences(user, self._preferences.get(user_id)).model_dump()
+
+    def language(self, user_id: str) -> Literal["en", "es"]:
+        """Read the current alert language without changing cached agents or chat state."""
+        user = self._user(user_id)
+        return self._preferences.get(user_id).language_for(user.language)
+
+    def update_preferences(self, user_id: str, changes: UserPreferences) -> dict:
+        """Persist explicit changes without modifying any open chat or running agent."""
+        user = self._user(user_id)
+        saved = self._preferences.update(
+            user_id, changes, validate=lambda preferences: self._resolve_preferences(user, preferences),
+        )
+        return self._resolve_preferences(user, saved).model_dump()
+
+    def _resolve_preferences(self, user: UserConfig, saved: UserPreferences) -> UserPreferences:
+        resolved = UserPreferences.model_validate({
+            "language": saved.language_for(user.language),
+        } | saved.model_dump(exclude_unset=True))
+        agent_id = resolved.agent_id
+        if agent_id is None:
+            agent_id = user.agents[0] if user.agents else None
+        if agent_id is not None:
+            self._check_id("agent", agent_id, UnknownAgent)
+            if agent_id not in user.agents:
+                raise UnknownAgent(
+                    "agent '{agent_id}' is not owned by user '{user_id}'", agent_id=agent_id, user_id=user.id,
+                )
+            try:
+                load_agent_config(user.id, agent_id)
+            except FileNotFoundError as exc:
+                raise UnknownAgent("unknown agent: {agent_id}", agent_id=agent_id) from exc
+        return resolved.model_copy(update={"agent_id": agent_id})
+
     def list_models(self, user_id: str, query: str = "", *, zdr: bool = True) -> list[dict]:
         """List searchable chat models for an OpenRouter user, requiring ZDR by default."""
         user = self._user(user_id)
         if user.provider.name != "openrouter":
-            raise ValueError("model browsing is only available for the OpenRouter chat provider")
+            raise InputError("model browsing is only available for the OpenRouter chat provider")
         return [model.model_dump() for model in list_openrouter_models(query, zdr=zdr)]
 
     def list_transcription_models(self, user_id: str, query: str = "", *, zdr: bool = True) -> list[dict]:
         """List OpenRouter speech-to-text models for the current user."""
         user = self._user(user_id)
         if user.provider.name != "openrouter":
-            raise ValueError("speech-to-text model browsing requires the OpenRouter chat provider")
+            raise InputError("speech-to-text model browsing requires the OpenRouter chat provider")
         return [
             model.model_dump()
             for model in list_openrouter_transcription_models(query, zdr=zdr)
@@ -164,7 +204,7 @@ class ChatService:
         """Save a model after checking availability under the explicit catalog filter."""
         models = self.list_models(user_id, model_id, zdr=zdr)
         if not any(model["id"] == model_id for model in models):
-            raise ValueError("model is not available in the OpenRouter chat catalog with the selected ZDR filter")
+            raise InputError("model is not available in the OpenRouter chat catalog with the selected ZDR filter")
         return self._favorites.update(user_id, model_id, favorite=True)
 
     def remove_favorite_model(self, user_id: str, model_id: str) -> list[str]:
@@ -221,7 +261,7 @@ class ChatService:
         self._load(conversations, chat_id)
         models = self.list_models(user_id, model_id, zdr=zdr)
         if not any(model["id"] == model_id for model in models):
-            raise ValueError("model is not available in the OpenRouter chat catalog with the selected ZDR filter")
+            raise InputError("model is not available in the OpenRouter chat catalog with the selected ZDR filter")
         slot = self._slot(user_id, agent_id)
         with slot.state:
             if slot.active is not None or slot.pending:
@@ -230,7 +270,7 @@ class ChatService:
                 try:
                     selection = conversations.set_model(chat_id, model_id, zdr=zdr)
                 except FileNotFoundError as exc:
-                    raise UnknownChat(f"unknown chat: {chat_id}") from exc
+                    raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
                 if slot.agent is not None and slot.agent.chat_id == chat_id:
                     slot.agent = None
         return selection.model_dump()
@@ -242,7 +282,7 @@ class ChatService:
             try:
                 conversations.delete_chat(chat_id)
             except (FileNotFoundError, ValueError) as e:
-                raise UnknownChat(f"unknown chat: {chat_id}") from e
+                raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from e
             if slot.agent is not None and slot.agent.chat_id == chat_id:
                 slot.agent = None  # rebuilt on next use rather than left pointing at a deleted chat
 
@@ -265,15 +305,15 @@ class ChatService:
             user_id, agent_id, text, attachments, transcription_model,
         )
         if not text.strip() and not attachments:
-            raise ValueError("message is empty")
+            raise InputError("message is empty")
         slot = self._slot(user_id, agent_id)
         run = _MessageRun(chat_id, text, attachments, stream)
         with slot.state:
             try:
                 if not conversations.exists_chat(chat_id):
-                    raise UnknownChat(f"unknown chat: {chat_id}")
+                    raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id)
             except ValueError as e:
-                raise UnknownChat(f"unknown chat: {chat_id}") from e
+                raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from e
             same_chat = [
                 i for i, queued in enumerate(slot.pending) if queued.chat_id == chat_id
             ]
@@ -309,7 +349,7 @@ class ChatService:
             return text, attachments
         resolved = load_agent(user_id, agent_id)
         if resolved.provider_name != "openrouter":
-            raise ValueError("audio messages require an OpenRouter chat provider for speech-to-text")
+            raise InputError("audio messages require an OpenRouter chat provider for speech-to-text")
         transcriber = OpenRouterProvider(api_key=resolved.api_key)
         transcripts = []
         remaining = []
@@ -320,7 +360,7 @@ class ChatService:
             try:
                 encoded = attachment["data_url"].split(",", 1)[1]
             except IndexError as exc:
-                raise ValueError(f"invalid audio data for '{attachment['name']}'") from exc
+                raise InputError("invalid audio data for '{name}'", name=attachment["name"]) from exc
             transcript = transcriber.transcribe(
                 encoded,
                 attachment["format"],
@@ -375,6 +415,7 @@ class ChatService:
             elif slot.agent.chat_id != run.chat_id:
                 slot.agent.open_chat(run.chat_id)
             agent = slot.agent
+            agent.config.language = self.language(user_id)
             try:
                 result = agent.invoke(
                     run.text, stream=run.stream, cancellation=run.cancellation,
@@ -428,21 +469,23 @@ class ChatService:
     @staticmethod
     def _check_id(kind: str, value: str, error: type[ServiceError]) -> None:
         if not isinstance(value, str) or not _ID_RE.match(value):
-            raise error(f"invalid {kind} id: {value!r}")
+            raise error("invalid {kind} id: {value!r}", kind=kind, value=value)
 
     def _user(self, user_id: str) -> UserConfig:
         self._check_id("user", user_id, UnknownUser)
         try:
             return load_user(user_id)
         except FileNotFoundError as e:
-            raise UnknownUser(f"unknown user: {user_id}") from e
+            raise UnknownUser("unknown user: {user_id}", user_id=user_id) from e
 
     def _conversations(self, user_id: str, agent_id: str) -> ConversationsSource:
         """The conversations source of an agent, after checking that the user owns it."""
         user = self._user(user_id)
         self._check_id("agent", agent_id, UnknownAgent)
         if agent_id not in user.agents:
-            raise UnknownAgent(f"agent '{agent_id}' is not owned by user '{user_id}'")
+            raise UnknownAgent(
+                "agent '{agent_id}' is not owned by user '{user_id}'", agent_id=agent_id, user_id=user_id,
+            )
         return SourceRegistry.for_agent(user_id, agent_id).conversations()
 
     @staticmethod
@@ -450,7 +493,7 @@ class ChatService:
         try:
             return conversations.load(chat_id)
         except (FileNotFoundError, ValueError) as e:
-            raise UnknownChat(f"unknown chat: {chat_id}") from e
+            raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from e
 
     def _slot(self, user_id: str, agent_id: str) -> _AgentSlot:
         with self._slots_guard:

@@ -1,0 +1,85 @@
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from typing import Annotated, Callable, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from src.utils.files import atomic_write_text, exclusive_file_lock
+from src.utils.i18n import UserMessageError
+
+
+class PreferencesError(UserMessageError, RuntimeError):
+    """User preferences could not be read, validated or saved."""
+
+
+class UserPreferences(BaseModel):
+    """User-wide display, notification language and new-chat agent preferences."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    show_thinking: bool = Field(default=True, strict=True)
+    language: Literal["en", "es"] = "en"
+    agent_id: Annotated[str, Field(strict=True, pattern=r"^[A-Za-z0-9_-]{1,64}$")] | None = None
+
+    def language_for(self, configured: str) -> Literal["en", "es"]:
+        """Resolve an explicit language override or the legacy YAML language."""
+        if "language" in self.model_fields_set:
+            return self.language
+        return "es" if configured.split("-", 1)[0] == "es" else "en"
+
+
+class UserPreferencesStore:
+    """Persist explicit overrides without caching or rewriting user YAML."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root.resolve()
+
+    def _path(self, user_id: str) -> Path:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", user_id):
+            raise ValueError("invalid user id for preferences")
+        user_root = self.root / user_id
+        path = (user_root / "preferences.json").resolve()
+        if not path.is_relative_to(user_root) or not user_root.is_dir():
+            raise ValueError("preferences require an existing user configuration directory")
+        return path
+
+    @staticmethod
+    def _load(path: Path) -> UserPreferences:
+        try:
+            return UserPreferences.model_validate_json(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return UserPreferences()
+        except (OSError, UnicodeError, ValidationError) as exc:
+            raise PreferencesError(
+                "Could not read preferences; check the user's preferences.json."
+            ) from exc
+
+    def get(self, user_id: str) -> UserPreferences:
+        return self._load(self._path(user_id))
+
+    def update(
+        self, user_id: str, changes: UserPreferences,
+        *, validate: Callable[[UserPreferences], UserPreferences] | None = None,
+    ) -> UserPreferences:
+        """Merge only explicitly supplied fields under an interprocess lock."""
+        path = self._path(user_id)
+        lock_path = path.with_suffix(".lock").resolve()
+        if not lock_path.is_relative_to(path.parent):
+            raise ValueError("preferences lock must stay inside the user's configuration directory")
+        try:
+            with exclusive_file_lock(lock_path):
+                current = self._load(path)
+                updated = UserPreferences.model_validate(
+                    current.model_dump(exclude_unset=True) | changes.model_dump(exclude_unset=True)
+                )
+                if validate is not None:
+                    validate(updated)
+                atomic_write_text(path, updated.model_dump_json(exclude_unset=True, indent=2) + "\n")
+                return updated
+        except OSError as exc:
+            raise PreferencesError(
+                "Could not save preferences; check configuration directory permissions "
+                "and whether another process is holding the preferences lock."
+            ) from exc

@@ -5,9 +5,10 @@ from typing import Iterable
 
 import httpx
 from pydantic import BaseModel, Field
+from src.utils.i18n import UserMessageError
 
 
-class CatalogUnavailable(RuntimeError):
+class CatalogUnavailable(UserMessageError, RuntimeError):
     """OpenRouter's model catalog or ZDR policy could not be retrieved or validated."""
 
 
@@ -91,7 +92,7 @@ def list_openrouter_models(query: str = "", *, zdr: bool = True) -> list[OpenRou
             endpoints = _EndpointsResponse.model_validate(endpoints_response.json()).data
     except httpx.HTTPStatusError as exc:
         raise CatalogUnavailable(
-            f"OpenRouter catalog request failed (HTTP {exc.response.status_code}); retry later."
+            "OpenRouter catalog request failed (HTTP {status}); retry later.", status=exc.response.status_code,
         ) from exc
     except httpx.RequestError as exc:
         raise CatalogUnavailable("Could not reach the OpenRouter catalog; check connectivity and retry.") from exc
@@ -153,7 +154,8 @@ def list_openrouter_transcription_models(
             endpoints = _EndpointsResponse.model_validate(endpoints_response.json()).data
     except httpx.HTTPStatusError as exc:
         raise CatalogUnavailable(
-            f"OpenRouter transcription catalog request failed (HTTP {exc.response.status_code}); retry later."
+            "OpenRouter transcription catalog request failed (HTTP {status}); retry later.",
+            status=exc.response.status_code,
         ) from exc
     except httpx.RequestError as exc:
         raise CatalogUnavailable("Could not reach the OpenRouter transcription catalog; retry later.") from exc
