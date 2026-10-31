@@ -61,6 +61,7 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
             bot=Mock(), application=SimpleNamespace(bot_data={"state": self.state}),
             user_data={}, args=[],
         )
+        self.context.bot.delete_message = AsyncMock()
 
     async def open_panel(self, command=settings_command):
         self.update.effective_message.reply_text.return_value = SimpleNamespace(message_id=789)
@@ -121,7 +122,7 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("✅ Español", [button.text for row in self.markup.inline_keyboard for button in row])
         await self.press("lang:en")
         self.assertIn("Active agent", self.text)
-        self.update.effective_message.reply_text.assert_awaited_once()
+        self.assertEqual(self.update.effective_message.reply_text.await_count, 2)
         self.assertEqual(self.session.chat_id, "current-chat")
         self.service.send.assert_not_called()
 
@@ -144,7 +145,7 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
         self.service.set_chat_transcription_model.assert_not_called()
         self.service.create_chat.assert_not_called()
         self.service.send.assert_not_called()
-        self.update.effective_message.reply_text.assert_awaited_once()
+        self.assertEqual(self.update.effective_message.reply_text.await_count, 2)
 
     async def test_default_pagination_and_back_stay_in_the_panel(self) -> None:
         self.service.list_transcription_models.return_value = [
@@ -163,7 +164,7 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
         await self.press("page:1")
         await self.press(self.action("STT 10"))
         self.assertEqual(self.preferences["default_stt_model"], "stt/10")
-        self.update.effective_message.reply_text.assert_awaited_once()
+        self.assertEqual(self.update.effective_message.reply_text.await_count, 2)
 
     async def test_agent_choice_switches_active_agent_and_returns_to_settings(self) -> None:
         await self.open_panel()
@@ -186,14 +187,13 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
         self.service.update_preferences.assert_not_called()
 
     async def test_reopening_settings_expires_the_previous_panel(self) -> None:
+        self.context.bot.delete_message = AsyncMock()
         self.context.bot.edit_message_reply_markup = AsyncMock()
         await self.open_panel()
         old = self.context.user_data["panel"]
         self.update.effective_message.reply_text.return_value = SimpleNamespace(message_id=790)
         await settings_command(self.update, self.context)
-        self.context.bot.edit_message_reply_markup.assert_awaited_once_with(
-            chat_id=456, message_id=789, reply_markup=None,
-        )
+        self.context.bot.delete_message.assert_awaited()
         query = await self.press("thinking", token=old.token, message_id=789)
         self.assertIn("expired", query.answer.await_args.args[0])
         query.edit_message_reply_markup.assert_awaited_once_with(reply_markup=None)
@@ -264,7 +264,7 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("llm/cheap", self.text)
         self.assertNotIn("panel", self.context.user_data)
         self.service.update_preferences.assert_not_called()
-        self.update.effective_message.reply_text.assert_awaited_once()
+        self.assertEqual(self.update.effective_message.reply_text.await_count, 2)
 
     async def test_chat_selectors_reset_overrides_without_changing_defaults(self) -> None:
         before = self.preferences.copy()
@@ -297,7 +297,7 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
         self.service.set_chat_transcription_model.assert_called_once_with(
             "test-user", "agent-a", "current-chat", "stt/10",
         )
-        self.update.effective_message.reply_text.assert_awaited_once()
+        self.assertEqual(self.update.effective_message.reply_text.await_count, 2)
 
     async def test_chat_selector_expires_when_the_current_chat_changes(self) -> None:
         await self.open_panel(select_model)

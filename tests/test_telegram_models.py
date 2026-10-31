@@ -52,6 +52,7 @@ class TelegramFavoritePickerTests(unittest.IsolatedAsyncioTestCase):
         self.context = SimpleNamespace(
             bot=Mock(), application=SimpleNamespace(bot_data={"state": state}), user_data={}, args=[],
         )
+        self.context.bot.delete_message = AsyncMock()
 
     async def test_favorites_are_first_marked_and_counted_in_normal_pagination(self) -> None:
         await select_model(self.update, self.context)

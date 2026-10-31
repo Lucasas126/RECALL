@@ -122,7 +122,9 @@ buttons. Agent and default-model choices open paginated lists in the same panel
 (LLM favorites first) with **Back**; a choice saves immediately and returns to
 the main view, without requiring a chat. Opening `/settings` again removes the
 previous panel's buttons; pressing a button on an old panel shows an expiry
-alert. The web
+alert. Opening any inline panel briefly sends and deletes a cleanup message
+with `ReplyKeyboardRemove`, clearing reply keyboards left by older bot
+versions before the inline panel is displayed. The web
 sidebar's **Settings** dialog edits thinking, language and default LLM/STT
 models; agent switching remains in the existing sidebar selector.
 Thinking visibility, preferred-agent selection and English/Spanish operational
