@@ -3,7 +3,7 @@ import sys
 import dotenv
 
 from src.agent.agent import Agent
-from src.config.loader import load_agent
+from src.config.loader import load_agent, load_user_models
 from src.core.sources.registry import SourceRegistry
 from src.utils.logger import setup_logging
 
@@ -44,6 +44,7 @@ def main():
             break
 
         try:
+            agent.refresh_user_models(load_user_models(USER_ID))
             result = agent.invoke(user_input)
             if isinstance(result, str):
                 print(f"\n{agent.name}: {result}\n")

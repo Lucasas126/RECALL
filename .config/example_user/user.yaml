@@ -1,4 +1,8 @@
 id: johndoe
+models:
+  chat: openai/gpt-4o-mini
+  stt: openai/whisper-large-v3-turbo
+  embeddings: openai/text-embedding-3-small
 name: johndoe
 provider:
   name: openrouter

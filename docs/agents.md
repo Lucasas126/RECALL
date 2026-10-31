@@ -9,7 +9,12 @@ an agent instance is defined by:
 - **identity**: id, name, personality / system prompt.
 - **data scope**: its own mind palace, its bound obsidian vault(s), its conversations, its user folders.
 - **tool policy**: which tools it is allowed to use.
-- **config**: models (chat + embeddings), overlay mode per vault, mode cadences (dream/sleep).
+- **config**: chat behavior, overlay mode per vault, mode cadences (dream/sleep).
+
+Model IDs belong to the user, not the agent. The user's LLM/STT defaults apply
+unless a chat has an explicit override; embeddings also use the user
+configuration. The agent's runtime receives those dependencies without owning
+their configuration. See [model defaults](config.md#user-model-defaults-and-chat-overrides).
 
 everything is resolved *within* the agent — its `SourceRegistry` is built from its own config, so `mind_palace:` always means **this** agent's palace.
 
@@ -43,9 +48,6 @@ id: aria
 name: Aria
 personality_prompt: >
   you are aria, a curious and tidy assistant...
-models:
-  chat: openai/gpt-4o-mini
-  embeddings: openai/text-embedding-3-small
 sources:
   mind_palace:
     root: ./data/user-a/aria/mind_palace

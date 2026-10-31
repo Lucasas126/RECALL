@@ -27,6 +27,14 @@ class ChatModel(BaseModel):
     zdr: bool = Field(default=True, strict=True)
 
 
+class ChatTranscriptionModel(BaseModel):
+    """An optional chat-owned speech-to-text selection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(strict=True, min_length=1, max_length=256)
+
+
 class ChatMetadataError(UserMessageError, RuntimeError):
     """Chat model metadata could not be read or saved."""
 
@@ -71,6 +79,36 @@ class ConversationsSource(Source):
             raise ChatMetadataError("Could not save model selection for chat {chat_id}.", chat_id=chat_id) from exc
         return selection
 
+    def clear_model(self, chat_id: str) -> None:
+        """Remove the LLM override so the chat inherits the current user default."""
+        try:
+            self._model_path(chat_id).unlink(missing_ok=True)
+        except OSError as exc:
+            raise ChatMetadataError("Could not save model selection for chat {chat_id}.", chat_id=chat_id) from exc
+
+    def transcription_selection(self, chat_id: str) -> ChatTranscriptionModel | None:
+        self._model_path(chat_id)
+        path = self.resolve(f"{chat_id}.stt.json")
+        try:
+            return ChatTranscriptionModel.model_validate_json(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
+        except (OSError, UnicodeError, ValidationError) as exc:
+            raise ChatMetadataError("Could not read model selection for chat {chat_id}.", chat_id=chat_id) from exc
+
+    def set_transcription_model(self, chat_id: str, model_id: str | None) -> ChatTranscriptionModel | None:
+        self._model_path(chat_id)
+        path = self.resolve(f"{chat_id}.stt.json")
+        selection = ChatTranscriptionModel(id=model_id) if model_id is not None else None
+        try:
+            if selection is None:
+                path.unlink(missing_ok=True)
+            else:
+                atomic_write_text(path, selection.model_dump_json() + "\n")
+        except OSError as exc:
+            raise ChatMetadataError("Could not save model selection for chat {chat_id}.", chat_id=chat_id) from exc
+        return selection
+
     def create(self) -> str:
         """Create an empty chat and return its id."""
         chat_id = f"{datetime.now():%Y%m%d-%H%M%S}-{secrets.token_hex(3)}"
@@ -82,8 +120,10 @@ class ConversationsSource(Source):
         if not path.is_file():
             raise FileNotFoundError(f"chat not found: {chat_id}")
         metadata = self._model_path(chat_id)
+        transcription = self.resolve(f"{chat_id}.stt.json")
         path.unlink()
         metadata.unlink(missing_ok=True)
+        transcription.unlink(missing_ok=True)
 
     def append(self, chat_id: str, role: str, content: str, **extra) -> dict:
         """Append a turn to an existing chat as one JSONL line."""

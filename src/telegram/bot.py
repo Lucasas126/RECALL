@@ -31,7 +31,7 @@ from telegram.ext import (
 
 from src.config.favorites import FavoritesError
 from src.config.preferences import PreferencesError, UserPreferences
-from src.config.settings import SPEECH_TO_TEXT, TELEGRAM_ALLOWED_USERS_ENV
+from src.config.settings import TELEGRAM_ALLOWED_USERS_ENV
 from src.providers.catalog import CatalogUnavailable
 from src.service.chat import ChatEvent, ChatService, ServiceError
 from src.utils.logger import get_logger
@@ -55,7 +55,6 @@ class TelegramSession:
     chat_id: str | None = None
     model_options: dict[str, str] = field(default_factory=dict)
     agent_options: dict[str, str] = field(default_factory=dict)
-    stt_model: str = SPEECH_TO_TEXT.model
     last_message_at: datetime | None = None
     pending_new_chat_notice: bool = False
     language: str = "en"
@@ -154,22 +153,36 @@ def _settings_view(
     visible = message(language, "visible" if preferences["show_thinking"] else "hidden")
     thinking_label = message(language, "Thinking: {visibility}", visibility=visible)
     agent_label = message(language, "Active agent")
+    llm_label = message(language, "Default LLM model")
+    stt_label = message(language, "Default STT model")
     close_label = message(language, "Close")
     options = {thinking_label: "thinking", agent_label: "agents", close_label: "close"}
+    options[llm_label] = "default_llm"
+    options[stt_label] = "default_stt"
     languages = []
     for code, label in (("en", "English"), ("es", "Español")):
         label = f"{'✅ ' if language == code else ''}{label}"
         options[label] = f"language:{code}"
         languages.append(label)
     return (
-        message(language, "Settings\n\nThinking: {visibility}\nAlerts/errors: {language}\nActive agent: {agent}\n\nThinking and language are shared with the web.",
-                visibility=visible, language=language.upper(), agent=agent_name),
+        message(language, "Settings\n\nThinking: {visibility}\nAlerts/errors: {language}\nActive agent: {agent}\nDefault LLM: {llm}\nDefault STT: {stt}\n\nUser defaults are shared with the web. Chats with no selected model inherit them.",
+                visibility=visible, language=language.upper(), agent=agent_name,
+                llm=preferences["default_llm_model"], stt=preferences["default_stt_model"]),
         ReplyKeyboardMarkup(
-            [[thinking_label], languages, [agent_label], [close_label]],
+            [[thinking_label], languages, [agent_label], [llm_label], [stt_label], [close_label]],
             resize_keyboard=True, one_time_keyboard=True,
         ),
         options,
     )
+
+
+def _clear_selection_menus(context: ContextTypes.DEFAULT_TYPE) -> None:
+    for key in (
+        "settings_options", "agent_options", "model_options", "model_catalog",
+        "model_favorites", "model_page", "model_target_default",
+        "stt_options", "stt_catalog", "stt_page", "stt_target_default",
+    ):
+        context.user_data.pop(key, None)
 
 
 async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -184,8 +197,7 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         logger.warning("Could not load Telegram settings: %s", exc)
         await update.effective_message.reply_text(_msg(session, "Could not load settings. Try /settings again."))
         return
-    for key in ("agent_options", "model_options", "stt_options"):
-        context.user_data.pop(key, None)
+    _clear_selection_menus(context)
     session.agent_options.clear()
     context.user_data["settings_options"] = options
     await update.effective_message.reply_text(text, reply_markup=markup)
@@ -204,6 +216,12 @@ async def settings_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     try:
         if data == "agents":
             await select_agent(update, context)
+            return True
+        if data == "default_llm":
+            await select_model(update, context, target_default=True)
+            return True
+        if data == "default_stt":
+            await select_stt(update, context, target_default=True)
             return True
         if data == "close":
             context.user_data.pop("settings_options", None)
@@ -260,15 +278,7 @@ async def new_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     session.pending_new_chat_notice = True
     session.model_options.clear()
     session.agent_options.clear()
-    context.user_data.pop("model_options", None)
-    context.user_data.pop("model_catalog", None)
-    context.user_data.pop("model_favorites", None)
-    context.user_data.pop("model_page", None)
-    context.user_data.pop("agent_options", None)
-    context.user_data.pop("settings_options", None)
-    context.user_data.pop("stt_options", None)
-    context.user_data.pop("stt_catalog", None)
-    context.user_data.pop("stt_page", None)
+    _clear_selection_menus(context)
     await update.effective_message.reply_text(
         _msg(session, "New chat created: {chat_id}\nYou can now choose a model or send your first message.",
              chat_id=chat["id"]),
@@ -399,18 +409,29 @@ async def _show_model_page(
     state: TelegramBotState = context.application.bot_data["state"]
     models = context.user_data["model_catalog"]
     page = context.user_data["model_page"]
-    page_count = (len(models) + _MODELS_PER_PAGE - 1) // _MODELS_PER_PAGE
+    page_count = max(1, (len(models) + _MODELS_PER_PAGE - 1) // _MODELS_PER_PAGE)
     page = max(0, min(page, page_count - 1))
     context.user_data["model_page"] = page
-    current_model = state.service.get_chat(
-        session.user_id, session.agent_id, session.chat_id,
-    )["model"]["id"]
+    target_default = context.user_data.get("model_target_default", False)
+    if target_default:
+        current_model = state.service.get_preferences(session.user_id)["default_llm_model"]
+        scope = _msg(session, "Choose the user's default LLM model. This does not set a chat override.")
+    else:
+        chat = state.service.get_chat(session.user_id, session.agent_id, session.chat_id)
+        current_model = chat["model"]["id"]
+        scope = _msg(session, "User default" if chat["model_override"] is None else "Chat override")
     page_models = models[
         page * _MODELS_PER_PAGE:(page + 1) * _MODELS_PER_PAGE
     ]
     favorites = context.user_data.get("model_favorites", set())
-    model_options: dict[str, str] = {}
+    model_options: dict[str, str | None] = {}
     keyboard: list[list[str]] = []
+    if not target_default:
+        inherit = _msg(session, "Use user default")
+        model_options[inherit] = None
+        keyboard.append([inherit])
+    else:
+        keyboard.append([_msg(session, "Back")])
     for index, model in enumerate(page_models, page * _MODELS_PER_PAGE + 1):
         label = (
             f"{'✅ ' if model['id'] == current_model else ''}"
@@ -434,7 +455,8 @@ async def _show_model_page(
         current_model,
     )
     await update.effective_message.reply_text(
-        _msg(session, "Current model: {model}\n\nPage {page}/{pages}. {count} models available.\nChoose another model. Prices are USD per 1 million tokens (input / output). ZDR enabled:",
+        scope + "\n\n"
+        + _msg(session, "Current model: {model}\n\nPage {page}/{pages}. {count} models available.\nChoose another model. Prices are USD per 1 million tokens (input / output). ZDR enabled:",
              model=current_label, page=page + 1, pages=page_count, count=len(models)),
         reply_markup=ReplyKeyboardMarkup(
             keyboard, resize_keyboard=True, one_time_keyboard=True,
@@ -442,19 +464,21 @@ async def _show_model_page(
     )
 
 
-async def select_model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def select_model(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, *, target_default: bool = False,
+) -> None:
     state: TelegramBotState = context.application.bot_data["state"]
     session = _session(update, state)
     if session is None:
         await _unauthorized(update)
         return
-    if session.chat_id is None:
+    if session.chat_id is None and not target_default:
         await update.effective_message.reply_text(
             _msg(session, "Create a chat first with /newchat.")
         )
         return
 
-    query = " ".join(context.args).strip()
+    query = "" if target_default else " ".join(context.args or []).strip()
     try:
         favorites = set(state.service.list_favorite_models(session.user_id))
         models = _sort_models(state.service.list_models(session.user_id, query, zdr=True), favorites)
@@ -470,12 +494,14 @@ async def select_model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             _msg(session, "I cannot load the models right now. Please try again in a few seconds.")
         )
         return
-    if not models:
+    if not models and target_default:
         await update.effective_message.reply_text(
             _msg(session, "No ZDR models found. Try /selectmodel followed by part of a model name.")
         )
         return
+    _clear_selection_menus(context)
     context.user_data["model_catalog"] = models
+    context.user_data["model_target_default"] = target_default
     context.user_data["model_favorites"] = favorites
     context.user_data["model_page"] = 0
     await _show_model_page(update, context, session)
@@ -493,7 +519,7 @@ async def model_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool
     page = context.user_data.get("model_page", 0)
     context.user_data["model_page"] = page + (1 if action in following else -1)
     session = _session(update, context.application.bot_data["state"])
-    if session is None or session.chat_id is None:
+    if session is None or (session.chat_id is None and not context.user_data.get("model_target_default")):
         await _unauthorized(update)
         return True
     await _show_model_page(update, context, session)
@@ -503,34 +529,49 @@ async def model_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool
 async def model_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     selected_label = (update.effective_message.text or "").strip()
     model_options = context.user_data.get("model_options", {})
-    model_id = model_options.get(selected_label)
-    if model_id is None:
+    target_default = context.user_data.get("model_target_default", False)
+    if target_default and selected_label in {"Back", message("es", "Back")}:
+        await settings_command(update, context)
+        return True
+    if selected_label not in model_options:
         return False
+    model_id = model_options[selected_label]
 
     state: TelegramBotState = context.application.bot_data["state"]
     session = _session(update, state)
-    if session is None or session.chat_id is None:
+    if session is None or (session.chat_id is None and not target_default):
         await update.effective_message.reply_text(
             _msg(session, "The session has expired. Use /newchat."),
             reply_markup=ReplyKeyboardRemove(),
         )
         return True
     try:
-        state.service.set_chat_model(
-            session.user_id, session.agent_id, session.chat_id, model_id, zdr=True,
-        )
-    except (CatalogUnavailable, ServiceError, ValueError) as exc:
+        if target_default:
+            state.service.update_preferences(session.user_id, UserPreferences(default_llm_model=model_id))
+        else:
+            state.service.set_chat_model(
+                session.user_id, session.agent_id, session.chat_id, model_id, zdr=True,
+            )
+    except (CatalogUnavailable, PreferencesError, ServiceError, ValueError, OSError) as exc:
         logger.warning("Could not select Telegram model %r: %s", model_id, exc)
         await update.effective_message.reply_text(
+            _msg(session, "Could not load or save settings: {error}\nTry /settings again.",
+                 error=error_message(session.language, exc)) if target_default else
             _msg(session, "That model could not be selected.\nUse /selectmodel to try again."),
             reply_markup=ReplyKeyboardRemove(),
         )
         return True
     session.model_options.clear()
-    context.user_data.pop("model_options", None)
-    context.user_data.pop("model_catalog", None)
-    context.user_data.pop("model_favorites", None)
-    context.user_data.pop("model_page", None)
+    _clear_selection_menus(context)
+    if target_default:
+        await settings_command(update, context)
+        return True
+    if model_id is None:
+        await update.effective_message.reply_text(
+            _msg(session, "This chat now uses the user's default LLM model."),
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        return True
     await update.effective_message.reply_text(
         _msg(session, "✅ Model selected\n\n{model_id}\n\nThis selection applies to the current chat.\nZDR: enabled",
              model_id=model_id),
@@ -557,17 +598,23 @@ async def show_model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     model = chat["model"]
     await update.effective_message.reply_text(
         _msg(session, "Current chat model:\n{model_id}\n\nZDR: {policy}",
-             model_id=model["id"], policy=_msg(session, "enabled" if model.get("zdr", True) else "disabled")),
+             model_id=model["id"], policy=_msg(session, "enabled" if model.get("zdr", True) else "disabled"))
+        + "\n" + _msg(session, "User default" if chat["model_override"] is None else "Chat override"),
     )
 
 
-async def select_stt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def select_stt(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, *, target_default: bool = False,
+) -> None:
     state: TelegramBotState = context.application.bot_data["state"]
     session = _session(update, state)
     if session is None:
         await _unauthorized(update)
         return
-    query = " ".join(context.args).strip()
+    if session.chat_id is None and not target_default:
+        await update.effective_message.reply_text(_msg(session, "Create a chat first with /newchat."))
+        return
+    query = "" if target_default else " ".join(context.args or []).strip()
     try:
         models = state.service.list_transcription_models(session.user_id, query, zdr=True)
     except (CatalogUnavailable, ServiceError, ValueError) as exc:
@@ -576,12 +623,14 @@ async def select_stt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             _msg(session, "I cannot load speech-to-text models right now. Please try again later.")
         )
         return
-    if not models:
+    if not models and target_default:
         await update.effective_message.reply_text(
             _msg(session, "No ZDR speech-to-text models found. Try /selectstt followed by a search term.")
         )
         return
+    _clear_selection_menus(context)
     context.user_data["stt_catalog"] = models
+    context.user_data["stt_target_default"] = target_default
     context.user_data["stt_page"] = 0
     await _show_stt_page(update, context, session)
 
@@ -590,18 +639,33 @@ async def _show_stt_page(
     update: Update, context: ContextTypes.DEFAULT_TYPE, session: TelegramSession,
 ) -> None:
     models = context.user_data["stt_catalog"]
+    state: TelegramBotState = context.application.bot_data["state"]
+    target_default = context.user_data.get("stt_target_default", False)
+    if target_default:
+        current = state.service.get_preferences(session.user_id)["default_stt_model"]
+        scope = _msg(session, "Choose the user's default STT model. This does not set a chat override.")
+    else:
+        chat = state.service.get_chat(session.user_id, session.agent_id, session.chat_id)
+        current = chat["stt_model"]
+        scope = _msg(session, "User default" if chat["stt_model_override"] is None else "Chat override")
     page = context.user_data["stt_page"]
-    page_count = (len(models) + _MODELS_PER_PAGE - 1) // _MODELS_PER_PAGE
+    page_count = max(1, (len(models) + _MODELS_PER_PAGE - 1) // _MODELS_PER_PAGE)
     page = max(0, min(page, page_count - 1))
     context.user_data["stt_page"] = page
     page_models = models[page * _MODELS_PER_PAGE:(page + 1) * _MODELS_PER_PAGE]
-    options: dict[str, str] = {}
+    options: dict[str, str | None] = {}
     keyboard: list[list[str]] = []
+    if not target_default:
+        inherit = _msg(session, "Use user default")
+        options[inherit] = None
+        keyboard.append([inherit])
+    else:
+        keyboard.append([_msg(session, "Back")])
     for index, model in enumerate(page_models, page * _MODELS_PER_PAGE + 1):
         label = (
-            f"{'✅ ' if model['id'] == session.stt_model else ''}"
+            f"{'✅ ' if model['id'] == current else ''}"
             f"{index}. {model['name'][:34]} | "
-            f"${model.get('pricing_prompt') or 'n/d'} / 1M min"
+            f"${model.get('pricing_prompt') or 'n/d'} / 1M tokens"
         )
         options[label] = model["id"]
         keyboard.append([label])
@@ -614,8 +678,9 @@ async def _show_stt_page(
         keyboard.append(navigation)
     context.user_data["stt_options"] = options
     await update.effective_message.reply_text(
-        _msg(session, "Current STT model: {model}\n\nPage {page}/{pages}. {count} ZDR models available.\nChoose a speech-to-text model. Prices are USD per 1 million input tokens:",
-             model=session.stt_model, page=page + 1, pages=page_count, count=len(models)),
+        scope + "\n\n"
+        + _msg(session, "Current STT model: {model}\n\nPage {page}/{pages}. {count} ZDR models available.\nChoose a speech-to-text model. Prices are USD per 1 million input tokens:",
+             model=current, page=page + 1, pages=page_count, count=len(models)),
         reply_markup=ReplyKeyboardMarkup(
             keyboard, resize_keyboard=True, one_time_keyboard=True,
         ),
@@ -633,7 +698,7 @@ async def stt_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     page = context.user_data.get("stt_page", 0)
     context.user_data["stt_page"] = page + (1 if action in following else -1)
     session = _session(update, context.application.bot_data["state"])
-    if session is None:
+    if session is None or (session.chat_id is None and not context.user_data.get("stt_target_default")):
         await _unauthorized(update)
         return True
     await _show_stt_page(update, context, session)
@@ -642,19 +707,46 @@ async def stt_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def stt_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     selected = (update.effective_message.text or "").strip()
-    model_id = context.user_data.get("stt_options", {}).get(selected)
-    if model_id is None:
+    options = context.user_data.get("stt_options", {})
+    target_default = context.user_data.get("stt_target_default", False)
+    if target_default and selected in {"Back", message("es", "Back")}:
+        await settings_command(update, context)
+        return True
+    if selected not in options:
         return False
+    model_id = options[selected]
     session = _session(update, context.application.bot_data["state"])
     if session is None:
         await _unauthorized(update)
         return True
-    session.stt_model = model_id
-    context.user_data.pop("stt_options", None)
-    context.user_data.pop("stt_catalog", None)
-    context.user_data.pop("stt_page", None)
+    state: TelegramBotState = context.application.bot_data["state"]
+    if session.chat_id is None and not target_default:
+        await update.effective_message.reply_text(_msg(session, "Create a chat first with /newchat."))
+        return True
+    try:
+        if target_default:
+            state.service.update_preferences(session.user_id, UserPreferences(default_stt_model=model_id))
+        else:
+            state.service.set_chat_transcription_model(session.user_id, session.agent_id, session.chat_id, model_id)
+    except (CatalogUnavailable, PreferencesError, ServiceError, ValueError, OSError) as exc:
+        logger.warning("Could not select Telegram transcription model: %s", exc)
+        await update.effective_message.reply_text(
+            _msg(session, "Could not load or save settings: {error}\nTry /settings again.",
+                 error=error_message(session.language, exc)),
+        )
+        return True
+    _clear_selection_menus(context)
+    if target_default:
+        await settings_command(update, context)
+        return True
+    if model_id is None:
+        await update.effective_message.reply_text(
+            _msg(session, "This chat now uses the user's default STT model."),
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        return True
     await update.effective_message.reply_text(
-        _msg(session, "✅ STT model selected:\n{model_id}\n\nZDR: enabled. This model will transcribe future audio messages.",
+        _msg(session, "✅ STT model selected:\n{model_id}\n\nThis selection applies only to the current chat. ZDR: enabled.",
              model_id=model_id),
         reply_markup=ReplyKeyboardRemove(),
     )
@@ -667,8 +759,14 @@ async def show_stt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if session is None:
         await _unauthorized(update)
         return
+    if session.chat_id is None:
+        await update.effective_message.reply_text(_msg(session, "Create a chat first with /newchat."))
+        return
+    chat = state.service.get_chat(session.user_id, session.agent_id, session.chat_id)
+    current = chat["stt_model"]
     await update.effective_message.reply_text(
-        _msg(session, "Current STT model:\n{model}\n\nZDR: enabled", model=session.stt_model),
+        _msg(session, "Current STT model:\n{model}\n\nZDR: enabled", model=current)
+        + "\n" + _msg(session, "User default" if chat["stt_model_override"] is None else "Chat override"),
     )
 
 
@@ -695,7 +793,7 @@ async def select_agent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         options[label] = agent["id"]
         keyboard.append([label])
     session.agent_options = options
-    context.user_data.pop("settings_options", None)
+    _clear_selection_menus(context)
     context.user_data["agent_options"] = options.copy()
     await update.effective_message.reply_text(
         _msg(session, "Choose the agent for new and incoming messages:"),
@@ -745,11 +843,7 @@ async def agent_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     session.agent_id = agent_id
     session.chat_id = None
     session.agent_options.clear()
-    context.user_data.pop("agent_options", None)
-    context.user_data.pop("model_options", None)
-    context.user_data.pop("model_catalog", None)
-    context.user_data.pop("model_favorites", None)
-    context.user_data.pop("model_page", None)
+    _clear_selection_menus(context)
     await update.effective_message.reply_text(
         _msg(session, "✅ Agent selected: {agent_id}\nUse /newchat to create a chat for this agent.",
              agent_id=agent_id),
@@ -983,7 +1077,6 @@ async def _send_generation(
         await update.effective_message.reply_text(_msg(session, "Create a chat first with /newchat."))
         return
     user_id, agent_id, chat_id = session.user_id, session.agent_id, session.chat_id
-    transcription_model = session.stt_model
     chat = update.effective_chat
     stream = _ReplyStream(context.bot, chat.id, use_draft=chat.type == ChatType.PRIVATE)
     await stream.start()
@@ -998,7 +1091,7 @@ async def _send_generation(
         events = await asyncio.to_thread(
             state.service.send,
             user_id, agent_id, chat_id, text,
-            stream=True, attachments=attachments, transcription_model=transcription_model,
+            stream=True, attachments=attachments,
         )
         while True:
             has_event, event = await _next_event(events)
@@ -1052,7 +1145,7 @@ async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     if await model_selected(update, context):
         return
-    context.user_data.pop("settings_options", None)
+    _clear_selection_menus(context)
     try:
         new_chat_notice = _prepare_message_session(session, state.service)
     except (PreferencesError, ServiceError, ValueError, OSError) as exc:

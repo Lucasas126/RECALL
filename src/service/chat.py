@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.agent.agent import Agent
 from src.config.favorites import ModelFavorites
-from src.config.loader import load_agent, load_agent_config, load_user
+from src.config.loader import load_agent, load_agent_config, load_user, user_models
 from src.config.models import UserConfig
 from src.config.preferences import UserPreferences, UserPreferencesStore
 from src.config.settings import CONFIG_DIR, SPEECH_TO_TEXT
@@ -154,6 +154,14 @@ class ChatService:
     def update_preferences(self, user_id: str, changes: UserPreferences) -> dict:
         """Persist explicit changes without modifying any open chat or running agent."""
         user = self._user(user_id)
+        if changes.default_llm_model is not None:
+            models = self.list_models(user_id, changes.default_llm_model, zdr=True)
+            if not any(model["id"] == changes.default_llm_model for model in models):
+                raise InputError("model is not available in the OpenRouter chat catalog with the selected ZDR filter")
+        if changes.default_stt_model is not None:
+            models = self.list_transcription_models(user_id, changes.default_stt_model, zdr=SPEECH_TO_TEXT.zdr)
+            if not any(model["id"] == changes.default_stt_model for model in models):
+                raise InputError("The speech-to-text model is not available with the required routing policy.")
         saved = self._preferences.update(
             user_id, changes, validate=lambda preferences: self._resolve_preferences(user, preferences),
         )
@@ -176,7 +184,11 @@ class ChatService:
                 load_agent_config(user.id, agent_id)
             except FileNotFoundError as exc:
                 raise UnknownAgent("unknown agent: {agent_id}", agent_id=agent_id) from exc
-        return resolved.model_copy(update={"agent_id": agent_id})
+        return resolved.model_copy(update={
+            "agent_id": agent_id,
+            "default_llm_model": resolved.default_llm_model or user.models.chat,
+            "default_stt_model": resolved.default_stt_model or user.models.stt,
+        })
 
     def list_models(self, user_id: str, query: str = "", *, zdr: bool = True) -> list[dict]:
         """List searchable chat models for an OpenRouter user, requiring ZDR by default."""
@@ -245,35 +257,76 @@ class ChatService:
             for t in turns
             if t.get("role") in ("user", "assistant")
         ]
-        selection = conversations.model_selection(chat_id)
+        return {
+            "chat": conversations.summary(chat_id), "messages": messages,
+            **self.get_chat_models(user_id, agent_id, chat_id),
+        }
+
+    def get_chat_models(self, user_id: str, agent_id: str, chat_id: str) -> dict:
+        """Return effective models and overrides without reading conversation history."""
+        conversations = self._conversations(user_id, agent_id)
+        try:
+            selection = conversations.model_selection(chat_id)
+            transcription = conversations.transcription_selection(chat_id)
+        except (FileNotFoundError, ValueError) as exc:
+            raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
+        user = self._user(user_id)
+        defaults = user_models(user, self._preferences)
         model = selection.model_dump() if selection is not None else {
-            "provider": self._user(user_id).provider.name,
-            "id": load_agent_config(user_id, agent_id).models.chat,
+            "provider": user.provider.name,
+            "id": defaults.chat,
             "zdr": True,
         }
-        return {"chat": conversations.summary(chat_id), "messages": messages, "model": model}
+        return {
+            "model": model,
+            "model_override": selection.model_dump() if selection else None,
+            "stt_model": transcription.id if transcription else defaults.stt,
+            "stt_model_override": transcription.id if transcription else None,
+        }
 
     def set_chat_model(
-        self, user_id: str, agent_id: str, chat_id: str, model_id: str, *, zdr: bool = True,
+        self, user_id: str, agent_id: str, chat_id: str, model_id: str | None, *, zdr: bool = True,
     ) -> dict:
         """Persist an idle chat's model and routing policy without changing other chats."""
         conversations = self._conversations(user_id, agent_id)
         self._load(conversations, chat_id)
-        models = self.list_models(user_id, model_id, zdr=zdr)
-        if not any(model["id"] == model_id for model in models):
-            raise InputError("model is not available in the OpenRouter chat catalog with the selected ZDR filter")
+        if model_id is not None:
+            models = self.list_models(user_id, model_id, zdr=zdr)
+            if not any(model["id"] == model_id for model in models):
+                raise InputError("model is not available in the OpenRouter chat catalog with the selected ZDR filter")
         slot = self._slot(user_id, agent_id)
         with slot.state:
             if slot.active is not None or slot.pending:
                 raise AgentBusy("wait for this agent's active and queued replies before changing models")
             with slot.lock:
                 try:
-                    selection = conversations.set_model(chat_id, model_id, zdr=zdr)
+                    if model_id is None:
+                        conversations.clear_model(chat_id)
+                    else:
+                        conversations.set_model(chat_id, model_id, zdr=zdr)
                 except FileNotFoundError as exc:
                     raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
                 if slot.agent is not None and slot.agent.chat_id == chat_id:
                     slot.agent = None
-        return selection.model_dump()
+        return self.get_chat_models(user_id, agent_id, chat_id)["model"]
+
+    def set_chat_transcription_model(
+        self, user_id: str, agent_id: str, chat_id: str, model_id: str | None,
+    ) -> dict:
+        """Persist or clear a chat's STT override, leaving other chats untouched."""
+        conversations = self._conversations(user_id, agent_id)
+        self._load(conversations, chat_id)
+        if model_id is not None:
+            models = self.list_transcription_models(user_id, model_id, zdr=SPEECH_TO_TEXT.zdr)
+            if not any(model["id"] == model_id for model in models):
+                raise InputError("The speech-to-text model is not available with the required routing policy.")
+        slot = self._slot(user_id, agent_id)
+        with slot.state:
+            if slot.active is not None or slot.pending:
+                raise AgentBusy("wait for this agent's active and queued replies before changing models")
+            conversations.set_transcription_model(chat_id, model_id)
+        chat = self.get_chat_models(user_id, agent_id, chat_id)
+        return {"model_id": chat["stt_model"], "override": chat["stt_model_override"]}
 
     def delete_chat(self, user_id: str, agent_id: str, chat_id: str) -> None:
         conversations = self._conversations(user_id, agent_id)
@@ -291,7 +344,6 @@ class ChatService:
     def send(
         self, user_id: str, agent_id: str, chat_id: str, text: str,
         stream: Optional[bool] = None, attachments: Optional[list[dict]] = None,
-        transcription_model: Optional[str] = None,
     ) -> Iterator[ChatEvent]:
         """Send a user message to a chat and yield the reply as events.
 
@@ -302,7 +354,7 @@ class ChatService:
         conversations = self._conversations(user_id, agent_id)
         attachments = [ChatAttachment.model_validate(item).model_dump() for item in (attachments or [])]
         text, attachments = self._transcribe_audio(
-            user_id, agent_id, text, attachments, transcription_model,
+            user_id, agent_id, chat_id, text, attachments,
         )
         if not text.strip() and not attachments:
             raise InputError("message is empty")
@@ -341,13 +393,18 @@ class ChatService:
         return f"[Audio transcription]\n{transcription}"
 
     def _transcribe_audio(
-        self, user_id: str, agent_id: str, text: str, attachments: list[dict],
-        transcription_model: str | None = None,
+        self, user_id: str, agent_id: str, chat_id: str, text: str, attachments: list[dict],
     ) -> tuple[str, list[dict]]:
         audio = [attachment for attachment in attachments if attachment["modality"] == "audio"]
         if not audio:
             return text, attachments
+        conversations = self._conversations(user_id, agent_id)
+        try:
+            selection = conversations.transcription_selection(chat_id)
+        except (FileNotFoundError, ValueError) as exc:
+            raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
         resolved = load_agent(user_id, agent_id)
+        transcription_model = selection.id if selection else user_models(self._user(user_id), self._preferences).stt
         if resolved.provider_name != "openrouter":
             raise InputError("audio messages require an OpenRouter chat provider for speech-to-text")
         transcriber = OpenRouterProvider(api_key=resolved.api_key)
@@ -364,7 +421,7 @@ class ChatService:
             transcript = transcriber.transcribe(
                 encoded,
                 attachment["format"],
-                model=transcription_model or SPEECH_TO_TEXT.model,
+                model=transcription_model,
                 language=SPEECH_TO_TEXT.language,
                 zdr=SPEECH_TO_TEXT.zdr,
             )
@@ -415,6 +472,7 @@ class ChatService:
             elif slot.agent.chat_id != run.chat_id:
                 slot.agent.open_chat(run.chat_id)
             agent = slot.agent
+            agent.refresh_user_models(user_models(self._user(user_id), self._preferences))
             agent.config.language = self.language(user_id)
             try:
                 result = agent.invoke(

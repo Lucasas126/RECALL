@@ -45,6 +45,11 @@ class ModelIn(BaseModel):
     zdr: bool = Field(default=True, strict=True)
 
 
+class ChatModelIn(BaseModel):
+    model_id: FavoriteModelId | None
+    zdr: bool = Field(default=True, strict=True)
+
+
 def _sse(event: str, data, generation_id: str = "") -> str:
     event_id = f"id: {generation_id}\n" if generation_id else ""
     return f"{event_id}event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -188,11 +193,21 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
     def get_chat(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):
         return service.get_chat(user_id, agent_id, chat_id)
 
+    @app.get("/api/agents/{agent_id}/chats/{chat_id}/models")
+    def get_chat_models(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):
+        return service.get_chat_models(user_id, agent_id, chat_id)
+
     @app.put("/api/agents/{agent_id}/chats/{chat_id}/model")
     def set_chat_model(
-        agent_id: str, chat_id: str, body: ModelIn, user_id: str = Depends(current_user),
+        agent_id: str, chat_id: str, body: ChatModelIn, user_id: str = Depends(current_user),
     ):
         return service.set_chat_model(user_id, agent_id, chat_id, body.model_id, zdr=body.zdr)
+
+    @app.put("/api/agents/{agent_id}/chats/{chat_id}/stt-model")
+    def set_chat_transcription_model(
+        agent_id: str, chat_id: str, body: ChatModelIn, user_id: str = Depends(current_user),
+    ):
+        return service.set_chat_transcription_model(user_id, agent_id, chat_id, body.model_id)
 
     @app.delete("/api/agents/{agent_id}/chats/{chat_id}", status_code=204)
     def delete_chat(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):

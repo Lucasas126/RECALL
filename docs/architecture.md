@@ -69,27 +69,30 @@ Telegram's `/selectmodel` reads the same user favorites, pins available favorite
 before the price-sorted remainder, and marks them with stars without expanding
 the ZDR catalog or exposing favorite mutations in the bot.
 
-Model selection is a chat override stored through `ConversationsSource`, not
-a mutation of the agent YAML or a direct filesystem operation in the channel.
+Model selection is a nullable chat override stored through `ConversationsSource`,
+not a mutation of user defaults or a direct filesystem operation in the channel.
 The service validates model availability and rejects changes while its agent
 has active/queued work. Its cached agent is rebuilt lazily when the current
 chat's selection changes. `Agent.open_chat` restores each chat's override (or
-the configured default), so other chats and CLI reopening behave consistently.
+the user default), so other chats and CLI reopening behave consistently.
 See [model selection and favorites](config.md#choosing-a-model-per-chat).
 
 ### shared channel preferences
 
 `ChatService.get_preferences` and `update_preferences` expose user-scoped
-thinking visibility, notification language and a preferred agent for new chats.
+thinking visibility, notification language, a preferred agent and current
+user-owned LLM/STT defaults.
 Overrides live in a validated configuration-side store, separate from user YAML
 and conversation sources. Reads bypass caches; updates merge under an
 interprocess file lock before atomic replacement, so web and Telegram processes
 do not overwrite unrelated fields. Agent selections are validated against the
-requesting user's configured agents before saving. Existing chats and agent
-execution are not changed by preference operations.
+requesting user's configured agents before saving. Preference operations
+neither move chats between agents nor alter in-flight execution; inherited
+inference models refresh before the next request.
 
 Status: persistence, `GET`/`PATCH /api/preferences`, Telegram reply-keyboard `/settings`,
-web thinking/language controls, thinking visibility and agent selection are
+web settings controls, default-model selection, nullable chat override resets,
+thinking visibility and agent selection are
 implemented. Visibility is enforced by channel renderers without changing
 reasoning generation, stored history or service events. Telegram captures each
 reply's user/agent/chat before asynchronous delivery, so changing a session

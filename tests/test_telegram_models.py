@@ -43,7 +43,7 @@ class TelegramFavoritePickerTests(unittest.IsolatedAsyncioTestCase):
             for index in range(12)
         ]
         self.service.list_models.return_value = self.models
-        self.service.get_chat.return_value = {"model": {"id": "vendor/0"}}
+        self.service.get_chat.return_value = {"model": {"id": "vendor/0"}, "model_override": None}
         state = TelegramBotState(self.service, {123: TelegramSession("test-user", "agent-a", "current-chat")})
         self.update = SimpleNamespace(
             effective_user=SimpleNamespace(id=123),
@@ -61,9 +61,10 @@ class TelegramFavoritePickerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(ids), 12)
         call = self.update.effective_message.reply_text.await_args
         keyboard = call.kwargs["reply_markup"].keyboard
-        self.assertIn("⭐", keyboard[0][0].text)
+        self.assertEqual(keyboard[0][0].text, "Use user default")
         self.assertIn("⭐", keyboard[1][0].text)
-        self.assertNotIn("⭐", keyboard[2][0].text)
+        self.assertIn("⭐", keyboard[2][0].text)
+        self.assertNotIn("⭐", keyboard[3][0].text)
         self.assertIn("Page 1/2", call.args[0])
         self.service.list_models.assert_called_once_with("test-user", "", zdr=True)
         self.service.list_favorite_models.assert_called_once_with("test-user")

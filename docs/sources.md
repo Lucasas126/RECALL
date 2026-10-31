@@ -28,12 +28,19 @@ Each chat may also have a `<chat_id>.model.json` sidecar, managed only through
 `ConversationsSource.model_selection` and `set_model`. It stores
 `{"provider": "openrouter", "id": "vendor/model", "zdr": true}` separately from message
 history, so selecting a model does not add a turn or create another chat.
-Missing metadata means the agent's configured default with ZDR required;
+Missing metadata means the current user's LLM default with ZDR required;
 old sidecars without `zdr` also default to true. Explicit false is per chat
 and persists across restarts. Invalid metadata is an
 explicit error, not a fallback. Writes are atomic and use the source's path
 validation. Deleting/pruning a chat removes its sidecar. These `.json` files are
 not indexed by the default `txt`, `md`, `jsonl` extension filter.
+An independent `<chat_id>.stt.json` stores an optional STT override as
+`{"id": "vendor/model"}`. Missing STT metadata means the current user STT
+default. New chats have neither sidecar; changes to user defaults affect
+inheriting chats on their next request, not explicitly selected models or
+generations already running. Deleting/pruning a chat removes both sidecars.
+Both selections are managed through the conversations source, never through
+direct channel filesystem access.
 New assistant turns also record their model ID, so usage from a different
 model is not reused as the current model's input-token count.
 See [per-chat model selection](config.md#choosing-a-model-per-chat).

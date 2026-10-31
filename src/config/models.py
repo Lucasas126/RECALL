@@ -18,7 +18,6 @@ class TavilyConfig(BaseModel):
 class SpeechToTextConfig(BaseModel):
     """OpenRouter speech-to-text settings."""
 
-    model: str = Field(default="openai/whisper-large-v3-turbo", min_length=1)
     zdr: bool = Field(default=True, strict=True)
     language: Optional[str] = Field(default=None, pattern=r"^[a-z]{2}(?:-[A-Z]{2})?$")
 
@@ -28,6 +27,16 @@ class ProviderConfig(BaseModel):
     api_key: Optional[str] = None  # name of the env var holding the actual key (not needed for local providers)
 
 
+class ModelsConfig(BaseModel):
+    """User-owned inference and indexing model defaults."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    chat: str = Field(default="openai/gpt-4o-mini", strict=True, min_length=1, max_length=256)
+    stt: str = Field(default="openai/whisper-large-v3-turbo", strict=True, min_length=1, max_length=256)
+    embeddings: str = Field(default="openai/text-embedding-3-small", strict=True, min_length=1, max_length=256)
+
+
 class UserConfig(BaseModel):
     id: str
     name: str
@@ -35,11 +44,7 @@ class UserConfig(BaseModel):
     provider: ProviderConfig  # chat provider
     embeddings_provider: Optional[ProviderConfig] = None  # falls back to `provider`
     agents: list[str]
-
-
-class ModelsConfig(BaseModel):
-    chat: str = "openai/gpt-4o-mini"
-    embeddings: str = "openai/text-embedding-3-small"
+    models: ModelsConfig = Field(default_factory=ModelsConfig)
 
 
 class ChatConfig(BaseModel):
@@ -59,15 +64,16 @@ class ChatConfig(BaseModel):
 
 
 class AgentConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: str
     name: str
     personality_prompt: str
-    models: ModelsConfig = ModelsConfig()
     chat_config: ChatConfig = ChatConfig()
 
 
 class ResolvedAgent(BaseModel):
-    """An agent with its config merged and references (like the provider key) resolved."""
+    """Runtime dependencies resolved from the user's models/providers and agent behavior."""
 
     user_id: str
     language: str = "en"

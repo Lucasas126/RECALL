@@ -28,7 +28,8 @@ provider:
   api_key: OPENROUTER_LUCAS_API_KEY   # env var NAME holding the key; omit for local providers
 ```
 
-api keys never live in yaml. agents inherit their owner's provider; they only pick model names, never keys.
+API keys never live in YAML. Providers and model IDs belong to the user;
+agents configure behavior, not inference or embedding models.
 
 ### Telegram access
 
@@ -86,8 +87,8 @@ and routing policy, then stores the transcription as text in the conversation.
 This keeps later model changes independent of whether the selected chat model
 supports audio input.
 
-The default STT model is `openai/whisper-large-v3-turbo` with ZDR required.
-The configured model must have an active ZDR transcription endpoint when
+The initial user STT default is `openai/whisper-large-v3-turbo`, with ZDR required.
+The effective user/chat model must have an active ZDR transcription endpoint when
 `speech_to_text.zdr` is `true`; otherwise audio requests fail explicitly.
 OpenRouter's current transcription catalog can be queried through
 `GET /api/speech-to-text/models?q=<query>&zdr=true`.
@@ -104,10 +105,13 @@ two-letter language code (`en`, `es`) or a language-region code (`en-US`,
 User-wide channel preferences are stored separately from YAML in the ignored
 `.config/<user_id>/preferences.json`. Telegram exposes `/settings` using the
 regular reply keyboard, like the existing model and agent selectors, not inline
-buttons. It offers thinking visibility, English/Spanish alerts, the active agent
-and **Close** to remove the keyboard. Menu selections are consumed by the bot,
-not sent to the model. The web sidebar's **Settings** dialog edits only thinking
-and language; agent switching remains in the existing sidebar selector.
+buttons. It offers thinking visibility, English/Spanish alerts, the active agent,
+default LLM/STT models and **Close** to remove the keyboard. Default selectors
+reuse the paginated model keyboards; LLM favorites appear first. Choosing a
+default saves it for the user and returns to settings, without requiring a chat.
+Menu selections are consumed by the bot, not sent to the model. The web
+sidebar's **Settings** dialog edits thinking, language and default LLM/STT
+models; agent switching remains in the existing sidebar selector.
 Thinking visibility, preferred-agent selection and English/Spanish operational
 notices/errors are implemented in both channels.
 
@@ -153,7 +157,7 @@ or rebuilding the agent. If preferences cannot be read, the failure is reported
 explicitly: Telegram uses its last successfully read language, while HTTP errors
 use the browser's last-known `Accept-Language` header and log the lookup failure.
 
-`GET /api/preferences` returns all three resolved fields for the current
+`GET /api/preferences` returns resolved fields for the current
 cookie user. `PATCH /api/preferences` accepts any subset of the fields and
 returns the resolved result. Omitted fields keep their saved overrides, or
 continue following configuration defaults when never explicitly saved.
@@ -170,6 +174,70 @@ that are no longer available produce explicit errors rather than silently
 resetting preferences. A removed agent can be replaced with a valid selection
 or reset with `{"agent_id": null}`. Neither user YAML nor model favorites are
 rewritten.
+
+### user model defaults and chat overrides
+
+All model IDs belong to the user. User YAML supplies initial defaults:
+
+```yaml
+models:
+  chat: openai/gpt-4o-mini
+  stt: openai/whisper-large-v3-turbo
+  embeddings: openai/text-embedding-3-small
+```
+
+Persistent user preferences can override `default_llm_model` and
+`default_stt_model`; null restores the corresponding user YAML value.
+Setting an LLM default validates the current ZDR chat catalog; setting an STT
+default validates the transcription catalog under the framework routing policy.
+Defaults are independent of agent selection. Embeddings remain a user YAML
+setting, not an editable inference preference.
+
+New chats have no LLM or STT selection: both overrides are null. Effective
+models resolve as **explicit chat override > current user default**.
+Changing a default affects subsequent requests in every inheriting chat,
+including existing chats, without changing chats with explicit overrides or
+any generation already running. Cached agents refresh inherited inference
+models before the next generation, invalidate model-specific token estimates,
+and retain their existing embedding index. CLI requests refresh the same user
+defaults. Agent YAML has no `models` block and rejects one.
+
+`GET /api/agents/<agent_id>/chats/<chat_id>` includes effective `model` and
+`stt_model`, plus nullable `model_override` and `stt_model_override`.
+Its `/models` GET endpoint returns only those four model fields, without
+loading conversation history or initializing an agent.
+The chat `/model` and `/stt-model` PUT endpoints accept `{"model_id": null}`
+to clear an override without changing user defaults. `/stt-model` with a model
+ID persists it for that chat only; Telegram `/selectstt` uses this operation
+instead of channel-session state. Both override operations require an idle
+agent. STT runs before chat inference and resolves its own independent selection.
+Audio requests validate chat existence before resolving STT or contacting the
+provider; missing/invalid chats return 404, including deletion during transcription.
+
+Remove old agent `models` blocks and configure model IDs in user YAML instead.
+There is no legacy configuration compatibility or migration utility.
+Existing chat LLM sidecars remain explicit overrides; missing STT metadata
+means inheritance.
+
+Both channels expose user defaults: Telegram `/settings` saves model choices
+immediately; web **Settings** stages choices until **Save settings**, including
+when no chat is open. Their selectors require ZDR; web chat LLM overrides can
+still select other routing policies.
+
+Telegram `/selectmodel` and `/selectstt`, and the web header's chat/audio
+selectors, change only the current chat. **Use user default** clears the
+corresponding override. Selectors distinguish **User default** from **Chat
+override** and show the effective model. Web settings changes from Telegram
+refresh at the existing preference-refresh points without overwriting explicit
+chat selections. With an open chat, the web also reads current model metadata
+after refreshing or saving preferences, so overrides selected or cleared in
+Telegram replace stale display state. It does not reload messages; responses
+for replaced sessions/chats or superseded local model selections are ignored.
+Default changes can be saved while a reply runs; changing chat
+overrides still requires an idle agent.
+
+Status: schemas, service/API precedence, user-default controls and chat reset
+controls are implemented in Telegram and web.
 
 ### openrouter model catalog and zero data retention
 
@@ -267,15 +335,15 @@ for a capability-filtered route. The API includes `input_modalities` and
 single model-level list when ZDR is unchecked) for these client-side filters.
 
 Selecting a model changes **only the current chat**, preserving its messages
-and leaving the agent YAML, other chats and embeddings unchanged. New chats
-use the agent's configured default. A selection survives browser/server restarts
+and leaving user defaults, other chats and embeddings unchanged. New chats
+inherit the user's current default without an explicit override. A selection survives browser/server restarts
 and is also honored when the CLI opens that chat. A chat with an OpenRouter
 override requires an OpenRouter chat provider; changing the user's provider
 does not silently reinterpret its model ID.
 
 `GET /api/agents/<agent_id>/chats/<chat_id>` includes
 `"model": {"provider": "openrouter", "id": "vendor/model", "zdr": true}` (the override or
-configured default). `PUT` to that chat's `/model` endpoint with
+user default). `PUT` to that chat's `/model` endpoint with
 `{"model_id": "vendor/model", "zdr": true}` validates the exact ID against the
 live catalog with that filter and persists both fields through the conversations
 source. Omission of `zdr` defaults to true; JSON opt-out requires the actual
@@ -377,6 +445,10 @@ provider:
   name: openrouter
   api_key: OPENROUTER_LUCAS_API_KEY   # omit for local providers (ollama)
 agents: [aria]
+models:
+  chat: openai/gpt-4o-mini
+  stt: openai/whisper-large-v3-turbo
+  embeddings: openai/text-embedding-3-small
 ```
 
 ```yaml
@@ -385,9 +457,6 @@ id: aria
 name: Aria
 personality_prompt: >
   you are aria, a helpful assistant...
-models:
-  chat: qwen3:8b
-  embeddings: openai/text-embedding-3-small
 chat_config:
   stream: true                       # stream tokens as they arrive
   has_memory: true                   # keep conversation history in context

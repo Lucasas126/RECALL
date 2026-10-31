@@ -32,6 +32,9 @@
         <span>Chat model</span>
         <button id="model-picker" type="button" disabled aria-haspopup="dialog">No chat selected</button>
         <span id="model-policy"></span>
+        <span id="stt-label">Audio model</span>
+        <button id="stt-picker" type="button" disabled aria-haspopup="dialog">No chat selected</button>
+        <span id="stt-policy"></span>
       </header>
       <div id="messages"></div>
       <details id="usage" hidden><summary></summary><pre></pre></details>
@@ -49,11 +52,17 @@
       <h2 id="settings-title">User settings</h2>
       <button id="settings-close" type="button">Close</button>
     </div>
-    <p id="settings-note" class="model-note">Thinking and language are shared with Telegram.</p>
+    <p id="settings-note" class="model-note">Settings are shared with Telegram. Chats without a selected model use your current defaults.</p>
     <form id="settings-form">
       <label class="model-filter">
         <input id="settings-thinking" type="checkbox"> <span id="settings-thinking-label">Show model thinking</span>
       </label>
+      <p><span id="settings-llm-label">Default LLM model</span><br>
+        <button id="settings-llm" type="button" aria-haspopup="dialog" disabled></button>
+      </p>
+      <p><span id="settings-stt-label">Default STT model</span><br>
+        <button id="settings-stt" type="button" aria-haspopup="dialog" disabled></button>
+      </p>
       <label for="settings-language"><span id="settings-language-label">Alerts and errors</span>
         <select id="settings-language">
           <option value="en">English</option>
@@ -70,7 +79,8 @@
       <h2 id="model-title">OpenRouter models</h2>
       <button id="model-close" type="button" aria-label="Close model selector">Close</button>
     </div>
-    <p class="model-subtitle">Choose a model for this chat.</p>
+    <p id="model-subtitle" class="model-subtitle">Choose a model for this chat.</p>
+    <button id="model-inherit" type="button">Use user default</button>
     <div class="model-toolbar">
       <input id="model-search" type="search" placeholder="Search by model name or ID" aria-label="Search models">
       <button id="model-favorites-only" class="model-favorites-toggle" type="button"
@@ -78,7 +88,7 @@
       <button id="model-refresh" type="button">Refresh</button>
     </div>
     <div class="model-options">
-      <label class="model-filter" title="Resets to checked each time you open the selector">
+      <label id="model-zdr-label" class="model-filter" title="Resets to checked each time you open the selector">
         <input id="model-zdr" type="checkbox" checked> ZDR only
       </label>
       <label class="model-sort-label" for="model-sort">Sort
@@ -108,9 +118,9 @@
     <ul id="model-list"></ul>
     <details id="model-info" class="model-disclosure">
       <summary>Information</summary>
-      <p class="model-note">ZDR starts checked each time you open the selector.
-        Choosing a model saves that routing policy for this chat only.
-        Favorites are shared across your agents.</p>
+      <p id="model-scope-note" class="model-note">Choosing a model for a chat sets only that chat's override.
+        Use user default removes it. Defaults in Settings are saved with Save settings.
+        Default LLM and STT selections require ZDR. Favorites are shared across your agents.</p>
       <p class="model-note">Prices are starting rates in USD per 1M tokens; provider,
         context tiers, caching and extras may change charges.</p>
       <p class="model-note">Capability filters use catalog metadata, not a routing guarantee.

@@ -91,7 +91,7 @@ class ModelFixture(steering.SteeringFixture):
         agent_patch = patch(
             "src.service.chat.load_agent_config",
             side_effect=lambda user, agent: AgentConfig(
-                id=agent, name=agent, personality_prompt="Test prompt", models=ModelsConfig(chat="vendor/default"),
+                id=agent, name=agent, personality_prompt="Test prompt",
             ),
         )
         agent_patch.start()
@@ -120,6 +120,7 @@ class ModelFixture(steering.SteeringFixture):
     def _user(self, user_id: str) -> UserConfig:
         user = super()._user(user_id)
         user.provider.name = "openrouter"
+        user.models.chat = "vendor/default"
         return user
 
     def _factory(self, user: str, agent: str, chat_id: str | None) -> Agent:

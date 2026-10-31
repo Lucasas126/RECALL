@@ -6,7 +6,8 @@ from typing import Optional
 
 import yaml
 
-from src.config.models import AgentConfig, ResolvedAgent, UserConfig
+from src.config.models import AgentConfig, ModelsConfig, ResolvedAgent, UserConfig
+from src.config.preferences import UserPreferencesStore
 from src.config.settings import CONFIG_DIR
 
 
@@ -25,6 +26,19 @@ def load_user(user_id: str) -> UserConfig:
 def load_agent_config(user_id: str, agent_id: str) -> AgentConfig:
     """Load one agent's own config (no provider resolution)."""
     return AgentConfig(**_load_yaml(CONFIG_DIR / user_id / "agents" / f"{agent_id}.yaml"))
+
+
+def user_models(user: UserConfig, preferences: UserPreferencesStore) -> ModelsConfig:
+    """Resolve inference overrides while preserving the user's embedding model."""
+    saved = preferences.get(user.id)
+    return user.models.model_copy(update={
+        "chat": saved.default_llm_model or user.models.chat,
+        "stt": saved.default_stt_model or user.models.stt,
+    })
+
+
+def load_user_models(user_id: str) -> ModelsConfig:
+    return user_models(load_user(user_id), UserPreferencesStore(CONFIG_DIR))
 
 
 def load_agent(user_id: str, agent_id: Optional[str] = None) -> ResolvedAgent:
@@ -59,7 +73,7 @@ def load_agent(user_id: str, agent_id: Optional[str] = None) -> ResolvedAgent:
         id=agent.id,
         name=agent.name,
         personality_prompt=agent.personality_prompt,
-        models=agent.models,
+        models=load_user_models(user_id),
         provider_name=user.provider.name,
         api_key=api_key,
         embeddings_provider_name=embeddings_provider.name,

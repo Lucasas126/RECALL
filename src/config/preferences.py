@@ -22,6 +22,8 @@ class UserPreferences(BaseModel):
     show_thinking: bool = Field(default=True, strict=True)
     language: Literal["en", "es"] = "en"
     agent_id: Annotated[str, Field(strict=True, pattern=r"^[A-Za-z0-9_-]{1,64}$")] | None = None
+    default_llm_model: Annotated[str, Field(strict=True, min_length=1, max_length=256)] | None = None
+    default_stt_model: Annotated[str, Field(strict=True, min_length=1, max_length=256)] | None = None
 
     def language_for(self, configured: str) -> Literal["en", "es"]:
         """Resolve an explicit language override or the legacy YAML language."""

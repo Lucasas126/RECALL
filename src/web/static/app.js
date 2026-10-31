@@ -6,6 +6,10 @@ const state = {
   model: null, modelCatalog: null, modelCatalogZdr: null, modelFavorites: [],
   modelBusy: false, modelLoading: false, modelRequest: 0,
   modelFavoritesOnly: false,
+  modelTarget: "chat-llm", modelCatalogKind: "llm",
+  modelOverride: undefined, sttModel: null, sttOverride: undefined,
+  chatModelRevision: 0,
+  settingsModelDraft: null,
   preferences: null, preferencesRequest: 0, settingsBusy: false, settingsOriginal: null,
   translations: null,
 };
@@ -27,7 +31,10 @@ function translateInterface() {
     ["settings-close", "Close"], ["settings-save", "Save settings"],
     ["settings-thinking-label", "Show model thinking"],
     ["settings-language-label", "Alerts and errors"],
-    ["settings-note", "Thinking and language are shared with Telegram."],
+    ["settings-note", "Settings are shared with Telegram. Chats without a selected model use your current defaults."],
+    ["settings-llm-label", "Default LLM model"], ["settings-stt-label", "Default STT model"],
+    ["stt-label", "Audio model"], ["model-inherit", "Use user default"],
+    ["model-scope-note", "Choosing a model for a chat sets only that chat's override. Use user default removes it. Defaults in Settings are saved with Save settings. Default LLM and STT selections require ZDR. Favorites are shared across your agents."],
     ["model-zdr-warning", "ZDR is not required for your next selection. Providers may retain your prompts and replies. Your OpenRouter account may still enforce ZDR."],
   ]) $(id).textContent = tr(text);
 }
@@ -168,13 +175,41 @@ function applyPreferences(preferences) {
   state.preferences = preferences;
   $("messages").classList.toggle("hide-thinking", !preferences.show_thinking);
   translateInterface();
+  updateModelControls();
 }
 
 async function applyServerPreferences(preferences, session, request) {
   if (preferences.language === "es" && !state.translations) {
     state.translations = await api("/api/localization?language=es");
   }
-  if (session === state.session && request === state.preferencesRequest && state.user) applyPreferences(preferences);
+  if (session === state.session && request === state.preferencesRequest && state.user) {
+    applyPreferences(preferences);
+    await refreshChatModels(session, request);
+  }
+}
+
+function applyChatModels(models) {
+  state.model = models.model;
+  state.modelOverride = models.model_override;
+  state.sttModel = models.stt_model;
+  state.sttOverride = models.stt_model_override;
+  updateModelControls();
+}
+
+async function refreshChatModels(session, preferencesRequest) {
+  if (!state.agentId || !state.chatId || state.modelBusy) return;
+  const agentId = state.agentId;
+  const chatId = state.chatId;
+  const revision = state.chatModelRevision;
+  const current = () => session === state.session && preferencesRequest === state.preferencesRequest
+    && agentId === state.agentId && chatId === state.chatId
+    && revision === state.chatModelRevision && !state.modelBusy;
+  try {
+    const models = await api(chatsUrl(`/${chatId}/models`), { cache: "no-store" });
+    if (current()) applyChatModels(models);
+  } catch (err) {
+    if (current()) throw err;
+  }
 }
 
 async function refreshPreferences() {
@@ -209,13 +244,28 @@ async function savePreferences(changes) {
 
 function fillSettings() {
   state.settingsOriginal = { ...state.preferences };
+  state.settingsModelDraft = {
+    default_llm_model: state.preferences.default_llm_model,
+    default_stt_model: state.preferences.default_stt_model,
+  };
   $("settings-thinking").checked = state.preferences.show_thinking;
   $("settings-language").value = state.preferences.language;
+  renderSettingsModels();
+}
+
+function renderSettingsModels() {
+  $("settings-llm").textContent = state.settingsModelDraft?.default_llm_model ?? "";
+  $("settings-stt").textContent = state.settingsModelDraft?.default_stt_model ?? "";
+  const disabled = !state.settingsOriginal || state.user?.provider !== "openrouter" || state.settingsBusy;
+  $("settings-llm").disabled = disabled;
+  $("settings-stt").disabled = disabled;
 }
 
 $("settings-open").addEventListener("click", async () => {
   const session = state.session;
   state.settingsOriginal = null;
+  state.settingsModelDraft = null;
+  renderSettingsModels();
   $("settings-error").textContent = "";
   $("settings-save").disabled = true;
   $("settings-dialog").showModal();
@@ -239,6 +289,9 @@ $("settings-form").addEventListener("submit", async (e) => {
   const language = $("settings-language").value;
   if (thinking !== state.settingsOriginal.show_thinking) changes.show_thinking = thinking;
   if (language !== state.settingsOriginal.language) changes.language = language;
+  for (const key of ["default_llm_model", "default_stt_model"]) {
+    if (state.settingsModelDraft?.[key] !== state.settingsOriginal[key]) changes[key] = state.settingsModelDraft[key];
+  }
   $("settings-error").textContent = "";
   try {
     if (Object.keys(changes).length) await savePreferences(changes);
@@ -314,11 +367,11 @@ async function openChat(chatId) {
   const agentId = state.agentId;
   await refreshPreferences();
   if (session !== state.session || agentId !== state.agentId) return;
+  const revision = ++state.chatModelRevision;
   const data = await api(chatsUrl(`/${chatId}`));
-  if (session !== state.session || agentId !== state.agentId || state.busy || state.modelBusy) return;
+  if (session !== state.session || agentId !== state.agentId || revision !== state.chatModelRevision || state.busy || state.modelBusy) return;
   state.chatId = chatId;
-  state.model = data.model;
-  updateModelControls();
+  applyChatModels(data);
   renderMessages(data.messages);
   setComposer(true);
   await refreshChats();
@@ -348,10 +401,20 @@ function updateModelControls() {
   const required = state.model?.zdr !== false;
   $("model-policy").textContent = state.model
     ? (openrouter ? (required ? "ZDR required" : "ZDR not required") : state.model.provider) : "";
+  if (state.model && state.modelOverride !== undefined) {
+    $("model-policy").textContent += ` · ${tr(state.modelOverride === null ? "User default" : "Chat override")}`;
+  }
+  $("stt-picker").textContent = state.chatId ? (state.sttModel ?? "") : tr("No chat selected");
+  $("stt-picker").disabled = !openrouter || !state.chatId || state.busy || state.modelBusy;
+  $("stt-policy").textContent = state.chatId && state.sttOverride !== undefined
+    ? tr(state.sttOverride === null ? "User default" : "Chat override") : "";
   $("model-policy").classList.toggle("privacy-warning", openrouter && !required);
   $("model-refresh").disabled = state.modelLoading || state.modelBusy;
   $("model-close").disabled = state.modelBusy;
-  $("model-zdr").disabled = state.modelBusy || state.modelLoading;
+  $("model-zdr").disabled = state.modelBusy || state.modelLoading || state.modelTarget !== "chat-llm";
+  $("model-inherit").hidden = state.modelTarget.startsWith("default-");
+  $("model-inherit").disabled = !state.chatId || state.busy || state.modelBusy;
+  renderSettingsModels();
   $("model-zdr-warning").hidden = $("model-zdr").checked;
   $("model-favorites-only").setAttribute("aria-pressed", String(state.modelFavoritesOnly));
   $("model-favorites-only").textContent = state.modelFavoritesOnly ? "\u2605" : "\u2606";
@@ -395,11 +458,12 @@ function renderModelList() {
     $("model-status").textContent = tr("Loading current model catalog...");
     return;
   }
-  if (!state.modelCatalog || state.modelCatalogZdr !== $("model-zdr").checked) {
+  const stt = state.modelTarget.endsWith("-stt");
+  if (!state.modelCatalog || state.modelCatalogKind !== (stt ? "stt" : "llm") || state.modelCatalogZdr !== $("model-zdr").checked) {
     $("model-status").textContent = tr("Catalog unavailable. Use Refresh to retry.");
     return;
   }
-  const saved = new Set(state.modelFavorites);
+  const saved = new Set(stt ? [] : state.modelFavorites);
   const availableIds = new Set(state.modelCatalog.map((model) => model.id));
   const models = new Map(state.modelCatalog.map((model) => [model.id, model]));
   for (const id of saved) {
@@ -413,7 +477,7 @@ function renderModelList() {
   };
   const matches = [...models.values()].filter((model) =>
     (!state.modelFavoritesOnly || saved.has(model.id))
-    && matchesCapabilities(model, capabilities)
+    && (stt || matchesCapabilities(model, capabilities))
     && (!query || model.id.toLocaleLowerCase().includes(query) || model.name.toLocaleLowerCase().includes(query))
   ).sort((a, b) => compareModels(a, b, $("model-sort").value, saved));
   $("model-status").textContent = matches.length
@@ -426,9 +490,12 @@ function renderModelList() {
     const choose = document.createElement("button");
     choose.type = "button";
     choose.className = "model-choice";
-    choose.disabled = !available || state.busy || state.modelBusy;
+    choose.disabled = !available || (state.busy && !state.modelTarget.startsWith("default-")) || state.modelBusy;
+    const selected = state.modelTarget.startsWith("default-")
+      ? state.settingsModelDraft?.[stt ? "default_stt_model" : "default_llm_model"]
+      : (stt ? state.sttModel : state.model?.id);
     choose.setAttribute("aria-pressed", String(
-      model.id === state.model?.id && (state.model?.zdr !== false) === $("model-zdr").checked
+      model.id === selected && (state.modelTarget !== "chat-llm" || (state.model?.zdr !== false) === $("model-zdr").checked)
     ));
     const name = document.createElement("strong");
     name.textContent = model.name;
@@ -440,7 +507,7 @@ function renderModelList() {
       : "No active ZDR routes";
     const pricing = document.createElement("small");
     pricing.textContent = `USD / 1M tokens: input ${tokenPrice(model.pricing?.prompt)}`
-      + ` | output ${tokenPrice(model.pricing?.completion)}`;
+      + (stt ? "" : ` | output ${tokenPrice(model.pricing?.completion)}`);
     choose.append(name, id, pricing, providers);
     choose.addEventListener("click", () => selectModel(model.id));
     const star = document.createElement("button");
@@ -453,7 +520,8 @@ function renderModelList() {
     star.title = label;
     star.disabled = state.modelBusy || state.busy;
     star.addEventListener("click", () => toggleFavorite(model.id));
-    row.append(choose, star);
+    row.append(choose);
+    if (!stt) row.append(star);
     list.append(row);
   }
 }
@@ -463,17 +531,22 @@ async function refreshModels(initial = false) {
   const session = state.session;
   const request = ++state.modelRequest;
   const zdr = $("model-zdr").checked;
+  const stt = state.modelTarget.endsWith("-stt");
   state.modelLoading = true;
   $("model-error").textContent = "";
   renderModelList();
   try {
     const [models, favorites] = await Promise.all([
-      api(`/api/models?zdr=${zdr}`), api("/api/models/favorites"),
+      api(`/api/${stt ? "speech-to-text/models" : "models"}?zdr=${zdr}`),
+      stt ? Promise.resolve([]) : api("/api/models/favorites"),
     ]);
     if (session !== state.session || request !== state.modelRequest) return;
-    state.modelCatalog = models;
+    state.modelCatalog = stt ? models.map((model) => ({
+      ...model, pricing: { prompt: model.pricing_prompt },
+    })) : models;
+    state.modelCatalogKind = stt ? "stt" : "llm";
     state.modelCatalogZdr = zdr;
-    state.modelFavorites = favorites;
+    if (!stt) state.modelFavorites = favorites;
     if (initial) state.modelFavoritesOnly = favorites.length > 0;
   } catch (err) {
     if (session !== state.session || request !== state.modelRequest) return;
@@ -513,21 +586,39 @@ async function toggleFavorite(modelId) {
 }
 
 async function selectModel(modelId) {
-  if (state.modelBusy || state.busy || state.modelLoading || !state.chatId) return;
+  const target = state.modelTarget;
+  const defaultSelection = target.startsWith("default-");
+  const stt = target.endsWith("-stt");
+  if (state.modelBusy || (state.modelLoading && modelId !== null)) return;
+  if (defaultSelection) {
+    if (!state.settingsOriginal || state.settingsBusy || modelId === null) return;
+    state.settingsModelDraft[stt ? "default_stt_model" : "default_llm_model"] = modelId;
+    renderSettingsModels();
+    $("model-dialog").close();
+    return;
+  }
+  if (state.busy || !state.chatId) return;
   const session = state.session;
   const agentId = state.agentId;
   const chatId = state.chatId;
   const zdr = $("model-zdr").checked;
+  state.chatModelRevision++;
   state.modelBusy = true;
   $("model-error").textContent = "";
   updateBusy();
   try {
-    const model = await api(chatsUrl(`/${chatId}/model`), {
+    const model = await api(chatsUrl(`/${chatId}/${stt ? "stt-model" : "model"}`), {
       method: "PUT", body: JSON.stringify({ model_id: modelId, zdr }),
     });
     if (session !== state.session || agentId !== state.agentId || chatId !== state.chatId) return;
-    state.model = model;
-    $("usage").hidden = true;
+    if (stt) {
+      state.sttModel = model.model_id;
+      state.sttOverride = model.override;
+    } else {
+      state.model = model;
+      state.modelOverride = modelId === null ? null : model;
+      $("usage").hidden = true;
+    }
     $("model-dialog").close();
   } catch (err) {
     if (session === state.session) $("model-error").textContent = err.message;
@@ -539,19 +630,39 @@ async function selectModel(modelId) {
   }
 }
 
-$("model-picker").addEventListener("click", () => {
-  if ($("model-picker").disabled) return;
+function openModelPicker(target) {
+  const defaultSelection = target.startsWith("default-");
+  const stt = target.endsWith("-stt");
+  if (state.modelBusy || !state.user || state.user.provider !== "openrouter") return;
+  if (defaultSelection ? (!state.settingsOriginal || state.settingsBusy) : (!state.chatId || state.busy)) return;
+  const previousStt = state.modelTarget.endsWith("-stt");
+  state.modelTarget = target;
   $("model-search").value = "";
   $("model-error").textContent = "";
   $("model-zdr").checked = true;
-  state.modelFavoritesOnly = state.modelFavorites.length > 0;
+  state.modelFavoritesOnly = !stt && state.modelFavorites.length > 0;
+  $("model-favorites-only").hidden = stt;
+  $("model-filters").hidden = stt;
+  if (stt) $("model-sort").value = "prompt-asc";
+  else if (previousStt) $("model-sort").value = "favorites";
+  for (const option of $("model-sort").querySelectorAll("option")) {
+    option.disabled = stt && (option.value === "favorites" || option.value.startsWith("completion-"));
+  }
+  $("model-title").textContent = tr(stt ? "Speech-to-text models" : "OpenRouter models");
+  $("model-subtitle").textContent = tr(defaultSelection
+    ? (stt ? "Choose the user's default STT model. This does not set a chat override." : "Choose the user's default LLM model. This does not set a chat override.")
+    : "Choose a model for this chat.");
   $("model-filters").open = false;
   $("model-info").open = false;
   $("model-dialog").showModal();
   $("model-search").focus();
-  if (!state.modelCatalog || state.modelCatalogZdr !== true || state.modelLoading) refreshModels(true);
-  else renderModelList();
-});
+  refreshModels(true);
+}
+$("model-picker").addEventListener("click", () => openModelPicker("chat-llm"));
+$("stt-picker").addEventListener("click", () => openModelPicker("chat-stt"));
+$("settings-llm").addEventListener("click", () => openModelPicker("default-llm"));
+$("settings-stt").addEventListener("click", () => openModelPicker("default-stt"));
+$("model-inherit").addEventListener("click", () => selectModel(null));
 $("model-close").addEventListener("click", () => $("model-dialog").close());
 $("model-dialog").addEventListener("cancel", (event) => {
   if (state.modelBusy) event.preventDefault();
@@ -601,6 +712,13 @@ function resetStreams() {
   state.preferencesRequest++;
   state.settingsOriginal = null;
   state.settingsBusy = false;
+  state.settingsModelDraft = null;
+  state.modelOverride = undefined;
+  state.sttModel = null;
+  state.sttOverride = undefined;
+  state.modelTarget = "chat-llm";
+  state.modelCatalogKind = "llm";
+  state.chatModelRevision++;
   $("settings-dialog").close();
   $("settings-save").disabled = false;
   $("messages").classList.toggle("hide-thinking", false);

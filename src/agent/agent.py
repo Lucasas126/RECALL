@@ -11,7 +11,7 @@ from src.agent import usage
 from src.agent import associative
 from src.agent.tools import build_tools
 from src.config.loader import load_agent
-from src.config.models import ResolvedAgent
+from src.config.models import ModelsConfig, ResolvedAgent
 from src.config.settings import AGENT_MAX_TOOL_HOPS, TAVILY
 from src.core.index import VectorIndex
 from src.core.sources.registry import SourceRegistry
@@ -116,6 +116,18 @@ class Agent:
         self._load_recent_context()
         self._reconstruct_context()
         return chat_id
+
+    def refresh_user_models(self, models: ModelsConfig) -> None:
+        """Refresh inherited inference defaults without rebuilding the embedding index."""
+        self._default_chat_model = models.chat
+        selection = self.sources.conversations().model_selection(self.chat_id)
+        model = selection.id if selection else models.chat
+        if model != self.config.models.chat:
+            self._max_context = None
+            self._ctx_input_tokens = None
+            self._prev_breakdown = None
+        self.config.models = self.config.models.model_copy(update={"chat": model, "stt": models.stt})
+        self.zdr_required = selection.zdr if selection else True
 
     @classmethod
     def from_config(

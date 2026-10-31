@@ -1,8 +1,5 @@
 id: example_agent
 name: example_agent
-models:
-  chat: openai/gpt-4o-mini
-  embeddings: openai/text-embedding-3-small
 personality_prompt: >
   you are "example_agent", a helpful assistant that remembers the conversation.
   
