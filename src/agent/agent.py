@@ -55,6 +55,7 @@ class Agent:
     def __init__(self, config: ResolvedAgent, provider: LLMProvider, chat_id: Optional[str] = None):
         self.config = config.model_copy(deep=True)
         self._default_chat_model = config.models.chat
+        self._default_reasoning_effort = config.reasoning_effort
         self.provider = provider
         # per-agent access to the data plane (mind palace, conversations, ...)
         self.sources = SourceRegistry.for_agent(config.user_id, config.id)
@@ -89,6 +90,8 @@ class Agent:
         if model != self.config.models.chat:
             self._max_context = None
         self.config.models = self.config.models.model_copy(update={"chat": model})
+        effort = conversations.reasoning_effort_selection(chat_id)
+        self.config.reasoning_effort = effort.effort if effort is not None else self._default_reasoning_effort
         self.chat_id = chat_id
         # real input tokens of the current context (seeded on load, updated each turn)
         self._ctx_input_tokens: Optional[int] = None

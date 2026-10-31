@@ -9,6 +9,7 @@ from typing import Collection, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from src.config.models import ReasoningEffort
 from src.core.sources.base import Source
 from src.utils.files import atomic_write_text
 from src.utils.i18n import InputError, UserMessageError
@@ -27,12 +28,12 @@ class ChatModel(BaseModel):
     zdr: bool = Field(default=True, strict=True)
 
 
-class ChatTranscriptionModel(BaseModel):
-    """An optional chat-owned speech-to-text selection."""
+class ChatReasoningEffort(BaseModel):
+    """A chat-owned reasoning effort that replaces the agent default for that chat."""
 
     model_config = ConfigDict(extra="forbid")
 
-    id: str = Field(strict=True, min_length=1, max_length=256)
+    effort: ReasoningEffort
 
 
 class ChatMetadataError(UserMessageError, RuntimeError):
@@ -86,28 +87,28 @@ class ConversationsSource(Source):
         except OSError as exc:
             raise ChatMetadataError("Could not save model selection for chat {chat_id}.", chat_id=chat_id) from exc
 
-    def transcription_selection(self, chat_id: str) -> ChatTranscriptionModel | None:
+    def reasoning_effort_selection(self, chat_id: str) -> ChatReasoningEffort | None:
+        """Read a chat's reasoning effort override; None means the agent default applies."""
         self._model_path(chat_id)
-        path = self.resolve(f"{chat_id}.stt.json")
+        path = self.resolve(f"{chat_id}.effort.json")
         try:
-            return ChatTranscriptionModel.model_validate_json(path.read_text(encoding="utf-8"))
+            return ChatReasoningEffort.model_validate_json(path.read_text(encoding="utf-8"))
         except FileNotFoundError:
             return None
         except (OSError, UnicodeError, ValidationError) as exc:
-            raise ChatMetadataError("Could not read model selection for chat {chat_id}.", chat_id=chat_id) from exc
+            raise ChatMetadataError("Could not read reasoning effort for chat {chat_id}.", chat_id=chat_id) from exc
 
-    def set_transcription_model(self, chat_id: str, model_id: str | None) -> ChatTranscriptionModel | None:
+    def set_reasoning_effort(self, chat_id: str, effort: ReasoningEffort | None) -> None:
+        """Persist or clear a chat's reasoning effort after the caller validates the model supports it."""
         self._model_path(chat_id)
-        path = self.resolve(f"{chat_id}.stt.json")
-        selection = ChatTranscriptionModel(id=model_id) if model_id is not None else None
+        path = self.resolve(f"{chat_id}.effort.json")
         try:
-            if selection is None:
+            if effort is None:
                 path.unlink(missing_ok=True)
             else:
-                atomic_write_text(path, selection.model_dump_json() + "\n")
+                atomic_write_text(path, ChatReasoningEffort(effort=effort).model_dump_json() + "\n")
         except OSError as exc:
-            raise ChatMetadataError("Could not save model selection for chat {chat_id}.", chat_id=chat_id) from exc
-        return selection
+            raise ChatMetadataError("Could not save reasoning effort for chat {chat_id}.", chat_id=chat_id) from exc
 
     def create(self) -> str:
         """Create an empty chat and return its id."""
@@ -120,10 +121,12 @@ class ConversationsSource(Source):
         if not path.is_file():
             raise FileNotFoundError(f"chat not found: {chat_id}")
         metadata = self._model_path(chat_id)
-        transcription = self.resolve(f"{chat_id}.stt.json")
+        effort = self.resolve(f"{chat_id}.effort.json")
+        legacy_transcription = self.resolve(f"{chat_id}.stt.json")  # per-chat STT overrides are no longer read
         path.unlink()
         metadata.unlink(missing_ok=True)
-        transcription.unlink(missing_ok=True)
+        effort.unlink(missing_ok=True)
+        legacy_transcription.unlink(missing_ok=True)
 
     def append(self, chat_id: str, role: str, content: str, **extra) -> dict:
         """Append a turn to an existing chat as one JSONL line."""

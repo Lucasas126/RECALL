@@ -13,8 +13,9 @@ from src.agent.agent import Agent
 from src.config.favorites import ModelFavorites
 from src.config.models import AgentConfig, ModelsConfig, ResolvedAgent, UserConfig
 from src.core.sources.conversations import ChatMetadataError, ConversationsSource
-from src.providers.catalog import ModelPricing, OpenRouterModel
+from src.providers.catalog import CatalogUnavailable, ModelPricing, OpenRouterModel
 from src.service.chat import AgentBusy, ChatService, UnknownAgent, UnknownChat
+from src.utils.i18n import InputError
 from src.web.app import create_app
 
 
@@ -72,6 +73,19 @@ class ConversationModelTests(unittest.TestCase):
         self.source.set_model(self.chat, "vendor/model", zdr=False)
         self.assertFalse(ConversationsSource(self.root).model_selection(self.chat).zdr)
 
+    def test_reasoning_effort_sidecar_is_persistent_removed_with_chat_and_validated(self) -> None:
+        self.source.set_reasoning_effort(self.chat, "max")
+        self.assertEqual(ConversationsSource(self.root).reasoning_effort_selection(self.chat).effort, "max")
+        self.source.set_reasoning_effort(self.chat, None)
+        self.assertIsNone(self.source.reasoning_effort_selection(self.chat))
+        self.source.set_reasoning_effort(self.chat, "low")
+        self.source.delete_chat(self.chat)
+        self.assertEqual(list(self.root.iterdir()), [])
+        chat = self.source.create()
+        (self.root / f"{chat}.effort.json").write_text('{"effort": "ultra"}', encoding="utf-8")
+        with self.assertRaises(ChatMetadataError):
+            self.source.reasoning_effort_selection(chat)
+
     def test_invalid_stored_policy_is_an_error_not_an_opt_out(self) -> None:
         path = self.root / f"{self.chat}.model.json"
         path.write_text('{"provider":"openrouter","id":"vendor/model","zdr":"false"}', encoding="utf-8")
@@ -127,7 +141,7 @@ class ModelFixture(steering.SteeringFixture):
         config = ResolvedAgent(
             user_id=user, id=agent, name=agent, personality_prompt="Test prompt",
             models=ModelsConfig(chat="vendor/default"), provider_name="openrouter", api_key="",
-            embeddings_provider_name="openrouter", embeddings_api_key="",
+            embeddings_provider_name="openrouter", embeddings_api_key="", reasoning_effort="medium",
             tools=False, associative_memory=self.associative_memory, has_memory=self.memory,
             conversation_messages_retained=self.retained,
         )
@@ -339,6 +353,59 @@ class ChatModelWebTests(ModelFixture):
         response = self.client.post("/api/models/favorites", json={**favorite, "zdr": False})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), ["vendor/retaining"])
+
+    def test_reasoning_effort_override_is_saved_and_validated_over_http(self) -> None:
+        url = self.url.removesuffix("/model") + "/reasoning-effort"
+        self.catalog_models[0].parameter_routes = [["tools", "reasoning_effort"]]
+        response = self.client.put(url, json={"effort": "high"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["reasoning_effort"]["override"], "high")
+        self.assertEqual(self.client.put(url, json={"effort": "ultra"}).status_code, 422)
+        self.assertEqual(self.client.put(url, json={}).status_code, 422)
+        self.assertEqual(self.client.put(url, json={"effort": None}).json()["reasoning_effort"]["override"], None)
+
+
+class ChatReasoningEffortServiceTests(ModelFixture):
+    def setUp(self) -> None:
+        super().setUp()
+        self.catalog_models[0].parameter_routes = [["reasoning_effort"]]
+
+    def test_override_is_per_chat_and_applied_to_the_agent(self) -> None:
+        list(self.service.send("user-one", "agent-one", self.chat, "Question"))  # empty chats are pruned on create
+        other = self.service.create_chat("user-one", "agent-one")["id"]
+        chat = self.service.set_chat_reasoning_effort("user-one", "agent-one", self.chat, "high")
+        self.assertEqual(chat["reasoning_effort"]["override"], "high")
+        self.assertEqual(chat["reasoning_effort"]["effective"], "high")
+        self.assertEqual(chat["reasoning_effort"]["default"], "medium")
+        self.assertIsNone(self.service.get_chat("user-one", "agent-one", other)["reasoning_effort"]["override"])
+        list(self.service.send("user-one", "agent-one", self.chat, "Question"))
+        self.assertEqual(self.agents[("user-one", "agent-one")].config.reasoning_effort, "high")
+        list(self.service.send("user-one", "agent-one", other, "Question"))
+        self.assertEqual(self.agents[("user-one", "agent-one")].config.reasoning_effort, "medium")
+
+    def test_clearing_restores_the_agent_default(self) -> None:
+        self.service.set_chat_reasoning_effort("user-one", "agent-one", self.chat, "low")
+        chat = self.service.set_chat_reasoning_effort("user-one", "agent-one", self.chat, None)
+        self.assertIsNone(chat["reasoning_effort"]["override"])
+        self.assertEqual(chat["reasoning_effort"]["effective"], "medium")
+        self.assertIsNone(self.sources[("user-one", "agent-one")].reasoning_effort_selection(self.chat))
+
+    def test_unsupported_models_reject_a_value(self) -> None:
+        self.service.set_chat_model("user-one", "agent-one", self.chat, "vendor/beta")
+        with self.assertRaises(InputError):
+            self.service.set_chat_reasoning_effort("user-one", "agent-one", self.chat, "high")
+        self.assertIsNone(self.service.get_chat("user-one", "agent-one", self.chat)["reasoning_effort"]["override"])
+
+    def test_support_is_reported_as_unknown_when_catalog_is_unavailable(self) -> None:
+        self.catalog.side_effect = CatalogUnavailable("retry later")
+        self.service._reasoning_support.clear()
+        self.assertIsNone(self.service.get_chat_models("user-one", "agent-one", self.chat)["reasoning_effort"]["supported"])
+
+    def test_invalid_stored_effort_is_an_explicit_error(self) -> None:
+        path = self.root / "user-one" / "agent-one" / f"{self.chat}.effort.json"
+        path.write_text('{"effort": "ultra"}', encoding="utf-8")
+        with self.assertRaises(ChatMetadataError):
+            self.service.get_chat_models("user-one", "agent-one", self.chat)
 
 
 if __name__ == "__main__":

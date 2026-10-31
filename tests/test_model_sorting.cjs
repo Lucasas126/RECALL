@@ -75,7 +75,7 @@ const sharedDefaults = {
 };
 const inheritedModels = {
   model: { id: "llm/base", provider: "openrouter", zdr: true }, model_override: null,
-  stt_model: "stt/base", stt_model_override: null,
+  stt_model: "stt/base",
 };
 const settlePicker = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -123,11 +123,12 @@ test("default pickers work without a chat, stage both models, and save only chan
   assert.equal(requests.some(({ url }) => url.includes("/chats/")), false);
 });
 
-test("STT reuses the picker with its own catalog, prices and no LLM favorites or capabilities", async () => {
+test("default STT picker uses its own catalog, prices and no LLM favorites or capabilities", async () => {
   const harness = pickerHarness();
   Object.assign(harness.state, {
-    user: { provider: "openrouter" }, chatId: "chat", modelTarget: "chat-stt",
-    modelFavorites: ["llm/favorite"], modelFavoritesOnly: false, sttModel: "stt/cheap", sttOverride: null,
+    user: { provider: "openrouter" }, modelTarget: "default-stt",
+    settingsOriginal: sharedDefaults, settingsModelDraft: { default_stt_model: "stt/cheap" },
+    modelFavorites: ["llm/favorite"], modelFavoritesOnly: false,
   });
   for (const id of ["model-tools", "model-images", "model-reasoning"]) harness.elements.get(id).checked = true;
   harness.elements.get("model-sort").value = "prompt-asc";
@@ -151,12 +152,11 @@ test("STT reuses the picker with its own catalog, prices and no LLM favorites or
   assert.equal(choice.children[2].textContent.includes("output"), false);
 });
 
-test("resetting LLM and STT chat overrides calls nullable endpoints without saving user preferences", async () => {
+test("resetting the LLM chat override calls the nullable endpoint without saving user preferences", async () => {
   const harness = pickerHarness();
   Object.assign(harness.state, {
     user: { provider: "openrouter" }, agentId: "agent-a", chatId: "chat",
     model: { id: "llm/override", zdr: true }, modelOverride: { id: "llm/override" },
-    sttModel: "stt/override", sttOverride: "stt/override",
   });
   harness.applyPreferences({ ...sharedDefaults });
   const calls = [];
@@ -164,30 +164,21 @@ test("resetting LLM and STT chat overrides calls nullable endpoints without savi
     calls.push(url);
     assert.equal(options.method, "PUT");
     assert.equal(JSON.parse(options.body).model_id, null);
-    return { ok: true, json: async () => url.endsWith("/stt-model")
-      ? { model_id: "stt/base", override: null }
-      : { id: "llm/base", provider: "openrouter", zdr: true } };
+    return { ok: true, json: async () => ({ id: "llm/base", provider: "openrouter", zdr: true }) };
   };
   const select = vm.runInContext("selectModel", harness.context);
   await select(null);
   assert.equal(harness.state.modelOverride, null);
-  harness.state.modelTarget = "chat-stt";
-  await select(null);
-  assert.equal(harness.state.sttOverride, null);
-  assert.deepEqual(calls, [
-    "/api/agents/agent-a/chats/chat/model", "/api/agents/agent-a/chats/chat/stt-model",
-  ]);
+  assert.deepEqual(calls, ["/api/agents/agent-a/chats/chat/model"]);
   assert.equal(harness.state.preferences.default_llm_model, "llm/base");
   assert.equal(harness.elements.get("model-policy").textContent.includes("User default"), true);
-  assert.equal(harness.elements.get("stt-policy").textContent, "User default");
   harness.context.fetch = async (url) => ({
     ok: true, json: async () => url === "/api/preferences"
       ? { ...sharedDefaults, default_llm_model: "llm/new", default_stt_model: "stt/new" }
-      : { ...inheritedModels, model: { ...inheritedModels.model, id: "llm/new" }, stt_model: "stt/new" },
+      : { ...inheritedModels, model: { ...inheritedModels.model, id: "llm/new" } },
   });
   await harness.refreshPreferences();
   assert.equal(harness.state.model.id, "llm/new");
-  assert.equal(harness.state.sttModel, "stt/new");
 });
 
 test("refreshing shared defaults does not change explicit chat overrides", () => {
@@ -195,14 +186,11 @@ test("refreshing shared defaults does not change explicit chat overrides", () =>
   Object.assign(harness.state, {
     user: { provider: "openrouter" }, chatId: "chat",
     model: { id: "llm/override", zdr: false }, modelOverride: { id: "llm/override" },
-    sttModel: "stt/override", sttOverride: "stt/override",
   });
   harness.applyPreferences({ ...sharedDefaults, default_llm_model: "llm/new", default_stt_model: "stt/new" });
   assert.equal(harness.state.model.id, "llm/override");
   assert.equal(harness.state.model.zdr, false);
-  assert.equal(harness.state.sttModel, "stt/override");
   assert.equal(harness.elements.get("model-policy").textContent.includes("Chat override"), true);
-  assert.equal(harness.elements.get("stt-policy").textContent, "Chat override");
 });
 
 test("shared preference refresh uses authoritative Telegram overrides without reloading history", async () => {
@@ -215,7 +203,6 @@ test("shared preference refresh uses authoritative Telegram overrides without re
   const current = {
     model: { id: "llm/telegram", provider: "openrouter", zdr: false },
     model_override: { id: "llm/telegram", provider: "openrouter", zdr: false },
-    stt_model: "stt/telegram", stt_model_override: "stt/telegram",
   };
   const requests = [];
   harness.context.fetch = async (url) => {
@@ -228,20 +215,13 @@ test("shared preference refresh uses authoritative Telegram overrides without re
   assert.equal(harness.state.model.id, "llm/telegram");
   assert.equal(harness.state.model.zdr, false);
   assert.equal(harness.state.modelOverride.id, "llm/telegram");
-  assert.equal(harness.state.sttModel, "stt/telegram");
-  assert.equal(harness.state.sttOverride, "stt/telegram");
   assert.equal(harness.elements.get("messages").children[0], history);
-  assert.equal(harness.elements.get("stt-policy").textContent, "Chat override");
   assert.equal(requests.length, 2);
   current.model = { id: "llm/new-default", provider: "openrouter", zdr: true };
   current.model_override = null;
-  current.stt_model = "stt/new-default";
-  current.stt_model_override = null;
   await harness.refreshPreferences();
   assert.equal(harness.state.model.id, "llm/new-default");
   assert.equal(harness.state.modelOverride, null);
-  assert.equal(harness.state.sttModel, "stt/new-default");
-  assert.equal(harness.state.sttOverride, null);
 });
 
 test("old chat model metadata cannot replace a different chat's selection", async () => {
@@ -254,11 +234,10 @@ test("old chat model metadata cannot replace a different chat's selection", asyn
   const pending = harness.refreshPreferences();
   await settlePicker();
   Object.assign(harness.state, { agentId: "agent-b", chatId: "new" });
-  harness.applyChatModels({ ...inheritedModels, model: { id: "llm/new-chat" }, stt_model: "stt/new-chat" });
+  harness.applyChatModels({ ...inheritedModels, model: { id: "llm/new-chat" } });
   respond({ ok: true, json: async () => inheritedModels });
   await pending;
   assert.equal(harness.state.model.id, "llm/new-chat");
-  assert.equal(harness.state.sttModel, "stt/new-chat");
 });
 
 test("delayed metadata cannot undo a model selected locally after the read started", async () => {
@@ -284,7 +263,7 @@ test("old metadata cannot undo a newer preference save or leak into a reset sess
   Object.assign(harness.state, { user: { id: "demo" }, agentId: "agent-a", chatId: "chat" });
   let respond;
   let first = true;
-  const latest = { ...inheritedModels, stt_model: "stt/latest", stt_model_override: "stt/latest" };
+  const latest = { ...inheritedModels, model: { id: "llm/latest", provider: "openrouter", zdr: true } };
   harness.context.fetch = async (url) => {
     if (url === "/api/preferences") return { ok: true, json: async () => sharedDefaults };
     if (first) {
@@ -298,27 +277,25 @@ test("old metadata cannot undo a newer preference save or leak into a reset sess
   await harness.savePreferences({ show_thinking: true });
   respond({ ok: true, json: async () => inheritedModels });
   await pending;
-  assert.equal(harness.state.sttOverride, "stt/latest");
+  assert.equal(harness.state.model.id, "llm/latest");
   first = true;
   const beforeReset = harness.refreshPreferences();
   await settlePicker();
   harness.reset();
   respond({ ok: true, json: async () => latest });
   await beforeReset;
-  assert.equal(harness.state.sttOverride, undefined);
-  assert.equal(harness.state.sttModel, null);
+  assert.equal(harness.state.modelOverride, undefined);
   assert.equal(harness.state.preferences, null);
 });
 
 test("current metadata errors propagate without substituting user defaults for an unknown chat selection", async () => {
   const harness = pickerHarness();
   Object.assign(harness.state, { user: { id: "demo" }, agentId: "agent-a", chatId: "chat" });
-  harness.applyChatModels({ ...inheritedModels, stt_model: "stt/existing" });
+  harness.applyChatModels(inheritedModels);
   harness.context.fetch = async (url) => url === "/api/preferences"
     ? { ok: true, json: async () => sharedDefaults }
     : { ok: false, status: 503, json: async () => ({ detail: "Metadata offline" }) };
   await assert.rejects(harness.refreshPreferences(), /Metadata offline/);
-  assert.equal(harness.state.sttModel, "stt/existing");
 });
 
 test("session reset discards default drafts and ignores an in-flight STT catalog", async () => {
@@ -326,7 +303,7 @@ test("session reset discards default drafts and ignores an in-flight STT catalog
   Object.assign(harness.state, {
     user: { provider: "openrouter" }, modelTarget: "default-stt",
     settingsOriginal: sharedDefaults, settingsModelDraft: { default_stt_model: "stt/unsaved" },
-    modelOverride: null, sttOverride: null, sttModel: "stt/base",
+    modelOverride: null,
   });
   let respond;
   harness.context.fetch = () => new Promise((resolve) => { respond = resolve; });
@@ -338,8 +315,6 @@ test("session reset discards default drafts and ignores an in-flight STT catalog
   assert.equal(harness.state.settingsModelDraft, null);
   assert.equal(harness.state.modelTarget, "chat-llm");
   assert.equal(harness.state.modelOverride, undefined);
-  assert.equal(harness.state.sttOverride, undefined);
-  assert.equal(harness.state.sttModel, null);
 });
 
 test("shared thinking visibility applies to the whole message history", () => {

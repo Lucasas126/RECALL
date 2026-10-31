@@ -8,6 +8,7 @@ from collections import deque
 from contextlib import closing
 from dataclasses import dataclass, field
 from queue import SimpleQueue
+from time import monotonic
 from typing import Callable, Iterator, Literal, Optional
 from uuid import uuid4
 
@@ -17,13 +18,13 @@ from src.agent.agent import Agent
 from src.config.agents import AgentStore
 from src.config.favorites import ModelFavorites
 from src.config.loader import load_agent, load_agent_config, load_user, user_models
-from src.config.models import AgentConfig, UserConfig
+from src.config.models import AgentConfig, ReasoningEffort, UserConfig
 from src.config.preferences import UserPreferences, UserPreferencesStore
 from src.config.settings import CONFIG_DIR, DATA_DIR, SPEECH_TO_TEXT, VIDEO_DECOMPOSITION
 from src.core.sources.conversations import ConversationsSource
 from src.core.sources.registry import SourceRegistry
 from src.providers.cancellation import CancellationToken, GenerationCancelled
-from src.providers.catalog import list_openrouter_models
+from src.providers.catalog import CatalogUnavailable, list_openrouter_models
 from src.providers.catalog import list_openrouter_transcription_models
 from src.providers.openrouter import OpenRouterProvider
 from src.providers.provider import get_provider
@@ -34,6 +35,7 @@ from src.utils.i18n import InputError, UserMessageError
 logger = get_logger("service")
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_REASONING_SUPPORT_TTL_SECONDS = 600
 
 AgentFactory = Callable[[str, str, Optional[str]], Agent]
 
@@ -159,6 +161,8 @@ class ChatService:
         self._favorites = ModelFavorites(CONFIG_DIR)
         self._preferences = UserPreferencesStore(CONFIG_DIR)
         self._agents = AgentStore(CONFIG_DIR, DATA_DIR)
+        # (model id -> (monotonic time, supported)) so opening chats does not refetch the catalog
+        self._reasoning_support: dict[str, tuple[float, bool]] = {}
 
     # ------------------------------------------------------------------ users & agents
 
@@ -224,7 +228,7 @@ class ChatService:
 
     def _agent_config(self, user_id: str, agent_id: str) -> AgentConfig:
         try:
-            return self._agents.load(user_id, agent_id)
+            return load_agent_config(user_id, agent_id)
         except FileNotFoundError as exc:
             raise UnknownAgent("unknown agent: {agent_id}", agent_id=agent_id) from exc
 
@@ -362,7 +366,6 @@ class ChatService:
         conversations = self._conversations(user_id, agent_id)
         try:
             selection = conversations.model_selection(chat_id)
-            transcription = conversations.transcription_selection(chat_id)
         except (FileNotFoundError, ValueError) as exc:
             raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
         user = self._user(user_id)
@@ -372,12 +375,71 @@ class ChatService:
             "id": defaults.chat,
             "zdr": True,
         }
+        agent_config = self._agent_config(user_id, agent_id).chat_config
+        effort = self._reasoning_effort_override(conversations, chat_id)
         return {
             "model": model,
             "model_override": selection.model_dump() if selection else None,
-            "stt_model": transcription.id if transcription else defaults.stt,
-            "stt_model_override": transcription.id if transcription else None,
+            "stt_model": defaults.stt,
+            "reasoning_effort": {
+                "override": effort,
+                "default": agent_config.reasoning_effort,
+                "effective": effort or agent_config.reasoning_effort,
+                "reasoning": agent_config.reasoning,
+                "supported": self._reasoning_effort_supported(user, model["id"]),
+            },
         }
+
+    @staticmethod
+    def _reasoning_effort_override(conversations: ConversationsSource, chat_id: str) -> ReasoningEffort | None:
+        selection = conversations.reasoning_effort_selection(chat_id)
+        return selection.effort if selection is not None else None
+
+    def _reasoning_effort_supported(self, user: UserConfig, model_id: str) -> bool | None:
+        """Whether the model advertises reasoning; None when the catalog cannot say."""
+        if user.provider.name != "openrouter":
+            return False
+        cached = self._reasoning_support.get(model_id)
+        if cached is not None and monotonic() - cached[0] < _REASONING_SUPPORT_TTL_SECONDS:
+            return cached[1]
+        try:
+            models = list_openrouter_models(model_id, zdr=False)
+        except CatalogUnavailable:
+            return None
+        model = next((item for item in models if item.id == model_id), None)
+        if model is None:
+            return None
+        supported = any(
+            "reasoning" in parameters or "reasoning_effort" in parameters
+            for parameters in model.parameter_routes
+        )
+        self._reasoning_support[model_id] = (monotonic(), supported)
+        return supported
+
+    def set_chat_reasoning_effort(
+        self, user_id: str, agent_id: str, chat_id: str, effort: ReasoningEffort | None,
+    ) -> dict:
+        """Persist or clear a chat's reasoning effort override, leaving other chats untouched."""
+        conversations = self._conversations(user_id, agent_id)
+        self._load(conversations, chat_id)
+        if effort is not None:
+            supported = self.get_chat_models(user_id, agent_id, chat_id)["reasoning_effort"]["supported"]
+            if supported is None:
+                raise InputError("reasoning effort support for this model could not be verified; try again")
+            if supported is False:
+                raise InputError("the selected model does not support reasoning effort")
+        slot = self._slot(user_id, agent_id)
+        with slot.state:
+            if slot.active is not None or slot.pending:
+                raise AgentBusy("wait for this agent's active and queued replies before changing reasoning effort")
+            with slot.lock:
+                try:
+                    conversations.set_reasoning_effort(chat_id, effort)
+                except FileNotFoundError as exc:
+                    raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
+                if slot.agent is not None and slot.agent.chat_id == chat_id:
+                    slot.agent = None
+        return self.get_chat_models(user_id, agent_id, chat_id)
 
     def set_chat_model(
         self, user_id: str, agent_id: str, chat_id: str, model_id: str | None, *, zdr: bool = True,
@@ -404,24 +466,6 @@ class ChatService:
                 if slot.agent is not None and slot.agent.chat_id == chat_id:
                     slot.agent = None
         return self.get_chat_models(user_id, agent_id, chat_id)["model"]
-
-    def set_chat_transcription_model(
-        self, user_id: str, agent_id: str, chat_id: str, model_id: str | None,
-    ) -> dict:
-        """Persist or clear a chat's STT override, leaving other chats untouched."""
-        conversations = self._conversations(user_id, agent_id)
-        self._load(conversations, chat_id)
-        if model_id is not None:
-            models = self.list_transcription_models(user_id, model_id, zdr=SPEECH_TO_TEXT.zdr)
-            if not any(model["id"] == model_id for model in models):
-                raise InputError("The speech-to-text model is not available with the required routing policy.")
-        slot = self._slot(user_id, agent_id)
-        with slot.state:
-            if slot.active is not None or slot.pending:
-                raise AgentBusy("wait for this agent's active and queued replies before changing models")
-            conversations.set_transcription_model(chat_id, model_id)
-        chat = self.get_chat_models(user_id, agent_id, chat_id)
-        return {"model_id": chat["stt_model"], "override": chat["stt_model_override"]}
 
     def delete_chat(self, user_id: str, agent_id: str, chat_id: str) -> None:
         conversations = self._conversations(user_id, agent_id)
@@ -576,13 +620,9 @@ class ChatService:
         audio = [attachment for attachment in attachments if attachment["modality"] == "audio"]
         if not audio:
             return text, attachments
-        conversations = self._conversations(user_id, agent_id)
-        try:
-            selection = conversations.transcription_selection(chat_id)
-        except (FileNotFoundError, ValueError) as exc:
-            raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
+        self._require_chat(self._conversations(user_id, agent_id), chat_id)
         resolved = load_agent(user_id, agent_id)
-        transcription_model = selection.id if selection else user_models(self._user(user_id), self._preferences).stt
+        transcription_model = user_models(self._user(user_id), self._preferences).stt
         if resolved.provider_name != "openrouter":
             raise InputError("audio messages require an OpenRouter chat provider for speech-to-text")
         transcriber = OpenRouterProvider(api_key=resolved.api_key)
@@ -728,6 +768,15 @@ class ChatService:
         """The conversations source of an agent, after checking that the user owns it."""
         self._owned_agent(user_id, agent_id)
         return SourceRegistry.for_agent(user_id, agent_id).conversations()
+
+    @staticmethod
+    def _require_chat(conversations: ConversationsSource, chat_id: str) -> None:
+        try:
+            exists = conversations.exists_chat(chat_id)
+        except ValueError as exc:
+            raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
+        if not exists:
+            raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id)
 
     @staticmethod
     def _load(conversations: ConversationsSource, chat_id: str) -> list[dict]:

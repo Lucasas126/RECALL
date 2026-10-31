@@ -9,7 +9,6 @@ from fastapi.testclient import TestClient
 import test_chat_models as models_tests
 from src.config.models import AgentConfig, ModelsConfig
 from src.config.preferences import UserPreferences
-from src.core.sources.conversations import ChatMetadataError
 from src.providers.catalog import CatalogUnavailable
 from src.service.chat import UnknownChat
 from src.web.app import create_app
@@ -19,7 +18,6 @@ class UserModelDefaultsTests(models_tests.ModelFixture):
     def test_model_metadata_endpoint_is_user_scoped_and_does_not_read_history(self) -> None:
         source = self.sources[("user-one", "agent-one")]
         source.set_model(self.chat, "vendor/beta", zdr=False)
-        source.set_transcription_model(self.chat, "stt/chat")
         with TestClient(create_app(self.service), raise_server_exceptions=False) as client:
             self.assertEqual(client.post("/api/login", json={"user_id": "user-one"}).status_code, 200)
             with patch.object(source, "load", side_effect=AssertionError("History must not be read")):
@@ -29,7 +27,11 @@ class UserModelDefaultsTests(models_tests.ModelFixture):
                     self.assertEqual(response.json(), {
                         "model": {"id": "vendor/beta", "provider": "openrouter", "zdr": False},
                         "model_override": {"id": "vendor/beta", "provider": "openrouter", "zdr": False},
-                        "stt_model": "stt/chat", "stt_model_override": "stt/chat",
+                        "stt_model": "openai/whisper-large-v3-turbo",
+                        "reasoning_effort": {
+                            "override": None, "default": "medium", "effective": "medium",
+                            "reasoning": False, "supported": False,
+                        },
                     })
                     get.assert_called_once_with("user-one")
             self.assertEqual(client.post("/api/login", json={"user_id": "user-two"}).status_code, 200)
@@ -40,7 +42,6 @@ class UserModelDefaultsTests(models_tests.ModelFixture):
     def test_new_chat_overrides_are_null_and_defaults_follow_the_user(self) -> None:
         chat = self.service.get_chat("user-one", "agent-one", self.chat)
         self.assertIsNone(chat["model_override"])
-        self.assertIsNone(chat["stt_model_override"])
         self.service.update_preferences("user-one", UserPreferences(default_llm_model="vendor/alpha"))
         self.assertEqual(self.service.get_chat("user-one", "agent-one", self.chat)["model"]["id"], "vendor/alpha")
         other = self.service.create_chat("user-one", "agent-two")["id"]
@@ -98,22 +99,17 @@ class UserModelDefaultsTests(models_tests.ModelFixture):
             self.service.update_preferences("user-one", UserPreferences(default_llm_model="vendor/alpha"))
         self.assertEqual(self.service.get_preferences("user-one")["default_llm_model"], "vendor/default")
 
-    def test_stt_default_and_chat_override_are_persistent_independent_and_resettable(self) -> None:
-        with patch.object(self.service, "list_transcription_models", return_value=[
-            {"id": "stt/default"}, {"id": "stt/chat"},
-        ]):
+    def test_stt_model_is_a_user_setting_shared_by_all_chats(self) -> None:
+        with patch.object(self.service, "list_transcription_models", return_value=[{"id": "stt/default"}]):
             self.service.update_preferences("user-one", UserPreferences(default_stt_model="stt/default"))
-            self.service.set_chat_transcription_model("user-one", "agent-one", self.chat, "stt/chat")
-            other = self.service.create_chat("user-one", "agent-two")["id"]
-            self.assertEqual(self.service.get_chat("user-one", "agent-two", other)["stt_model"], "stt/default")
-            self.assertEqual(self.service.get_chat("user-one", "agent-one", self.chat)["stt_model"], "stt/chat")
-            self.service.set_chat_transcription_model("user-one", "agent-one", self.chat, None)
-            self.assertEqual(self.service.get_chat("user-one", "agent-one", self.chat)["stt_model"], "stt/default")
-            self.assertIsNone(self.service.get_chat("user-one", "agent-one", self.chat)["stt_model_override"])
+        self.assertEqual(self.service.get_chat("user-one", "agent-one", self.chat)["stt_model"], "stt/default")
+        other = self.service.create_chat("user-one", "agent-two")["id"]
+        self.assertEqual(self.service.get_chat("user-one", "agent-two", other)["stt_model"], "stt/default")
+        self.assertFalse(hasattr(self.service, "set_chat_transcription_model"))
 
-    def test_transcription_uses_effective_chat_model_not_channel_session_state(self) -> None:
-        source = self.sources[("user-one", "agent-one")]
-        source.set_transcription_model(self.chat, "stt/chat")
+    def test_transcription_uses_user_default_stt_model(self) -> None:
+        with patch.object(self.service, "list_transcription_models", return_value=[{"id": "stt/chat"}]):
+            self.service.update_preferences("user-one", UserPreferences(default_stt_model="stt/chat"))
         resolved = Mock(provider_name="openrouter", api_key="test")
         transcriber = Mock()
         transcriber.transcribe.return_value = "Transcript"
@@ -165,27 +161,14 @@ class UserModelDefaultsTests(models_tests.ModelFixture):
                     self.service.send("user-one", "agent-one", self.chat, "", attachments=[attachment])
         self.assertFalse(self.agents)
 
-    def test_deleting_chat_removes_both_override_sidecars(self) -> None:
+    def test_deleting_chat_removes_its_sidecars_including_legacy_stt_overrides(self) -> None:
         source = self.sources[("user-one", "agent-one")]
-        source.set_transcription_model(self.chat, "stt/chat")
         source.set_model(self.chat, "vendor/alpha")
+        legacy = source.root / f"{self.chat}.stt.json"
+        legacy.write_text('{"id": "stt/chat"}', encoding="utf-8")
         source.delete_chat(self.chat)
         self.assertFalse((source.root / f"{self.chat}.model.json").exists())
-        self.assertFalse((source.root / f"{self.chat}.stt.json").exists())
-
-    def test_stt_sidecars_use_source_validation_and_invalid_data_never_resets_selection(self) -> None:
-        source = self.sources[("user-one", "agent-one")]
-        path = source.root / f"{self.chat}.stt.json"
-        path.write_text('{"id": 123}', encoding="utf-8")
-        with self.assertRaises(ChatMetadataError):
-            source.transcription_selection(self.chat)
-        self.assertEqual(path.read_text(encoding="utf-8"), '{"id": 123}')
-        with patch.object(source, "resolve", wraps=source.resolve) as resolve:
-            source.set_transcription_model(self.chat, "stt/chat")
-            resolve.assert_any_call(f"{self.chat}.stt.json")
-        for chat_id in ("../escape", "..\\escape"):
-            with self.subTest(chat_id=chat_id), self.assertRaises(ValueError):
-                source.set_transcription_model(chat_id, "stt/chat")
+        self.assertFalse(legacy.exists())
 
 
 class AgentModelSchemaTests(unittest.TestCase):

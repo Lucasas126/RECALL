@@ -7,7 +7,8 @@ const state = {
   modelBusy: false, modelLoading: false, modelRequest: 0,
   modelFavoritesOnly: false,
   modelTarget: "chat-llm", modelCatalogKind: "llm",
-  modelOverride: undefined, sttModel: null, sttOverride: undefined,
+  modelOverride: undefined,
+  reasoningEffort: null,
   chatModelRevision: 0,
   settingsModelDraft: null,
   preferences: null, preferencesRequest: 0, settingsBusy: false, settingsOriginal: null,
@@ -34,7 +35,8 @@ function translateInterface() {
     ["settings-language-label", "Alerts and errors"],
     ["settings-note", "Settings are shared with Telegram. Chats without a selected model use your current defaults."],
     ["settings-llm-label", "Default LLM model"], ["settings-stt-label", "Default STT model"],
-    ["stt-label", "Audio model"], ["model-inherit", "Use user default"],
+    ["agent-label", "Agent"], ["chat-model-label", "Chat model"], ["chat-effort-text", "Reasoning effort"],
+    ["model-inherit", "Use user default"],
     ["model-scope-note", "Choosing a model for a chat sets only that chat's override. Use user default removes it. Defaults in Settings are saved with Save settings. Default LLM and STT selections require ZDR. Favorites are shared across your agents."],
     ["model-zdr-warning", "ZDR is not required for your next selection. Providers may retain your prompts and replies. Your OpenRouter account may still enforce ZDR."],
     ["tab-chats", "Chats"], ["tab-agents", "Agents"], ["agents-title", "Agents"],
@@ -409,8 +411,7 @@ async function applyServerPreferences(preferences, session, request) {
 function applyChatModels(models) {
   state.model = models.model;
   state.modelOverride = models.model_override;
-  state.sttModel = models.stt_model;
-  state.sttOverride = models.stt_model_override;
+  state.reasoningEffort = models.reasoning_effort;
   updateModelControls();
 }
 
@@ -622,10 +623,7 @@ function updateModelControls() {
   if (state.model && state.modelOverride !== undefined) {
     $("model-policy").textContent += ` · ${tr(state.modelOverride === null ? "User default" : "Chat override")}`;
   }
-  $("stt-picker").textContent = state.chatId ? (state.sttModel ?? "") : tr("No chat selected");
-  $("stt-picker").disabled = !openrouter || !state.chatId || state.busy || state.modelBusy;
-  $("stt-policy").textContent = state.chatId && state.sttOverride !== undefined
-    ? tr(state.sttOverride === null ? "User default" : "Chat override") : "";
+  updateReasoningEffortControls();
   $("model-policy").classList.toggle("privacy-warning", openrouter && !required);
   $("model-refresh").disabled = state.modelLoading || state.modelBusy;
   $("model-close").disabled = state.modelBusy;
@@ -642,6 +640,49 @@ function updateModelControls() {
   $("model-filters-label").textContent = activeFilters ? `Filters (${activeFilters})` : "Filters";
   $("model-filters").dataset.active = String(activeFilters > 0);
 }
+
+function updateReasoningEffortControls() {
+  const effort = state.chatId ? state.reasoningEffort : null;
+  $("chat-effort-default").textContent = effort?.default ? `${tr("Default")} (${effort.default})` : tr("Default");
+  $("chat-effort").value = effort?.override ?? "";
+  $("chat-effort").disabled = !effort?.reasoning || effort.supported !== true
+    || !state.chatId || state.busy || state.modelBusy;
+  let note = "";
+  if (effort) {
+    if (!effort.reasoning) note = tr("Reasoning is off for this agent.");
+    else if (effort.supported === false) note = tr("This model does not support reasoning effort.");
+    else if (effort.supported === null) note = tr("Reasoning effort support could not be verified right now.");
+    else note = tr(effort.override === null ? "Agent default" : "Chat override");
+  }
+  $("effort-policy").textContent = note;
+}
+
+$("chat-effort").addEventListener("change", async (e) => {
+  if (state.busy || state.modelBusy || !state.chatId) return;
+  const session = state.session;
+  const agentId = state.agentId;
+  const chatId = state.chatId;
+  state.chatModelRevision++;
+  state.modelBusy = true;
+  updateBusy();
+  try {
+    const models = await api(chatsUrl(`/${chatId}/reasoning-effort`), {
+      method: "PUT", body: JSON.stringify({ effort: e.target.value || null }),
+    });
+    if (session !== state.session || agentId !== state.agentId || chatId !== state.chatId) return;
+    applyChatModels(models);
+  } catch (err) {
+    if (session === state.session) {
+      e.target.value = state.reasoningEffort?.override ?? "";
+      addMessage("assistant").error(err.message);
+    }
+  } finally {
+    if (session === state.session) {
+      state.modelBusy = false;
+      updateBusy();
+    }
+  }
+});
 
 function compareModels(a, b, order, favorites) {
   const byName = () => a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
@@ -711,7 +752,7 @@ function renderModelList() {
     choose.disabled = !available || (state.busy && !state.modelTarget.startsWith("default-")) || state.modelBusy;
     const selected = state.modelTarget.startsWith("default-")
       ? state.settingsModelDraft?.[stt ? "default_stt_model" : "default_llm_model"]
-      : (stt ? state.sttModel : state.model?.id);
+      : state.model?.id;
     choose.setAttribute("aria-pressed", String(
       model.id === selected && (state.modelTarget !== "chat-llm" || (state.model?.zdr !== false) === $("model-zdr").checked)
     ));
@@ -825,18 +866,13 @@ async function selectModel(modelId) {
   $("model-error").textContent = "";
   updateBusy();
   try {
-    const model = await api(chatsUrl(`/${chatId}/${stt ? "stt-model" : "model"}`), {
+    const model = await api(chatsUrl(`/${chatId}/model`), {
       method: "PUT", body: JSON.stringify({ model_id: modelId, zdr }),
     });
     if (session !== state.session || agentId !== state.agentId || chatId !== state.chatId) return;
-    if (stt) {
-      state.sttModel = model.model_id;
-      state.sttOverride = model.override;
-    } else {
-      state.model = model;
-      state.modelOverride = modelId === null ? null : model;
-      $("usage").hidden = true;
-    }
+    state.model = model;
+    state.modelOverride = modelId === null ? null : model;
+    $("usage").hidden = true;
     $("model-dialog").close();
   } catch (err) {
     if (session === state.session) $("model-error").textContent = err.message;
@@ -877,7 +913,6 @@ function openModelPicker(target) {
   refreshModels(true);
 }
 $("model-picker").addEventListener("click", () => openModelPicker("chat-llm"));
-$("stt-picker").addEventListener("click", () => openModelPicker("chat-stt"));
 $("settings-llm").addEventListener("click", () => openModelPicker("default-llm"));
 $("settings-stt").addEventListener("click", () => openModelPicker("default-stt"));
 $("model-inherit").addEventListener("click", () => selectModel(null));
@@ -932,8 +967,7 @@ function resetStreams() {
   state.settingsBusy = false;
   state.settingsModelDraft = null;
   state.modelOverride = undefined;
-  state.sttModel = null;
-  state.sttOverride = undefined;
+  state.reasoningEffort = null;
   state.modelTarget = "chat-llm";
   state.modelCatalogKind = "llm";
   state.chatModelRevision++;

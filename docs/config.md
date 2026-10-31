@@ -40,7 +40,7 @@ through the environment variable named by `telegram.allowed_users_env` in
 ignored completely. The bot token remains in `TELEGRAM_BOT_TOKEN`.
 
 Telegram provides `/help`,
-`/settings`, `/newchat`, `/selectmodel`, `/selectagent`, `/agent`, `/model`, `/selectstt`,
+`/settings`, `/newchat`, `/selectmodel`, `/selectagent`, `/agent`, `/model`,
 and `/stt`. Telegram's native command menu is populated at startup, and
 `/help` prints the same command list in the chat.
 Operational notices and errors use the user's saved English/Spanish preference;
@@ -49,11 +49,11 @@ Telegram creates a chat automatically on the first message after the bot
 restarts, and after one hour without a user message. The first assistant
 message in each automatically created chat begins with bold-italic
 `New chat started`.
-`/selectmodel`, `/selectstt` and `/selectagent` open the same kind of inline
+`/selectmodel` and `/selectagent` open the same kind of inline
 panel as `/settings`: buttons send callbacks instead of chat messages, and the
 bot edits the panel in place for pagination. Choosing an option saves it and
 replaces the panel with a short confirmation; **Close** only removes the
-buttons. Model and STT choices persist for the chat that was current when the
+buttons. Model choices persist for the chat that was current when the
 selector opened; if the active chat changes first, the selector expires.
 Both model selectors start with **Use user default**, and accept an optional
 search term (`/selectmodel claude`). Available user favorites appear first
@@ -125,11 +125,14 @@ and routing policy, then stores the transcription as text in the conversation.
 This keeps later model changes independent of whether the selected chat model
 supports audio input.
 
-The initial user STT default is `openai/whisper-large-v3-turbo`, with ZDR required.
-The effective user/chat model must have an active ZDR transcription endpoint when
+The transcription model is a single user setting, the **Default STT model** in
+web **Settings** or Telegram `/settings`; it is shared by all chats and agents.
+The initial default is `openai/whisper-large-v3-turbo`, with ZDR required.
+The model must have an active ZDR transcription endpoint when
 `speech_to_text.zdr` is `true`; otherwise audio requests fail explicitly.
 OpenRouter's current transcription catalog can be queried through
-`GET /api/speech-to-text/models?q=<query>&zdr=true`.
+`GET /api/speech-to-text/models?q=<query>&zdr=true`. Telegram `/stt` shows the
+current default.
 
 Run the polling process locally with `uv run python run_telegram.py`. Polling
 requests all update types, because Telegram otherwise keeps the bot's last
@@ -156,7 +159,9 @@ alert. Opening any inline panel briefly sends and deletes a cleanup message
 with `ReplyKeyboardRemove`, clearing reply keyboards left by older bot
 versions before the inline panel is displayed. The web
 sidebar's **Settings** dialog edits thinking, language and default LLM/STT
-models; agent switching remains in the existing sidebar selector.
+models (the audio model is set only here); agent switching is the **Agent**
+selector in the chat header. The per-chat reasoning effort is also available in Telegram's
+`/settings` panel (**Chat reasoning effort**).
 Thinking visibility, preferred-agent selection and English/Spanish operational
 notices/errors are implemented in both channels.
 
@@ -179,7 +184,7 @@ sending or creating a chat, and when its window regains focus. Hiding thinking
 applies to both existing history and live reply blocks; the separate local
 expanded/collapsed preference is unchanged. The current conversation stays on
 its own agent until a new chat is requested or the user explicitly switches
-agents. Selecting an agent in the web sidebar also saves the shared preference.
+agents. Selecting an agent in the web chat header also saves the shared preference.
 
 Telegram reads the shared agent when creating a chat, including automatic
 first-message/idle-timeout chats. Thinking visibility is read at the beginning
@@ -238,8 +243,9 @@ default validates the transcription catalog under the framework routing policy.
 Defaults are independent of agent selection. Embeddings remain a user YAML
 setting, not an editable inference preference.
 
-New chats have no LLM or STT selection: both overrides are null. Effective
-models resolve as **explicit chat override > current user default**.
+New chats have no LLM selection: `model_override` is null. Effective LLM
+models resolve as **explicit chat override > current user default**. The STT
+model has no per-chat override; it is always the current user default.
 Changing a default affects subsequent requests in every inheriting chat,
 including existing chats, without changing chats with explicit overrides or
 any generation already running. Cached agents refresh inherited inference
@@ -247,30 +253,27 @@ models before the next generation, invalidate model-specific token estimates,
 and retain their existing embedding index. CLI requests refresh the same user
 defaults. Agent YAML has no `models` block and rejects one.
 
-`GET /api/agents/<agent_id>/chats/<chat_id>` includes effective `model` and
-`stt_model`, plus nullable `model_override` and `stt_model_override`.
-Its `/models` GET endpoint returns only those four model fields, without
-loading conversation history or initializing an agent.
-The chat `/model` and `/stt-model` PUT endpoints accept `{"model_id": null}`
-to clear an override without changing user defaults. `/stt-model` with a model
-ID persists it for that chat only; Telegram `/selectstt` uses this operation
-instead of channel-session state. Both override operations require an idle
-agent. STT runs before chat inference and resolves its own independent selection.
-Audio requests validate chat existence before resolving STT or contacting the
-provider; missing/invalid chats return 404, including deletion during transcription.
+`GET /api/agents/<agent_id>/chats/<chat_id>` includes the effective `model`,
+the user's `stt_model` default (read-only here), and a nullable `model_override`.
+Its `/models` GET endpoint returns only those model fields and the reasoning
+effort state, without loading conversation history or initializing an agent.
+The chat `/model` PUT endpoint accepts `{"model_id": null}` to clear an override
+without changing user defaults. Changing it requires an idle agent. Audio requests
+validate chat existence before resolving STT or contacting the provider;
+missing/invalid chats return 404, including deletion during transcription.
 
 Remove old agent `models` blocks and configure model IDs in user YAML instead.
 There is no legacy configuration compatibility or migration utility.
-Existing chat LLM sidecars remain explicit overrides; missing STT metadata
-means inheritance.
+Existing chat LLM sidecars remain explicit overrides. Legacy `<chat_id>.stt.json`
+files are no longer read and are removed with their chat.
 
 Both channels expose user defaults: Telegram `/settings` saves model choices
 immediately; web **Settings** stages choices until **Save settings**, including
 when no chat is open. Their selectors require ZDR; web chat LLM overrides can
 still select other routing policies.
 
-Telegram `/selectmodel` and `/selectstt`, and the web header's chat/audio
-selectors, change only the current chat. **Use user default** clears the
+Telegram `/selectmodel` and the web composer's chat model selector change only
+the current chat. The STT default is changed only in **Settings** (web or Telegram). **Use user default** clears the
 corresponding override. Selectors distinguish **User default** from **Chat
 override** and show the effective model. Web settings changes from Telegram
 refresh at the existing preference-refresh points without overwriting explicit
@@ -330,7 +333,8 @@ by this integration.
 
 ### choosing a model per chat
 
-For OpenRouter users, the web chat header opens a model selector with name/ID
+For OpenRouter users, the **Chat model** control in the web composer (above the
+message box) opens a model selector with name/ID
 search, ZDR provider names and a Refresh button. A star beside the search
 field toggles Favorites only; its filled/highlighted state means the filter
 is active. ZDR remains visible, and capability checkboxes live in the collapsed
@@ -345,7 +349,7 @@ regardless of the current chat's policy or a previous search. Unchecking it
 fetches the unrestricted text-model catalog and shows a retention warning.
 Editing the search text does not reset the checkbox. Opening the selector or
 changing its filter does not change the chat's policy: choosing a model does.
-The header shows "ZDR required" or "ZDR not required" for the current chat.
+The composer shows "ZDR required" or "ZDR not required" for the current chat.
 Saved favorites appear first, and reopening the selector defaults to favorites when
 any exist. Favorites missing from the current catalog are visible but cannot
 be selected; they can still be removed. The browser keeps the catalog until
@@ -398,6 +402,29 @@ disabled while the agent has active or queued replies; direct callers receive
 HTTP 409. It never interrupts or changes the model of an in-flight reply.
 Reopening/switching chats restores their own model and invalidates the cached
 context-window size when the model changes.
+
+### reasoning effort per chat
+
+The composer's **Reasoning effort** selector overrides the agent's
+`chat_config.reasoning_effort` for the current chat only. Its first option,
+**Default**, shows the agent's value and removes the override. The override is
+stored with the chat (`<chat_id>.effort.json`), survives restarts, is honored
+when the CLI opens that chat, and is deleted with the chat.
+
+The selector is disabled when the agent has `reasoning: false`, or when the
+selected model does not advertise `reasoning` or `reasoning_effort` in its
+OpenRouter supported parameters (the same check as the Reasoning filter). The
+UI then says why. Support is cached by the service for ten minutes; if the
+catalog cannot be reached, the state is shown as unverified and the value cannot
+be changed. Changes are rejected with HTTP 409 while the agent has active or
+queued replies.
+
+`GET /api/agents/<agent_id>/chats/<chat_id>/models` includes
+`"reasoning_effort": {"override", "default", "effective", "reasoning", "supported"}`
+(`supported` is `true`, `false`, or `null` when unverified). `PUT` to
+`/api/agents/<agent_id>/chats/<chat_id>/reasoning-effort` with
+`{"effort": "high"}` sets the override, and `{"effort": null}` clears it. Accepted
+values are `minimal`, `low`, `medium`, `high`, `xhigh` and `max`.
 
 ### favorite models
 

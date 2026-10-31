@@ -15,7 +15,7 @@ from src.service.chat import AgentBusy, ChatEvent
 from src.telegram.bot import (
     TelegramBotState, TelegramSession, _edit_panel, _final_messages, _generation_message,
     _prepare_message_session, _send_generation, new_chat, panel_callback,
-    refresh_language, select_agent, select_model, select_stt, settings_command, text_message,
+    refresh_language, select_agent, select_model, settings_command, text_message,
 )
 
 
@@ -106,7 +106,7 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
         buttons = [button for row in self.markup.inline_keyboard for button in row]
         self.assertEqual([button.text for button in buttons], [
             "Thinking: visible", "✅ English", "Español", "Active agent",
-            "Default LLM model", "Default STT model", "Close",
+            "Default LLM model", "Default STT model", "Chat reasoning effort", "Close",
         ])
         self.assertTrue(all(len(button.callback_data.encode()) <= 64 for button in buttons))
 
@@ -142,7 +142,6 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Default STT: stt/new", self.text)
         self.assertIsNone(self.session.chat_id)
         self.service.set_chat_model.assert_not_called()
-        self.service.set_chat_transcription_model.assert_not_called()
         self.service.create_chat.assert_not_called()
         self.service.send.assert_not_called()
         self.assertEqual(self.update.effective_message.reply_text.await_count, 2)
@@ -268,36 +267,16 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_chat_selectors_reset_overrides_without_changing_defaults(self) -> None:
         before = self.preferences.copy()
-        for command, method, expected in (
-            (select_model, self.service.set_chat_model,
-             (("test-user", "agent-a", "current-chat", None), {"zdr": True})),
-            (select_stt, self.service.set_chat_transcription_model,
-             (("test-user", "agent-a", "current-chat", None), {})),
-        ):
-            with self.subTest(command=command.__name__):
-                await self.open_panel(command)
-                await self.press("inherit")
-                self.assertEqual((method.call_args.args, method.call_args.kwargs), expected)
-                self.assertIn("default", self.text)
+        await self.open_panel(select_model)
+        await self.press("inherit")
+        self.assertEqual(
+            (self.service.set_chat_model.call_args.args, self.service.set_chat_model.call_args.kwargs),
+            (("test-user", "agent-a", "current-chat", None), {"zdr": True}),
+        )
+        self.assertIn("default", self.text)
         self.assertEqual(self.preferences, before)
         self.service.update_preferences.assert_not_called()
         self.service.send.assert_not_called()
-
-    async def test_chat_selector_search_and_pagination_stay_in_place(self) -> None:
-        self.context.args = ["STT"]
-        self.service.list_transcription_models.return_value = [
-            {"id": f"stt/{index}", "name": f"STT {index}", "pricing_prompt": "0.1"}
-            for index in range(11)
-        ]
-        await self.open_panel(select_stt)
-        self.service.list_transcription_models.assert_called_once_with("test-user", "STT", zdr=True)
-        await self.press(self.action("Next"))
-        self.assertIn("Page 2/2", self.text)
-        await self.press(self.action("STT 10"))
-        self.service.set_chat_transcription_model.assert_called_once_with(
-            "test-user", "agent-a", "current-chat", "stt/10",
-        )
-        self.assertEqual(self.update.effective_message.reply_text.await_count, 2)
 
     async def test_chat_selector_expires_when_the_current_chat_changes(self) -> None:
         await self.open_panel(select_model)
@@ -328,11 +307,11 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("panel", self.context.user_data)
 
     async def test_closing_a_selector_only_removes_its_buttons(self) -> None:
-        await self.open_panel(select_stt)
+        await self.open_panel(select_model)
         query = await self.press("close")
         query.edit_message_reply_markup.assert_awaited_once_with(reply_markup=None)
         query.edit_message_text.assert_not_awaited()
-        self.service.set_chat_transcription_model.assert_not_called()
+        self.service.set_chat_model.assert_not_called()
 
     async def test_selector_rejects_settings_only_actions(self) -> None:
         await self.open_panel(select_model)
@@ -417,6 +396,40 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
             with self.assertLogs("recall.telegram", level="ERROR"):
                 await _send_generation(self.update, self.context, "Hello", [])
         self.assertEqual(stream.finish.await_args.args[0][0][0], f"La generación ha fallado: {original}")
+
+
+    async def test_chat_reasoning_effort_is_chosen_from_settings_for_the_current_chat(self) -> None:
+        self.service.get_chat_models.return_value = {
+            "model": {"id": "llm/base", "zdr": True}, "model_override": None,
+            "stt_model": "stt/base", "stt_model_override": None,
+            "reasoning_effort": {
+                "override": None, "default": "medium", "effective": "medium", "reasoning": True, "supported": True,
+            },
+        }
+        await self.open_panel()
+        await self.press(self.action("Chat reasoning effort"))
+        self.assertIn("Choose the reasoning effort for this chat", self.text)
+        labels = [button.text for row in self.markup.inline_keyboard for button in row]
+        self.assertEqual(labels[0], "✅ Default (medium)")
+        high = next(button for row in self.markup.inline_keyboard for button in row if button.text == "high")
+        query = await self.press(high.callback_data.split(":", 2)[2])
+        self.service.set_chat_reasoning_effort.assert_called_once_with("test-user", "agent-a", "current-chat", "high")
+        self.assertIn("Reasoning effort for this chat: high", query.edit_message_text.await_args.args[0])
+
+    async def test_chat_reasoning_effort_explains_unsupported_models_without_choices(self) -> None:
+        self.service.get_chat_models.return_value = {
+            "model": {"id": "llm/base", "zdr": True}, "model_override": None,
+            "stt_model": "stt/base", "stt_model_override": None,
+            "reasoning_effort": {
+                "override": None, "default": "medium", "effective": "medium", "reasoning": True, "supported": False,
+            },
+        }
+        await self.open_panel()
+        await self.press(self.action("Chat reasoning effort"))
+        self.assertIn("This model does not support reasoning effort.", self.text)
+        labels = [button.text for row in self.markup.inline_keyboard for button in row]
+        self.assertEqual(labels, ["Back"])
+        self.service.set_chat_reasoning_effort.assert_not_called()
 
 
 class ThinkingVisibilityTests(unittest.TestCase):

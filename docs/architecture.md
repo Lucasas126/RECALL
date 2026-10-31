@@ -79,6 +79,12 @@ chat's selection changes. `Agent.open_chat` restores each chat's override (or
 the user default), so other chats and CLI reopening behave consistently.
 See [model selection and favorites](config.md#choosing-a-model-per-chat).
 
+Reasoning effort follows the same pattern: a nullable per-chat override in
+`ConversationsSource`, validated by the service against the model's advertised
+reasoning support, and applied by `Agent.open_chat` over the agent default.
+Telegram's `/settings` panel and the web composer both use it. See
+[reasoning effort per chat](config.md#reasoning-effort-per-chat).
+
 ### shared channel preferences
 
 `ChatService.get_preferences` and `update_preferences` expose user-scoped
@@ -100,7 +106,7 @@ reasoning generation, stored history or service events. Telegram captures each
 reply's user/agent/chat before asynchronous delivery, so changing a session
 cannot reroute an accepted message. The settings agent option changes the
 active Telegram agent like `/selectagent`, rather than just saving a future
-preference. Web agent switching stays in the sidebar.
+preference. Web agent switching is the chat header's Agent selector.
 English/Spanish operational notices and
 application errors use a shared translation catalog served to the browser.
 Errors carry their RECALL-owned template separately from opaque interpolation

@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from src.config.agents import AgentConflict
 from src.config.favorites import FavoriteModelId, FavoritesError
-from src.config.models import AgentConfig
+from src.config.models import AgentConfig, ReasoningEffort
 from src.config.preferences import PreferencesError, UserPreferences
 from src.core.sources.conversations import ChatMetadataError
 from src.providers.catalog import CatalogUnavailable
@@ -50,6 +50,10 @@ class ModelIn(BaseModel):
 class ChatModelIn(BaseModel):
     model_id: FavoriteModelId | None
     zdr: bool = Field(default=True, strict=True)
+
+
+class ChatReasoningEffortIn(BaseModel):
+    effort: ReasoningEffort | None
 
 
 def _sse(event: str, data, generation_id: str = "") -> str:
@@ -226,11 +230,11 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
     ):
         return service.set_chat_model(user_id, agent_id, chat_id, body.model_id, zdr=body.zdr)
 
-    @app.put("/api/agents/{agent_id}/chats/{chat_id}/stt-model")
-    def set_chat_transcription_model(
-        agent_id: str, chat_id: str, body: ChatModelIn, user_id: str = Depends(current_user),
+    @app.put("/api/agents/{agent_id}/chats/{chat_id}/reasoning-effort")
+    def set_chat_reasoning_effort(
+        agent_id: str, chat_id: str, body: ChatReasoningEffortIn, user_id: str = Depends(current_user),
     ):
-        return service.set_chat_transcription_model(user_id, agent_id, chat_id, body.model_id)
+        return service.set_chat_reasoning_effort(user_id, agent_id, chat_id, body.effort)
 
     @app.delete("/api/agents/{agent_id}/chats/{chat_id}", status_code=204)
     def delete_chat(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):

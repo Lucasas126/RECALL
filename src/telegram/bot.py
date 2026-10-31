@@ -10,7 +10,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Callable
+from typing import Any, Callable, get_args
 
 import telegramify_markdown
 from telegram import (
@@ -32,6 +32,7 @@ from telegram.ext import (
 )
 
 from src.config.favorites import FavoritesError
+from src.config.models import ReasoningEffort
 from src.config.preferences import PreferencesError, UserPreferences
 from src.config.settings import TELEGRAM_ALLOWED_USERS_ENV
 from src.providers.catalog import CatalogUnavailable
@@ -138,21 +139,21 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     await update.effective_message.reply_text(
         "Available commands:\n\n"
-        "/settings — Thinking, language, and active agent\n"
+        "/settings — Thinking, language, active agent, and chat reasoning effort\n"
         "/newchat — Start a new chat for the current agent\n"
         "/selectagent — Choose the active agent\n"
         "/agent — Show the active agent\n"
         "/selectmodel — Browse models, prices, and pages\n"
         "/model — Show the model selected for the current chat\n"
-        "/selectstt — Choose the speech-to-text model\n"
-        "/stt — Show the current speech-to-text model\n"
+        "/stt — Show the default speech-to-text model (change it in /settings)\n"
         "/help — Show this help\n\n"
         "You can send text, images, audio, voice messages, and video directly."
     )
 
 
-_SETTINGS_VIEWS = frozenset({"main", "agents", "llm", "stt"})
-_CHAT_VIEWS = frozenset({"chat_llm", "chat_stt"})
+_SETTINGS_VIEWS = frozenset({"main", "agents", "llm", "stt", "chat_effort"})
+_CHAT_VIEWS = frozenset({"chat_llm"})
+_EFFORT_LEVELS = get_args(ReasoningEffort)
 
 
 def _panel_button(panel: _Panel, text: str, action: str) -> InlineKeyboardButton:
@@ -198,6 +199,7 @@ def _settings_main_view(
         [_panel_button(panel, message(language, "Active agent"), "agents")],
         [_panel_button(panel, message(language, "Default LLM model"), "llm")],
         [_panel_button(panel, message(language, "Default STT model"), "stt")],
+        [_panel_button(panel, message(language, "Chat reasoning effort"), "effort")],
         [_panel_button(panel, message(language, "Close"), "close")],
     ]
     return (
@@ -228,12 +230,46 @@ def _paged_rows(
     return rows, page_count
 
 
+def _effort_items(service: ChatService, session: TelegramSession, agent_id: str, chat_id: str) -> list[dict[str, Any]]:
+    default = service.get_chat_models(session.user_id, agent_id, chat_id)["reasoning_effort"]["default"]
+    default_label = _msg(session, "Default") + (f" ({default})" if default else "")
+    return [{"id": None, "name": default_label}, *({"id": level, "name": level} for level in _EFFORT_LEVELS)]
+
+
+def _effort_view(
+    service: ChatService, session: TelegramSession, panel: _Panel,
+) -> tuple[str, InlineKeyboardMarkup]:
+    effort = service.get_chat_models(session.user_id, panel.agent_id, panel.target_chat)["reasoning_effort"]
+    back = [_panel_button(panel, _msg(session, "Back"), "main")]
+    if not effort["reasoning"]:
+        return _msg(session, "Reasoning is off for this agent."), InlineKeyboardMarkup([back])
+    if effort["supported"] is False:
+        return _msg(session, "This model does not support reasoning effort."), InlineKeyboardMarkup([back])
+    if effort["supported"] is None:
+        return (
+            _msg(session, "Reasoning effort support could not be verified right now."),
+            InlineKeyboardMarkup([back]),
+        )
+    rows = [
+        [_panel_button(
+            panel, f"{'✅ ' if item['id'] == effort['override'] else ''}{item['name']}", f"pick:{index}",
+        )]
+        for index, item in enumerate(panel.items)
+    ]
+    return (
+        _msg(session, "Choose the reasoning effort for this chat. It overrides the agent default only here."),
+        InlineKeyboardMarkup([*rows, back]),
+    )
+
+
 def _panel_view(
     service: ChatService, session: TelegramSession, panel: _Panel,
 ) -> tuple[str, InlineKeyboardMarkup]:
     """Render the current view of a settings panel or selector."""
     if panel.view == "main":
         return _settings_main_view(service, session, panel)
+    if panel.view == "chat_effort":
+        return _effort_view(service, session, panel)
     tail = (
         [_panel_button(panel, _msg(session, "Back"), "main")] if panel.view in _SETTINGS_VIEWS
         else [_panel_button(panel, _msg(session, "Close"), "close")]
@@ -249,9 +285,8 @@ def _panel_view(
         return _msg(session, "Choose the agent for new and incoming messages:"), InlineKeyboardMarkup([*rows, tail])
     if panel.view in _CHAT_VIEWS:
         chat = service.get_chat_models(session.user_id, panel.agent_id, panel.target_chat)
-        override = chat["model_override"] if panel.view == "chat_llm" else chat["stt_model_override"]
-        current = chat["model"]["id"] if panel.view == "chat_llm" else chat["stt_model"]
-        header = _msg(session, "User default" if override is None else "Chat override")
+        header = _msg(session, "User default" if chat["model_override"] is None else "Chat override")
+        current = chat["model"]["id"]
     else:
         preferences = service.get_preferences(session.user_id)
         current = preferences["default_llm_model" if panel.view == "llm" else "default_stt_model"]
@@ -303,14 +338,21 @@ def _apply_panel_action(
     elif kind == "stt" and panel.view == "main":
         models = service.list_transcription_models(session.user_id, "", zdr=True)
         panel.view, panel.items, panel.page = "stt", models, 0
+    elif kind == "effort" and panel.view == "main":
+        if session.chat_id is None:
+            return _msg(session, "Create a chat first with /newchat.")
+        panel.view, panel.agent_id, panel.target_chat = "chat_effort", session.agent_id, session.chat_id
+        panel.items, panel.page = _effort_items(service, session, session.agent_id, session.chat_id), 0
     elif kind == "page" and argument.isdigit() and panel.view in ("llm", "stt", *_CHAT_VIEWS):
         panel.page = int(argument)
     elif kind == "inherit" and panel.view == "chat_llm":
         service.set_chat_model(session.user_id, panel.agent_id, panel.target_chat, None, zdr=True)
         return _msg(session, "This chat now uses the user's default LLM model.")
-    elif kind == "inherit" and panel.view == "chat_stt":
-        service.set_chat_transcription_model(session.user_id, panel.agent_id, panel.target_chat, None)
-        return _msg(session, "This chat now uses the user's default STT model.")
+    elif kind == "pick" and panel.view == "chat_effort" and argument.isdigit() and int(argument) < len(panel.items):
+        item = panel.items[int(argument)]
+        service.set_chat_reasoning_effort(session.user_id, panel.agent_id, panel.target_chat, item["id"])
+        return _msg(session, "Reasoning effort for this chat: {effort}\n\nThis selection applies only to the current chat.",
+                    effort=item["name"])
     elif kind == "pick" and argument.isdigit() and int(argument) < len(panel.items):
         selected = panel.items[int(argument)]["id"]
         if panel.view == "agents":
@@ -326,10 +368,6 @@ def _apply_panel_action(
         elif panel.view == "chat_llm":
             service.set_chat_model(session.user_id, panel.agent_id, panel.target_chat, selected, zdr=True)
             return _msg(session, "✅ Model selected\n\n{model_id}\n\nThis selection applies to the current chat.\nZDR: enabled",
-                        model_id=selected)
-        elif panel.view == "chat_stt":
-            service.set_chat_transcription_model(session.user_id, panel.agent_id, panel.target_chat, selected)
-            return _msg(session, "✅ STT model selected:\n{model_id}\n\nThis selection applies only to the current chat. ZDR: enabled.",
                         model_id=selected)
         panel.view, panel.items, panel.page = "main", [], 0
     else:
@@ -460,29 +498,6 @@ async def select_model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         logger.warning("Could not load Telegram model options: %s", exc)
         await update.effective_message.reply_text(
             _msg(session, "I cannot load the models right now. Please try again in a few seconds.")
-        )
-        return
-    await _open_panel(update, context, text, markup, panel)
-
-
-async def select_stt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    state: TelegramBotState = context.application.bot_data["state"]
-    session = _session(update, state)
-    if session is None:
-        await _unauthorized(update)
-        return
-    if session.chat_id is None:
-        await update.effective_message.reply_text(_msg(session, "Create a chat first with /newchat."))
-        return
-    panel = _new_panel(update, "chat_stt", session)
-    try:
-        query = " ".join(context.args or []).strip()
-        panel.items = state.service.list_transcription_models(session.user_id, query, zdr=True)
-        text, markup = _panel_view(state.service, session, panel)
-    except (CatalogUnavailable, ServiceError, ValueError) as exc:
-        logger.warning("Could not load Telegram STT models: %s", exc)
-        await update.effective_message.reply_text(
-            _msg(session, "I cannot load speech-to-text models right now. Please try again later.")
         )
         return
     await _open_panel(update, context, text, markup, panel)
@@ -687,14 +702,9 @@ async def show_stt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if session is None:
         await _unauthorized(update)
         return
-    if session.chat_id is None:
-        await update.effective_message.reply_text(_msg(session, "Create a chat first with /newchat."))
-        return
-    chat = state.service.get_chat(session.user_id, session.agent_id, session.chat_id)
-    current = chat["stt_model"]
+    current = state.service.get_preferences(session.user_id)["default_stt_model"]
     await update.effective_message.reply_text(
-        _msg(session, "Current STT model:\n{model}\n\nZDR: enabled", model=current)
-        + "\n" + _msg(session, "User default" if chat["stt_model_override"] is None else "Chat override"),
+        _msg(session, "Current STT model:\n{model}\n\nZDR: enabled", model=current),
     )
 
 
@@ -1067,14 +1077,13 @@ def build_application(token: str, service: ChatService | None = None) -> Applica
     application = ApplicationBuilder().token(token).concurrent_updates(True).build()
     application.bot_data["state"] = state
     application.bot_data["commands"] = [
-        BotCommand("settings", "Thinking, language, and agent"),
+        BotCommand("settings", "Thinking, language, agent, and reasoning effort"),
         BotCommand("newchat", "Start a new chat"),
         BotCommand("selectagent", "Choose the active agent"),
         BotCommand("agent", "Show the active agent"),
         BotCommand("selectmodel", "Browse models and prices"),
         BotCommand("model", "Show the current model"),
-        BotCommand("selectstt", "Choose the STT model"),
-        BotCommand("stt", "Show the current STT model"),
+        BotCommand("stt", "Show the default STT model"),
         BotCommand("help", "Show available commands"),
     ]
     async def set_commands(application: Application) -> None:
@@ -1088,7 +1097,6 @@ def build_application(token: str, service: ChatService | None = None) -> Applica
     application.add_handler(CommandHandler("newchat", new_chat))
     application.add_handler(CommandHandler("selectmodel", select_model))
     application.add_handler(CommandHandler("model", show_model))
-    application.add_handler(CommandHandler("selectstt", select_stt))
     application.add_handler(CommandHandler("stt", show_stt))
     application.add_handler(CommandHandler("selectagent", select_agent))
     application.add_handler(CommandHandler("agent", show_agent))

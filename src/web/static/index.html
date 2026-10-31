@@ -26,7 +26,6 @@
         <button id="tab-chats" type="button" aria-pressed="true">Chats</button>
         <button id="tab-agents" type="button" aria-pressed="false">Agents</button>
       </nav>
-      <select id="agent-select"></select>
       <button id="settings-open" type="button" aria-haspopup="dialog">Settings</button>
       <button id="new-chat">+ New chat</button>
       <ul id="chat-list"></ul>
@@ -34,16 +33,30 @@
     <main>
       <div id="chat-view">
       <header id="model-bar">
-        <span>Chat model</span>
-        <button id="model-picker" type="button" disabled aria-haspopup="dialog">No chat selected</button>
-        <span id="model-policy"></span>
-        <span id="stt-label">Audio model</span>
-        <button id="stt-picker" type="button" disabled aria-haspopup="dialog">No chat selected</button>
-        <span id="stt-policy"></span>
+        <span id="agent-label">Agent</span>
+        <select id="agent-select"></select>
       </header>
       <div id="messages"></div>
       <details id="usage" hidden><summary></summary><pre></pre></details>
       <form id="composer">
+        <div id="chat-controls">
+          <span id="chat-model-label">Chat model</span>
+          <button id="model-picker" type="button" disabled aria-haspopup="dialog">No chat selected</button>
+          <span id="model-policy"></span>
+          <label id="chat-effort-label">
+            <span id="chat-effort-text">Reasoning effort</span>
+            <select id="chat-effort" disabled>
+              <option value="" id="chat-effort-default">Default</option>
+              <option value="minimal">minimal</option>
+              <option value="low">low</option>
+              <option value="medium">medium</option>
+              <option value="high">high</option>
+              <option value="xhigh">xhigh</option>
+              <option value="max">max</option>
+            </select>
+          </label>
+          <span id="effort-policy"></span>
+        </div>
         <textarea id="input" rows="2" placeholder="Write a message…" disabled></textarea>
         <input id="file-input" type="file" accept="image/*,video/*,audio/*" multiple hidden>
         <button id="attach" type="button" disabled title="Attach image, video or audio">Attach</button>

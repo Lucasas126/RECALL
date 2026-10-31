@@ -34,11 +34,8 @@ and persists across restarts. Invalid metadata is an
 explicit error, not a fallback. Writes are atomic and use the source's path
 validation. Deleting/pruning a chat removes its sidecar. These `.json` files are
 not indexed by the default `txt`, `md`, `jsonl` extension filter.
-An independent `<chat_id>.stt.json` stores an optional STT override as
-`{"id": "vendor/model"}`. Missing STT metadata means the current user STT
-default. New chats have neither sidecar; changes to user defaults affect
-inheriting chats on their next request, not explicitly selected models or
-generations already running. Deleting/pruning a chat removes both sidecars.
+The STT model is a user setting and has no per-chat sidecar. Deleting/pruning a
+chat removes its model and reasoning-effort sidecars.
 Both selections are managed through the conversations source, never through
 direct channel filesystem access.
 New assistant turns also record their model ID, so usage from a different
