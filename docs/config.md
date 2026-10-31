@@ -160,7 +160,10 @@ with `ReplyKeyboardRemove`, clearing reply keyboards left by older bot
 versions before the inline panel is displayed. The web
 sidebar's **Settings** dialog edits thinking, language and default LLM/STT
 models (the audio model is set only here); agent switching is the **Agent**
-selector in the chat header. The per-chat reasoning effort is also available in Telegram's
+selector in the chat header. The web sidebar lists the chats of all of the
+user's agents (`GET /api/chats`), each labelled in italics with its agent.
+Opening a chat from another agent makes that agent active; choosing an agent in
+the selector starts a new chat with it. The per-chat reasoning effort is also available in Telegram's
 `/settings` panel (**Chat reasoning effort**).
 Thinking visibility, preferred-agent selection and English/Spanish operational
 notices/errors are implemented in both channels.

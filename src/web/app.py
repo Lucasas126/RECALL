@@ -208,6 +208,10 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
     def delete_agent(agent_id: str, user_id: str = Depends(current_user)):
         service.delete_agent(user_id, agent_id)
 
+    @app.get("/api/chats")
+    def list_all_chats(keep: Optional[str] = None, user_id: str = Depends(current_user)):
+        return service.list_all_chats(user_id, keep)
+
     @app.get("/api/agents/{agent_id}/chats")
     def list_chats(agent_id: str, keep: Optional[str] = None, user_id: str = Depends(current_user)):
         return service.list_chats(user_id, agent_id, keep)

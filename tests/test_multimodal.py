@@ -40,7 +40,7 @@ class MultimodalTests(unittest.TestCase):
                 },
             ],
         )
-        self.assertEqual(content[0], {"type": "text", "text": "Describe these"})
+        self.assertEqual(content[0], {"type": "text", "text": "[VIDEO] Describe these"})
         self.assertEqual(content[1]["type"], "image_url")
         self.assertEqual(content[2]["input_audio"]["data"], "xyz")
         self.assertEqual(content[3]["type"], "video_url")

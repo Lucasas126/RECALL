@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import re
 import threading
 import unittest
 from pathlib import Path
@@ -101,6 +102,9 @@ class SteeringFixture(unittest.TestCase):
     def _responder(self, key: tuple[str, str]):
         def respond(messages, model, *, cancellation: CancellationToken, **kwargs):
             snapshot = copy.deepcopy(messages)
+            for m in snapshot:
+                if m["role"] == "user" and isinstance(m["content"], str):
+                    m["content"] = re.sub(r"^\[[^\]]*\] ?", "", m["content"])
             self.calls[key].append({"context": snapshot, "cancellation": cancellation})
             latest = next(m["content"] for m in reversed(snapshot) if m["role"] == "user")
             if latest == "fail":
@@ -241,7 +245,7 @@ class ServiceSteeringTests(SteeringFixture):
 
         def response(messages, model, **kwargs):
             latest = next(m["content"] for m in reversed(messages) if m["role"] == "user")
-            if latest == "Original":
+            if latest.endswith("Original"):
                 yield {"tool_calls": [{"id": "write", "name": "write", "arguments": {}}]}
             else:
                 yield from regular(messages, model, **kwargs)

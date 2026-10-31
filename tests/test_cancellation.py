@@ -174,9 +174,9 @@ class AgentCancellationTests(unittest.TestCase):
             "New answer",
         )
         context = self.provider.invoke.call_args.args[0]
-        self.assertEqual(context[1]["content"], "First")
+        self.assertTrue(context[1]["content"].endswith("] First"))
         self.assertIn("[Response interrupted by user.]", context[2]["content"])
-        self.assertEqual(context[3]["content"], "Correction")
+        self.assertTrue(context[3]["content"].endswith("] Correction"))
 
 
 class _StalledServer(ThreadingHTTPServer):

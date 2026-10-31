@@ -18,7 +18,9 @@ aside .bar { display: flex; justify-content: space-between; align-items: center;
 #chat-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
 #chat-list li { display: flex; align-items: center; gap: 6px; padding: 8px; border-radius: 6px; cursor: pointer; }
 #chat-list li:hover, #chat-list li.active { background: var(--panel); }
-#chat-list .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#chat-list .chat-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+#chat-list .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#chat-list .chat-agent { font-style: italic; font-size: .75em; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #chat-list .title.empty { color: var(--muted); font-style: italic; }
 #chat-list .del { background: none; border: none; color: var(--muted); padding: 0 4px; }
 

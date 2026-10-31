@@ -182,7 +182,9 @@ $("agent-select").addEventListener("change", async (e) => {
   }
   try {
     await savePreferences({ agent_id: agentId });
-    if (session === state.session) await selectAgent(agentId);
+    if (session !== state.session) return;
+    await selectAgent(agentId);
+    await newChat();
   } catch (err) {
     if (session === state.session) {
       $("agent-select").value = state.agentId ?? "";
@@ -190,6 +192,18 @@ $("agent-select").addEventListener("change", async (e) => {
     }
   }
 });
+
+// Opening a chat from another agent makes that agent the active one, as the agent selector does.
+async function openChatFromList(chat) {
+  if (state.busy || state.modelBusy || state.settingsBusy) return;
+  const session = state.session;
+  if (chat.agent_id !== state.agentId) {
+    await savePreferences({ agent_id: chat.agent_id });
+    if (session !== state.session) return;
+    await selectAgent(chat.agent_id);
+  }
+  await openChat(chat.id);
+}
 
 // ------------------------------------------------------------------ agents tab
 
@@ -531,20 +545,25 @@ globalThis.addEventListener("focus", async () => {
 });
 
 async function refreshChats() {
-  if (!state.agentId) return;
+  if (!state.user) return;
   const session = state.session;
-  const agentId = state.agentId;
   const keep = state.chatId ? `?keep=${encodeURIComponent(state.chatId)}` : "";
-  const chats = await api(chatsUrl(keep));
-  if (session !== state.session || agentId !== state.agentId) return;
+  const chats = await api(`/api/chats${keep}`);
+  if (session !== state.session) return;
   const list = $("chat-list");
   list.replaceChildren(
     ...chats.map((chat) => {
       const li = document.createElement("li");
-      li.classList.toggle("active", chat.id === state.chatId);
+      li.classList.toggle("active", chat.id === state.chatId && chat.agent_id === state.agentId);
+      const meta = document.createElement("div");
+      meta.className = "chat-meta";
       const title = document.createElement("span");
       title.className = "title" + (chat.title ? "" : " empty");
       title.textContent = chat.title || tr("New chat");
+      const agent = document.createElement("span");
+      agent.className = "chat-agent";
+      agent.textContent = chat.agent_name;
+      meta.append(title, agent);
       const del = document.createElement("button");
       del.className = "del";
       del.textContent = "✕";
@@ -554,8 +573,8 @@ async function refreshChats() {
         e.stopPropagation();
         deleteChat(chat);
       });
-      li.append(title, del);
-      li.addEventListener("click", () => openChat(chat.id));
+      li.append(meta, del);
+      li.addEventListener("click", () => openChatFromList(chat));
       return li;
     })
   );
@@ -572,6 +591,9 @@ async function newChat() {
     const agentId = state.agentId;
     const chat = await api(chatsUrl(), { method: "POST" });
     if (session !== state.session || agentId !== state.agentId) return;
+    // creating a chat discards the previous empty one; stop requesting its state while opening the new one
+    state.chatId = null;
+    state.reasoningEffort = null;
     await openChat(chat.id);
   } catch (err) {
     if (session === state.session) addMessage("assistant").error(err.message);
@@ -599,8 +621,8 @@ async function openChat(chatId) {
 
 async function deleteChat(chat) {
   if (state.busy || state.modelBusy || !confirm(tr("Delete \"{title}\"?", { title: chat.title || tr("New chat") }))) return;
-  await api(chatsUrl(`/${chat.id}`), { method: "DELETE" });
-  if (state.chatId === chat.id) {
+  await api(`/api/agents/${chat.agent_id}/chats/${chat.id}`, { method: "DELETE" });
+  if (state.chatId === chat.id && state.agentId === chat.agent_id) {
     state.chatId = null;
     state.model = null;
     updateModelControls();
@@ -866,12 +888,14 @@ async function selectModel(modelId) {
   $("model-error").textContent = "";
   updateBusy();
   try {
-    const model = await api(chatsUrl(`/${chatId}/model`), {
+    await api(chatsUrl(`/${chatId}/model`), {
       method: "PUT", body: JSON.stringify({ model_id: modelId, zdr }),
     });
     if (session !== state.session || agentId !== state.agentId || chatId !== state.chatId) return;
-    state.model = model;
-    state.modelOverride = modelId === null ? null : model;
+    // reload the whole chat state: the server may clear an unsupported reasoning effort too
+    const models = await api(chatsUrl(`/${chatId}/models`), { cache: "no-store" });
+    if (session !== state.session || agentId !== state.agentId || chatId !== state.chatId) return;
+    applyChatModels(models);
     $("usage").hidden = true;
     $("model-dialog").close();
   } catch (err) {

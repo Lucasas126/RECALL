@@ -182,7 +182,7 @@ class ChatModelServiceTests(ModelFixture):
         self.assertEqual(old_agent.config.models.chat, "vendor/default")
         new_agent = self.agents[("user-one", "agent-one")]
         self.assertIsNot(old_agent, new_agent)
-        self.assertIn("First", [message["content"] for message in self.calls[("user-one", "agent-one")][-1]["context"]])
+        self.assertTrue(any(message["content"].endswith("First") for message in self.calls[("user-one", "agent-one")][-1]["context"]))
         self.assertEqual(new_agent.provider.context_window.call_args.args[0], "vendor/alpha")
 
     def test_reopening_chat_and_switching_to_others_does_not_leak_model(self) -> None:
@@ -365,6 +365,26 @@ class ChatModelWebTests(ModelFixture):
         self.assertEqual(self.client.put(url, json={"effort": None}).json()["reasoning_effort"]["override"], None)
 
 
+class ChatListTests(ModelFixture):
+    def test_chat_list_spans_all_agents_and_labels_each_chat(self) -> None:
+        other = self.service.create_chat("user-one", "agent-two")["id"]
+        list(self.service.send("user-one", "agent-two", other, "Hello"))  # unused empty chats are pruned
+        chats = self.service.list_all_chats("user-one", keep=self.chat)
+        self.assertEqual({(chat["agent_id"], chat["id"]) for chat in chats}, {
+            ("agent-one", self.chat), ("agent-two", other),
+        })
+        self.assertEqual({chat["id"]: chat["agent_name"] for chat in chats}, {self.chat: "agent-one", other: "agent-two"})
+
+    def test_chat_list_endpoint_returns_every_agent_for_the_user(self) -> None:
+        other = self.service.create_chat("user-one", "agent-two")["id"]
+        list(self.service.send("user-one", "agent-two", other, "Hello"))
+        with TestClient(create_app(self.service)) as client:
+            client.cookies.set("recall_user", "user-one")
+            response = client.get(f"/api/chats?keep={self.chat}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual({chat["id"] for chat in response.json()}, {self.chat, other})
+
+
 class ChatReasoningEffortServiceTests(ModelFixture):
     def setUp(self) -> None:
         super().setUp()
@@ -389,6 +409,13 @@ class ChatReasoningEffortServiceTests(ModelFixture):
         self.assertIsNone(chat["reasoning_effort"]["override"])
         self.assertEqual(chat["reasoning_effort"]["effective"], "medium")
         self.assertIsNone(self.sources[("user-one", "agent-one")].reasoning_effort_selection(self.chat))
+
+    def test_changing_to_an_unsupported_model_clears_the_effort_override(self) -> None:
+        self.service.set_chat_reasoning_effort("user-one", "agent-one", self.chat, "high")
+        self.service.set_chat_model("user-one", "agent-one", self.chat, "vendor/beta")
+        chat = self.service.get_chat("user-one", "agent-one", self.chat)
+        self.assertIsNone(chat["reasoning_effort"]["override"])
+        self.assertEqual(chat["reasoning_effort"]["supported"], False)
 
     def test_unsupported_models_reject_a_value(self) -> None:
         self.service.set_chat_model("user-one", "agent-one", self.chat, "vendor/beta")

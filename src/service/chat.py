@@ -333,6 +333,14 @@ class ChatService:
         summaries = [conversations.summary(chat_id) for chat_id in conversations.chats()]
         return sorted(summaries, key=lambda s: s["updated"], reverse=True)
 
+    def list_all_chats(self, user_id: str, keep: Optional[str] = None) -> list[dict]:
+        """Chat summaries across all of the user's agents, each labelled with its agent."""
+        chats = []
+        for agent in self.list_agents(user_id):
+            for chat in self.list_chats(user_id, agent["id"], keep):
+                chats.append({**chat, "agent_id": agent["id"], "agent_name": agent["name"]})
+        return sorted(chats, key=lambda chat: chat["updated"], reverse=True)
+
     def create_chat(self, user_id: str, agent_id: str) -> dict:
         """Create a chat, discarding any other unused empty ones so they never pile up."""
         conversations = self._conversations(user_id, agent_id)
@@ -463,6 +471,11 @@ class ChatService:
                         conversations.set_model(chat_id, model_id, zdr=zdr)
                 except FileNotFoundError as exc:
                     raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
+                # an effort the new model does not support would be sent to it; drop it
+                if self._reasoning_effort_override(conversations, chat_id) is not None:
+                    effective = model_id or user_models(self._user(user_id), self._preferences).chat
+                    if self._reasoning_effort_supported(self._user(user_id), effective) is False:
+                        conversations.set_reasoning_effort(chat_id, None)
                 if slot.agent is not None and slot.agent.chat_id == chat_id:
                     slot.agent = None
         return self.get_chat_models(user_id, agent_id, chat_id)["model"]
