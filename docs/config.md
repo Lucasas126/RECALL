@@ -462,8 +462,13 @@ not when settings are imported. An unset/blank key leaves web access unavailable
 it does not prevent normal chat. Restart after changing configuration or the key.
 
 Implemented: the standalone client in `src/providers/tavily.py`, basic search
-(1-10 results, at most 2,000 excerpt characters per result), and Markdown
-extraction with optional query-focused passages and explicit truncation.
+(1-10 results, at most 2,000 excerpt characters per result), search filters
+(topic, recency or publication-date range, domain include/exclude lists and
+country preference), and Markdown extraction with optional query-focused
+passages and explicit truncation. Search always requests Tavily's
+`published_date` estimate. Results whose date is unknown are kept by Tavily
+even with a date filter; `web_search` then adds a note so the agent does not
+present them as verified recent. Search depth is fixed to `basic`.
 Extraction checks public HTTP(S) URLs and their locally resolved addresses,
 rejects credentials and nonstandard ports, and delegates fetching to Tavily.
 These checks do not control Tavily's own DNS resolution or page redirects.

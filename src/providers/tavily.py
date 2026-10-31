@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import re
 import socket
+from datetime import date
+from typing import Literal
 from urllib.parse import urlsplit
 
 import requests
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError, field_validator, model_validator
 
 from src.config.models import TavilyConfig
 from src.utils.logger import get_logger
@@ -45,11 +48,56 @@ class _ExtractResponse(BaseModel):
     failed_results: list[dict] = Field(default_factory=list)
 
 
+TimeRange = Literal["day", "week", "month", "year"]
+Topic = Literal["general", "news", "finance"]
+_DOMAIN_PATTERN = re.compile(r"^[a-z0-9-]+(\.[a-z0-9-]+)+$")
+
+
 class _SearchInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     query: str = Field(min_length=1, max_length=2000)
     top_k: int = Field(default=5, ge=1, le=10, strict=True)
+    topic: Topic = "general"
+    time_range: TimeRange | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+    country: str | None = Field(default=None, min_length=2, max_length=64, pattern=r"^[a-z ]+$")
+    include_domains: list[str] = Field(default_factory=list, max_length=300)
+    exclude_domains: list[str] = Field(default_factory=list, max_length=150)
+
+    @field_validator("country", mode="before")
+    @classmethod
+    def _normalize_country(cls, value):
+        if isinstance(value, str):
+            value = value.strip().lower() or None
+        return value
+
+    @field_validator("include_domains", "exclude_domains", mode="before")
+    @classmethod
+    def _normalize_domains(cls, value):
+        if value is None:
+            return []
+        domains = []
+        for item in value:
+            domain = str(item).strip().lower()
+            if not _DOMAIN_PATTERN.fullmatch(domain):
+                raise ValueError(f"domain filter must be a bare domain such as example.com, got {item!r}")
+            domains.append(domain)
+        return list(dict.fromkeys(domains))
+
+    @model_validator(mode="after")
+    def _check_filters(self):
+        if self.time_range and (self.start_date or self.end_date):
+            raise ValueError("use either time_range or start_date/end_date, not both")
+        if self.start_date and self.end_date and self.start_date > self.end_date:
+            raise ValueError("start_date must not be after end_date")
+        if self.country and self.topic != "general":
+            raise ValueError("country filter is only available for the general topic")
+        overlap = set(self.include_domains) & set(self.exclude_domains)
+        if overlap:
+            raise ValueError(f"domains cannot be both included and excluded: {sorted(overlap)}")
+        return self
 
 
 def _validate_public_url(url: str) -> str:
@@ -104,6 +152,7 @@ class TavilyClient:
                 status = response.status_code
                 if status != 200:
                     advice = {
+                        400: "check the search parameters",
                         401: "check the configured API key",
                         403: "check the API key permissions",
                         429: "rate limit reached; retry later",
@@ -122,17 +171,52 @@ class TavilyClient:
             raise TavilyError(f"Tavily {endpoint} returned an invalid response object")
         return data
 
-    def search(self, query: str, top_k: int = 5) -> list[WebSearchResult]:
-        """Find up to ten URLs with short excerpts, without generating an answer."""
-        inputs = _SearchInput(query=query, top_k=top_k)
-        data = self._post("search", {
+    def search(
+        self,
+        query: str,
+        top_k: int = 5,
+        *,
+        topic: str = "general",
+        time_range: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        country: str | None = None,
+        include_domains: list[str] | None = None,
+        exclude_domains: list[str] | None = None,
+    ) -> list[WebSearchResult]:
+        """Find up to ten URLs with short excerpts, without generating an answer.
+
+        Results without a detectable publication date are kept by Tavily even when a date
+        filter is set; their published_date is None.
+        """
+        inputs = _SearchInput(
+            query=query, top_k=top_k, topic=topic, time_range=time_range or None,
+            start_date=start_date or None, end_date=end_date or None, country=country,
+            include_domains=include_domains or [], exclude_domains=exclude_domains or [],
+        )
+        payload: dict = {
             "query": inputs.query,
             "max_results": inputs.top_k,
             "search_depth": "basic",
+            "topic": inputs.topic,
             "auto_parameters": False,
             "include_answer": False,
             "include_raw_content": False,
-        })
+            "include_published_date": True,
+        }
+        if inputs.time_range:
+            payload["time_range"] = inputs.time_range
+        if inputs.start_date:
+            payload["start_date"] = inputs.start_date.isoformat()
+        if inputs.end_date:
+            payload["end_date"] = inputs.end_date.isoformat()
+        if inputs.country:
+            payload["country"] = inputs.country
+        if inputs.include_domains:
+            payload["include_domains"] = inputs.include_domains
+        if inputs.exclude_domains:
+            payload["exclude_domains"] = inputs.exclude_domains
+        data = self._post("search", payload)
         try:
             results = _SearchResponse.model_validate(data).results[:inputs.top_k]
         except ValidationError:

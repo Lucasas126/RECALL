@@ -100,10 +100,10 @@ delete
 
 web_search
 - status: implemented; available when the shared Tavily key is set and the agent's `chat_config.tools` is true. see [configuration](config.md#shared-web-access-tavily).
-- parameters: query (nonempty str, at most 2,000 characters), top_k (int, default 5, range 1-10).
-- agent description: search the public web for current information; cite the returned URLs and use web_retrieve to read selected pages. never send secrets or private memories.
-- background behaviour: Tavily basic search, without an AI-generated answer or full-page extraction. no automatic retries or higher-cost advanced search.
-- return: JSON with `untrusted: true` and `results`: titles, URLs, excerpts, optional publication dates and a per-result `truncated` flag. excerpts are capped at 2,000 characters; an empty list means no results. provider failures are errors, not empty results.
+- parameters: query (nonempty str, at most 2,000 characters), top_k (int, default 5, range 1-10), topic (`general` default, `news` or `finance`), time_range (`day`, `week`, `month` or `year`), start_date and end_date (`YYYY-MM-DD`), country (lowercase country name, only with `general`), include_domains and exclude_domains (bare domains such as `example.com`). empty strings or omitted values mean no filter. time_range cannot be combined with start_date/end_date, and a domain cannot be both included and excluded.
+- agent description: search the public web for current information, using recency filters for time-sensitive questions; cite the returned URLs and use web_retrieve to read selected pages. never send secrets or private memories.
+- background behaviour: Tavily basic search, without an AI-generated answer, full-page extraction or advanced depth. no automatic retries. date filters keep results whose publication date is unknown (Tavily's default); the agent is told via `notes` when such results are present. `filter_by_published_date` is not exposed.
+- return: JSON with `untrusted: true` and `results`: titles, URLs, excerpts, publication dates (`published_date`, null when unknown) and a per-result `truncated` flag, plus an optional `notes` list. excerpts are capped at 2,000 characters; an empty list means no results. provider failures and invalid filters are errors, not empty results.
 
 web_retrieve
 - status: implemented under the same conditions as web_search.
