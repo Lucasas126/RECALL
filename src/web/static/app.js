@@ -12,6 +12,7 @@ const state = {
   settingsModelDraft: null,
   preferences: null, preferencesRequest: 0, settingsBusy: false, settingsOriginal: null,
   translations: null,
+  agentConfigs: [], agentForm: { originalId: null, busy: false },
 };
 // thinking blocks start open (streamed live); closing one keeps them closed from then on
 const prefs = { thinkingOpen: localStorage.getItem("thinkingOpen") !== "false" };
@@ -36,6 +37,17 @@ function translateInterface() {
     ["stt-label", "Audio model"], ["model-inherit", "Use user default"],
     ["model-scope-note", "Choosing a model for a chat sets only that chat's override. Use user default removes it. Defaults in Settings are saved with Save settings. Default LLM and STT selections require ZDR. Favorites are shared across your agents."],
     ["model-zdr-warning", "ZDR is not required for your next selection. Providers may retain your prompts and replies. Your OpenRouter account may still enforce ZDR."],
+    ["tab-chats", "Chats"], ["tab-agents", "Agents"], ["agents-title", "Agents"],
+    ["agent-new", "+ New agent"], ["agents-empty", "Select an agent to edit it, or create a new one."],
+    ["agent-name-label", "Name"],
+    ["agent-prompt-label", "System prompt"], ["agent-behavior-label", "Chat behavior"],
+    ["agent-stream-label", "Stream replies"], ["agent-memory-label", "Use memory"],
+    ["agent-reasoning-label", "Reasoning"], ["agent-keep-reasoning-label", "Keep reasoning in memory"],
+    ["agent-tools-label", "Use tools"], ["agent-associative-label", "Associative memory"],
+    ["agent-effort-label", "Reasoning effort"], ["agent-effort-default", "Default"],
+    ["agent-tokens-enabled-label", "Limit reasoning tokens"], ["agent-reasoning-tokens-label", "Reasoning tokens"],
+    ["agent-retained-label", "Messages kept in context"],
+    ["agent-retained-hint", "Empty keeps all messages."], ["agent-save", "Save agent"], ["agent-delete", "Delete agent"],
   ]) $(id).textContent = tr(text);
 }
 
@@ -88,8 +100,23 @@ function showLogin() {
   updateModelControls();
   renderMessages([]);
   setComposer(false);
+  state.agentConfigs = [];
+  state.agentForm = { originalId: null, busy: false };
+  showTab("chats");
   $("app").hidden = true;
   $("login").hidden = false;
+}
+
+function renderAgentOptions() {
+  $("agent-select").replaceChildren(
+    ...state.user.agents.map((a) => {
+      const option = document.createElement("option");
+      option.value = a.id;
+      option.textContent = a.name;
+      return option;
+    })
+  );
+  $("agent-select").value = state.agentId ?? "";
 }
 
 async function showApp(user) {
@@ -99,15 +126,8 @@ async function showApp(user) {
   $("login").hidden = true;
   $("app").hidden = false;
   $("user-name").textContent = user.name;
-  const select = $("agent-select");
-  select.replaceChildren(
-    ...user.agents.map((a) => {
-      const option = document.createElement("option");
-      option.value = a.id;
-      option.textContent = a.name;
-      return option;
-    })
-  );
+  renderAgentOptions();
+  showTab("chats");
   try {
     await refreshPreferences();
     if (session !== state.session) return;
@@ -166,6 +186,204 @@ $("agent-select").addEventListener("change", async (e) => {
       $("agent-select").value = state.agentId ?? "";
       addMessage("assistant").error(err.message);
     }
+  }
+});
+
+// ------------------------------------------------------------------ agents tab
+
+function showTab(tab) {
+  const agents = tab === "agents";
+  $("tab-chats").setAttribute("aria-pressed", String(!agents));
+  $("tab-agents").setAttribute("aria-pressed", String(agents));
+  $("chat-view").hidden = agents;
+  $("agents-view").hidden = !agents;
+  $("chat-list").hidden = agents;
+  $("new-chat").hidden = agents;
+  if (agents) loadAgentConfigs();
+}
+
+async function loadAgentConfigs() {
+  const session = state.session;
+  try {
+    const agents = await api("/api/agents");
+    if (session !== state.session) return;
+    state.agentConfigs = agents;
+    renderAgentList();
+  } catch (err) {
+    if (session === state.session) $("agent-error").textContent = err.message;
+  }
+}
+
+function renderAgentList() {
+  $("agent-list").replaceChildren(
+    ...state.agentConfigs.map((agent) => {
+      const item = document.createElement("li");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = agent.id === state.agentForm.originalId ? "active" : "";
+      button.textContent = agent.name;
+      button.addEventListener("click", () => openAgent(agent.id));
+      item.append(button);
+      return item;
+    })
+  );
+}
+
+function openAgent(agentId) {
+  if (state.agentForm.busy) return;
+  const agent = state.agentConfigs.find((item) => item.id === agentId);
+  if (!agent) return;
+  state.agentForm.originalId = agent.id;
+  $("agent-error").textContent = "";
+  $("agent-status").textContent = "";
+  fillAgentForm(agent);
+  $("agent-delete").hidden = false;
+  setAgentFormOpen(true);
+}
+
+function openNewAgent() {
+  if (state.agentForm.busy) return;
+  state.agentForm.originalId = null;
+  $("agent-error").textContent = "";
+  $("agent-status").textContent = "";
+  fillAgentForm({
+    name: "", id: "", personality_prompt: "",
+    chat_config: {
+      stream: true, has_memory: true, reasoning: false, reasoning_effort: "medium", reasoning_tokens: null,
+      keep_reasoning_in_memory: false, conversation_messages_retained: 30, tools: true, associative_memory: true,
+    },
+  });
+  $("agent-delete").hidden = true;
+  setAgentFormOpen(true);
+}
+
+function setAgentFormOpen(open) {
+  $("agent-form").hidden = !open;
+  $("agents-empty").hidden = open;
+  renderAgentList();
+}
+
+function fillAgentForm(agent) {
+  const config = agent.chat_config;
+  $("agent-form-title").textContent = tr(state.agentForm.originalId ? "Edit agent" : "New agent");
+  $("agent-name").value = agent.name;
+  $("agent-prompt").value = agent.personality_prompt;
+  $("agent-stream").checked = config.stream;
+  $("agent-memory").checked = config.has_memory;
+  $("agent-reasoning").checked = config.reasoning;
+  $("agent-keep-reasoning").checked = config.keep_reasoning_in_memory;
+  $("agent-tools").checked = config.tools;
+  $("agent-associative").checked = config.associative_memory;
+  $("agent-effort").value = config.reasoning_effort ?? "";
+  $("agent-tokens-enabled").checked = config.reasoning_tokens != null;
+  $("agent-reasoning-tokens").disabled = config.reasoning_tokens == null;
+  $("agent-reasoning-tokens").value = config.reasoning_tokens ?? "";
+  $("agent-retained").value = config.conversation_messages_retained ?? "";
+}
+
+// The id is derived from the name once, when the agent is created; it never changes from the form.
+function agentIdFromName(name) {
+  const slug = name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64);
+  return slug || `agent-${Date.now().toString(36)}`;
+}
+
+function agentFormBody() {
+  const optionalNumber = (id) => {
+    const value = $(id).value.trim();
+    return value === "" ? null : Number(value);
+  };
+  const name = $("agent-name").value.trim();
+  return {
+    id: state.agentForm.originalId ?? agentIdFromName(name),
+    name,
+    personality_prompt: $("agent-prompt").value,
+    chat_config: {
+      stream: $("agent-stream").checked,
+      has_memory: $("agent-memory").checked,
+      reasoning: $("agent-reasoning").checked,
+      reasoning_effort: $("agent-effort").value || null,
+      reasoning_tokens: $("agent-tokens-enabled").checked ? optionalNumber("agent-reasoning-tokens") : null,
+      keep_reasoning_in_memory: $("agent-keep-reasoning").checked,
+      conversation_messages_retained: optionalNumber("agent-retained"),
+      tools: $("agent-tools").checked,
+      associative_memory: $("agent-associative").checked,
+    },
+  };
+}
+
+function setAgentBusy(busy) {
+  state.agentForm.busy = busy;
+  for (const id of ["agent-new", "agent-save", "agent-delete"]) $(id).disabled = busy;
+}
+
+// Reloads the agent list and keeps the sidebar consistent after a save or delete.
+async function refreshAgents(previousId, currentId) {
+  const me = await api("/api/me");
+  state.user.agents = me.agents;
+  renderAgentOptions();
+  await loadAgentConfigs();
+  if (previousId && previousId === state.agentId && previousId !== currentId) {
+    // the server moved the preference when the agent was renamed or deleted
+    const preferences = await refreshPreferences();
+    await selectAgent(preferences.agent_id ?? state.user.agents[0]?.id ?? null);
+  }
+}
+
+$("tab-chats").addEventListener("click", () => showTab("chats"));
+$("tab-agents").addEventListener("click", () => showTab("agents"));
+$("agent-new").addEventListener("click", openNewAgent);
+
+$("agent-tokens-enabled").addEventListener("change", () => {
+  const enabled = $("agent-tokens-enabled").checked;
+  $("agent-reasoning-tokens").disabled = !enabled;
+  if (enabled && !$("agent-reasoning-tokens").value) $("agent-reasoning-tokens").value = "1024";
+});
+
+$("agent-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (state.agentForm.busy) return;
+  const session = state.session;
+  const previousId = state.agentForm.originalId;
+  const body = JSON.stringify(agentFormBody());
+  setAgentBusy(true);
+  $("agent-error").textContent = "";
+  $("agent-status").textContent = "";
+  try {
+    const saved = await api(previousId ? `/api/agents/${previousId}` : "/api/agents", {
+      method: previousId ? "PUT" : "POST", body,
+    });
+    if (session !== state.session) return;
+    state.agentForm.originalId = saved.id;
+    $("agent-delete").hidden = false;
+    fillAgentForm(saved);
+    await refreshAgents(previousId, saved.id);
+    $("agent-status").textContent = tr("Agent saved.");
+  } catch (err) {
+    if (session === state.session) $("agent-error").textContent = err.message;
+  } finally {
+    if (session === state.session) setAgentBusy(false);
+  }
+});
+
+$("agent-delete").addEventListener("click", async () => {
+  const agentId = state.agentForm.originalId;
+  if (!agentId || state.agentForm.busy) return;
+  if (!window.confirm(tr("Delete this agent? Its conversations and memory data are kept on disk."))) return;
+  const session = state.session;
+  setAgentBusy(true);
+  $("agent-error").textContent = "";
+  try {
+    await api(`/api/agents/${agentId}`, { method: "DELETE" });
+    if (session !== state.session) return;
+    state.agentForm.originalId = null;
+    setAgentFormOpen(false);
+    await refreshAgents(agentId, null);
+    $("agent-status").textContent = tr("Agent deleted.");
+  } catch (err) {
+    if (session === state.session) $("agent-error").textContent = err.message;
+  } finally {
+    if (session === state.session) setAgentBusy(false);
   }
 });
 

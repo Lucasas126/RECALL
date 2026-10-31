@@ -6,9 +6,10 @@ from typing import Optional
 
 import yaml
 
+from src.config.agents import AgentStore
 from src.config.models import AgentConfig, ModelsConfig, ResolvedAgent, UserConfig
 from src.config.preferences import UserPreferencesStore
-from src.config.settings import CONFIG_DIR
+from src.config.settings import CONFIG_DIR, DATA_DIR
 
 
 def _load_yaml(path: Path) -> dict:
@@ -24,8 +25,8 @@ def load_user(user_id: str) -> UserConfig:
 
 
 def load_agent_config(user_id: str, agent_id: str) -> AgentConfig:
-    """Load one agent's own config (no provider resolution)."""
-    return AgentConfig(**_load_yaml(CONFIG_DIR / user_id / "agents" / f"{agent_id}.yaml"))
+    """Load one agent's own config (no provider resolution); raises FileNotFoundError if missing."""
+    return AgentStore(CONFIG_DIR, DATA_DIR).load(user_id, agent_id)
 
 
 def user_models(user: UserConfig, preferences: UserPreferencesStore) -> ModelsConfig:

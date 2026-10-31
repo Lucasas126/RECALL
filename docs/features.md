@@ -18,7 +18,7 @@
 ## Configuration and interface
 
 - Remove unnecessary messages from the settings selection and other configuration options to keep the interface clean.
-- Web interface tab where an user can handle, create and edit agents, with a list of all the agents the user has access to, and the ability to create new agents or edit existing ones: changing the system prompt, and all confiurations that are now in the agent json file
+- ~~Web interface tab where an user can handle, create and edit agents, with a list of all the agents the user has access to, and the ability to create new agents or edit existing ones: changing the system prompt, and all confiurations that are now in the agent json file~~
 
 ## Chat UI
 
@@ -29,3 +29,6 @@
 
 ## Recall
 - make it so associaive memory is inyected into the system prompt while the model has started generating text, so its faster and more efficient. This will allow the model to have access to relevant information without having to wait for the entire context to be processed before generating a response. Make it so the model is aware that this can happen, so it can adjust its behavior accordingly. This will improve latency. Since the process will be parallel, we have to adjust the timings so it makes sense (right now since they are not parallel, they are just summed in the latency metric that we print in the debug panel in the web ui)
+
+## Errors
+- [error] openrouter API error 429: Provider returned error, happened when trying to use cheapeast model in openrouter, probably because its not zdr or something like that, try to handle it better and show a more user friendly message, such as a suggestion to changing the model

@@ -14,11 +14,12 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.agent.agent import Agent
+from src.config.agents import AgentStore
 from src.config.favorites import ModelFavorites
 from src.config.loader import load_agent, load_agent_config, load_user, user_models
-from src.config.models import UserConfig
+from src.config.models import AgentConfig, UserConfig
 from src.config.preferences import UserPreferences, UserPreferencesStore
-from src.config.settings import CONFIG_DIR, SPEECH_TO_TEXT, VIDEO_DECOMPOSITION
+from src.config.settings import CONFIG_DIR, DATA_DIR, SPEECH_TO_TEXT, VIDEO_DECOMPOSITION
 from src.core.sources.conversations import ConversationsSource
 from src.core.sources.registry import SourceRegistry
 from src.providers.cancellation import CancellationToken, GenerationCancelled
@@ -157,6 +158,7 @@ class ChatService:
         self._slots_guard = threading.Lock()
         self._favorites = ModelFavorites(CONFIG_DIR)
         self._preferences = UserPreferencesStore(CONFIG_DIR)
+        self._agents = AgentStore(CONFIG_DIR, DATA_DIR)
 
     # ------------------------------------------------------------------ users & agents
 
@@ -178,6 +180,61 @@ class ChatService:
             cfg = load_agent_config(user_id, agent_id)
             agents.append({"id": cfg.id, "name": cfg.name})
         return agents
+
+    def list_agent_configs(self, user_id: str) -> list[dict]:
+        """Full editable configuration of every agent the user owns."""
+        user = self._user(user_id)
+        return [self._agent_config(user_id, agent_id).model_dump(mode="json") for agent_id in user.agents]
+
+    def get_agent(self, user_id: str, agent_id: str) -> dict:
+        self._owned_agent(user_id, agent_id)
+        return self._agent_config(user_id, agent_id).model_dump(mode="json")
+
+    def create_agent(self, user_id: str, config: AgentConfig) -> dict:
+        self._user(user_id)
+        return self._agents.create(user_id, config).model_dump(mode="json")
+
+    def update_agent(self, user_id: str, agent_id: str, config: AgentConfig) -> dict:
+        """Save an idle agent's configuration; a changed id also moves its data folder and preference."""
+        self._owned_agent(user_id, agent_id)
+        slot = self._slot(user_id, agent_id)
+        with slot.state:
+            if slot.active is not None or slot.pending:
+                raise AgentBusy("wait for this agent's active and queued replies before editing it")
+            with slot.lock:
+                updated = self._agents.update(user_id, agent_id, config)
+                slot.agent = None  # rebuilt from the saved configuration on next use
+        if updated.id != agent_id:
+            self._forget_slot(user_id, agent_id)
+            self._replace_preferred_agent(user_id, agent_id, updated.id)
+        return updated.model_dump(mode="json")
+
+    def delete_agent(self, user_id: str, agent_id: str) -> None:
+        """Remove an idle agent's configuration; its data folder is kept on disk."""
+        self._owned_agent(user_id, agent_id)
+        slot = self._slot(user_id, agent_id)
+        with slot.state:
+            if slot.active is not None or slot.pending:
+                raise AgentBusy("wait for this agent's active and queued replies before deleting it")
+            with slot.lock:
+                self._agents.delete(user_id, agent_id)
+                slot.agent = None
+        self._forget_slot(user_id, agent_id)
+        self._replace_preferred_agent(user_id, agent_id, None)
+
+    def _agent_config(self, user_id: str, agent_id: str) -> AgentConfig:
+        try:
+            return self._agents.load(user_id, agent_id)
+        except FileNotFoundError as exc:
+            raise UnknownAgent("unknown agent: {agent_id}", agent_id=agent_id) from exc
+
+    def _replace_preferred_agent(self, user_id: str, old_id: str, new_id: str | None) -> None:
+        if self._preferences.get(user_id).agent_id == old_id:
+            self._preferences.update(user_id, UserPreferences(agent_id=new_id))
+
+    def _forget_slot(self, user_id: str, agent_id: str) -> None:
+        with self._slots_guard:
+            self._slots.pop((user_id, agent_id), None)
 
     def get_preferences(self, user_id: str) -> dict:
         """Read current user-wide preferences, including configuration-derived defaults."""
@@ -657,14 +714,19 @@ class ChatService:
         except FileNotFoundError as e:
             raise UnknownUser("unknown user: {user_id}", user_id=user_id) from e
 
-    def _conversations(self, user_id: str, agent_id: str) -> ConversationsSource:
-        """The conversations source of an agent, after checking that the user owns it."""
+    def _owned_agent(self, user_id: str, agent_id: str) -> UserConfig:
+        """The user's config, after checking that the user owns the agent."""
         user = self._user(user_id)
         self._check_id("agent", agent_id, UnknownAgent)
         if agent_id not in user.agents:
             raise UnknownAgent(
                 "agent '{agent_id}' is not owned by user '{user_id}'", agent_id=agent_id, user_id=user_id,
             )
+        return user
+
+    def _conversations(self, user_id: str, agent_id: str) -> ConversationsSource:
+        """The conversations source of an agent, after checking that the user owns it."""
+        self._owned_agent(user_id, agent_id)
         return SourceRegistry.for_agent(user_id, agent_id).conversations()
 
     @staticmethod

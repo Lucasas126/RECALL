@@ -62,11 +62,11 @@ class ChatConfig(BaseModel):
     has_memory: bool = True
     reasoning: bool = False
     # effort level for models that support it (minimal|low|medium|high|xhigh|max); openrouter maps it
-    reasoning_effort: Optional[str] = None
+    reasoning_effort: Optional[str] = "medium"
     reasoning_tokens: Optional[int] = None
     keep_reasoning_in_memory: bool = False
     # last N conversation messages kept in context (None = all); system prompt is always kept
-    conversation_messages_retained: Optional[int] = None
+    conversation_messages_retained: Optional[int] = 30
     # let the model call tools (memory recall, source read/write/list)
     tools: bool = True
     # run a memory subagent each turn that suggests relevant fragments from long-term memory
@@ -74,11 +74,13 @@ class ChatConfig(BaseModel):
 
 
 class AgentConfig(BaseModel):
+    """One agent's own configuration; `id` identifies the agent and its data folder."""
+
     model_config = ConfigDict(extra="forbid")
 
-    id: str
-    name: str
-    personality_prompt: str
+    id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    name: str = Field(min_length=1, max_length=100)
+    personality_prompt: str = Field(min_length=1, max_length=20000)
     chat_config: ChatConfig = ChatConfig()
 
 

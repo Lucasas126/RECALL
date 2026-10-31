@@ -9,7 +9,9 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from src.config.agents import AgentConflict
 from src.config.favorites import FavoriteModelId, FavoritesError
+from src.config.models import AgentConfig
 from src.config.preferences import PreferencesError, UserPreferences
 from src.core.sources.conversations import ChatMetadataError
 from src.providers.catalog import CatalogUnavailable
@@ -115,7 +117,8 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
         return localized_error(request, 500, exc)
 
     @app.exception_handler(AgentBusy)
-    def _agent_busy(request: Request, exc: AgentBusy):
+    @app.exception_handler(AgentConflict)
+    def _agent_conflict(request: Request, exc: AgentBusy | AgentConflict):
         return localized_error(request, 409, exc)
 
     @app.middleware("http")
@@ -180,6 +183,26 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
         return service.remove_favorite_model(user_id, model_id)
 
     # ------------------------------------------------------------------ chats
+
+    @app.get("/api/agents")
+    def list_agent_configs(user_id: str = Depends(current_user)):
+        return service.list_agent_configs(user_id)
+
+    @app.post("/api/agents", status_code=201)
+    def create_agent(body: AgentConfig, user_id: str = Depends(current_user)):
+        return service.create_agent(user_id, body)
+
+    @app.get("/api/agents/{agent_id}")
+    def get_agent(agent_id: str, user_id: str = Depends(current_user)):
+        return service.get_agent(user_id, agent_id)
+
+    @app.put("/api/agents/{agent_id}")
+    def update_agent(agent_id: str, body: AgentConfig, user_id: str = Depends(current_user)):
+        return service.update_agent(user_id, agent_id, body)
+
+    @app.delete("/api/agents/{agent_id}", status_code=204)
+    def delete_agent(agent_id: str, user_id: str = Depends(current_user)):
+        service.delete_agent(user_id, agent_id)
 
     @app.get("/api/agents/{agent_id}/chats")
     def list_chats(agent_id: str, keep: Optional[str] = None, user_id: str = Depends(current_user)):

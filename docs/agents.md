@@ -41,6 +41,10 @@ effective = agent_policy ∩ mode_toolset
 
 example: an agent whose policy excludes `web_search` will not have it even in dream mode, where it is otherwise exposed.
 
+## managing agents
+
+users create, edit and delete agents from the web **Agents** tab; the routes and rules are in [config.md](./config.md#managing-agents). A new agent's id comes from its name and stays fixed in the form. Changing an id through the API moves its data folder, and deleting an agent keeps its data on disk.
+
 ## agent config (sketch)
 
 ```yaml

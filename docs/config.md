@@ -14,7 +14,7 @@ yaml, editable by hand, one file per entity, nested per user. one file per agent
       <agent_id>.yaml        # one file per agent
 ```
 
-creating an agent = adding a file. isolation is natural per user folder. everything except secrets is versionable in git. a global `defaults.yaml` with merge is planned but not yet used.
+agents can be created, edited, renamed and deleted from the web **Agents** tab or the `/api/agents` routes (see [managing agents](#managing-agents)); hand-written files work too. the `id` field inside the file identifies the agent, so the file name is only a convention. isolation is natural per user folder. everything except secrets is versionable in git. a global `defaults.yaml` with merge is planned but not yet used.
 
 ## provider & secrets
 
@@ -525,10 +525,30 @@ checks today: the agent belongs to the user, and the provider key env var (if co
 
 planned: a `defaults.yaml < user.yaml < agent.yaml` merge, full fail-fast validation, resource/vault references, a per-tool policy, and a `ConfigStore` with a channel→user index for routing incoming messages.
 
+## managing agents
+
+the web **Agents** tab lists the user's agents and edits the name, `personality_prompt` and all `chat_config` options. a new agent's `id` is derived from its name (lowercase, accents removed, non-alphanumeric characters replaced by `-`) and is not editable from the form. the same operations are available as routes:
+
+| method | route | result |
+| --- | --- | --- |
+| `GET` | `/api/agents` | full configuration of each agent the user owns |
+| `POST` | `/api/agents` | creates `agents/<id>.yaml` and appends the id to `agents` in `user.yaml` (`201`) |
+| `GET` | `/api/agents/<agent_id>` | one agent's configuration |
+| `PUT` | `/api/agents/<agent_id>` | replaces the agent; the body `id` may differ, which renames it |
+| `DELETE` | `/api/agents/<agent_id>` | removes the agent from `user.yaml` and deletes its file (`204`) |
+
+rules:
+
+- ids match `[A-Za-z0-9_-]{1,64}`; `name` has 1–100 characters and `personality_prompt` 1–20000.
+- ids are unique per user. a duplicate id, or an existing file name, returns `409`.
+- changing the `id` through `PUT` (the web form never does) moves `data/<user_id>/<old_id>` to `data/<user_id>/<new_id>` and updates the user's preferred agent. if the agent file was named after its old id, it is renamed after the new one; otherwise it keeps its name. if the data folder cannot be moved (for example, another process is using it), the change is rolled back.
+- deleting keeps `data/<user_id>/<agent_id>` on disk, so creating an agent later with the same id reuses that memory. if the deleted agent was the preferred one, the preference falls back to the user's first agent.
+- editing, renaming or deleting an agent with active or queued replies returns `409`; the cached runtime is rebuilt from the saved file on the next message.
+- writes are atomic and serialized per user by `.config/<user_id>/agents.lock`. only the `agents:` entry of `user.yaml` is rewritten, so comments and other keys are kept.
+- Telegram sessions that are already open keep the agent id they started with; use `/selectagent` (or restart the bot) after a rename or delete.
+
 ## mutability
 
 YAML config is read at load time; edit it and restart to change framework/user/
-agent defaults. Model favorites and per-chat selections are the exceptions:
-they are persisted immediately through the APIs above, without restarting.
-The file-based layout supports runtime agent creation later (write a new
-`<agent_id>.yaml`) without migration.
+agent defaults. Model favorites, per-chat selections and agent edits made through
+the APIs above are persisted immediately, without restarting.
