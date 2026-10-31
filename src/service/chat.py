@@ -37,6 +37,39 @@ _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 AgentFactory = Callable[[str, str, Optional[str]], Agent]
 
 
+_DECOMPOSITION_NOTICE = {
+    "en": (
+        "This model supports images but not video. {videos} video(s) were decomposed into "
+        "{frames} frame(s) and their audio. The model only sees these frames, so motion or "
+        "events between them may be missed."
+    ),
+    "es": (
+        "Este modelo admite imágenes, pero no vídeo. {videos} vídeo(s) se han descompuesto en "
+        "{frames} fotograma(s) y su audio. El modelo solo ve estos fotogramas, así que puede "
+        "perder movimiento o eventos entre ellos."
+    ),
+}
+_DECOMPOSITION_TRUNCATED = {
+    "en": " Only the first part of at least one video was sampled.",
+    "es": " Solo se ha muestreado la primera parte de al menos un vídeo.",
+}
+
+
+def _decomposition_notice(language: str, decompositions: list[VideoDecomposition]) -> str | None:
+    """Return the localized warning shown when videos were replaced by frames, or None."""
+    if not decompositions:
+        return None
+    code = language.split("-", 1)[0].lower()
+    code = code if code in _DECOMPOSITION_NOTICE else "en"
+    notice = _DECOMPOSITION_NOTICE[code].format(
+        videos=len(decompositions),
+        frames=sum(len(item.frames) for item in decompositions),
+    )
+    if any(item.truncated for item in decompositions):
+        notice += _DECOMPOSITION_TRUNCATED[code]
+    return notice
+
+
 class ServiceError(UserMessageError):
     """Base error of the chat service; channels translate subclasses to their own responses."""
 
@@ -74,13 +107,14 @@ class ChatEvent:
     """One piece of an agent reply, independent of the channel that delivers it.
 
     `kind` is `reasoning` (thinking tokens), `text` (answer tokens), `tool` (an action the agent
-    took, in `data`: name, arguments, result, error) or `usage` (context report, emitted once
-    after the reply) or `interrupted` (partial answer in `text`, reasoning/actions in `data`).
+    took, in `data`: name, arguments, result, error), `usage` (context report, emitted once
+    after the reply), `interrupted` (partial answer in `text`, reasoning/actions in `data`) or
+    `notice` (a warning about how the request was handled, in `text`, sent before the reply).
     Non-streaming replies arrive as `tool` events followed by one `text` event. All events
     carry a generation id so adapters can distinguish overlapping deliveries.
     """
 
-    kind: Literal["reasoning", "text", "tool", "usage", "interrupted", "memory"]
+    kind: Literal["reasoning", "text", "tool", "usage", "interrupted", "memory", "notice"]
     text: str = ""
     data: Optional[dict] = None
     generation_id: str = ""
@@ -357,7 +391,7 @@ class ChatService:
         """
         conversations = self._conversations(user_id, agent_id)
         attachments = [ChatAttachment.model_validate(item).model_dump() for item in (attachments or [])]
-        text, attachments = self._decompose_videos(user_id, agent_id, chat_id, text, attachments)
+        text, attachments, notice = self._decompose_videos(user_id, agent_id, chat_id, text, attachments)
         text, attachments = self._transcribe_audio(
             user_id, agent_id, chat_id, text, attachments,
         )
@@ -365,6 +399,8 @@ class ChatService:
             raise InputError("message is empty")
         slot = self._slot(user_id, agent_id)
         run = _MessageRun(chat_id, text, attachments, stream)
+        if notice:
+            run.events.put(ChatEvent("notice", text=notice, generation_id=run.generation_id))
         with slot.state:
             try:
                 if not conversations.exists_chat(chat_id):
@@ -395,19 +431,20 @@ class ChatService:
 
     @staticmethod
     def _transcription_text(transcription: str) -> str:
-        return f"[Audio transcription]\n{transcription}"
+        return f"[AUDIO] Audio transcription:\n{transcription}"
 
     def _decompose_videos(
         self, user_id: str, agent_id: str, chat_id: str, text: str, attachments: list[dict],
-    ) -> tuple[str, list[dict]]:
+    ) -> tuple[str, list[dict], str | None]:
         """Replace videos with sampled frames and an audio track when the chat model lacks video input.
 
         Models with image support receive the frames as images and the audio as audio attachments,
         which the transcription step then turns into text. Models without image support keep the
-        video attachment so the agent rejects it with the usual modality error.
+        video attachment so the agent rejects it with the usual modality error. The returned notice
+        warns the user that the model sees only the sampled frames; it is None when nothing changed.
         """
         if not any(attachment["modality"] == "video" for attachment in attachments):
-            return text, attachments
+            return text, attachments, None
         conversations = self._conversations(user_id, agent_id)
         try:
             selection = conversations.model_selection(chat_id)
@@ -417,10 +454,11 @@ class ChatService:
         chat_model = selection.id if selection else user_models(self._user(user_id), self._preferences).chat
         supported = get_provider(resolved.provider_name, api_key=resolved.api_key).supported_modalities(chat_model)
         if "video" in supported or "image" not in supported:
-            return text, attachments
+            return text, attachments, None
 
         notes: list[str] = []
         expanded: list[dict] = []
+        decomposed: list[VideoDecomposition] = []
         for attachment in attachments:
             if attachment["modality"] != "video":
                 expanded.append(attachment)
@@ -441,9 +479,10 @@ class ChatService:
                     "format": "wav",
                     "data_url": "data:audio/wav;base64," + base64.b64encode(decomposition.audio_wav).decode("ascii"),
                 })
+            decomposed.append(decomposition)
             notes.append(self._video_note(name, decomposition))
         text = "\n\n".join(part for part in [text.strip(), *notes] if part)
-        return text, expanded
+        return text, expanded, _decomposition_notice(self.language(user_id), decomposed)
 
     @staticmethod
     def _frame_attachment(name: str, index: int, frame: bytes) -> dict:
@@ -459,7 +498,7 @@ class ChatService:
     def _video_note(name: str, decomposition: VideoDecomposition) -> str:
         stamps = ", ".join(f"{seconds:g}s" for seconds in decomposition.timestamps)
         note = (
-            f"[Video '{name}' was decomposed into {len(decomposition.frames)} frames, "
+            f"[VIDEO] Video '{name}' was decomposed into {len(decomposition.frames)} frames, "
             f"attached in order at {stamps} of the video."
         )
         if decomposition.truncated:
@@ -472,7 +511,7 @@ class ChatService:
             if decomposition.audio_wav is not None
             else " The video has no audio track."
         )
-        return note + "]"
+        return note
 
     def _transcribe_audio(
         self, user_id: str, agent_id: str, chat_id: str, text: str, attachments: list[dict],

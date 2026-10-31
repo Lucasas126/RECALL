@@ -843,6 +843,13 @@ function addMessage(role) {
       }
       thinking.lastChild.textContent += chunk;
     },
+    notice(text) {
+      const note = document.createElement("div");
+      note.className = "notice";
+      note.setAttribute("role", "status");
+      note.textContent = text;
+      el.insertBefore(note, body);
+    },
     memoryMatches(count) {
       if (!Number.isInteger(count) || count < 1) return;
       if (!memoryIndicator) {
@@ -1093,6 +1100,7 @@ function handleEvent(raw, request) {
   else if (event === "reasoning") reply.thinking(payload);
   else if (event === "tool") reply.action(payload);
   else if (event === "memory") reply.memoryMatches(payload.matches);
+  else if (event === "notice") reply.notice(payload);
   else if (event === "interrupted") reply.interrupted(payload);
   else if (event === "error") reply.error(payload);
   else if (event === "done") request.done = true;

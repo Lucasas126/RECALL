@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from time import perf_counter
 from contextlib import closing
 from typing import Iterator, Optional, Union
@@ -179,6 +180,7 @@ class Agent:
         attachments = attachments or []
         self._validate_modalities(attachments)
         user_content = self._user_content(user_input, attachments)
+        ts = datetime.now().astimezone().isoformat(timespec="seconds")
         logger.info("invoke user=%s agent=%s stream=%s", self.config.user_id, self.config.id, stream)
         self._turn_started_at = perf_counter()
         # without memory, each turn starts fresh from the system prompt
@@ -207,14 +209,14 @@ class Agent:
             if cancellation is not None:
                 cancellation.raise_if_cancelled()
         except GenerationCancelled:
-            self.messages.append({"role": "user", "content": user_content})
-            self._log_turn("user", user_content)
+            self.messages.append({"role": "user", "content": self._stamped(user_content, ts)})
+            self._log_turn("user", user_content, ts=ts)
             if not continuation:
                 self._trim_context()
             self._remember_interrupted("", "")
             raise
-        self.messages.append({"role": "user", "content": user_content})
-        self._log_turn("user", user_content)
+        self.messages.append({"role": "user", "content": self._stamped(user_content, ts)})
+        self._log_turn("user", user_content, ts=ts)
         if not continuation:
             self._trim_context()
         if stream:
@@ -243,6 +245,8 @@ class Agent:
         """Build the OpenAI-compatible content parts for a user turn."""
         if not attachments:
             return text
+        if any(attachment["modality"] == "video" for attachment in attachments):
+            text = f"[VIDEO] {text}" if text else "[VIDEO]"
         parts: list[dict] = [{"type": "text", "text": text}] if text else []
         for attachment in attachments:
             modality = attachment["modality"]
@@ -259,6 +263,19 @@ class Agent:
                 })
             elif modality == "video":
                 parts.append({"type": "video_url", "video_url": {"url": data_url}})
+        return parts
+
+    @staticmethod
+    def _stamped(content: str | list[dict], ts: str) -> str | list[dict]:
+        """Prefix a user turn with its local timestamp so the model knows when it was sent."""
+        prefix = f"[{datetime.fromisoformat(ts).isoformat(sep=' ', timespec='minutes')}]"
+        if isinstance(content, str):
+            return f"{prefix} {content}" if content else prefix
+        parts = list(content)
+        if parts and parts[0].get("type") == "text":
+            parts[0] = {"type": "text", "text": f"{prefix} {parts[0]['text']}".rstrip()}
+        else:
+            parts.insert(0, {"type": "text", "text": prefix})
         return parts
 
     def _stream(self, cancellation: CancellationToken | None = None) -> Iterator[tuple[str, str | dict]]:
@@ -487,10 +504,10 @@ class Agent:
         for t in history:
             if t.get("role") not in ("user", "assistant"):
                 continue
-            self.messages.append({
-                "role": t["role"],
-                "content": self._reply_content(t["content"], bool(t.get("interrupted"))),
-            })
+            content = self._reply_content(t["content"], bool(t.get("interrupted")))
+            if t["role"] == "user" and t.get("ts"):
+                content = self._stamped(content, t["ts"])
+            self.messages.append({"role": t["role"], "content": content})
         # seed the context input size from the most recent persisted usage
         for t in reversed(history):
             u = t.get("usage")

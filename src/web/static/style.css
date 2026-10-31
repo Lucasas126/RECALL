@@ -76,6 +76,7 @@ main { display: flex; flex-direction: column; min-width: 0; height: 100vh; }
 .msg.error { color: #f28b82; }
 .msg.interrupted { border-left: 3px solid var(--muted); }
 .interruption { margin-top: 8px; color: var(--muted); font-size: .85em; }
+.notice { display: table; margin-bottom: 8px; padding: 4px 10px; border: 1px solid #b8860b; border-radius: 8px; background: #3a300f; color: #f5d27a; font-size: .85em; }
 .memory-indicator { display: table; margin-bottom: 8px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; background: #25334a; color: var(--accent); font-size: .78em; }
 .body > :first-child { margin-top: 0; }
 .body > :last-child { margin-bottom: 0; }

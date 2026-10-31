@@ -639,7 +639,7 @@ def _generation_message(
             if text and not text.endswith("\n"):
                 text += "\n\n"
             quote_start = _utf16_len(text)
-        if kind in ("tool", "reasoning_tool"):
+        if kind in ("tool", "reasoning_tool", "notice"):
             if text and not text.endswith("\n"):
                 text += "\n"
             entities.append(MessageEntity(
@@ -976,6 +976,8 @@ async def _send_generation(
                 if event.data is None:
                     raise ValueError("Telegram tool event is missing its action data")
                 content.add_action(event.data)
+            elif event.kind == "notice":
+                content.append("notice", event.text)
             else:
                 continue
             preview = _final_messages(content.parts, notice, show_thinking=show_thinking)

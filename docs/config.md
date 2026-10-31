@@ -101,9 +101,21 @@ Models with native `video` input receive the file unchanged. Models without
 `image` input still reject videos. Sampling stops after the last frame, and the
 audio extraction skips video decoding, to keep CPU use low.
 
+When this happens the web UI and Telegram show a warning above the reply, because
+the model sees only the sampled frames and may miss motion or events between them.
+
 The defaults live in `settings.yaml` under `video`. Install `ffmpeg` (which
 includes `ffprobe`) on the host running RECALL; a missing binary produces an
 explicit error for video messages only.
+
+### message tags and timestamps
+
+Each user turn is sent to the model prefixed with its local timestamp (for example
+`[2026-10-31 14:01+01:00]`), taken from the `ts` stored with the turn, so reloaded
+chats keep the same dates. Assistant replies are not prefixed. Text derived from
+audio starts with `[AUDIO]`, and text describing a video starts with `[VIDEO]`.
+Stored conversations keep the original message text; the prefixes are added only
+to the context sent to the model.
 
 ### speech-to-text
 
