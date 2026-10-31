@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 import threading
 from collections import deque
@@ -16,14 +18,16 @@ from src.config.favorites import ModelFavorites
 from src.config.loader import load_agent, load_agent_config, load_user, user_models
 from src.config.models import UserConfig
 from src.config.preferences import UserPreferences, UserPreferencesStore
-from src.config.settings import CONFIG_DIR, SPEECH_TO_TEXT
+from src.config.settings import CONFIG_DIR, SPEECH_TO_TEXT, VIDEO_DECOMPOSITION
 from src.core.sources.conversations import ConversationsSource
 from src.core.sources.registry import SourceRegistry
 from src.providers.cancellation import CancellationToken, GenerationCancelled
 from src.providers.catalog import list_openrouter_models
 from src.providers.catalog import list_openrouter_transcription_models
 from src.providers.openrouter import OpenRouterProvider
+from src.providers.provider import get_provider
 from src.utils.logger import get_logger
+from src.utils.media import VideoDecomposition, decompose_video
 from src.utils.i18n import InputError, UserMessageError
 
 logger = get_logger("service")
@@ -353,6 +357,7 @@ class ChatService:
         """
         conversations = self._conversations(user_id, agent_id)
         attachments = [ChatAttachment.model_validate(item).model_dump() for item in (attachments or [])]
+        text, attachments = self._decompose_videos(user_id, agent_id, chat_id, text, attachments)
         text, attachments = self._transcribe_audio(
             user_id, agent_id, chat_id, text, attachments,
         )
@@ -391,6 +396,83 @@ class ChatService:
     @staticmethod
     def _transcription_text(transcription: str) -> str:
         return f"[Audio transcription]\n{transcription}"
+
+    def _decompose_videos(
+        self, user_id: str, agent_id: str, chat_id: str, text: str, attachments: list[dict],
+    ) -> tuple[str, list[dict]]:
+        """Replace videos with sampled frames and an audio track when the chat model lacks video input.
+
+        Models with image support receive the frames as images and the audio as audio attachments,
+        which the transcription step then turns into text. Models without image support keep the
+        video attachment so the agent rejects it with the usual modality error.
+        """
+        if not any(attachment["modality"] == "video" for attachment in attachments):
+            return text, attachments
+        conversations = self._conversations(user_id, agent_id)
+        try:
+            selection = conversations.model_selection(chat_id)
+        except (FileNotFoundError, ValueError) as exc:
+            raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
+        resolved = load_agent(user_id, agent_id)
+        chat_model = selection.id if selection else user_models(self._user(user_id), self._preferences).chat
+        supported = get_provider(resolved.provider_name, api_key=resolved.api_key).supported_modalities(chat_model)
+        if "video" in supported or "image" not in supported:
+            return text, attachments
+
+        notes: list[str] = []
+        expanded: list[dict] = []
+        for attachment in attachments:
+            if attachment["modality"] != "video":
+                expanded.append(attachment)
+                continue
+            name = attachment["name"]
+            try:
+                data = base64.b64decode(attachment["data_url"].split(",", 1)[1], validate=True)
+            except (IndexError, binascii.Error) as exc:
+                raise InputError("invalid video data for '{name}'", name=name) from exc
+            decomposition = decompose_video(data, name, VIDEO_DECOMPOSITION)
+            expanded.extend(self._frame_attachment(name, index, frame)
+                            for index, frame in enumerate(decomposition.frames, start=1))
+            if decomposition.audio_wav is not None:
+                expanded.append({
+                    "modality": "audio",
+                    "name": f"{name} audio",
+                    "mime_type": "audio/wav",
+                    "format": "wav",
+                    "data_url": "data:audio/wav;base64," + base64.b64encode(decomposition.audio_wav).decode("ascii"),
+                })
+            notes.append(self._video_note(name, decomposition))
+        text = "\n\n".join(part for part in [text.strip(), *notes] if part)
+        return text, expanded
+
+    @staticmethod
+    def _frame_attachment(name: str, index: int, frame: bytes) -> dict:
+        return {
+            "modality": "image",
+            "name": f"{name} frame {index}",
+            "mime_type": "image/jpeg",
+            "format": "jpeg",
+            "data_url": "data:image/jpeg;base64," + base64.b64encode(frame).decode("ascii"),
+        }
+
+    @staticmethod
+    def _video_note(name: str, decomposition: VideoDecomposition) -> str:
+        stamps = ", ".join(f"{seconds:g}s" for seconds in decomposition.timestamps)
+        note = (
+            f"[Video '{name}' was decomposed into {len(decomposition.frames)} frames, "
+            f"attached in order at {stamps} of the video."
+        )
+        if decomposition.truncated:
+            note += (
+                f" Only the first {decomposition.sampled_seconds:g}s of the "
+                f"{decomposition.duration:.1f}s video were sampled."
+            )
+        note += (
+            " The audio track is transcribed below."
+            if decomposition.audio_wav is not None
+            else " The video has no audio track."
+        )
+        return note + "]"
 
     def _transcribe_audio(
         self, user_id: str, agent_id: str, chat_id: str, text: str, attachments: list[dict],

@@ -22,6 +22,16 @@ class SpeechToTextConfig(BaseModel):
     language: Optional[str] = Field(default=None, pattern=r"^[a-z]{2}(?:-[A-Z]{2})?$")
 
 
+class VideoDecompositionConfig(BaseModel):
+    """Frame sampling limits for videos sent to models without native video input."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    frame_interval_seconds: float = Field(default=5, gt=0, le=60, allow_inf_nan=False)
+    max_frames: int = Field(default=16, ge=1, le=64, strict=True)
+    max_width: int = Field(default=768, ge=64, le=4096, strict=True)
+
+
 class ProviderConfig(BaseModel):
     name: str
     api_key: Optional[str] = None  # name of the env var holding the actual key (not needed for local providers)

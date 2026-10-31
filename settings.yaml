@@ -21,6 +21,11 @@ web:
 telegram:
   allowed_users_env: TELEGRAM_ALLOWED_USERS  # comma-separated telegram_id=recall_user_id entries
 
+video:
+  frame_interval_seconds: 5  # seconds between frames sampled from videos sent to image-only models
+  max_frames: 16             # frames sent per video; the rest of the video is not sampled
+  max_width: 768             # frames are scaled down to this width in pixels to limit cost
+
 speech_to_text:
   zdr: true
   language: null  # optional ISO-639-1 code; null enables provider auto-detection

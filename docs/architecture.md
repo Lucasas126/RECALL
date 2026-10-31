@@ -52,9 +52,11 @@ The web composer sends image, audio and video attachments as validated
 OpenAI-compatible content parts. Providers expose declared input modalities;
 unsupported attachments are rejected before model invocation with a message
 localized using the user's `language` setting. Audio is transcribed through
-the configured OpenRouter speech-to-text model before the chat model runs, so
-the resulting conversation turn is text-only and can be reopened with any
-later chat model.
+the configured OpenRouter speech-to-text model before the chat model runs. Videos
+for image-only models are decomposed into frames and audio first (see
+[config.md](./config.md#video-input)). The audio becomes text, so the resulting
+conversation turn stays text-only apart from any frames and can be reopened with
+any later chat model.
 
 ### model catalog and chat selection
 

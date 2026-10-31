@@ -87,6 +87,24 @@ In private chats, replies stream through Telegram's native `sendMessageDraft`
 placeholder) and are then persisted with a normal message. If drafts are
 unavailable, the bot falls back to sending one message and editing it.
 
+### video input
+
+A video sent to a chat model that declares `image` but not `video` input is
+decomposed before the model runs. RECALL uses `ffmpeg` and `ffprobe` from the
+`PATH` to sample one frame every `video.frame_interval_seconds` (up to
+`video.max_frames`, scaled to `video.max_width` pixels), and sends the frames as
+image attachments in order. The audio track, when present, is transcribed with
+the speech-to-text flow below. The message carries a note with the frame
+timestamps, whether only part of the video was sampled, and whether the video
+has an audio track, so the model knows the frames come from a decomposed video.
+Models with native `video` input receive the file unchanged. Models without
+`image` input still reject videos. Sampling stops after the last frame, and the
+audio extraction skips video decoding, to keep CPU use low.
+
+The defaults live in `settings.yaml` under `video`. Install `ffmpeg` (which
+includes `ffprobe`) on the host running RECALL; a missing binary produces an
+explicit error for video messages only.
+
 ### speech-to-text
 
 Audio is always transcribed before the chat model is invoked. RECALL uses
@@ -342,7 +360,8 @@ Filters combine with search, favorites and ordering and reset on logout/reload.
 They do not change the chat routing policy, enable agent tools/reasoning, or
 pin an upstream provider. The web composer accepts image, audio and video
 attachments; each selected model must explicitly declare the corresponding
-`input_modalities` before RECALL sends the file. Files are limited to 10 MB
+`input_modalities` before RECALL sends the file, except that videos are
+decomposed for image-only models (see video input). Files are limited to 10 MB
 each and 25 MB per message. Audio is passed directly to models that advertise
 audio input; automatic speech-to-text is not configured. Prices remain catalog base minima under the ZDR filter, not quotes
 for a capability-filtered route. The API includes `input_modalities` and
