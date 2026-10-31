@@ -24,6 +24,7 @@
 - Put user-level provider settings in `.config/<user_id>/user.yaml` and agent settings in `.config/<user_id>/agents/<agent_id>.yaml`. Agent IDs must belong to the configured user.
 - Put provider secrets in environment variables (typically loaded from the ignored `.env` file); configure the environment-variable name in user YAML, not the secret itself.
 - Install/sync project dependencies with `uv sync`. For the configured CLI, set `USER_ID` and `AGENT_ID` in `.env`, then run `uv run python cli.py` (continues the agent's most recent chat). For the web UI run `uv run python web.py` (host/port in `settings.yaml`).
+- After changing code that affects the web UI (`web.py`) or the Telegram bot (`run_telegram.py`), restart the affected processes so the changes take effect. Restart them without asking if the user has already approved it in the session; otherwise ask for confirmation the first time, and stop only the specific processes by PID.
 - The repository currently has no automated test suite configured. For Python changes, run `uv run python -m compileall src cli.py main.py web.py`; exercise the relevant behavior manually when it requires configured providers or data.
 
 ## More specific guidance

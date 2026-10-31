@@ -349,8 +349,10 @@ async def _open_panel(
     update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, markup: InlineKeyboardMarkup, panel: _Panel,
 ) -> None:
     """Send a new panel and disable the buttons of the user's previous one."""
-    cleanup = await update.effective_message.reply_text(" ", reply_markup=ReplyKeyboardRemove())
-    await context.bot.delete_message(chat_id=panel.chat_id, message_id=cleanup.message_id)
+    # Telegram rejects blank text, so the keyboard-removal message uses a visible character.
+    with suppress(TelegramError):
+        cleanup = await update.effective_message.reply_text(".", reply_markup=ReplyKeyboardRemove())
+        await context.bot.delete_message(chat_id=panel.chat_id, message_id=cleanup.message_id)
     sent = await update.effective_message.reply_text(text, reply_markup=markup)
     panel.message_id = sent.message_id
     previous: _Panel | None = context.user_data.get("panel")
