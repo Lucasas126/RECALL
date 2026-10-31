@@ -1,19 +1,21 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-from telegram import MessageEntity, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import InlineKeyboardMarkup, MessageEntity
+from telegram.error import BadRequest
 from telegram.ext import ApplicationHandlerStop
 
 from src.config.preferences import PreferencesError, UserPreferences
-from src.service.chat import ChatEvent
+from src.service.chat import AgentBusy, ChatEvent
 from src.telegram.bot import (
-    TelegramBotState, TelegramSession, _final_messages, _generation_message,
-    _prepare_message_session, _send_generation, agent_selected, new_chat,
-    refresh_language, select_model, select_stt, settings_command, settings_selected, text_message,
+    TelegramBotState, TelegramSession, _edit_panel, _final_messages, _generation_message,
+    _prepare_message_session, _send_generation, new_chat, panel_callback,
+    refresh_language, select_agent, select_model, select_stt, settings_command, text_message,
 )
 
 
@@ -30,7 +32,7 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
             {"id": "agent-a", "name": "First"}, {"id": "agent-b", "name": "Second"},
         ]
         self.service.create_chat.return_value = {"id": "new-chat"}
-        self.service.get_chat.return_value = {
+        self.service.get_chat_models.return_value = {
             "model": {"id": "llm/base", "zdr": True}, "model_override": None,
             "stt_model": "stt/base", "stt_model_override": None,
         }
@@ -60,208 +62,284 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
             user_data={}, args=[],
         )
 
-    async def choose(self, data: str) -> None:
-        if "settings_options" not in self.context.user_data:
-            await settings_command(self.update, self.context)
-        self.update.effective_message.text = next(
-            label for label, action in self.context.user_data["settings_options"].items()
-            if action == data
-        )
-        self.assertTrue(await settings_selected(self.update, self.context))
-
-    async def test_settings_menu_shows_shared_values_and_buttons(self) -> None:
-        await settings_command(self.update, self.context)
+    async def open_panel(self, command=settings_command):
+        self.update.effective_message.reply_text.return_value = SimpleNamespace(message_id=789)
+        await command(self.update, self.context)
         call = self.update.effective_message.reply_text.await_args
+        self.markup = call.kwargs["reply_markup"]
+        self.text = call.args[0]
+        return call
+
+    def action(self, label: str) -> str:
+        button = next(
+            button for row in self.markup.inline_keyboard for button in row if label in button.text
+        )
+        return button.callback_data.split(":", 2)[2]
+
+    async def press(self, action: str, *, token: str | None = None, message_id: int = 789):
+        if "panel" not in self.context.user_data:
+            await self.open_panel()
+        panel = self.context.user_data.get("panel")
+        query = SimpleNamespace(
+            data=f"p:{token or panel.token}:{action}",
+            message=SimpleNamespace(message_id=message_id),
+            answer=AsyncMock(), edit_message_text=AsyncMock(), edit_message_reply_markup=AsyncMock(),
+        )
+        update = SimpleNamespace(
+            effective_user=self.update.effective_user, effective_chat=self.update.effective_chat,
+            effective_message=query.message, callback_query=query,
+        )
+        await panel_callback(update, self.context)
+        if query.edit_message_text.await_args is not None:
+            self.text = query.edit_message_text.await_args.args[0]
+            self.markup = query.edit_message_text.await_args.kwargs["reply_markup"]
+        return query
+
+    async def test_settings_panel_shows_shared_values_with_inline_buttons(self) -> None:
+        call = await self.open_panel()
         self.assertIn("Thinking: visible", call.args[0])
         self.assertIn("Active agent: First", call.args[0])
-        self.assertIsInstance(call.kwargs["reply_markup"], ReplyKeyboardMarkup)
-        labels = [button.text for row in call.kwargs["reply_markup"].keyboard for button in row]
-        self.assertEqual(labels, [
+        self.assertIn("Default LLM: llm/base", call.args[0])
+        self.assertIn("Default STT: stt/base", call.args[0])
+        self.assertIsInstance(self.markup, InlineKeyboardMarkup)
+        buttons = [button for row in self.markup.inline_keyboard for button in row]
+        self.assertEqual([button.text for button in buttons], [
             "Thinking: visible", "✅ English", "Español", "Active agent",
             "Default LLM model", "Default STT model", "Close",
         ])
-        self.assertIn("Default LLM: llm/base", call.args[0])
-        self.assertIn("Default STT: stt/base", call.args[0])
+        self.assertTrue(all(len(button.callback_data.encode()) <= 64 for button in buttons))
+
+    async def test_toggles_edit_the_same_panel_without_sending_messages(self) -> None:
+        await self.open_panel()
+        query = await self.press("thinking")
+        self.assertFalse(self.preferences["show_thinking"])
+        query.answer.assert_awaited_once_with()
+        self.assertIn("Thinking: hidden", self.text)
+        await self.press("lang:es")
+        self.assertEqual(self.session.language, "es")
+        self.assertIn("Agente activo", self.text)
+        self.assertIn("✅ Español", [button.text for row in self.markup.inline_keyboard for button in row])
+        await self.press("lang:en")
+        self.assertIn("Active agent", self.text)
+        self.update.effective_message.reply_text.assert_awaited_once()
+        self.assertEqual(self.session.chat_id, "current-chat")
+        self.service.send.assert_not_called()
 
     async def test_defaults_are_user_scoped_without_requiring_a_chat(self) -> None:
         self.session.chat_id = None
-        for action, catalog, model_id, preference in (
-            ("default_llm", "model_options", "llm/favorite", "default_llm_model"),
-            ("default_stt", "stt_options", "stt/new", "default_stt_model"),
-        ):
-            with self.subTest(action=action):
-                await self.choose(action)
-                self.assertNotIn("settings_options", self.context.user_data)
-                call = self.update.effective_message.reply_text.await_args
-                self.assertIsInstance(call.kwargs["reply_markup"], ReplyKeyboardMarkup)
-                self.assertNotIn("Use user default", self.context.user_data[catalog])
-                self.update.effective_message.text = next(
-                    label for label, value in self.context.user_data[catalog].items() if value == model_id
-                )
-                await text_message(self.update, self.context)
-                self.assertEqual(self.preferences[preference], model_id)
-                self.assertIn("settings_options", self.context.user_data)
-                self.assertIsNone(self.session.chat_id)
+        await self.open_panel()
+        await self.press("llm")
+        labels = [button.text for row in self.markup.inline_keyboard for button in row]
+        self.assertTrue(labels[0].startswith("⭐ 1. Favorite"))
+        self.assertNotIn("Use user default", labels)
+        await self.press(self.action("Favorite"))
+        self.assertEqual(self.preferences["default_llm_model"], "llm/favorite")
+        self.assertIn("Default LLM: llm/favorite", self.text)
+        await self.press("stt")
+        await self.press(self.action("New STT"))
+        self.assertEqual(self.preferences["default_stt_model"], "stt/new")
+        self.assertIn("Default STT: stt/new", self.text)
+        self.assertIsNone(self.session.chat_id)
         self.service.set_chat_model.assert_not_called()
         self.service.set_chat_transcription_model.assert_not_called()
+        self.service.create_chat.assert_not_called()
         self.service.send.assert_not_called()
+        self.update.effective_message.reply_text.assert_awaited_once()
 
-    async def test_chat_selectors_clear_overrides_without_changing_defaults(self) -> None:
-        before = self.preferences.copy()
-        for selector, method in (
-            (select_model, self.service.set_chat_model),
-            (select_stt, self.service.set_chat_transcription_model),
-        ):
-            with self.subTest(selector=selector.__name__):
-                await selector(self.update, self.context)
-                self.update.effective_message.text = "Use user default"
-                await text_message(self.update, self.context)
-                if selector is select_model:
-                    method.assert_called_once_with("test-user", "agent-a", "current-chat", None, zdr=True)
-                else:
-                    method.assert_called_once_with("test-user", "agent-a", "current-chat", None)
-                self.assertIsInstance(
-                    self.update.effective_message.reply_text.await_args.kwargs["reply_markup"], ReplyKeyboardRemove,
-                )
-        self.assertEqual(self.preferences, before)
-        self.service.update_preferences.assert_not_called()
-        self.service.send.assert_not_called()
-
-    async def test_chat_model_selection_does_not_change_user_defaults(self) -> None:
-        await select_model(self.update, self.context)
-        options = self.context.user_data["model_options"]
-        self.assertEqual(list(options.values()), [None, "llm/favorite", "llm/cheap"])
-        self.update.effective_message.text = next(label for label, value in options.items() if value == "llm/cheap")
-        await text_message(self.update, self.context)
-        self.service.set_chat_model.assert_called_once_with(
-            "test-user", "agent-a", "current-chat", "llm/cheap", zdr=True,
-        )
-        self.service.update_preferences.assert_not_called()
-        self.assertEqual(self.preferences["default_llm_model"], "llm/base")
-
-    async def test_switching_menus_discards_default_target_and_navigation(self) -> None:
-        await self.choose("default_stt")
-        self.assertTrue(self.context.user_data["stt_target_default"])
-        await select_model(self.update, self.context)
-        self.assertNotIn("stt_catalog", self.context.user_data)
-        self.assertNotIn("stt_target_default", self.context.user_data)
-        self.assertFalse(self.context.user_data["model_target_default"])
-        await new_chat(self.update, self.context)
-        self.assertNotIn("model_target_default", self.context.user_data)
-        self.assertNotIn("model_catalog", self.context.user_data)
-
-    async def test_failed_default_save_is_reported_and_keeps_selection(self) -> None:
-        await self.choose("default_stt")
-        self.service.update_preferences.side_effect = PreferencesError("Could not save preferences")
-        self.update.effective_message.text = next(iter(self.context.user_data["stt_options"]))
-        with self.assertLogs("recall.telegram", level="WARNING"):
-            await text_message(self.update, self.context)
-        self.assertIn("Could not save preferences", self.update.effective_message.reply_text.await_args.args[0])
-        self.assertEqual(self.preferences["default_stt_model"], "stt/base")
-        self.assertTrue(self.context.user_data["stt_target_default"])
-
-    async def test_default_pagination_preserves_user_scope_without_a_chat(self) -> None:
-        self.session.chat_id = None
+    async def test_default_pagination_and_back_stay_in_the_panel(self) -> None:
         self.service.list_transcription_models.return_value = [
             {"id": f"stt/{index}", "name": f"STT {index}", "pricing_prompt": "0.1"}
             for index in range(11)
         ]
-        await self.choose("default_stt")
-        self.update.effective_message.text = "➡️ Next STT"
-        await text_message(self.update, self.context)
-        self.assertIn("Page 2/2", self.update.effective_message.reply_text.await_args.args[0])
-        self.update.effective_message.text = next(iter(self.context.user_data["stt_options"]))
-        await text_message(self.update, self.context)
-        self.assertEqual(self.preferences["default_stt_model"], "stt/10")
-        self.service.set_chat_transcription_model.assert_not_called()
-        self.service.create_chat.assert_not_called()
-
-    async def test_spanish_default_menu_can_return_without_saving_or_sending_a_message(self) -> None:
-        self.preferences["language"] = "es"
-        self.session.language = "es"
-        for action in ("default_llm", "default_stt"):
-            with self.subTest(action=action):
-                await self.choose(action)
-                self.update.effective_message.text = "Volver"
-                await text_message(self.update, self.context)
-                self.assertIn("settings_options", self.context.user_data)
+        await self.open_panel()
+        await self.press("stt")
+        self.assertIn("Page 1/2", self.text)
+        await self.press(self.action("Next"))
+        self.assertIn("Page 2/2", self.text)
+        await self.press(self.action("Back"))
+        self.assertIn("Settings", self.text)
         self.service.update_preferences.assert_not_called()
-        self.service.send.assert_not_called()
+        await self.press("stt")
+        await self.press("page:1")
+        await self.press(self.action("STT 10"))
+        self.assertEqual(self.preferences["default_stt_model"], "stt/10")
+        self.update.effective_message.reply_text.assert_awaited_once()
 
-    async def test_settings_agent_reuses_selector_and_changes_active_agent(self) -> None:
-        await self.choose("thinking")
-        self.assertFalse(self.preferences["show_thinking"])
-        await self.choose("language:es")
-        self.assertEqual(self.preferences["language"], "es")
-        self.assertEqual(self.session.chat_id, "current-chat")
-        await self.choose("agents")
-        self.assertNotIn("settings_options", self.context.user_data)
-        self.assertIsInstance(
-            self.update.effective_message.reply_text.await_args.kwargs["reply_markup"], ReplyKeyboardMarkup,
-        )
-        self.update.effective_message.text = "Second (agent-b)"
-        self.assertTrue(await agent_selected(self.update, self.context))
+    async def test_agent_choice_switches_active_agent_and_returns_to_settings(self) -> None:
+        await self.open_panel()
+        await self.press("agents")
+        await self.press(self.action("Second (agent-b)"))
         self.assertEqual(self.preferences["agent_id"], "agent-b")
         self.assertEqual(self.session.agent_id, "agent-b")
         self.assertIsNone(self.session.chat_id)
+        self.assertIn("Active agent: Second", self.text)
         self.service.send.assert_not_called()
 
-    async def test_unknown_text_is_not_treated_as_a_settings_choice(self) -> None:
-        await settings_command(self.update, self.context)
-        self.update.effective_message.text = "Normal chat message"
-        self.assertFalse(await settings_selected(self.update, self.context))
+    async def test_closing_removes_buttons_and_panel_state(self) -> None:
+        await self.open_panel()
+        query = await self.press("close")
+        query.edit_message_text.assert_awaited_once_with("Settings closed.", reply_markup=None)
+        self.assertNotIn("panel", self.context.user_data)
+        query = await self.press("thinking", token="stale")
+        query.answer.assert_awaited_once()
+        self.assertTrue(query.answer.await_args.kwargs["show_alert"])
         self.service.update_preferences.assert_not_called()
 
-    async def test_closing_settings_removes_keyboard_and_menu_state(self) -> None:
-        await self.choose("close")
-        self.assertNotIn("settings_options", self.context.user_data)
-        self.assertIsInstance(
-            self.update.effective_message.reply_text.await_args.kwargs["reply_markup"], ReplyKeyboardRemove,
+    async def test_reopening_settings_expires_the_previous_panel(self) -> None:
+        self.context.bot.edit_message_reply_markup = AsyncMock()
+        await self.open_panel()
+        old = self.context.user_data["panel"]
+        self.update.effective_message.reply_text.return_value = SimpleNamespace(message_id=790)
+        await settings_command(self.update, self.context)
+        self.context.bot.edit_message_reply_markup.assert_awaited_once_with(
+            chat_id=456, message_id=789, reply_markup=None,
         )
+        query = await self.press("thinking", token=old.token, message_id=789)
+        self.assertIn("expired", query.answer.await_args.args[0])
+        query.edit_message_reply_markup.assert_awaited_once_with(reply_markup=None)
+        self.service.update_preferences.assert_not_called()
+
+    async def test_failed_save_alerts_without_editing_or_changing_session(self) -> None:
+        await self.open_panel()
+        self.service.update_preferences.side_effect = PreferencesError("Could not save preferences")
+        with self.assertLogs("recall.telegram", level="WARNING"):
+            query = await self.press("thinking")
+        self.assertIn("Could not save preferences", query.answer.await_args.args[0])
+        self.assertTrue(query.answer.await_args.kwargs["show_alert"])
+        query.edit_message_text.assert_not_awaited()
+        self.assertEqual(self.session.chat_id, "current-chat")
+
+    async def test_unchanged_panel_edit_is_not_an_error(self) -> None:
+        await self.open_panel()
+        query = SimpleNamespace(edit_message_text=AsyncMock(side_effect=BadRequest("Message is not modified")))
+        await _edit_panel(query, "Same", None)
+        query.edit_message_text.side_effect = BadRequest("Message to edit not found")
+        with self.assertRaises(BadRequest):
+            await _edit_panel(query, "Same", None)
+
+    async def test_unauthorized_callbacks_are_answered_and_ignored(self) -> None:
+        await self.open_panel()
+        self.update.effective_user = SimpleNamespace(id=999)
+        self.service.get_preferences.reset_mock()
+        query = await self.press("thinking")
+        query.answer.assert_awaited_once_with()
+        self.service.get_preferences.assert_not_called()
+        self.service.update_preferences.assert_not_called()
+
+    async def test_regular_text_after_settings_is_sent_to_the_model(self) -> None:
+        await self.open_panel()
+        self.update.effective_message.text = "Thinking: visible"
+        with patch("src.telegram.bot._send_generation", new=AsyncMock()) as send:
+            await text_message(self.update, self.context)
+            await asyncio.sleep(0)
+        send.assert_awaited_once()
+        self.service.update_preferences.assert_not_called()
+        self.assertIn("panel", self.context.user_data)
 
     async def test_settings_shows_active_agent_instead_of_saved_new_chat_default(self) -> None:
         self.preferences["agent_id"] = "agent-b"
-        await settings_command(self.update, self.context)
-        self.assertIn("Active agent: First", self.update.effective_message.reply_text.await_args.args[0])
+        await self.open_panel()
+        self.assertIn("Active agent: First", self.text)
 
-    async def test_text_dispatch_consumes_settings_without_sending_to_model(self) -> None:
-        await settings_command(self.update, self.context)
-        self.update.effective_message.text = "Active agent"
-        await text_message(self.update, self.context)
-        self.assertIn("Second (agent-b)", self.context.user_data["agent_options"])
-        self.service.send.assert_not_called()
-        self.service.create_chat.assert_not_called()
-        self.update.effective_message.text = "Second (agent-b)"
-        await text_message(self.update, self.context)
-        self.assertEqual(self.session.agent_id, "agent-b")
-        self.assertIsNone(self.session.chat_id)
-        self.service.send.assert_not_called()
-
-    async def test_settings_replaces_previous_selection_state(self) -> None:
-        self.context.user_data.update({
-            "agent_options": {"Old": "agent-b"}, "model_options": {"Old": "model"},
-            "stt_options": {"Old": "stt"},
-        })
-        await settings_command(self.update, self.context)
-        for key in ("agent_options", "model_options", "stt_options"):
-            self.assertNotIn(key, self.context.user_data)
-
-    async def test_failed_save_is_explicit_and_does_not_change_session(self) -> None:
-        self.service.update_preferences.side_effect = PreferencesError("Could not save preferences")
-        with self.assertLogs("recall.telegram", level="WARNING"):
-            await self.choose("thinking")
-        self.assertIn("Could not save preferences", self.update.effective_message.reply_text.await_args.args[0])
-        self.assertEqual(self.session.chat_id, "current-chat")
-
-    async def test_unauthorized_settings_are_ignored(self) -> None:
+    async def test_unauthorized_settings_command_is_ignored(self) -> None:
         self.update.effective_user.id = 999
         await settings_command(self.update, self.context)
-        self.context.user_data["settings_options"] = {"Thinking": "thinking"}
-        self.update.effective_message.text = "Thinking"
-        self.assertTrue(await settings_selected(self.update, self.context))
         self.service.get_preferences.assert_not_called()
-        self.service.update_preferences.assert_not_called()
         self.update.effective_message.reply_text.assert_not_awaited()
+
+    async def test_chat_model_selector_is_inline_and_only_changes_this_chat(self) -> None:
+        await self.open_panel(select_model)
+        self.assertIsInstance(self.markup, InlineKeyboardMarkup)
+        labels = [button.text for row in self.markup.inline_keyboard for button in row]
+        self.assertEqual(labels[0], "Use user default")
+        self.assertTrue(labels[1].startswith("⭐ 1. Favorite"))
+        self.assertEqual(labels[-1], "Close")
+        self.assertIn("User default", self.text)
+        query = await self.press(self.action("Cheap"))
+        self.service.set_chat_model.assert_called_once_with(
+            "test-user", "agent-a", "current-chat", "llm/cheap", zdr=True,
+        )
+        query.edit_message_text.assert_awaited_once()
+        self.assertIsNone(query.edit_message_text.await_args.kwargs["reply_markup"])
+        self.assertIn("llm/cheap", self.text)
+        self.assertNotIn("panel", self.context.user_data)
+        self.service.update_preferences.assert_not_called()
+        self.update.effective_message.reply_text.assert_awaited_once()
+
+    async def test_chat_selectors_reset_overrides_without_changing_defaults(self) -> None:
+        before = self.preferences.copy()
+        for command, method, expected in (
+            (select_model, self.service.set_chat_model,
+             (("test-user", "agent-a", "current-chat", None), {"zdr": True})),
+            (select_stt, self.service.set_chat_transcription_model,
+             (("test-user", "agent-a", "current-chat", None), {})),
+        ):
+            with self.subTest(command=command.__name__):
+                await self.open_panel(command)
+                await self.press("inherit")
+                self.assertEqual((method.call_args.args, method.call_args.kwargs), expected)
+                self.assertIn("default", self.text)
+        self.assertEqual(self.preferences, before)
+        self.service.update_preferences.assert_not_called()
+        self.service.send.assert_not_called()
+
+    async def test_chat_selector_search_and_pagination_stay_in_place(self) -> None:
+        self.context.args = ["STT"]
+        self.service.list_transcription_models.return_value = [
+            {"id": f"stt/{index}", "name": f"STT {index}", "pricing_prompt": "0.1"}
+            for index in range(11)
+        ]
+        await self.open_panel(select_stt)
+        self.service.list_transcription_models.assert_called_once_with("test-user", "STT", zdr=True)
+        await self.press(self.action("Next"))
+        self.assertIn("Page 2/2", self.text)
+        await self.press(self.action("STT 10"))
+        self.service.set_chat_transcription_model.assert_called_once_with(
+            "test-user", "agent-a", "current-chat", "stt/10",
+        )
+        self.update.effective_message.reply_text.assert_awaited_once()
+
+    async def test_chat_selector_expires_when_the_current_chat_changes(self) -> None:
+        await self.open_panel(select_model)
+        await new_chat(self.update, self.context)
+        query = await self.press("pick:0")
+        self.assertIn("expired", query.answer.await_args.args[0])
+        self.service.set_chat_model.assert_not_called()
+
+    async def test_busy_agent_is_reported_as_an_alert_and_keeps_the_selector(self) -> None:
+        await self.open_panel(select_model)
+        self.service.set_chat_model.side_effect = AgentBusy(
+            "wait for this agent's active and queued replies before changing models",
+        )
+        with self.assertLogs("recall.telegram", level="WARNING"):
+            query = await self.press("pick:0")
+        self.assertTrue(query.answer.await_args.kwargs["show_alert"])
+        self.assertIn("wait for this agent", query.answer.await_args.args[0])
+        query.edit_message_text.assert_not_awaited()
+        self.assertIn("panel", self.context.user_data)
+
+    async def test_selectagent_switches_and_persists_shared_selection(self) -> None:
+        await self.open_panel(select_agent)
+        await self.press(self.action("Second (agent-b)"))
+        self.assertEqual(self.preferences["agent_id"], "agent-b")
+        self.assertEqual(self.session.agent_id, "agent-b")
+        self.assertIsNone(self.session.chat_id)
+        self.assertIn("agent-b", self.text)
+        self.assertNotIn("panel", self.context.user_data)
+
+    async def test_closing_a_selector_only_removes_its_buttons(self) -> None:
+        await self.open_panel(select_stt)
+        query = await self.press("close")
+        query.edit_message_reply_markup.assert_awaited_once_with(reply_markup=None)
+        query.edit_message_text.assert_not_awaited()
+        self.service.set_chat_transcription_model.assert_not_called()
+
+    async def test_selector_rejects_settings_only_actions(self) -> None:
+        await self.open_panel(select_model)
+        with self.assertLogs("recall.telegram", level="WARNING"):
+            query = await self.press("thinking")
+        self.assertTrue(query.answer.await_args.kwargs["show_alert"])
+        self.service.update_preferences.assert_not_called()
 
     async def test_newchat_reads_preferred_agent_saved_by_another_channel(self) -> None:
         self.preferences["agent_id"] = "agent-b"
@@ -280,14 +358,6 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(_prepare_message_session(self.session, self.service))
         self.service.create_chat.assert_called_once_with("test-user", "agent-b")
         self.assertEqual(self.session.agent_id, "agent-b")
-
-    async def test_explicit_selectagent_still_switches_and_persists_shared_selection(self) -> None:
-        self.context.user_data["agent_options"] = {"Second": "agent-b"}
-        self.update.effective_message.text = "Second"
-        self.assertTrue(await agent_selected(self.update, self.context))
-        self.assertEqual(self.preferences["agent_id"], "agent-b")
-        self.assertEqual(self.session.agent_id, "agent-b")
-        self.assertIsNone(self.session.chat_id)
 
     async def test_hidden_thinking_does_not_remove_tools_or_interrupted_text(self) -> None:
         self.preferences["show_thinking"] = False
@@ -323,14 +393,6 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
         with patch("src.telegram.bot._ReplyStream", return_value=stream):
             await _send_generation(self.update, self.context, "Hello", [])
         self.assertEqual(self.service.send.call_args.args[:3], ("test-user", "agent-a", "current-chat"))
-
-    async def test_language_selection_translates_the_settings_menu_immediately(self) -> None:
-        await self.choose("language:es")
-        self.assertIn("Agente activo", self.update.effective_message.reply_text.await_args.args[0])
-        self.assertEqual(self.session.language, "es")
-        await self.choose("language:en")
-        self.assertIn("Active agent", self.update.effective_message.reply_text.await_args.args[0])
-        self.assertEqual(self.session.language, "en")
 
     async def test_language_middleware_picks_up_web_changes_without_switching_chat(self) -> None:
         self.preferences["language"] = "es"

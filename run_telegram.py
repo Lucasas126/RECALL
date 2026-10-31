@@ -1,6 +1,7 @@
 import os
 
 import dotenv
+from telegram import Update
 
 from src.telegram.bot import build_application
 from src.utils.logger import setup_logging
@@ -12,7 +13,8 @@ def main() -> None:
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set in the environment.")
     setup_logging("telegram")
-    build_application(token).run_polling()
+    # Telegram remembers the last allowed_updates list; request all so button callbacks arrive.
+    build_application(token).run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":

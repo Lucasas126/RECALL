@@ -90,15 +90,15 @@ requesting user's configured agents before saving. Preference operations
 neither move chats between agents nor alter in-flight execution; inherited
 inference models refresh before the next request.
 
-Status: persistence, `GET`/`PATCH /api/preferences`, Telegram reply-keyboard `/settings`,
+Status: persistence, `GET`/`PATCH /api/preferences`, Telegram's inline `/settings` panel,
 web settings controls, default-model selection, nullable chat override resets,
 thinking visibility and agent selection are
 implemented. Visibility is enforced by channel renderers without changing
 reasoning generation, stored history or service events. Telegram captures each
 reply's user/agent/chat before asynchronous delivery, so changing a session
-cannot reroute an accepted message. The settings agent option reuses
-`/selectagent`'s selector and handler to change the active Telegram agent, rather
-than just saving a future preference. Web agent switching stays in the sidebar.
+cannot reroute an accepted message. The settings agent option changes the
+active Telegram agent like `/selectagent`, rather than just saving a future
+preference. Web agent switching stays in the sidebar.
 English/Spanish operational notices and
 application errors use a shared translation catalog served to the browser.
 Errors carry their RECALL-owned template separately from opaque interpolation
