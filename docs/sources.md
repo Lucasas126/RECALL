@@ -28,6 +28,8 @@ Each chat may also have a `<chat_id>.model.json` sidecar, managed only through
 `ConversationsSource.model_selection` and `set_model`. It stores
 `{"provider": "openrouter", "id": "vendor/model", "zdr": true}` separately from message
 history, so selecting a model does not add a turn or create another chat.
+A generated `<chat_id>.title.json` sidecar (`{"title": "..."}`) stores the chat title once the
+chat reaches `chat_naming.min_messages`; `summary` uses it instead of the first user message.
 Missing metadata means the current user's LLM default with ZDR required;
 old sidecars without `zdr` also default to true. Explicit false is per chat
 and persists across restarts. Invalid metadata is an

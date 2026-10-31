@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from src.config.models import SpeechToTextConfig, TavilyConfig, VideoDecompositionConfig
+from src.config.models import ChatNamingConfig, SpeechToTextConfig, TavilyConfig, VideoDecompositionConfig
 
 """Framework-level settings, loaded from `settings.yaml` at the repo root.
 
@@ -55,6 +55,9 @@ VIDEO_DECOMPOSITION = VideoDecompositionConfig.model_validate(_video)
 
 # ------------------------------------------------------------------ external web access
 TAVILY = TavilyConfig.model_validate(_raw.get("tavily", {}))
+
+# ------------------------------------------------------------------ chat naming
+CHAT_NAMING = ChatNamingConfig.model_validate(_raw.get("chat_naming", {}))
 
 # ------------------------------------------------------------------ associative memory
 ASSOC_CONTEXT_MESSAGES = _assoc["context_messages"]   # recent messages the memory subagent sees

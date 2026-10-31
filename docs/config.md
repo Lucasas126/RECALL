@@ -491,6 +491,31 @@ integer between 1,000 and 100,000. The client resolves the key when constructed,
 not when settings are imported. An unset/blank key leaves web access unavailable;
 it does not prevent normal chat. Restart after changing configuration or the key.
 
+## chat naming
+
+The root `settings.yaml` holds a framework-wide small model used to generate chat
+titles. Like Tavily, it uses one shared key referenced by env var name:
+
+```yaml
+chat_naming:
+  model: openai/gpt-4o-mini
+  api_key: OPENROUTER_API_KEY
+  zdr: true
+  min_messages: 5
+```
+
+`model` is an OpenRouter model ID, `zdr` restricts routing to zero data retention
+providers, and `min_messages` (1-1000) is the number of user and assistant messages
+required before a title is generated. Behavior:
+
+- the title is generated once, after the reply that reaches `min_messages`, and stored
+  in `<chat_id>.title.json` next to the chat's other metadata; it is not regenerated
+- shorter chats keep the first user message as their title
+- if the env var is unset or the naming request fails, a warning is logged and the
+  chat keeps its previous title; the reply has already been delivered by then. An
+  unreadable title file is an explicit error, not a fallback
+- the title is shown in the chat list and removed with the chat
+
 Implemented: the standalone client in `src/providers/tavily.py`, basic search
 (1-10 results, at most 2,000 excerpt characters per result), search filters
 (topic, recency or publication-date range, domain include/exclude lists and

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import os
 import re
 import threading
 from collections import deque
@@ -20,7 +21,7 @@ from src.config.favorites import ModelFavorites
 from src.config.loader import load_agent, load_agent_config, load_user, user_models
 from src.config.models import AgentConfig, ReasoningEffort, UserConfig
 from src.config.preferences import UserPreferences, UserPreferencesStore
-from src.config.settings import CONFIG_DIR, DATA_DIR, SPEECH_TO_TEXT, VIDEO_DECOMPOSITION
+from src.config.settings import CHAT_NAMING, CONFIG_DIR, DATA_DIR, SPEECH_TO_TEXT, VIDEO_DECOMPOSITION
 from src.core.sources.conversations import ConversationsSource
 from src.core.sources.registry import SourceRegistry
 from src.providers.cancellation import CancellationToken, GenerationCancelled
@@ -36,6 +37,11 @@ logger = get_logger("service")
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _REASONING_SUPPORT_TTL_SECONDS = 600
+_NAMING_PROMPT = (
+    "Name the conversation below with a short title of at most six words, in the language used "
+    "in the conversation. Reply with the title only, without quotes or punctuation at the end."
+)
+_NAMING_TURN_CHARS = 1000
 
 AgentFactory = Callable[[str, str, Optional[str]], Agent]
 
@@ -71,6 +77,17 @@ def _decomposition_notice(language: str, decompositions: list[VideoDecomposition
     if any(item.truncated for item in decompositions):
         notice += _DECOMPOSITION_TRUNCATED[code]
     return notice
+
+
+def _naming_transcript(turns: list[dict]) -> str:
+    lines = []
+    for turn in turns:
+        content = turn.get("content", "")
+        if isinstance(content, list):
+            content = " ".join(part.get("text", "") for part in content if part.get("type") == "text")
+        text = " ".join(str(content).split())[:_NAMING_TURN_CHARS]
+        lines.append(f"{turn['role']}: {text}")
+    return "\n".join(lines)
 
 
 class ServiceError(UserMessageError):
@@ -743,6 +760,33 @@ class ChatService:
                 if agent.last_latency_report:
                     report += "\n\n" + agent.last_latency_report
                 yield ChatEvent("usage", report, generation_id=run.generation_id)
+        self._name_chat(user_id, agent_id, run.chat_id)
+
+    def _name_chat(self, user_id: str, agent_id: str, chat_id: str) -> None:
+        """Generate a title once a chat reaches the configured length; request failures are logged, not raised."""
+        conversations = self._conversations(user_id, agent_id)
+        if conversations.generated_title(chat_id) is not None:
+            return
+        turns = [t for t in self._load(conversations, chat_id) if t.get("role") in ("user", "assistant")]
+        if len(turns) < CHAT_NAMING.min_messages:
+            return
+        api_key = os.environ.get(CHAT_NAMING.api_key, "").strip()
+        if not api_key:
+            logger.warning("chat naming skipped: env var %s is not set", CHAT_NAMING.api_key)
+            return
+        messages = [
+            {"role": "system", "content": _NAMING_PROMPT},
+            {"role": "user", "content": _naming_transcript(turns)},
+        ]
+        try:
+            reply = OpenRouterProvider(api_key=api_key).invoke_sync(
+                messages, model=CHAT_NAMING.model, api_key=api_key, zdr=CHAT_NAMING.zdr,
+            )
+            title = conversations.set_generated_title(chat_id, reply["response"] or "")
+        except Exception:
+            logger.exception("chat naming failed for %s/%s/%s; keeping the first-message title", user_id, agent_id, chat_id)
+            return
+        logger.info("named chat %s/%s/%s: %s", user_id, agent_id, chat_id, title)
 
     # ------------------------------------------------------------------ internals
 

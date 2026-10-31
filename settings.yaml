@@ -39,3 +39,9 @@ associative_memory:
   context_messages: 6       # recent messages the memory subagent sees
   top_n: 3                  # fragments injected into the active agent
   score_threshold: 0.25     # minimum similarity for a fragment to be injected
+
+chat_naming:
+  model: openai/gpt-4o-mini    # small OpenRouter model that names chats
+  api_key: OPENROUTER_API_KEY  # shared env var NAME for the OpenRouter key, never the secret
+  zdr: true                    # only route naming requests to zero data retention providers
+  min_messages: 5              # chats shorter than this keep the first-message title

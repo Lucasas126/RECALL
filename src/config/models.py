@@ -17,6 +17,17 @@ class TavilyConfig(BaseModel):
     max_content_chars: int = Field(default=16000, ge=1000, le=100000, strict=True)
 
 
+class ChatNamingConfig(BaseModel):
+    """Framework-wide small model that generates chat titles; api_key names an environment variable, not a secret."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: str = Field(default="openai/gpt-4o-mini", strict=True, min_length=1, max_length=256)
+    api_key: str = Field(default="OPENROUTER_API_KEY", pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
+    zdr: bool = Field(default=True, strict=True)
+    min_messages: int = Field(default=5, ge=1, le=1000, strict=True)
+
+
 class SpeechToTextConfig(BaseModel):
     """OpenRouter speech-to-text settings."""
 
