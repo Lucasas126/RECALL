@@ -9,7 +9,7 @@ import yaml
 from src.config.agents import AgentStore
 from src.config.models import AgentConfig, ModelsConfig, ResolvedAgent, UserConfig
 from src.config.preferences import UserPreferencesStore
-from src.config.settings import CONFIG_DIR, DATA_DIR
+from src.config.settings import CONFIG_DIR, DATA_DIR, MCP
 from src.agent.tool_groups import DEFAULT_TOOL_GROUPS
 
 
@@ -72,6 +72,9 @@ def load_agent(user_id: str, agent_id: Optional[str] = None) -> ResolvedAgent:
     selected_tool_groups = agent.chat_config.tool_groups
     if selected_tool_groups is None and agent.chat_config.tools:
         selected_tool_groups = list(DEFAULT_TOOL_GROUPS)
+    unknown_mcp = sorted(set(agent.chat_config.mcp) - set(MCP.servers))
+    if unknown_mcp:
+        raise ValueError(f"agent '{agent.id}' enables unknown MCP servers: {', '.join(unknown_mcp)}")
     return ResolvedAgent(
         user_id=user.id,
         language=user.language,
@@ -94,5 +97,6 @@ def load_agent(user_id: str, agent_id: Optional[str] = None) -> ResolvedAgent:
         tool_groups=selected_tool_groups,
         allow=agent.chat_config.allow,
         deny=agent.chat_config.deny,
+        mcp=agent.chat_config.mcp,
         associative_memory=agent.chat_config.associative_memory,
     )

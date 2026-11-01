@@ -46,3 +46,22 @@ chat_naming:
   api_key: OPENROUTER_API_KEY  # shared env var NAME for the OpenRouter key, never the secret
   zdr: true                    # only route naming requests to zero data retention providers
   min_messages: 5              # chats shorter than this keep the first-message title
+
+# MCP servers offered to every user; each user connects their own account in Settings,
+# and each agent enables the servers it needs (see docs/mcp.md)
+mcp:
+  connect_timeout_seconds: 120  # server start and tool listing (the first npx run downloads it)
+  call_timeout_seconds: 60      # maximum time for one tool call
+  servers:
+    google_calendar:
+      name: Google Calendar
+      description: Read and manage events in the user's Google Calendar.
+      command: npx
+      args: ["-y", "@cocal/google-calendar-mcp@2.8.1"]
+      env:
+        GOOGLE_OAUTH_CREDENTIALS: {env: GOOGLE_OAUTH_CREDENTIALS}  # shared env var NAME holding the OAuth client JSON path
+        GOOGLE_CALENDAR_MCP_TOKEN_PATH: {user_file: tokens.json}  # per-user token file
+      exclude_tools: [manage-accounts]  # accounts are connected from RECALL's Settings
+      auth:
+        args: ["-y", "@cocal/google-calendar-mcp@2.8.1", "auth"]
+        credential_file: tokens.json

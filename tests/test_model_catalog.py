@@ -10,6 +10,7 @@ from src.config.models import ProviderConfig, UserConfig
 from src.providers.catalog import CatalogUnavailable, OpenRouterModel, list_openrouter_models
 from src.service.chat import ChatService
 from src.web.app import create_app
+from auth_helpers import TEST_PASSWORD_HASH, login
 
 
 def _model(model_id: str, name: str, output: str = "text") -> dict:
@@ -195,16 +196,18 @@ class ModelCatalogTests(unittest.TestCase):
 class ModelCatalogWebTests(unittest.TestCase):
     def setUp(self) -> None:
         self.user = UserConfig(
-            id="test-user", name="Test", provider=ProviderConfig(name="openrouter"), agents=[],
+            id="test-user", name="Test", provider=ProviderConfig(name="openrouter"),
+            password_hash=TEST_PASSWORD_HASH, agents=[],
         )
         self.service = ChatService(agent_factory=Mock())
         self.client = TestClient(create_app(self.service))
         self.client.__enter__()
         self.addCleanup(self.client.__exit__, None, None, None)
-        self.client.cookies.set("recall_user", self.user.id)
         user_patch = patch("src.service.chat.load_user", return_value=self.user)
         self.load_user = user_patch.start()
         self.addCleanup(user_patch.stop)
+        login(self.client, self.user.id)
+        self.load_user.reset_mock()
         catalog_patch = patch("src.service.chat.list_openrouter_models", return_value=[
             OpenRouterModel(id="vendor/alpha", name="Alpha", description="Test", zdr_providers=["Private"]),
         ])
@@ -221,10 +224,22 @@ class ModelCatalogWebTests(unittest.TestCase):
             "parameter_routes": [],
         }])
         self.catalog.assert_called_once_with("alpha", zdr=True)
-        self.load_user.assert_called_once_with("test-user")
+        self.load_user.assert_called_with("test-user")
 
     def test_login_is_required_before_catalog_lookup(self) -> None:
         self.client.cookies.clear()
+        self.assertEqual(self.client.get("/api/models").status_code, 401)
+        self.catalog.assert_not_called()
+
+    def test_password_is_required_for_login(self) -> None:
+        self.client.cookies.clear()
+        self.assertEqual(
+            self.client.post("/api/login", json={"user_id": self.user.id}).status_code, 422,
+        )
+        response = self.client.post(
+            "/api/login", json={"user_id": self.user.id, "password": "incorrect-password"},
+        )
+        self.assertEqual(response.status_code, 401)
         self.assertEqual(self.client.get("/api/models").status_code, 401)
         self.catalog.assert_not_called()
 

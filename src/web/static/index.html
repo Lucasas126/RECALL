@@ -29,7 +29,9 @@
       </nav>
       <button id="settings-open" type="button" aria-haspopup="dialog">Settings</button>
       <button id="new-chat">+ New chat</button>
+      <button id="agent-new" type="button" hidden>+ New agent</button>
       <ul id="chat-list"></ul>
+      <ul id="agent-list" hidden></ul>
     </aside>
     <main>
       <div id="chat-view">
@@ -65,21 +67,24 @@
       </form>
       </div>
       <section id="agents-view" hidden>
-        <div class="agents-list">
-          <div class="model-heading">
-            <h2 id="agents-title">Agents</h2>
-            <button id="agent-new" type="button">+ New agent</button>
-          </div>
-          <ul id="agent-list"></ul>
-        </div>
         <p id="agent-error" class="error" role="alert"></p>
         <p id="agent-status" class="model-note" role="status"></p>
         <p id="agents-empty" class="model-note">Select an agent to edit it, or create a new one.</p>
         <form id="agent-form" class="agent-form" hidden>
           <h3 id="agent-form-title">Edit agent</h3>
+          <nav class="tabs agent-tabs" aria-label="Agent configuration">
+            <button id="agent-tab-general" type="button" aria-pressed="true">General</button>
+            <button id="agent-tab-mcp" type="button" aria-pressed="false">MCP</button>
+          </nav>
+          <div id="agent-panel-general" class="agent-panel">
           <label>
             <span id="agent-name-label">Name</span>
             <input id="agent-name" required maxlength="100">
+          </label>
+          <label>
+            <span id="agent-description-label">Description</span>
+            <textarea id="agent-description" rows="2" maxlength="500"></textarea>
+            <span id="agent-description-hint" class="model-note">Optional. Shown in the agent list; not sent to the model.</span>
           </label>
           <label>
             <span id="agent-prompt-label">System prompt</span>
@@ -126,6 +131,11 @@
               <span id="agent-retained-hint" class="model-note">Empty keeps all messages.</span>
             </label>
           </fieldset>
+          </div>
+          <div id="agent-panel-mcp" class="agent-panel" hidden>
+            <p id="agent-mcp-note" class="model-note">MCP servers act on each user's own account. Connect accounts in Settings &gt; Connections.</p>
+            <div id="agent-mcp-list"></div>
+          </div>
           <div class="agent-actions">
             <button id="agent-save" type="submit">Save agent</button>
             <button id="agent-delete" type="button">Delete agent</button>
@@ -160,6 +170,13 @@
       <p id="settings-error" class="error" role="alert"></p>
       <button id="settings-save" type="submit">Save settings</button>
     </form>
+    <section id="connections" class="connections" aria-labelledby="connections-title">
+      <h3 id="connections-title">Connections</h3>
+      <p id="connections-note" class="model-note">Connect your own account for each service your agents can use. Every user connects separately.</p>
+      <p id="connections-browser-note" class="model-note">Sign-in opens in a browser on the computer running RECALL.</p>
+      <ul id="connection-list"></ul>
+      <p id="connections-error" class="error" role="alert"></p>
+    </section>
   </dialog>
 
   <dialog id="model-dialog" aria-labelledby="model-title">

@@ -3,7 +3,7 @@
 ## Project context
 
 - RECALL is a Python 3.12+ framework for per-user, per-agent assistants with memory and tools.
-- Read the relevant pages in `docs/` before changing behavior. In particular, `docs/architecture.md`, `docs/config.md`, `docs/sources.md`, `docs/agents.md`, and `docs/tools.md` describe the intended design.
+- Before changing behavior, read the relevant design pages: [architecture](docs/architecture.md) for layer boundaries and channels, [configuration](docs/config.md) for settings and ownership, [sources](docs/sources.md) for data access, [agents](docs/agents.md) for orchestration, and [tools](docs/tools.md) for tool behavior. Read only the pages needed for the task, not all documentation on every request.
 - Check each document's implementation/status notes and the current code. Some documented features are planned, not implemented; do not present or build on a planned feature as if it already exists.
 - Keep the data plane scoped to the requesting user and agent. Route memory access through `SourceRegistry` and source APIs; do not bypass their path validation, isolation, or overlay behavior with direct filesystem access.
 - Keep capabilities independent of orchestration and pass dependencies explicitly. Avoid adding global mutable state.
@@ -24,8 +24,8 @@
 - Put user-level provider settings in `.config/<user_id>/user.yaml` and agent settings in `.config/<user_id>/agents/<agent_id>.yaml`. Agent IDs must belong to the configured user.
 - Put provider secrets in environment variables (typically loaded from the ignored `.env` file); configure the environment-variable name in user YAML, not the secret itself.
 - Install/sync project dependencies with `uv sync`. For the configured CLI, set `USER_ID` and `AGENT_ID` in `.env`, then run `uv run python cli.py` (continues the agent's most recent chat). For the web UI run `uv run python web.py` (host/port in `settings.yaml`).
-- After changing code that affects the web UI (`web.py`) or the Telegram bot (`run_telegram.py`), restart the affected processes so the changes take effect. Restart them without asking if the user has already approved it in the session; otherwise ask for confirmation the first time, and stop only the specific processes by PID.
-- The repository currently has no automated test suite configured. For Python changes, run `uv run python -m compileall src cli.py main.py web.py`; exercise the relevant behavior manually when it requires configured providers or data.
+- The project is in initial development with no production deployment. After implementing a feature, always restart both the web and Telegram services so the changes take effect; no additional restart confirmation is required. Identify and stop only their specific process IDs, preserve their launch configuration, and verify that both services are running and responsive afterward. Report restart or readiness failures explicitly. Documentation-only and instruction-only changes do not require a restart.
+- Automated tests in `tests/` use the standard-library `unittest` framework. For Python changes, run the relevant tests with `uv run python -m unittest discover -s tests -p "test_<area>.py"` (replace the pattern with the affected test files), and run `uv run python -m compileall src tests cli.py main.py web.py run_telegram.py`. Exercise relevant behavior manually when it requires configured providers or data; compilation alone does not validate behavior.
 
 ## More specific guidance
 

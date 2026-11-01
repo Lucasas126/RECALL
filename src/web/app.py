@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Iterator, Literal, Optional
+from typing import AsyncIterator, Iterator, Literal, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -17,6 +18,7 @@ from src.config.models import AgentConfig, ReasoningEffort
 from src.config.preferences import PreferencesError, UserPreferences
 from src.core.sources.conversations import ChatMetadataError
 from src.providers.catalog import CatalogUnavailable
+from src.providers.mcp import McpError, McpNotConnected, UnknownMcpServer
 from src.service.chat import (
     AgentBusy,
     ChatAttachment,
@@ -60,6 +62,10 @@ class ChatReasoningEffortIn(BaseModel):
     effort: ReasoningEffort | None
 
 
+class ChatTitleIn(BaseModel):
+    title: str = Field(max_length=1000)
+
+
 def _sse(event: str, data, generation_id: str = "") -> str:
     event_id = f"id: {generation_id}\n" if generation_id else ""
     return f"{event_id}event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -71,7 +77,13 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
     The user comes from a signed session cookie set after password authentication.
     """
     service = service or ChatService()
-    app = FastAPI(title="RECALL")
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        yield
+        service.close()
+
+    app = FastAPI(title="RECALL", lifespan=lifespan)
     session_secret = os.environ.get(WEB_SESSION_SECRET_ENV)
     if not session_secret:
         raise RuntimeError(
@@ -143,8 +155,18 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
 
     @app.exception_handler(AgentBusy)
     @app.exception_handler(AgentConflict)
-    def _agent_conflict(request: Request, exc: AgentBusy | AgentConflict):
+    @app.exception_handler(McpNotConnected)
+    def _agent_conflict(request: Request, exc: AgentBusy | AgentConflict | McpNotConnected):
         return localized_error(request, 409, exc)
+
+    @app.exception_handler(UnknownMcpServer)
+    def _unknown_mcp_server(request: Request, exc: UnknownMcpServer):
+        return localized_error(request, 404, exc)
+
+    @app.exception_handler(McpError)
+    def _mcp_error(request: Request, exc: McpError):
+        logger.warning("MCP operation failed: %s", exc)
+        return localized_error(request, 502, exc)
 
     @app.middleware("http")
     async def no_cache(request: Request, call_next):
@@ -218,6 +240,22 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
     def list_tool_groups(user_id: str = Depends(current_user)):
         return service.list_tool_groups(user_id)
 
+    @app.get("/api/mcp")
+    def list_mcp_servers(user_id: str = Depends(current_user)):
+        return service.list_mcp_servers(user_id)
+
+    @app.get("/api/mcp/{server_id}/tools")
+    def list_mcp_tools(server_id: str, user_id: str = Depends(current_user)):
+        return service.list_mcp_tools(user_id, server_id)
+
+    @app.post("/api/mcp/{server_id}/connect")
+    def connect_mcp(server_id: str, user_id: str = Depends(current_user)):
+        return service.connect_mcp(user_id, server_id)
+
+    @app.delete("/api/mcp/{server_id}/connection")
+    def disconnect_mcp(server_id: str, user_id: str = Depends(current_user)):
+        return service.disconnect_mcp(user_id, server_id)
+
     @app.post("/api/agents", status_code=201)
     def create_agent(body: AgentConfig, user_id: str = Depends(current_user)):
         return service.create_agent(user_id, body)
@@ -265,6 +303,12 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
         agent_id: str, chat_id: str, body: ChatReasoningEffortIn, user_id: str = Depends(current_user),
     ):
         return service.set_chat_reasoning_effort(user_id, agent_id, chat_id, body.effort)
+
+    @app.put("/api/agents/{agent_id}/chats/{chat_id}/title")
+    def rename_chat(
+        agent_id: str, chat_id: str, body: ChatTitleIn, user_id: str = Depends(current_user),
+    ):
+        return service.rename_chat(user_id, agent_id, chat_id, body.title)
 
     @app.delete("/api/agents/{agent_id}/chats/{chat_id}", status_code=204)
     def delete_chat(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):

@@ -13,6 +13,7 @@ from src.config.models import ProviderConfig, UserConfig
 from src.providers.catalog import CatalogUnavailable, OpenRouterModel
 from src.service.chat import ChatService
 from src.web.app import create_app
+from auth_helpers import TEST_PASSWORD_HASH, login
 
 
 class ModelFavoritesStorageTests(unittest.TestCase):
@@ -99,7 +100,8 @@ class ModelFavoritesWebTests(unittest.TestCase):
         for user in ("user-one", "user-two"):
             (self.root / user).mkdir()
             self.users[user] = UserConfig(
-                id=user, name=user, provider=ProviderConfig(name="openrouter"), agents=[],
+                id=user, name=user, provider=ProviderConfig(name="openrouter"),
+                password_hash=TEST_PASSWORD_HASH, agents=[],
             )
         root_patch = patch("src.service.chat.CONFIG_DIR", self.root)
         root_patch.start()
@@ -117,7 +119,7 @@ class ModelFavoritesWebTests(unittest.TestCase):
         self.client = TestClient(create_app(self.service))
         self.client.__enter__()
         self.addCleanup(self.client.__exit__, None, None, None)
-        self.client.cookies.set("recall_user", "user-one")
+        login(self.client, "user-one")
         self.url = "/api/models/favorites"
         catalog_patch = patch("src.service.chat.list_openrouter_models", return_value=[
             OpenRouterModel(
@@ -144,10 +146,10 @@ class ModelFavoritesWebTests(unittest.TestCase):
 
     def test_favorites_are_scoped_to_cookie_user(self) -> None:
         self.add()
-        self.client.cookies.set("recall_user", "user-two")
+        login(self.client, "user-two")
         self.assertEqual(self.client.get(self.url).json(), [])
         self.client.delete(self.url + "/vendor/model:free")
-        self.client.cookies.set("recall_user", "user-one")
+        login(self.client, "user-one")
         self.assertEqual(self.client.get(self.url).json(), ["vendor/model:free"])
 
     def test_non_zdr_or_inexact_model_id_cannot_be_added(self) -> None:
@@ -184,7 +186,7 @@ class ModelFavoritesWebTests(unittest.TestCase):
         self.assertIn("Could not read model favorites", response.json()["detail"])
         self.assertEqual(path.read_text(encoding="utf-8"), "invalid")
 
-    def test_unauthenticated_or_unknown_user_cannot_mutate_preferences(self) -> None:
+    def test_unauthenticated_or_unknown_user_cannot_mutate_favorites(self) -> None:
         for user in (None, "missing", "..\\user-two"):
             with self.subTest(user=user):
                 self.client.cookies.clear()
@@ -193,6 +195,11 @@ class ModelFavoritesWebTests(unittest.TestCase):
                 self.assertEqual(self.client.get(self.url).status_code, 401)
                 self.assertEqual(self.add().status_code, 401)
                 self.assertEqual(self.client.delete(self.url + "/vendor/model:free").status_code, 401)
+                if user is not None:
+                    response = self.client.post(
+                        "/api/login", json={"user_id": user, "password": "test-password-123"},
+                    )
+                    self.assertEqual(response.status_code, 401)
         self.catalog.assert_not_called()
         self.assertFalse((self.root / "user-one" / "openrouter-favorites.json").exists())
 

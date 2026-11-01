@@ -31,6 +31,7 @@ isolation is enforced in one place: the per-agent `SourceRegistry` (path resolut
 
 - each agent has a **tool-group policy**: a selection from the shared tool-group catalog.
 - the available groups are memory read-only, memory read and edit, and web search.
+- each agent also chooses which shared **MCP servers** it uses (for example Google Calendar), optionally read-only, with a tool selection and extra instructions. The tools act on the agent's user's own connected account; see [MCP servers](mcp.md).
 - legacy `allow`/`deny` tool lists are still accepted as an additional per-tool filter.
 - **modes** (recall/dream) further restrict the active set on top of the policy.
 
@@ -45,7 +46,7 @@ example: an agent whose policy excludes the web group will not have `web_search`
 
 ## managing agents
 
-users create, edit and delete agents from the web **Agents** tab; the routes and rules are in [config.md](./config.md#managing-agents). A new agent's id comes from its name and stays fixed in the form. Changing an id through the API moves its data folder, and deleting an agent keeps its data on disk.
+users create, edit and delete agents from the web **Agents** tab, which lists the agents in the sidebar with their optional description; the routes and rules are in [config.md](./config.md#managing-agents). A new agent's id comes from its name and stays fixed in the form. Changing an id through the API moves its data folder, and deleting an agent keeps its data on disk.
 
 ## agent config (sketch)
 

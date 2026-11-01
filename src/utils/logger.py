@@ -66,3 +66,8 @@ def get_logger(component: str) -> logging.Logger:
         _attach_file_handler(component)
     return logger
 
+
+def run_log_dir() -> Optional[Path]:
+    """Return the current run's log folder, or None when logging was not set up."""
+    return _run_dir
+

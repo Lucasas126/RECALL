@@ -22,12 +22,13 @@ from src.config.loader import load_agent, load_agent_config, load_user, user_mod
 from src.config.models import AgentConfig, ReasoningEffort, UserConfig
 from src.agent.tool_groups import TOOL_GROUP_CATALOG
 from src.config.preferences import UserPreferences, UserPreferencesStore
-from src.config.settings import CHAT_NAMING, CONFIG_DIR, DATA_DIR, SPEECH_TO_TEXT, VIDEO_DECOMPOSITION
+from src.config.settings import CHAT_NAMING, CONFIG_DIR, DATA_DIR, MCP, SPEECH_TO_TEXT, VIDEO_DECOMPOSITION
 from src.core.sources.conversations import ConversationsSource
 from src.core.sources.registry import SourceRegistry
 from src.providers.cancellation import CancellationToken, GenerationCancelled
 from src.providers.catalog import CatalogUnavailable, list_openrouter_models
 from src.providers.catalog import list_openrouter_transcription_models
+from src.providers.mcp import McpManager
 from src.providers.openrouter import OpenRouterProvider
 from src.providers.provider import get_provider
 from src.utils.logger import get_logger
@@ -178,8 +179,11 @@ class ChatService:
     identity (web login, telegram id, ...). Returns plain dicts and events, never internal objects.
     """
 
-    def __init__(self, agent_factory: AgentFactory = Agent.from_config):
-        self._agent_factory = agent_factory
+    def __init__(self, agent_factory: AgentFactory | None = None, mcp: McpManager | None = None):
+        self._mcp = mcp or McpManager(MCP, CONFIG_DIR)
+        self._agent_factory = agent_factory or (
+            lambda user_id, agent_id, chat_id: Agent.from_config(user_id, agent_id, chat_id, self._mcp)
+        )
         self._slots: dict[tuple[str, str], _AgentSlot] = {}
         self._slots_guard = threading.Lock()
         self._favorites = ModelFavorites(CONFIG_DIR)
@@ -229,17 +233,52 @@ class ChatService:
         self._user(user_id)
         return [dict(item) for item in TOOL_GROUP_CATALOG]
 
+    # ------------------------------------------------------------------ mcp connections
+
+    def list_mcp_servers(self, user_id: str) -> list[dict]:
+        """Return the shared MCP catalog with this user's connection status for each server."""
+        self._user(user_id)
+        return [self._mcp.status(user_id, server_id) for server_id in self._mcp.servers]
+
+    def list_mcp_tools(self, user_id: str, server_id: str) -> list[dict]:
+        """List a connected server's tools for this user, to choose them per agent."""
+        self._user(user_id)
+        return [
+            {"name": tool.name, "description": tool.description, "read_only": tool.read_only}
+            for tool in self._mcp.list_tools(user_id, server_id)
+        ]
+
+    def connect_mcp(self, user_id: str, server_id: str) -> dict:
+        """Start the server's sign-in for this user; returns the status with the sign-in URL."""
+        self._user(user_id)
+        return self._mcp.start_auth(user_id, server_id)
+
+    def disconnect_mcp(self, user_id: str, server_id: str) -> dict:
+        """Stop this user's server and delete the user's stored credentials for it."""
+        self._user(user_id)
+        return self._mcp.disconnect(user_id, server_id)
+
+    def close(self) -> None:
+        """Stop background resources such as MCP server processes."""
+        self._mcp.close()
+
+    def _check_mcp(self, config: AgentConfig) -> None:
+        for server_id in config.chat_config.mcp:
+            self._mcp.server(server_id)
+
     def get_agent(self, user_id: str, agent_id: str) -> dict:
         self._owned_agent(user_id, agent_id)
         return self._agent_config(user_id, agent_id).model_dump(mode="json")
 
     def create_agent(self, user_id: str, config: AgentConfig) -> dict:
         self._user(user_id)
+        self._check_mcp(config)
         return self._agents.create(user_id, config).model_dump(mode="json")
 
     def update_agent(self, user_id: str, agent_id: str, config: AgentConfig) -> dict:
         """Save an idle agent's configuration; a changed id also moves its data folder and preference."""
         self._owned_agent(user_id, agent_id)
+        self._check_mcp(config)
         slot = self._slot(user_id, agent_id)
         with slot.state:
             if slot.active or slot.pending:
@@ -516,6 +555,16 @@ class ChatService:
                         conversations.set_reasoning_effort(chat_id, None)
                 slot.agents.pop(chat_id, None)
         return self.get_chat_models(user_id, agent_id, chat_id)["model"]
+
+    def rename_chat(self, user_id: str, agent_id: str, chat_id: str, title: str) -> dict:
+        """Replace a chat's title with a user-chosen one; automatic naming no longer changes it."""
+        conversations = self._conversations(user_id, agent_id)
+        self._load(conversations, chat_id)
+        try:
+            conversations.rename(chat_id, title)
+        except FileNotFoundError as exc:
+            raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
+        return conversations.summary(chat_id)
 
     def delete_chat(self, user_id: str, agent_id: str, chat_id: str) -> None:
         conversations = self._conversations(user_id, agent_id)

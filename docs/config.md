@@ -537,6 +537,10 @@ required before a title is generated. Behavior:
   chat keeps its previous title; the reply has already been delivered by then. An
   unreadable title file is an explicit error, not a fallback
 - the title is shown in the chat list and removed with the chat
+- users can rename a chat with messages from the web chat list (✎ or double-click the title),
+  or with `PUT /api/agents/<agent_id>/chats/<chat_id>/title` and `{"title": "..."}`. the
+  title is trimmed to one line of 1-60 characters (otherwise `400`) and replaces the
+  stored one; automatic naming never overwrites an existing title
 
 Implemented: the standalone client in `src/providers/tavily.py`, basic search
 (1-10 results, at most 2,000 excerpt characters per result), search filters
@@ -569,6 +573,15 @@ selectable in the web **Agents** tab. Agent YAML stores the selection as
 Existing `allow` and `deny` lists remain supported as an additional per-tool
 filter.
 
+## MCP servers
+
+External services such as Google Calendar are connected through MCP servers. The
+catalog lives under `mcp` in the root `settings.yaml`, each user connects their own
+account in Settings > Connections (credentials are stored in
+`.config/<user_id>/mcp/<server_id>/`), and each agent enables servers in
+`chat_config.mcp`. Shared values such as the Google OAuth client path come from
+environment variables (`GOOGLE_OAUTH_CREDENTIALS`). See [MCP servers](mcp.md).
+
 ## config files
 
 ```yaml
@@ -589,10 +602,11 @@ models:
 # <user_id>/agents/<agent_id>.yaml
 id: aria
 name: Aria
+description: Helps with notes and planning  # optional; shown in the web agent list, not sent to the model
 personality_prompt: >
   you are aria, a helpful assistant...
 chat_config:
-  stream: true                       # stream tokens as they arrive
+  stream: true                        # stream tokens as they arrive
   has_memory: true                   # keep conversation history in context
   reasoning: true                    # request and separate thinking tokens
   reasoning_tokens: 20               # optional reasoning budget
@@ -600,6 +614,8 @@ chat_config:
   conversation_messages_retained: 20 # last N messages kept in context (see sources.md)
   tools: true                       # enable the selected tool groups
   tool_groups: [memory_read, memory_edit]  # memory_read, memory_edit, web
+  mcp:                               # MCP servers enabled for this agent (see mcp.md)
+    google_calendar: {tools: null, read_only: false, instructions: ""}
 ```
 
 ## loading
@@ -614,11 +630,15 @@ messages.
 
 ## managing agents
 
-the web **Agents** tab lists the user's agents and edits the name, `personality_prompt` and all `chat_config` options. a new agent's `id` is derived from its name (lowercase, accents removed, non-alphanumeric characters replaced by `-`) and is not editable from the form. the same operations are available as routes:
+the web **Agents** tab lists the user's agents in the sidebar (name and description) and edits the name, `description`, `personality_prompt` and all `chat_config` options. a new agent's `id` is derived from its name (lowercase, accents removed, non-alphanumeric characters replaced by `-`) and is not editable from the form. the same operations are available as routes:
 
 | method | route | result |
 | --- | --- | --- |
 | `GET` | `/api/tool-groups` | shared tool-group catalog available to the user's agents |
+| `GET` | `/api/mcp` | shared MCP server catalog with the user's connection status |
+| `GET` | `/api/mcp/<server_id>/tools` | tools of a server the user has connected (`409` when not connected) |
+| `POST` | `/api/mcp/<server_id>/connect` | starts the server's sign-in for the user; returns the status and sign-in URL |
+| `DELETE` | `/api/mcp/<server_id>/connection` | stops the user's server and deletes their stored credentials |
 | `GET` | `/api/agents` | full configuration of each agent the user owns, including `chat_config.tool_groups` |
 | `POST` | `/api/agents` | creates `agents/<id>.yaml` and appends the id to `agents` in `user.yaml` (`201`) |
 | `GET` | `/api/agents/<agent_id>` | one agent's configuration |
@@ -627,7 +647,7 @@ the web **Agents** tab lists the user's agents and edits the name, `personality_
 
 rules:
 
-- ids match `[A-Za-z0-9_-]{1,64}`; `name` has 1–100 characters and `personality_prompt` 1–20000.
+- ids match `[A-Za-z0-9_-]{1,64}`; `name` has 1–100 characters, `description` 0–500 (optional, empty by default) and `personality_prompt` 1–20000.
 - ids are unique per user. a duplicate id, or an existing file name, returns `409`.
 - changing the `id` through `PUT` (the web form never does) moves `data/<user_id>/<old_id>` to `data/<user_id>/<new_id>` and updates the user's preferred agent. if the agent file was named after its old id, it is renamed after the new one; otherwise it keeps its name. if the data folder cannot be moved (for example, another process is using it), the change is rolled back.
 - deleting keeps `data/<user_id>/<agent_id>` on disk, so creating an agent later with the same id reuses that memory. if the deleted agent was the preferred one, the preference falls back to the user's first agent.

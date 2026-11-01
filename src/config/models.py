@@ -1,11 +1,97 @@
 from __future__ import annotations
 
-from typing import Literal, Optional
+import re
+from typing import Annotated, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from src.agent.tool_groups import validate_tool_groups
 ReasoningEffort = Literal["minimal", "low", "medium", "high", "xhigh", "max"]
+
+_ENV_NAME = r"^[A-Za-z_][A-Za-z0-9_]*$"
+# a bare file name inside the user's private MCP folder; no separators, so it cannot escape it
+_STATE_FILE = r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$"
+McpServerId = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{0,31}$")]
+
+
+class McpEnvFromEnvironment(BaseModel):
+    """Environment value copied from RECALL's own environment, shared by every user."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    env: str = Field(pattern=_ENV_NAME)
+
+
+class McpEnvUserFile(BaseModel):
+    """Absolute path of a file in the requesting user's private folder for the server."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    user_file: str = Field(pattern=_STATE_FILE)
+
+
+McpEnvValue = Union[str, McpEnvFromEnvironment, McpEnvUserFile]
+
+
+class McpAuthConfig(BaseModel):
+    """Interactive sign-in run by the server's own command; it stores the user's credentials."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    args: list[str] = Field(min_length=1)
+    credential_file: str = Field(pattern=_STATE_FILE)
+    url_pattern: str = Field(default=r"Authentication URL:\s*(https?://\S+)", min_length=1)
+    timeout_seconds: int = Field(default=300, ge=30, le=1800, strict=True)
+
+
+class McpServerConfig(BaseModel):
+    """One MCP server offered to every user; each user connects with their own credentials."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=500)
+    transport: Literal["stdio"] = "stdio"
+    command: str = Field(min_length=1)
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, McpEnvValue] = Field(default_factory=dict)
+    exclude_tools: list[str] = Field(default_factory=list)
+    auth: Optional[McpAuthConfig] = None
+
+    @field_validator("env")
+    @classmethod
+    def _validate_env_names(cls, value: dict[str, McpEnvValue]) -> dict[str, McpEnvValue]:
+        invalid = sorted(name for name in value if not re.match(_ENV_NAME, name))
+        if invalid:
+            raise ValueError(f"invalid environment variable name: {', '.join(invalid)}")
+        return value
+
+
+class McpSettings(BaseModel):
+    """Framework-wide MCP server catalog and client limits."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    connect_timeout_seconds: float = Field(default=120, ge=1, le=600, allow_inf_nan=False)
+    call_timeout_seconds: float = Field(default=60, ge=1, le=600, allow_inf_nan=False)
+    servers: dict[McpServerId, McpServerConfig] = Field(default_factory=dict)
+
+
+class AgentMcpConfig(BaseModel):
+    """An agent's use of one MCP server; the server is enabled while this entry exists."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tools: Optional[list[str]] = None  # None exposes every tool the server offers
+    read_only: bool = False
+    instructions: str = Field(default="", max_length=4000)
+
+    @field_validator("tools")
+    @classmethod
+    def _validate_tools(cls, value: Optional[list[str]]) -> Optional[list[str]]:
+        if value is not None and len(set(value)) != len(value):
+            raise ValueError("MCP tool selections must not contain duplicates")
+        return value
 
 
 class TavilyConfig(BaseModel):
@@ -89,6 +175,8 @@ class ChatConfig(BaseModel):
     tool_groups: list[str] | None = None
     allow: list[str] | None = None
     deny: list[str] | None = None
+    # MCP servers from the shared catalog enabled for this agent, keyed by server id
+    mcp: dict[McpServerId, AgentMcpConfig] = Field(default_factory=dict)
     # run a memory subagent each turn that suggests relevant fragments from long-term memory
     associative_memory: bool = True
 
@@ -105,6 +193,7 @@ class AgentConfig(BaseModel):
 
     id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
     name: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=500)
     personality_prompt: str = Field(min_length=1, max_length=20000)
     chat_config: ChatConfig = ChatConfig()
 
@@ -133,4 +222,5 @@ class ResolvedAgent(BaseModel):
     tool_groups: list[str] | None = None
     allow: list[str] | None = None
     deny: list[str] | None = None
+    mcp: dict[str, AgentMcpConfig] = Field(default_factory=dict)
     associative_memory: bool = True

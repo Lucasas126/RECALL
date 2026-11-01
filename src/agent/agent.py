@@ -11,6 +11,7 @@ import src.providers.ollama  # noqa: F401  (registers the ollama provider)
 from src.agent import usage
 from src.agent import associative
 from src.agent.tools import build_tools
+from src.agent.toolsets.mcp import build_mcp_tools
 from src.config.loader import load_agent
 from src.config.models import ModelsConfig, ResolvedAgent
 from src.config.settings import AGENT_MAX_TOOL_HOPS, TAVILY
@@ -24,6 +25,7 @@ from src.providers.provider import (
     unsupported_modality_message,
 )
 from src.providers.cancellation import CancellationToken, GenerationCancelled
+from src.providers.mcp import McpManager
 from src.providers.tavily import TavilyClient
 
 logger = get_logger("agent")
@@ -52,11 +54,15 @@ def _dedupe_tool_calls(tool_calls: list[dict]) -> list[dict]:
 class Agent:
     """Orchestration entry point: wraps an agent's config, provider and conversation memory."""
 
-    def __init__(self, config: ResolvedAgent, provider: LLMProvider, chat_id: Optional[str] = None):
+    def __init__(
+        self, config: ResolvedAgent, provider: LLMProvider, chat_id: Optional[str] = None,
+        mcp: McpManager | None = None,
+    ):
         self.config = config.model_copy(deep=True)
         self._default_chat_model = config.models.chat
         self._default_reasoning_effort = config.reasoning_effort
         self.provider = provider
+        self._mcp = mcp
         # per-agent access to the data plane (mind palace, conversations, ...)
         self.sources = SourceRegistry.for_agent(config.user_id, config.id)
         # semantic index over the indexed sources; kept in sync as memory changes
@@ -65,12 +71,15 @@ class Agent:
             self._embeddings_provider(), config.models.embeddings,
         )
         self.index.sync()
-        self._tool_specs, self._tool_handlers = (
+        self._base_tool_specs, self._base_tool_handlers = (
             build_tools(
                 self, TavilyClient.from_config(TAVILY), config.tool_groups, config.allow, config.deny,
             )
             if config.tools and config.tool_groups else ([], {})
         )
+        self._tool_specs, self._tool_handlers = list(self._base_tool_specs), dict(self._base_tool_handlers)
+        # MCP notes appended to the system prompt; refreshed with the MCP tools at each turn
+        self._mcp_notes: list[str] = []
         self._max_context = None  # model context window, fetched lazily from the provider
         self.open_chat(chat_id)
         logger.debug(
@@ -102,7 +111,7 @@ class Agent:
         self._prev_breakdown: Optional[dict] = None
         # conversation history is the memory
         self.messages: list[dict] = [
-            {"role": "system", "content": self.config.personality_prompt}
+            {"role": "system", "content": self._system_prompt()}
         ]
         # whether older turns were dropped from the in-context window
         self._truncated = False
@@ -138,7 +147,8 @@ class Agent:
 
     @classmethod
     def from_config(
-        cls, user_id: str, agent_id: Optional[str] = None, chat_id: Optional[str] = None
+        cls, user_id: str, agent_id: Optional[str] = None, chat_id: Optional[str] = None,
+        mcp: McpManager | None = None,
     ) -> "Agent":
         config = load_agent(user_id, agent_id)
         provider = get_provider(config.provider_name, api_key=config.api_key)
@@ -146,11 +156,27 @@ class Agent:
             "loaded agent user=%s agent=%s provider=%s model=%s",
             config.user_id, config.id, config.provider_name, config.models.chat,
         )
-        return cls(config, provider, chat_id)
+        return cls(config, provider, chat_id, mcp)
 
     @property
     def name(self) -> str:
         return self.config.name
+
+    def _system_prompt(self) -> str:
+        if not self._mcp_notes:
+            return self.config.personality_prompt
+        notes = "\n\n".join(self._mcp_notes)
+        return f"{self.config.personality_prompt}\n\n## Connected services (MCP)\n\n{notes}"
+
+    def _refresh_mcp_tools(self) -> None:
+        """Rebuild this turn's MCP tools, so connecting or disconnecting a service applies at once."""
+        if self._mcp is None or not self.config.tools or not self.config.mcp:
+            return
+        toolset = build_mcp_tools(self._mcp, self.config.user_id, self.config.mcp)
+        self._tool_specs = [*self._base_tool_specs, *toolset.specs]
+        self._tool_handlers = {**self._base_tool_handlers, **toolset.handlers}
+        self._mcp_notes = toolset.notes
+        self.messages[0] = {"role": "system", "content": self._system_prompt()}
 
     def _embeddings_provider(self) -> LLMProvider:
         """The provider used for embeddings, reusing the chat provider when identical."""
@@ -191,7 +217,7 @@ class Agent:
         self._turn_started_at = perf_counter()
         # without memory, each turn starts fresh from the system prompt
         if not self.config.has_memory and not continuation:
-            self.messages = [{"role": "system", "content": self.config.personality_prompt}]
+            self.messages = [{"role": "system", "content": self._system_prompt()}]
             self._truncated = False
         # associative memory: run before logging the turn so the search can't match this message
         self._assoc_suggestion = None
@@ -225,6 +251,7 @@ class Agent:
         self._log_turn("user", user_content, ts=ts)
         if not continuation:
             self._trim_context()
+        self._refresh_mcp_tools()
         if stream:
             return self._stream(cancellation)
         if cancellation is not None:
