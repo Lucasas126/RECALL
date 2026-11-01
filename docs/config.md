@@ -134,9 +134,13 @@ explicit error for video messages only.
 
 The web composer and Telegram accept PDFs. RECALL reads them locally before the model runs: PyMuPDF
 extracts the selectable text of each page, and a page with fewer than `pdf.ocr_min_chars` non-whitespace
-characters (default 25) is rendered at `pdf.ocr_dpi` and read with Tesseract. Pages with enough text never
-reach OCR. The model receives only text: no PDF file and no page images. Images and charts are ignored, except
-text Tesseract recognizes inside them.
+characters (default 25) is rendered at `pdf.ocr_dpi` and read with Tesseract as a whole. A page with enough
+text is still read with OCR for each large embedded image (at least 5% of the page area, up to 10 images per
+page), because scanned or photographed details such as a card's name and address are often stored only as
+images. Small images such as logos are skipped, and pages without large images skip OCR. The OCR text of an image
+is added after the page's digital text, so a heading that appears in both may show up twice. The model receives
+only text: no PDF file and no page images. Vector graphics and charts are not interpreted, except text Tesseract
+recognizes inside images.
 
 The text is added to the user's message under `Attached document: <name>`, with a `[Page N]` marker before each
 page (`[Page N, OCR]` for OCR pages) so answers can cite pages. The stored turn keeps this text, not the file,
