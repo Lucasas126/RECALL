@@ -2,6 +2,8 @@ const $ = (id) => document.getElementById(id);
 const state = {
   user: null, agentId: null, chatId: null, busy: false, session: 0,
   requests: new Set(), latest: null, sendQueue: Promise.resolve(),
+  // message containers of chats with a reply in flight, so they keep updating while another chat is open
+  view: null, views: new Map(), usages: new Map(),
   attachments: [],
   model: null, modelCatalog: null, modelCatalogZdr: null, modelFavorites: [],
   modelBusy: false, modelLoading: false, modelRequest: 0,
@@ -161,8 +163,19 @@ $("logout").addEventListener("click", async () => {
 
 // ------------------------------------------------------------------ agents & chats
 
+function chatKey(agentId, chatId) {
+  return `${agentId}/${chatId}`;
+}
+
+function isGenerating(agentId, chatId) {
+  for (const request of state.requests) {
+    if (request.agentId === agentId && request.chatId === chatId) return true;
+  }
+  return false;
+}
+
 async function selectAgent(agentId) {
-  if (state.busy || state.modelBusy) return;
+  if (state.modelBusy) return;
   state.agentId = agentId;
   state.chatId = null;
   state.model = null;
@@ -176,7 +189,7 @@ async function selectAgent(agentId) {
 $("agent-select").addEventListener("change", async (e) => {
   const session = state.session;
   const agentId = e.target.value;
-  if (state.busy || state.modelBusy || state.settingsBusy) {
+  if (state.modelBusy || state.settingsBusy) {
     $("agent-select").value = state.agentId ?? "";
     return;
   }
@@ -195,7 +208,7 @@ $("agent-select").addEventListener("change", async (e) => {
 
 // Opening a chat from another agent makes that agent the active one, as the agent selector does.
 async function openChatFromList(chat) {
-  if (state.busy || state.modelBusy || state.settingsBusy) return;
+  if (state.modelBusy || state.settingsBusy) return;
   const session = state.session;
   if (chat.agent_id !== state.agentId) {
     await savePreferences({ agent_id: chat.agent_id });
@@ -555,6 +568,8 @@ async function refreshChats() {
     ...chats.map((chat) => {
       const li = document.createElement("li");
       li.classList.toggle("active", chat.id === state.chatId && chat.agent_id === state.agentId);
+      const generating = isGenerating(chat.agent_id, chat.id);
+      li.classList.toggle("generating", generating);
       const meta = document.createElement("div");
       meta.className = "chat-meta";
       const title = document.createElement("span");
@@ -568,7 +583,9 @@ async function refreshChats() {
       del.className = "del";
       del.textContent = "✕";
       del.title = "Delete chat";
-      del.disabled = state.busy;
+      del.disabled = generating || state.modelBusy;
+      del.dataset.agent = chat.agent_id;
+      del.dataset.chat = chat.id;
       del.addEventListener("click", (e) => {
         e.stopPropagation();
         deleteChat(chat);
@@ -581,11 +598,11 @@ async function refreshChats() {
 }
 
 async function newChat() {
-  if (state.busy || state.modelBusy || state.settingsBusy || !state.user) return;
+  if (state.modelBusy || state.settingsBusy || !state.user) return;
   const session = state.session;
   try {
     const preferences = await refreshPreferences();
-    if (session !== state.session || state.busy || state.modelBusy || state.settingsBusy) return;
+    if (session !== state.session || state.modelBusy || state.settingsBusy) return;
     if (!preferences.agent_id) throw new Error(tr("No agents are configured for this user."));
     if (preferences.agent_id !== state.agentId) await selectAgent(preferences.agent_id);
     const agentId = state.agentId;
@@ -603,24 +620,32 @@ async function newChat() {
 $("new-chat").addEventListener("click", newChat);
 
 async function openChat(chatId) {
-  if (state.busy || state.modelBusy) return;
+  if (state.modelBusy) return;
   const session = state.session;
   const agentId = state.agentId;
   await refreshPreferences();
   if (session !== state.session || agentId !== state.agentId) return;
   const revision = ++state.chatModelRevision;
   const data = await api(chatsUrl(`/${chatId}`));
-  if (session !== state.session || agentId !== state.agentId || revision !== state.chatModelRevision || state.busy || state.modelBusy) return;
+  if (session !== state.session || agentId !== state.agentId || revision !== state.chatModelRevision || state.modelBusy) return;
   state.chatId = chatId;
   applyChatModels(data);
-  renderMessages(data.messages);
-  setComposer(true);
+  const key = chatKey(agentId, chatId);
+  if (isGenerating(agentId, chatId) && state.views.has(key)) {
+    activateView(state.views.get(key));
+    const usage = state.usages.get(key);
+    if (usage) showUsage(usage);
+    else $("usage").hidden = true;
+  } else {
+    renderMessages(data.messages);
+  }
+  updateBusy();
   await refreshChats();
   $("input").focus();
 }
 
 async function deleteChat(chat) {
-  if (state.busy || state.modelBusy || !confirm(tr("Delete \"{title}\"?", { title: chat.title || tr("New chat") }))) return;
+  if (isGenerating(chat.agent_id, chat.id) || state.modelBusy || !confirm(tr("Delete \"{title}\"?", { title: chat.title || tr("New chat") }))) return;
   await api(`/api/agents/${chat.agent_id}/chats/${chat.id}`, { method: "DELETE" });
   if (state.chatId === chat.id && state.agentId === chat.agent_id) {
     state.chatId = null;
@@ -965,11 +990,18 @@ function setComposer(enabled) {
 }
 
 function updateBusy() {
-  state.busy = state.requests.size > 0;
-  $("agent-select").disabled = state.busy || state.modelBusy || state.settingsBusy;
-  $("new-chat").disabled = state.busy || state.modelBusy || state.settingsBusy;
+  // busy refers to the open chat only; other chats may keep generating in the background
+  state.busy = isGenerating(state.agentId, state.chatId);
+  $("agent-select").disabled = state.modelBusy || state.settingsBusy;
+  $("new-chat").disabled = state.modelBusy || state.settingsBusy;
   $("settings-open").disabled = state.settingsBusy;
-  for (const button of $("chat-list").querySelectorAll(".del")) button.disabled = state.busy || state.modelBusy;
+  for (const button of $("chat-list").querySelectorAll(".del")) {
+    button.disabled = isGenerating(button.dataset.agent, button.dataset.chat) || state.modelBusy;
+  }
+  for (const li of $("chat-list").querySelectorAll("li")) {
+    const del = li.querySelector(".del");
+    li.classList.toggle("generating", Boolean(del) && isGenerating(del.dataset.agent, del.dataset.chat));
+  }
   setComposer(Boolean(state.chatId));
   updateModelControls();
   if ($("model-dialog").open) renderModelList();
@@ -983,6 +1015,9 @@ function resetStreams() {
   state.session++;
   for (const request of state.requests) request.controller.abort();
   state.requests.clear();
+  state.views.clear();
+  state.usages.clear();
+  state.view = null;
   state.latest = null;
   state.sendQueue = Promise.resolve();
   state.preferences = null;
@@ -1016,16 +1051,28 @@ function resetStreams() {
   updateBusy();
 }
 
+function sameSession(request) {
+  return request.session === state.session && request.userId === state.user?.id;
+}
+
 function isCurrent(request) {
-  return request.session === state.session && request.userId === state.user?.id
-    && request.agentId === state.agentId && request.chatId === state.chatId;
+  return sameSession(request) && request.agentId === state.agentId && request.chatId === state.chatId;
+}
+
+function activateView(container) {
+  state.view = container;
+  $("messages").replaceChildren(container);
+  scrollDown();
 }
 
 function renderMessages(messages) {
-  $("messages").replaceChildren();
+  const container = document.createElement("div");
+  container.className = "chat-view";
+  state.view = container;
+  $("messages").replaceChildren(container);
   $("usage").hidden = true;
   for (const m of messages) {
-    const view = addMessage(m.role);
+    const view = addMessage(m.role, container);
     if (m.reasoning) view.thinking(m.reasoning);
     for (const action of m.actions ?? []) view.action(action);
     if (m.associative_matches) view.memoryMatches(m.associative_matches);
@@ -1049,7 +1096,7 @@ function showUsage(report) {
   $("usage").querySelector("pre").textContent = report;
 }
 
-function addMessage(role) {
+function addMessage(role, parent = state.view ?? $("messages")) {
   const el = document.createElement("div");
   el.className = `msg ${role}`;
   const body = document.createElement("div");
@@ -1060,7 +1107,7 @@ function addMessage(role) {
   let actionCount = 0;
   let attachmentBox = null;
   el.append(body);
-  $("messages").append(el);
+  parent.append(el);
   function renderBody() {
     if (role === "assistant") {
       body.innerHTML = DOMPurify.sanitize(marked.parse(raw, { breaks: true }));
@@ -1262,10 +1309,12 @@ $("composer").addEventListener("submit", async (e) => {
   const attachments = state.attachments.splice(0);
   renderPendingAttachments();
   $("input").value = "";
-  const userMessage = addMessage("user");
+  const key = chatKey(state.agentId, state.chatId);
+  state.views.set(key, state.view);
+  const userMessage = addMessage("user", state.view);
   userMessage.text(content);
   userMessage.attachments(attachments);
-  const reply = addMessage("assistant");
+  const reply = addMessage("assistant", state.view);
   const request = {
     userId: state.user.id, agentId: state.agentId, chatId: state.chatId,
     session: state.session, controller: new AbortController(), reply,
@@ -1273,6 +1322,7 @@ $("composer").addEventListener("submit", async (e) => {
   };
   state.requests.add(request);
   state.latest = request;
+  state.usages.delete(key);
   $("usage").hidden = true;
   updateBusy();
   scrollDown();
@@ -1280,13 +1330,17 @@ $("composer").addEventListener("submit", async (e) => {
     await streamReply(content, attachments, request);
   } catch (err) {
     request.controller.abort();
-    if (isCurrent(request) && err.name !== "AbortError") reply.error(err.message);
+    if (sameSession(request) && err.name !== "AbortError") reply.error(err.message);
   } finally {
     state.requests.delete(request);
-    if (isCurrent(request)) {
+    if (sameSession(request)) {
+      if (!isGenerating(request.agentId, request.chatId) && !isCurrent(request)) {
+        state.views.delete(key);
+        state.usages.delete(key);
+      }
       updateBusy();
-      if (!state.busy) {
-        $("input").focus();
+      if (!isGenerating(request.agentId, request.chatId)) {
+        if (isCurrent(request)) $("input").focus();
         try {
           await refreshChats();
         } catch (err) {
@@ -1307,9 +1361,9 @@ $("input").addEventListener("keydown", (e) => {
 async function streamReply(content, attachments, request) {
   // Serialize acceptance, not generation, so rapid sends reach the service in order.
   const response = state.sendQueue.then(async () => {
-    if (!isCurrent(request)) throw new DOMException("Session changed", "AbortError");
+    if (!sameSession(request)) throw new DOMException("Session changed", "AbortError");
     await refreshPreferences();
-    if (!isCurrent(request)) throw new DOMException("Session changed", "AbortError");
+    if (!sameSession(request)) throw new DOMException("Session changed", "AbortError");
     return fetch(`/api/agents/${request.agentId}/chats/${request.chatId}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Accept-Language": state.preferences?.language ?? "en" },
@@ -1324,7 +1378,7 @@ async function streamReply(content, attachments, request) {
   const res = await response;
   if (res.status === 401) {
     const error = tr("not logged in");
-    if (isCurrent(request)) showLogin();
+    if (sameSession(request)) showLogin();
     throw new Error(error);
   }
   if (!res.ok) {
@@ -1347,7 +1401,7 @@ async function streamReply(content, attachments, request) {
       if (done) break;
       if (isCurrent(request)) scrollDown();
     }
-    if (isCurrent(request) && !request.done) {
+    if (sameSession(request) && !request.done) {
       throw new Error(tr("Response stream ended before completion"));
     }
   } finally {
@@ -1356,7 +1410,7 @@ async function streamReply(content, attachments, request) {
 }
 
 function handleEvent(raw, request) {
-  if (!isCurrent(request)) return;
+  if (!sameSession(request)) return;
   const reply = request.reply;
   let event = "message";
   let data = "";
@@ -1381,8 +1435,9 @@ function handleEvent(raw, request) {
   else if (event === "error") reply.error(payload);
   else if (event === "done") request.done = true;
   else if (event === "usage" && request === state.latest) {
+    state.usages.set(chatKey(request.agentId, request.chatId), payload);
     // the first line is the headline; the full breakdown stays folded until expanded
-    showUsage(payload);
+    if (isCurrent(request)) showUsage(payload);
   }
 }
 

@@ -26,7 +26,8 @@
 ~~- Option to choose from the different models the user has access to.~~
 ~~- Option to view and manage existing chats: users can see a list of their previous conversations, with the ability to delete or continue them.~~
 - ~~small llm that generates a name of the conversation to display on the chat list, its runs when a conversation is at least 5 messages long, and the name is stored in the conversation metadata. if the conversation is less than 5 messages long, keep the current method. the small llm must be a general settings, not from teh user or the chat, but in the general settings~~
-- its possible to swap chat while another one is working, so you are not forced to stay in the same chat while the model is generating a response
+- ~~its possible to swap chat while another one is working, so you are not forced to stay in the same chat while the model is generating a response~~
+- chat names can be changed and edited
 
 ## Recall
 - make it so associaive memory is inyected into the system prompt while the model has started generating text, so its faster and more efficient. This will allow the model to have access to relevant information without having to wait for the entire context to be processed before generating a response. Make it so the model is aware that this can happen, so it can adjust its behavior accordingly. This will improve latency. Since the process will be parallel, we have to adjust the timings so it makes sense (right now since they are not parallel, they are just summed in the latency metric that we print in the debug panel in the web ui)

@@ -164,9 +164,16 @@ without duplicating already displayed ones.
 
 Rapid sends wait only for the previous HTTP response headers (acceptance), not
 its generated answer, to preserve input order. Changing agents, opening/creating
-chats and deleting chats remain blocked until the current streams finish.
+chats and switching between chats are allowed while replies are generating: each
+chat with a reply in flight keeps its own message view in the browser, which
+keeps receiving the stream while another chat is open and is restored as-is when
+the chat is reopened. The chat list marks generating chats, and a generating chat
+cannot be deleted. `Steer`, the model picker and the usage panel only apply to
+the open chat. The service still serializes execution per agent, so a reply in a
+chat of the same agent started later waits for the running one; chats of different
+agents generate in parallel.
 Logging out detaches the browser streams; callbacks from an old session cannot
-modify the new session, and only the latest request can update the usage panel.
+modify the new session, and only the latest request of a chat can update its usage panel.
 Detaching a transport does not cancel a service generation on its own.
 
 The messages endpoint returns SSE with the generation id in each event's `id:`
