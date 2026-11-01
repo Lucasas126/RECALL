@@ -6,7 +6,7 @@
 - ~~Include message timestamps in conversations so models know the relevant dates. Include [AUDIO] and [VIDEO] tags in the conversation to indicate when a message contains or was generated from audio or video content. This will help models understand the context of the conversation and provide more accurate responses.~~
 - pdf generation?
 - image and graph generation with an mcp?
-- pdf reading and extraction
+- ~~pdf reading and extraction~~ (text from selectable PDF text, with Tesseract OCR for scanned pages; see [config.md](config.md#pdf-input))
 
 ## Search and integrations
 

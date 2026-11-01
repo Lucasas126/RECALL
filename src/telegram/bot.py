@@ -745,9 +745,9 @@ async def _download_attachment(message, bot) -> dict:
         modality, mime_type, name = "audio", message.voice.mime_type or "audio/ogg", "voice.ogg"
     elif message.document:
         mime_type = message.document.mime_type or ""
-        modality = mime_type.split("/", 1)[0]
-        if modality not in {"image", "video", "audio"}:
-            raise InputError("Only image, video and audio files are supported.")
+        modality = "document" if mime_type == "application/pdf" else mime_type.split("/", 1)[0]
+        if modality not in {"image", "video", "audio", "document"}:
+            raise InputError("Only image, video, audio and PDF files are supported.")
         source = message.document
         name = message.document.file_name or f"attachment.{mime_type.split('/', 1)[1]}"
     if source is None or modality is None or mime_type is None or name is None:

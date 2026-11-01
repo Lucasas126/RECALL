@@ -22,7 +22,7 @@ from src.config.loader import load_agent, load_agent_config, load_user, user_mod
 from src.config.models import AgentConfig, ReasoningEffort, UserConfig
 from src.agent.tool_groups import TOOL_GROUP_CATALOG
 from src.config.preferences import UserPreferences, UserPreferencesStore
-from src.config.settings import CHAT_NAMING, CONFIG_DIR, DATA_DIR, MCP, SPEECH_TO_TEXT, VIDEO_DECOMPOSITION
+from src.config.settings import CHAT_NAMING, CONFIG_DIR, DATA_DIR, MCP, PDF, SPEECH_TO_TEXT, VIDEO_DECOMPOSITION
 from src.core.sources.conversations import ConversationsSource
 from src.core.sources.registry import SourceRegistry
 from src.providers.cancellation import CancellationToken, GenerationCancelled
@@ -33,6 +33,7 @@ from src.providers.openrouter import OpenRouterProvider
 from src.providers.provider import get_provider
 from src.utils.logger import get_logger
 from src.utils.media import VideoDecomposition, decompose_video
+from src.utils.pdf import extract_pdf_text, run_tesseract
 from src.utils.i18n import InputError, UserMessageError
 from src.web.auth import verify_password
 
@@ -118,7 +119,7 @@ class ChatAttachment(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    modality: Literal["image", "video", "audio"]
+    modality: Literal["image", "video", "audio", "document"]
     name: str = Field(min_length=1, max_length=255)
     mime_type: str = Field(min_length=1, max_length=128)
     format: str = Field(min_length=1, max_length=16)
@@ -598,6 +599,7 @@ class ChatService:
         text, attachments = self._transcribe_audio(
             user_id, agent_id, chat_id, text, attachments,
         )
+        text, attachments = self._extract_documents(text, attachments)
         if not text.strip() and not attachments:
             raise InputError("message is empty")
         slot = self._slot(user_id, agent_id)
@@ -752,6 +754,24 @@ class ChatService:
                 self._transcription_text(transcript) for transcript in transcripts
             )] if part)
         return text, remaining
+
+    @staticmethod
+    def _extract_documents(text: str, attachments: list[dict]) -> tuple[str, list[dict]]:
+        """Replace PDF attachments with their page text, so providers only receive text."""
+        documents = [attachment for attachment in attachments if attachment["modality"] == "document"]
+        if not documents:
+            return text, attachments
+        remaining = [attachment for attachment in attachments if attachment["modality"] != "document"]
+        blocks = [text.strip()] if text.strip() else []
+        for attachment in documents:
+            try:
+                encoded = attachment["data_url"].split(",", 1)[1]
+                data = base64.b64decode(encoded, validate=True)
+            except (IndexError, binascii.Error) as exc:
+                raise InputError("invalid PDF data for '{name}'", name=attachment["name"]) from exc
+            extracted = extract_pdf_text(data, attachment["name"], PDF, lambda png: run_tesseract(png, PDF))
+            blocks.append(f"Attached document: {attachment['name']}\n{extracted.render()}")
+        return "\n\n".join(blocks), remaining
 
     @staticmethod
     def _events(run: _MessageRun) -> Iterator[ChatEvent]:

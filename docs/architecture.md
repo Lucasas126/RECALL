@@ -56,7 +56,9 @@ the configured OpenRouter speech-to-text model before the chat model runs. Video
 for image-only models are decomposed into frames and audio first (see
 [config.md](./config.md#video-input)). The audio becomes text, so the resulting
 conversation turn stays text-only apart from any frames and can be reopened with
-any later chat model.
+any later chat model. PDFs follow the same rule: `ChatService.send` replaces each PDF with its
+extracted text, with page markers, before validation, so no provider receives the file or
+its page images (see [config.md](./config.md#pdf-input)).
 
 ### model catalog and chat selection
 

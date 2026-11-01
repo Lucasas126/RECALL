@@ -1582,21 +1582,27 @@ function scrollDown() {
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_TOTAL_FILE_BYTES = 25 * 1024 * 1024;
 
+function isPdf(file) {
+  return file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+}
+
 function attachmentModality(file) {
   if (file.type.startsWith("image/")) return "image";
   if (file.type.startsWith("video/")) return "video";
   if (file.type.startsWith("audio/")) return "audio";
+  if (isPdf(file)) return "document";
   return null;
 }
 
 function readAttachment(file) {
+  const pdf = isPdf(file);
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve({
       modality: attachmentModality(file),
       name: file.name,
-      mime_type: file.type,
-      format: file.type.split("/")[1].split(";")[0],
+      mime_type: pdf ? "application/pdf" : file.type,
+      format: pdf ? "pdf" : file.type.split("/")[1].split(";")[0],
       data_url: reader.result,
       size: file.size,
     });
@@ -1635,7 +1641,7 @@ $("file-input").addEventListener("change", async (event) => {
   event.target.value = "";
   try {
     const valid = files.map((file) => {
-      if (!attachmentModality(file)) throw new Error(tr("{name}: only image, video and audio files are supported", { name: file.name }));
+      if (!attachmentModality(file)) throw new Error(tr("{name}: only image, video, audio and PDF files are supported", { name: file.name }));
       if (file.size > MAX_FILE_BYTES) throw new Error(tr("{name}: maximum size is 10 MB", { name: file.name }));
       return file;
     });

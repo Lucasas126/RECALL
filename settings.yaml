@@ -27,6 +27,13 @@ video:
   max_frames: 16             # frames sent per video; the rest of the video is not sampled
   max_width: 768             # frames are scaled down to this width in pixels to limit cost
 
+pdf:
+  max_pages: 30               # pages accepted per PDF; longer documents are rejected
+  ocr_min_chars: 25           # pages with fewer extractable characters are read with Tesseract
+  ocr_dpi: 300                # render resolution for pages sent to Tesseract
+  ocr_languages: eng+spa      # Tesseract language packs, joined with +; they must be installed
+  tesseract_cmd: null         # optional path to the tesseract executable; null uses PATH, then the default Windows folder
+
 speech_to_text:
   zdr: true
   language: null  # optional ISO-639-1 code; null enables provider auto-detection

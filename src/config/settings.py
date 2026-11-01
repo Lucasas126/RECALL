@@ -5,7 +5,7 @@ from pathlib import Path
 import yaml
 
 from src.config.models import (
-    ChatNamingConfig, McpSettings, SpeechToTextConfig, TavilyConfig, VideoDecompositionConfig,
+    ChatNamingConfig, McpSettings, PdfConfig, SpeechToTextConfig, TavilyConfig, VideoDecompositionConfig,
 )
 
 """Framework-level settings, loaded from `settings.yaml` at the repo root.
@@ -27,6 +27,7 @@ _web = _raw["web"]
 _telegram = _raw["telegram"]
 _speech_to_text = _raw["speech_to_text"]
 _video = _raw["video"]
+_pdf = _raw["pdf"]
 
 # ------------------------------------------------------------------ paths
 CONFIG_DIR = Path(_paths["config_dir"])  # user & agent yaml configs
@@ -55,6 +56,9 @@ SPEECH_TO_TEXT = SpeechToTextConfig.model_validate(_speech_to_text)
 
 # ------------------------------------------------------------------ video decomposition
 VIDEO_DECOMPOSITION = VideoDecompositionConfig.model_validate(_video)
+
+# ------------------------------------------------------------------ pdf text extraction
+PDF = PdfConfig.model_validate(_pdf)
 
 # ------------------------------------------------------------------ external web access
 TAVILY = TavilyConfig.model_validate(_raw.get("tavily", {}))

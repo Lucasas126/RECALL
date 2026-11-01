@@ -20,4 +20,6 @@ dependencies = [
     "telegramify-markdown>=1.0.0",
     "uvicorn>=0.52.4",
     "mcp>=1.0",
+    "pytesseract>=0.3.13",
+    "pymupdf>=1.26,<2",
 ]

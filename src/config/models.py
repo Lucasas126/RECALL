@@ -132,6 +132,18 @@ class VideoDecompositionConfig(BaseModel):
     max_width: int = Field(default=768, ge=64, le=4096, strict=True)
 
 
+class PdfConfig(BaseModel):
+    """PDF text extraction limits and Tesseract settings for OCR of pages without digital text."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_pages: int = Field(default=30, ge=1, le=200, strict=True)
+    ocr_min_chars: int = Field(default=25, ge=0, le=10000, strict=True)
+    ocr_dpi: int = Field(default=300, ge=72, le=600, strict=True)
+    ocr_languages: str = Field(default="eng+spa", min_length=1, max_length=64, pattern=r"^[A-Za-z_]+(\+[A-Za-z_]+)*$")
+    tesseract_cmd: str | None = Field(default=None, min_length=1, max_length=512)
+
+
 class ProviderConfig(BaseModel):
     name: str
     api_key: Optional[str] = None  # name of the env var holding the actual key (not needed for local providers)

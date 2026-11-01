@@ -21,3 +21,9 @@ main ideas:
     apart from those two modes, there will be a boolean of "auto commit" to determine whether each change made by the agent should create a commit in the obsidian vault (requires the vault to be a git repository)
 - internet access and search, probably with Tavily search
 - external services through MCP servers (Google Calendar first): shared catalog, per-user accounts, enabled per agent; see [docs/mcp.md](docs/mcp.md)
+
+## Tesseract OCR
+
+Scanned PDF pages need the Tesseract OCR program installed on the machine that runs RECALL.
+Windows: `winget install --id UB-Mannheim.TesseractOCR -e`. For macOS, Linux and the rest of the setup,
+see [docs/config.md](docs/config.md#tesseract-ocr).
