@@ -31,6 +31,28 @@ provider:
 API keys never live in YAML. Providers and model IDs belong to the user;
 agents configure behavior, not inference or embedding models.
 
+### web authentication
+
+Web users are preconfigured; there is no registration flow. Add an Argon2 password
+hash to each user's `user.yaml`:
+
+```yaml
+id: johndoe
+name: John Doe
+password_hash: "$argon2id$..."
+```
+
+Generate a hash without putting the password in a file or command history:
+
+```powershell
+uv run python -m src.web.auth
+```
+
+The web UI uses a signed, HTTP-only `recall_session` cookie. Set the session
+signing secret through the environment variable named by `web.session_secret_env`
+(default: `RECALL_SESSION_SECRET`) before starting `web.py`. Use a long random
+value and keep it outside YAML and source control. Logging out clears the session.
+
 ### Telegram access
 
 The Telegram channel maps approved Telegram user IDs to existing RECALL users
@@ -533,13 +555,19 @@ The client sends only the supplied query/URL, not agent history or memory;
 callers must not supply secrets or private data. Web content is untrusted data,
 not instructions.
 
-Agents with `chat_config.tools: true` (the default) register `web_search` and
-`web_retrieve` when the shared key is set. Without the key they keep their existing
-memory tools; with `tools: false` no tools are registered and the key is not
-resolved. Web actions use the same chat events and history display as memory
-actions. The complete result enters the active context, while the action preview
-stored with the turn is truncated to 500 characters.
-Per-user Tavily credentials and per-agent web policies are not implemented.
+Agents with `chat_config.tools: true` (the default) use the selected tool
+groups. The web group registers `web_search` and `web_retrieve` when the shared
+key is set; the memory groups expose the corresponding read or edit tools. With `tools: false`
+no tools are registered and the key is not resolved. Web actions use the same
+chat events and history display as memory actions. The complete result enters
+the active context, while the action preview stored with the turn is truncated
+to 500 characters.
+
+The shared tool-group catalog is returned by `GET /api/tool-groups` and is
+selectable in the web **Agents** tab. Agent YAML stores the selection as
+`chat_config.tool_groups`; omitting it preserves the default all-groups behavior.
+Existing `allow` and `deny` lists remain supported as an additional per-tool
+filter.
 
 ## config files
 
@@ -570,6 +598,8 @@ chat_config:
   reasoning_tokens: 20               # optional reasoning budget
   keep_reasoning_in_memory: false    # store the thinking in context/history
   conversation_messages_retained: 20 # last N messages kept in context (see sources.md)
+  tools: true                       # enable the selected tool groups
+  tool_groups: [memory_read, memory_edit]  # memory_read, memory_edit, web
 ```
 
 ## loading
@@ -578,7 +608,9 @@ chat_config:
 
 checks today: the agent belongs to the user, and the provider key env var (if configured) is set.
 
-planned: a `defaults.yaml < user.yaml < agent.yaml` merge, full fail-fast validation, resource/vault references, a per-tool policy, and a `ConfigStore` with a channel→user index for routing incoming messages.
+planned: a `defaults.yaml < user.yaml < agent.yaml` merge, resource/vault
+references, and a `ConfigStore` with a channel→user index for routing incoming
+messages.
 
 ## managing agents
 
@@ -586,7 +618,8 @@ the web **Agents** tab lists the user's agents and edits the name, `personality_
 
 | method | route | result |
 | --- | --- | --- |
-| `GET` | `/api/agents` | full configuration of each agent the user owns |
+| `GET` | `/api/tool-groups` | shared tool-group catalog available to the user's agents |
+| `GET` | `/api/agents` | full configuration of each agent the user owns, including `chat_config.tool_groups` |
 | `POST` | `/api/agents` | creates `agents/<id>.yaml` and appends the id to `agents` in `user.yaml` (`201`) |
 | `GET` | `/api/agents/<agent_id>` | one agent's configuration |
 | `PUT` | `/api/agents/<agent_id>` | replaces the agent; the body `id` may differ, which renames it |

@@ -29,8 +29,9 @@ isolation is enforced in one place: the per-agent `SourceRegistry` (path resolut
 
 ## tool separation
 
-- each agent has a **tool policy**: an allow/deny list over the full tool catalog (tools.md).
-- some agents may lack `web_search`, `obsidian`, `delete`, etc.
+- each agent has a **tool-group policy**: a selection from the shared tool-group catalog.
+- the available groups are memory read-only, memory read and edit, and web search.
+- legacy `allow`/`deny` tool lists are still accepted as an additional per-tool filter.
 - **modes** (recall/dream) further restrict the active set on top of the policy.
 
 the effective toolset at any moment is:
@@ -39,7 +40,8 @@ the effective toolset at any moment is:
 effective = agent_policy ∩ mode_toolset
 ```
 
-example: an agent whose policy excludes `web_search` will not have it even in dream mode, where it is otherwise exposed.
+example: an agent whose policy excludes the web group will not have `web_search` or
+`web_retrieve`.
 
 ## managing agents
 
@@ -62,10 +64,9 @@ sources:
     overlay: safe              # safe | auto
   user_folder:
     resource: folders.refs
-tools:
-  allow: [list, read, search, query_memory, list_tags, find_notes_by_tag,
-          write, edit, move, delete, recall_mode]
-  deny:  [web_search, web_retrieve]
+chat_config:
+  tools: true
+  tool_groups: [memory_read, memory_edit]
 modes:
   dream: { every_hours: 6 }
   sleep: { every_hours: 3 }
@@ -73,7 +74,7 @@ modes:
 
 ## resolution order for a tool call
 
-1. is the tool in the agent's `allow` set (and not in `deny`)?
+1. is the tool included by one of the agent's selected tool groups?
 2. is it exposed by the current mode?
 3. does the target `source:path` resolve inside one of this agent's sources?
 

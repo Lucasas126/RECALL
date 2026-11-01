@@ -20,6 +20,7 @@ from src.config.agents import AgentStore
 from src.config.favorites import ModelFavorites
 from src.config.loader import load_agent, load_agent_config, load_user, user_models
 from src.config.models import AgentConfig, ReasoningEffort, UserConfig
+from src.agent.tool_groups import TOOL_GROUP_CATALOG
 from src.config.preferences import UserPreferences, UserPreferencesStore
 from src.config.settings import CHAT_NAMING, CONFIG_DIR, DATA_DIR, SPEECH_TO_TEXT, VIDEO_DECOMPOSITION
 from src.core.sources.conversations import ConversationsSource
@@ -32,6 +33,7 @@ from src.providers.provider import get_provider
 from src.utils.logger import get_logger
 from src.utils.media import VideoDecomposition, decompose_video
 from src.utils.i18n import InputError, UserMessageError
+from src.web.auth import verify_password
 
 logger = get_logger("service")
 
@@ -199,6 +201,16 @@ class ChatService:
             "agents": self.list_agents(user_id),
         }
 
+    def authenticate(self, user_id: str, password: str) -> dict:
+        """Verify configured credentials and return the user's profile."""
+        try:
+            user = self._user(user_id)
+        except UnknownUser:
+            raise UnknownUser("Invalid user ID or password") from None
+        if not verify_password(password, user.password_hash):
+            raise UnknownUser("Invalid user ID or password")
+        return self.login(user_id)
+
     def list_agents(self, user_id: str) -> list[dict]:
         user = self._user(user_id)
         agents = []
@@ -211,6 +223,11 @@ class ChatService:
         """Full editable configuration of every agent the user owns."""
         user = self._user(user_id)
         return [self._agent_config(user_id, agent_id).model_dump(mode="json") for agent_id in user.agents]
+
+    def list_tool_groups(self, user_id: str) -> list[dict]:
+        """Return the tool-group catalog available to the user's agents."""
+        self._user(user_id)
+        return [dict(item) for item in TOOL_GROUP_CATALOG]
 
     def get_agent(self, user_id: str, agent_id: str) -> dict:
         self._owned_agent(user_id, agent_id)

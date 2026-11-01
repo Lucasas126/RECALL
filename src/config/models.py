@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from src.agent.tool_groups import validate_tool_groups
 ReasoningEffort = Literal["minimal", "low", "medium", "high", "xhigh", "max"]
 
 
@@ -63,6 +64,7 @@ class ModelsConfig(BaseModel):
 class UserConfig(BaseModel):
     id: str
     name: str
+    password_hash: Optional[str] = Field(default=None, min_length=1)
     language: str = Field(default="en", pattern=r"^[a-z]{2}(?:-[A-Z]{2})?$")
     provider: ProviderConfig  # chat provider
     embeddings_provider: Optional[ProviderConfig] = None  # falls back to `provider`
@@ -71,6 +73,8 @@ class UserConfig(BaseModel):
 
 
 class ChatConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     stream: bool = True
     has_memory: bool = True
     reasoning: bool = False
@@ -82,8 +86,16 @@ class ChatConfig(BaseModel):
     conversation_messages_retained: Optional[int] = 30
     # let the model call tools (memory recall, source read/write/list)
     tools: bool = True
+    tool_groups: list[str] | None = None
+    allow: list[str] | None = None
+    deny: list[str] | None = None
     # run a memory subagent each turn that suggests relevant fragments from long-term memory
     associative_memory: bool = True
+
+    @field_validator("tool_groups")
+    @classmethod
+    def _validate_tool_groups(cls, value: list[str] | None) -> list[str] | None:
+        return None if value is None else validate_tool_groups(value)
 
 
 class AgentConfig(BaseModel):
@@ -118,4 +130,7 @@ class ResolvedAgent(BaseModel):
     keep_reasoning_in_memory: bool = False
     conversation_messages_retained: Optional[int] = None
     tools: bool = True
+    tool_groups: list[str] | None = None
+    allow: list[str] | None = None
+    deny: list[str] | None = None
     associative_memory: bool = True

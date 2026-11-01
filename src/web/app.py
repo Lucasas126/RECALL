@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Iterator, Literal, Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.middleware.sessions import SessionMiddleware
 
 from src.config.agents import AgentConflict
 from src.config.favorites import FavoriteModelId, FavoritesError
@@ -26,15 +28,17 @@ from src.service.chat import (
 )
 from src.utils.logger import get_logger
 from src.utils.i18n import error_message, message, messages
+from src.config.settings import WEB_SESSION_SECRET_ENV
 
 logger = get_logger("web")
 
 _STATIC = Path(__file__).parent / "static"
-_COOKIE = "recall_user"
+_SESSION_KEY = "user_id"
 
 
 class LoginIn(BaseModel):
     user_id: str
+    password: str = Field(min_length=1, max_length=1024)
 
 
 class MessageIn(BaseModel):
@@ -64,21 +68,38 @@ def _sse(event: str, data, generation_id: str = "") -> str:
 def create_app(service: Optional[ChatService] = None) -> FastAPI:
     """Web channel: an HTTP/SSE adapter over `ChatService`.
 
-    The user comes from a cookie set at login. This is identification, not authentication:
-    anyone who can reach the server can claim any existing user.
+    The user comes from a signed session cookie set after password authentication.
     """
     service = service or ChatService()
     app = FastAPI(title="RECALL")
+    session_secret = os.environ.get(WEB_SESSION_SECRET_ENV)
+    if not session_secret:
+        raise RuntimeError(
+            f"Set the {WEB_SESSION_SECRET_ENV} environment variable before starting the web UI"
+        )
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=session_secret,
+        session_cookie="recall_session",
+        same_site="strict",
+        https_only=False,
+        max_age=60 * 60 * 24 * 14,
+    )
 
     def current_user(request: Request) -> str:
-        user_id = request.cookies.get(_COOKIE)
+        user_id = request.session.get(_SESSION_KEY)
         if not user_id:
             raise HTTPException(401, message(request.headers.get("Accept-Language", "en"), "not logged in"))
+        try:
+            service.login(user_id)
+        except UnknownUser:
+            request.session.clear()
+            raise HTTPException(401, message(request.headers.get("Accept-Language", "en"), "not logged in")) from None
         return user_id
 
     def notification_language(request: Request) -> str:
         language = request.headers.get("Accept-Language", "en").split(",", 1)[0]
-        user_id = request.cookies.get(_COOKIE)
+        user_id = request.session.get(_SESSION_KEY)
         if user_id:
             try:
                 return service.language(user_id)
@@ -135,17 +156,18 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
     # ------------------------------------------------------------------ session
 
     @app.post("/api/login")
-    def login(body: LoginIn, response: Response, request: Request):
+    def login(body: LoginIn, request: Request):
         try:
-            profile = service.login(body.user_id.strip())
+            profile = service.authenticate(body.user_id.strip(), body.password)
         except UnknownUser as e:
-            return localized_error(request, 404, e)
-        response.set_cookie(_COOKIE, profile["id"], httponly=True, samesite="strict")
+            return localized_error(request, 401, e)
+        request.session.clear()
+        request.session[_SESSION_KEY] = profile["id"]
         return profile
 
     @app.post("/api/logout")
-    def logout(response: Response):
-        response.delete_cookie(_COOKIE)
+    def logout(request: Request):
+        request.session.clear()
         return {"ok": True}
 
     @app.get("/api/me")
@@ -191,6 +213,10 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
     @app.get("/api/agents")
     def list_agent_configs(user_id: str = Depends(current_user)):
         return service.list_agent_configs(user_id)
+
+    @app.get("/api/tool-groups")
+    def list_tool_groups(user_id: str = Depends(current_user)):
+        return service.list_tool_groups(user_id)
 
     @app.post("/api/agents", status_code=201)
     def create_agent(body: AgentConfig, user_id: str = Depends(current_user)):

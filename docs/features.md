@@ -8,7 +8,8 @@
 ## Search and integrations
 
 - ~~Add date filters to web search tools.~~
-- Add Google Calendar MCP integration.
+- ~~Separate and group all tools: web search, obsidian read only, obsidian read+edit, etc. All groups should be exposed and available to select for all agents, and should be configured in the agent tab in the web interface. This will allow users to easily manage and configure tool access for different agents, so not all agents have the same tools.~~
+- Add Google Calendar integration.
 
 ## Automation and behavior
 
@@ -29,6 +30,7 @@
 - ~~its possible to swap chat while another one is working, so you are not forced to stay in the same chat while the model is generating a response~~
 - ~~chats using the same agent can generate in parallel without sharing conversation context~~
 - chat names can be changed and edited
+- ~~user authentication. allowed users must be defined beforehand in a configuration file, there is no user registration system, only password authentication~~
 
 ## Recall
 - make it so associaive memory is inyected into the system prompt while the model has started generating text, so its faster and more efficient. This will allow the model to have access to relevant information without having to wait for the entire context to be processed before generating a response. Make it so the model is aware that this can happen, so it can adjust its behavior accordingly. This will improve latency. Since the process will be parallel, we have to adjust the timings so it makes sense (right now since they are not parallel, they are just summed in the latency metric that we print in the debug panel in the web ui)

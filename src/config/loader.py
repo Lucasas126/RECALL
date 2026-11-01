@@ -10,6 +10,7 @@ from src.config.agents import AgentStore
 from src.config.models import AgentConfig, ModelsConfig, ResolvedAgent, UserConfig
 from src.config.preferences import UserPreferencesStore
 from src.config.settings import CONFIG_DIR, DATA_DIR
+from src.agent.tool_groups import DEFAULT_TOOL_GROUPS
 
 
 def _load_yaml(path: Path) -> dict:
@@ -68,6 +69,9 @@ def load_agent(user_id: str, agent_id: Optional[str] = None) -> ResolvedAgent:
         if not embeddings_api_key:
             raise ValueError(f"env var '{embeddings_provider.api_key}' is not set")
 
+    selected_tool_groups = agent.chat_config.tool_groups
+    if selected_tool_groups is None and agent.chat_config.tools:
+        selected_tool_groups = list(DEFAULT_TOOL_GROUPS)
     return ResolvedAgent(
         user_id=user.id,
         language=user.language,
@@ -87,5 +91,8 @@ def load_agent(user_id: str, agent_id: Optional[str] = None) -> ResolvedAgent:
         keep_reasoning_in_memory=agent.chat_config.keep_reasoning_in_memory,
         conversation_messages_retained=agent.chat_config.conversation_messages_retained,
         tools=agent.chat_config.tools,
+        tool_groups=selected_tool_groups,
+        allow=agent.chat_config.allow,
+        deny=agent.chat_config.deny,
         associative_memory=agent.chat_config.associative_memory,
     )

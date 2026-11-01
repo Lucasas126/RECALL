@@ -43,6 +43,7 @@ AGENT_MAX_TOOL_HOPS = _agent["max_tool_hops"]    # max tool round-trips per turn
 # ------------------------------------------------------------------ web
 WEB_HOST = _web["host"]                          # interface the web ui binds to
 WEB_PORT = _web["port"]                          # port the web ui listens on
+WEB_SESSION_SECRET_ENV = _web["session_secret_env"]
 
 # ------------------------------------------------------------------ telegram
 TELEGRAM_ALLOWED_USERS_ENV = _telegram["allowed_users_env"]

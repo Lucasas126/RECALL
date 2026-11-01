@@ -8,6 +8,19 @@ memory search, listing and reading; `tags.py` contains tag lookup;
 `editing.py` contains memory mutations; and `web.py` contains public web
 search and retrieval. Shared source checks are in `common.py`.
 
+## Tool-group catalog
+
+The web **Agents** tab configures these groups for each agent:
+
+- `memory_read`: `query_memory`, `search`, `list_memories`, `read`, `list_tags`,
+  and `find_notes_by_tag`.
+- `memory_edit`: `write`, `append`, `edit`, `move`, and `delete`.
+- `web`: `web_search` and `web_retrieve`.
+
+The catalog is available through `GET /api/tool-groups`. Groups are an
+agent-level selection and do not bypass source isolation or the effective mode
+restrictions.
+
 When adding a tool, implement it in the module for its responsibility and add
 it to the registration order in `build_tools`. Web tools are registered only
 when a Tavily client is configured.

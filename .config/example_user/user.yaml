@@ -1,4 +1,5 @@
 id: johndoe
+# password_hash: "$argon2id$..."
 models:
   chat: openai/gpt-4o-mini
   stt: openai/whisper-large-v3-turbo

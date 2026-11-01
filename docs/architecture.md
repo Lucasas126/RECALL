@@ -15,17 +15,17 @@ separate the system into layers where **data lives in its own plane** and everyt
 
 ```
 L4  clients / orchestration   recall agent (langgraph + telegram), external clients
-L3  mcp (optional adapter)    exposes L1/L2 to external agents as tools/resources
+L3  external adapter (future) exposes L1/L2 to external clients
 L2  capabilities (internal)   associative memory, recall mode, dream/sleep mode
 L1  data / sources plane      mind palace, conversations, obsidian (+overlay), vector index
 ```
 
 - **L1 — data/sources plane (core)**: the actual data and how to access it. a `SourceRegistry` gives unified, typed access (`mind_palace()`, `obsidian()`, `vector()`). depends on nothing above.
 - **L2 — capabilities**: the cognitive modes. each one receives the sources it needs by injection (dependency injection), never via a global. reads/writes L1 directly.
-- **L3 — mcp**: a thin adapter that exposes L1 as read-only *resources* and selected L2 capabilities + crud/search as *tools*. this is what makes the memory portable to other agents (copilot, claude desktop, etc). imports L1 and L2, never the reverse.
-- **L4 — orchestration**: the recall agent itself, plus background schedulers for dream/sleep. accesses L1 and L2 directly (not through the mcp).
+- **L3 — external adapter (future)**: a thin adapter that could expose L1 and selected L2 capabilities to external clients. It imports L1 and L2, never the reverse.
+- **L4 — orchestration**: the recall agent itself, plus background schedulers for dream/sleep. accesses L1 and L2 directly.
 
-## resources vs tools (mcp)
+## resources vs tools
 
 - **resources** = read-only views: mind palace snapshot, recent conversations, obsidian notes.
 - **tools** = mutations or reasoning: `remember`, `obsidian_write`, `associative_search`, `deep_recall`, `consolidate`.
@@ -41,7 +41,7 @@ telegram (planned) ─┼─▶ ChatService ─▶ Agent ─▶ SourceRegistry
 cli (cli.py, direct) ─┘
 ```
 
-- a channel resolves its own identity to a `user_id` (web: login cookie; telegram: a telegram id → user, planned) and then calls the service with that `user_id`. the service never trusts ids to be well formed: it validates user, agent ownership and chat ids.
+- a channel resolves its own identity to a `user_id` (web: Argon2 password login and signed session; telegram: a telegram id → user, planned) and then calls the service with that `user_id`. the service never trusts ids to be well formed: it validates user, agent ownership and chat ids.
 - operations: `login`, `list_agents`, `list_chats`, `create_chat`, `get_chat`, `delete_chat`, `send`. CRUD returns plain dicts; `send` returns events.
 - `send` yields `ChatEvent`s (`reasoning`, `text`, `tool`, `usage`, `interrupted`, `notice` when a video was replaced by frames for an image-only model, and `memory` when associative recall finds matches), not channel formats. the `memory` event carries the number of matched fragments; adapters decide how to display it. a telegram adapter would call `send(..., stream=False)`, deliver the `text` event as a message and handle `interrupted` without claiming a completed answer. rendering and transport stay in the adapter.
 - one `Agent` runtime is kept per (user, agent, chat), so chat context and mutable reply state cannot leak between conversations; different chats of the same configured agent can execute in parallel, while a new message can interrupt its active reply to the same chat.
@@ -237,12 +237,12 @@ The Node checks cover model ordering, capability matching and selector state
 (favorites toggle, active-filter counts, collapsed filters and session reset).
 Keyboard navigation and responsive layout still require a browser check.
 
-## first approach: no mcp
+## first approach: internal capabilities only
 
-the mcp (L3) is purely an exposure surface for external clients. **for the first approach it will not be used.** the agent uses `core/` + `capabilities/` directly, so recall, dream, associative memory and the obsidian overlay all work without it.
+the L3 adapter is purely an exposure surface for external clients. **for the first approach it will not be used.** the agent uses `core/` + `capabilities/` directly, so recall, dream, associative memory and the obsidian overlay all work without it.
 
-adding the mcp later is trivial (write an adapter, zero core refactor) **as long as we keep these habits from the start**:
+adding an external adapter later is straightforward (write an adapter, zero core refactor) **as long as we keep these habits from the start**:
 
 1. capabilities and sources expose a clean, serializable api (return dicts/pydantic, not internal objects).
 2. no global state — everything goes through the injected `SourceRegistry`.
-3. keep logic separate from langgraph orchestration — a capability is a plain function/class that could be called from a graph node *or* an mcp tool.
+3. keep logic separate from langgraph orchestration — a capability is a plain function/class that could be called from a graph node or an external adapter.

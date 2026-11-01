@@ -14,7 +14,7 @@ const state = {
   chatModelRevision: 0,
   settingsModelDraft: null,
   preferences: null, preferencesRequest: 0, settingsBusy: false, settingsOriginal: null,
-  translations: null,
+  translations: null, toolGroupCatalog: [],
   agentConfigs: [], agentForm: { originalId: null, busy: false },
 };
 // thinking blocks start open (streamed live); closing one keeps them closed from then on
@@ -48,6 +48,7 @@ function translateInterface() {
     ["agent-stream-label", "Stream replies"], ["agent-memory-label", "Use memory"],
     ["agent-reasoning-label", "Reasoning"], ["agent-keep-reasoning-label", "Keep reasoning in memory"],
     ["agent-tools-label", "Use tools"], ["agent-associative-label", "Associative memory"],
+    ["agent-tool-groups-label", "Tool groups"], ["agent-associative-label", "Associative memory"],
     ["agent-effort-label", "Reasoning effort"], ["agent-effort-default", "Default"],
     ["agent-tokens-enabled-label", "Limit reasoning tokens"], ["agent-reasoning-tokens-label", "Reasoning tokens"],
     ["agent-retained-label", "Messages kept in context"],
@@ -148,8 +149,12 @@ $("login-form").addEventListener("submit", async (e) => {
   try {
     const user = await api("/api/login", {
       method: "POST",
-      body: JSON.stringify({ user_id: $("login-user").value }),
+      body: JSON.stringify({
+        user_id: $("login-user").value,
+        password: $("login-password").value,
+      }),
     });
+    $("login-password").value = "";
     showApp(user);
   } catch (err) {
     $("login-error").textContent = err.message;
@@ -234,9 +239,10 @@ function showTab(tab) {
 async function loadAgentConfigs() {
   const session = state.session;
   try {
-    const agents = await api("/api/agents");
+    const [agents, toolGroups] = await Promise.all([api("/api/agents"), api("/api/tool-groups")]);
     if (session !== state.session) return;
     state.agentConfigs = agents;
+    state.toolGroupCatalog = toolGroups;
     renderAgentList();
   } catch (err) {
     if (session === state.session) $("agent-error").textContent = err.message;
@@ -302,6 +308,24 @@ function fillAgentForm(agent) {
   $("agent-reasoning").checked = config.reasoning;
   $("agent-keep-reasoning").checked = config.keep_reasoning_in_memory;
   $("agent-tools").checked = config.tools;
+  const selected = new Set(config.tool_groups ?? state.toolGroupCatalog.map((group) => group.id));
+  $("agent-tool-groups").replaceChildren(
+    Object.assign(document.createElement("legend"), { id: "agent-tool-groups-label", textContent: tr("Tool groups") }),
+    ...state.toolGroupCatalog.map((group) => {
+      const label = document.createElement("label");
+      label.className = "model-filter";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.name = "agent-tool-group";
+      checkbox.value = group.id;
+      checkbox.checked = selected.has(group.id);
+      checkbox.title = group.description;
+      const text = document.createElement("span");
+      text.textContent = group.name;
+      label.append(checkbox, text);
+      return label;
+    }),
+  );
   $("agent-associative").checked = config.associative_memory;
   $("agent-effort").value = config.reasoning_effort ?? "";
   $("agent-tokens-enabled").checked = config.reasoning_tokens != null;
@@ -336,6 +360,7 @@ function agentFormBody() {
       keep_reasoning_in_memory: $("agent-keep-reasoning").checked,
       conversation_messages_retained: optionalNumber("agent-retained"),
       tools: $("agent-tools").checked,
+      tool_groups: [...document.querySelectorAll('input[name="agent-tool-group"]:checked')].map((input) => input.value),
       associative_memory: $("agent-associative").checked,
     },
   };

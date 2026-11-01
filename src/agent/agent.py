@@ -66,7 +66,10 @@ class Agent:
         )
         self.index.sync()
         self._tool_specs, self._tool_handlers = (
-            build_tools(self, TavilyClient.from_config(TAVILY)) if config.tools else ([], {})
+            build_tools(
+                self, TavilyClient.from_config(TAVILY), config.tool_groups, config.allow, config.deny,
+            )
+            if config.tools and config.tool_groups else ([], {})
         )
         self._max_context = None  # model context window, fetched lazily from the provider
         self.open_chat(chat_id)

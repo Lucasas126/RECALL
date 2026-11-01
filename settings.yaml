@@ -15,8 +15,9 @@ agent:
   max_tool_hops: 5          # max tool round-trips before forcing a final answer
 
 web:
-  host: 127.0.0.1           # interface the web ui binds to (no real auth yet: keep it local)
+  host: 127.0.0.1           # interface the web ui binds to
   port: 8000
+  session_secret_env: RECALL_SESSION_SECRET  # env var containing the signing secret
 
 telegram:
   allowed_users_env: TELEGRAM_ALLOWED_USERS  # comma-separated telegram_id=recall_user_id entries
