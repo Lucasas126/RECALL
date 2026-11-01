@@ -44,7 +44,7 @@ cli (cli.py, direct) ─┘
 - a channel resolves its own identity to a `user_id` (web: login cookie; telegram: a telegram id → user, planned) and then calls the service with that `user_id`. the service never trusts ids to be well formed: it validates user, agent ownership and chat ids.
 - operations: `login`, `list_agents`, `list_chats`, `create_chat`, `get_chat`, `delete_chat`, `send`. CRUD returns plain dicts; `send` returns events.
 - `send` yields `ChatEvent`s (`reasoning`, `text`, `tool`, `usage`, `interrupted`, `notice` when a video was replaced by frames for an image-only model, and `memory` when associative recall finds matches), not channel formats. the `memory` event carries the number of matched fragments; adapters decide how to display it. a telegram adapter would call `send(..., stream=False)`, deliver the `text` event as a message and handle `interrupted` without claiming a completed answer. rendering and transport stay in the adapter.
-- one `Agent` is kept per (user, agent) and switches between that agent's chats with `open_chat`; execution on an agent is serialized, but a new message can interrupt its active reply to the same chat.
+- one `Agent` runtime is kept per (user, agent, chat), so chat context and mutable reply state cannot leak between conversations; different chats of the same configured agent can execute in parallel, while a new message can interrupt its active reply to the same chat.
 
 status: implemented for the web and Telegram channels; the cli still uses `Agent` directly.
 
@@ -128,8 +128,9 @@ A new message to the active chat cancels its unfinished generation, preserves
 the partial reply and appends the new user input before generating again. A burst
 keeps every user message in arrival order; superseded queued generations record
 an empty interrupted turn without invoking the model. The same-chat continuation
-stays together ahead of unrelated queued chats. Other chats on that agent wait
-without interrupting it; different users and agents have independent workers.
+stays together ahead of unrelated queued chats. Other chats on that agent run independently without interrupting it; each chat
+has its own worker and runtime. Different users and agents have independent
+slots as before.
 Active and queued chats are excluded from empty-chat pruning.
 
 Every `ChatEvent` carries a `generation_id`. An interrupted request ends with
@@ -169,9 +170,8 @@ chat with a reply in flight keeps its own message view in the browser, which
 keeps receiving the stream while another chat is open and is restored as-is when
 the chat is reopened. The chat list marks generating chats, and a generating chat
 cannot be deleted. `Steer`, the model picker and the usage panel only apply to
-the open chat. The service still serializes execution per agent, so a reply in a
-chat of the same agent started later waits for the running one; chats of different
-agents generate in parallel.
+the open chat. Chats of the same agent generate in parallel too; only messages
+targeting the same chat are ordered and steered together.
 Logging out detaches the browser streams; callbacks from an old session cannot
 modify the new session, and only the latest request of a chat can update its usage panel.
 Detaching a transport does not cancel a service generation on its own.

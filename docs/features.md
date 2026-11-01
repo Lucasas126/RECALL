@@ -27,6 +27,7 @@
 ~~- Option to view and manage existing chats: users can see a list of their previous conversations, with the ability to delete or continue them.~~
 - ~~small llm that generates a name of the conversation to display on the chat list, its runs when a conversation is at least 5 messages long, and the name is stored in the conversation metadata. if the conversation is less than 5 messages long, keep the current method. the small llm must be a general settings, not from teh user or the chat, but in the general settings~~
 - ~~its possible to swap chat while another one is working, so you are not forced to stay in the same chat while the model is generating a response~~
+- ~~chats using the same agent can generate in parallel without sharing conversation context~~
 - chat names can be changed and edited
 
 ## Recall

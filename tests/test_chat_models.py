@@ -196,7 +196,7 @@ class ChatModelServiceTests(ModelFixture):
         ])
         self.assertEqual([
             call.args[0] for call in self.providers[("user-one", "agent-one")].context_window.call_args_list
-        ], ["vendor/alpha", "vendor/default", "vendor/alpha"])
+        ], ["vendor/alpha", "vendor/default"])
         restarted = ChatService(agent_factory=self._factory)
         list(restarted.send("user-one", "agent-one", self.chat, "After restart"))
         self.assertEqual(self.used_models[("user-one", "agent-one")][-1], "vendor/alpha")
@@ -236,9 +236,10 @@ class ChatModelServiceTests(ModelFixture):
             with self.assertRaises(AgentBusy):
                 self.service.set_chat_model("user-one", "agent-one", self.chat, "vendor/alpha")
             other = self.service.create_chat("user-one", "agent-one")["id"]
+            self.service.set_chat_model("user-one", "agent-one", other, "vendor/beta")
             queued = self.service.send("user-one", "agent-one", other, "Queued")
             with self.assertRaises(AgentBusy):
-                self.service.set_chat_model("user-one", "agent-one", other, "vendor/beta")
+                self.service.set_chat_model("user-one", "agent-one", other, "vendor/alpha")
         finally:
             release.set()
         list(original)

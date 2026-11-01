@@ -156,12 +156,17 @@ class _AgentSlot:
     """A lazily built agent, its worker queue and locks for execution and scheduling."""
 
     def __init__(self) -> None:
-        self.agent: Optional[Agent] = None
+        self.agents: dict[str, Agent] = {}
         self.lock = threading.Lock()
         self.state = threading.Lock()
-        self.pending: deque[_MessageRun] = deque()
-        self.active: _MessageRun | None = None
-        self.worker: threading.Thread | None = None
+        self.pending: dict[str, deque[_MessageRun]] = {}
+        self.active: dict[str, _MessageRun] = {}
+        self.workers: dict[str, threading.Thread] = {}
+
+    @property
+    def worker(self) -> threading.Thread | None:
+        """Return one worker for lifecycle inspection."""
+        return next(iter(self.workers.values()), None)
 
 
 class ChatService:
@@ -220,11 +225,11 @@ class ChatService:
         self._owned_agent(user_id, agent_id)
         slot = self._slot(user_id, agent_id)
         with slot.state:
-            if slot.active is not None or slot.pending:
+            if slot.active or slot.pending:
                 raise AgentBusy("wait for this agent's active and queued replies before editing it")
             with slot.lock:
                 updated = self._agents.update(user_id, agent_id, config)
-                slot.agent = None  # rebuilt from the saved configuration on next use
+                slot.agents.clear()
         if updated.id != agent_id:
             self._forget_slot(user_id, agent_id)
             self._replace_preferred_agent(user_id, agent_id, updated.id)
@@ -235,11 +240,11 @@ class ChatService:
         self._owned_agent(user_id, agent_id)
         slot = self._slot(user_id, agent_id)
         with slot.state:
-            if slot.active is not None or slot.pending:
+            if slot.active or slot.pending:
                 raise AgentBusy("wait for this agent's active and queued replies before deleting it")
             with slot.lock:
                 self._agents.delete(user_id, agent_id)
-                slot.agent = None
+                slot.agents.clear()
         self._forget_slot(user_id, agent_id)
         self._replace_preferred_agent(user_id, agent_id, None)
 
@@ -455,15 +460,14 @@ class ChatService:
                 raise InputError("the selected model does not support reasoning effort")
         slot = self._slot(user_id, agent_id)
         with slot.state:
-            if slot.active is not None or slot.pending:
-                raise AgentBusy("wait for this agent's active and queued replies before changing reasoning effort")
+            if self._chat_busy(slot, chat_id):
+                raise AgentBusy("wait for this chat's active and queued replies before changing reasoning effort")
             with slot.lock:
                 try:
                     conversations.set_reasoning_effort(chat_id, effort)
                 except FileNotFoundError as exc:
                     raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
-                if slot.agent is not None and slot.agent.chat_id == chat_id:
-                    slot.agent = None
+                slot.agents.pop(chat_id, None)
         return self.get_chat_models(user_id, agent_id, chat_id)
 
     def set_chat_model(
@@ -478,8 +482,8 @@ class ChatService:
                 raise InputError("model is not available in the OpenRouter chat catalog with the selected ZDR filter")
         slot = self._slot(user_id, agent_id)
         with slot.state:
-            if slot.active is not None or slot.pending:
-                raise AgentBusy("wait for this agent's active and queued replies before changing models")
+            if self._chat_busy(slot, chat_id):
+                raise AgentBusy("wait for this chat's active and queued replies before changing models")
             with slot.lock:
                 try:
                     if model_id is None:
@@ -493,20 +497,22 @@ class ChatService:
                     effective = model_id or user_models(self._user(user_id), self._preferences).chat
                     if self._reasoning_effort_supported(self._user(user_id), effective) is False:
                         conversations.set_reasoning_effort(chat_id, None)
-                if slot.agent is not None and slot.agent.chat_id == chat_id:
-                    slot.agent = None
+                slot.agents.pop(chat_id, None)
         return self.get_chat_models(user_id, agent_id, chat_id)["model"]
 
     def delete_chat(self, user_id: str, agent_id: str, chat_id: str) -> None:
         conversations = self._conversations(user_id, agent_id)
         slot = self._slot(user_id, agent_id)
-        with slot.lock:  # wait for any reply in flight on this agent
+        with slot.state:
+            if self._chat_busy(slot, chat_id):
+                raise AgentBusy("cannot delete a chat while it has an active or queued reply")
+        with slot.lock:
             try:
                 conversations.delete_chat(chat_id)
             except (FileNotFoundError, ValueError) as e:
                 raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from e
-            if slot.agent is not None and slot.agent.chat_id == chat_id:
-                slot.agent = None  # rebuilt on next use rather than left pointing at a deleted chat
+            with slot.state:
+                slot.agents.pop(chat_id, None)
 
     # ------------------------------------------------------------------ messaging
 
@@ -518,7 +524,7 @@ class ChatService:
 
         Validation and scheduling happen immediately, independently of event consumption.
         A new message interrupts an unfinished reply to the same chat and continues its turn.
-        Other chats on the agent remain serialized. `stream=None` follows the agent's config.
+        Other chats on the agent run independently. `stream=None` follows the agent's config.
         """
         conversations = self._conversations(user_id, agent_id)
         attachments = [ChatAttachment.model_validate(item).model_dump() for item in (attachments or [])]
@@ -538,26 +544,26 @@ class ChatService:
                     raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id)
             except ValueError as e:
                 raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from e
-            same_chat = [
-                i for i, queued in enumerate(slot.pending) if queued.chat_id == chat_id
-            ]
-            active = slot.active
+            pending = slot.pending.setdefault(chat_id, deque())
+            same_chat = list(range(len(pending)))
+            active = slot.active.get(chat_id)
             if active is not None and active.chat_id == chat_id:
                 run.continuation = active.cancellation.cancel()
             for index in same_chat:
-                slot.pending[index].cancellation.cancel()
+                pending[index].cancellation.cancel()
                 run.continuation = True
             if same_chat:
-                slot.pending.insert(same_chat[-1] + 1, run)
+                pending.insert(same_chat[-1] + 1, run)
             elif run.continuation:
-                slot.pending.appendleft(run)
+                pending.appendleft(run)
             else:
-                slot.pending.append(run)
-            if slot.worker is None:
-                slot.worker = threading.Thread(
-                    target=self._work, args=(user_id, agent_id, slot), daemon=True,
+                pending.append(run)
+            if chat_id not in slot.workers:
+                worker = threading.Thread(
+                    target=self._work, args=(user_id, agent_id, slot, chat_id), daemon=True,
                 )
-                slot.worker.start()
+                slot.workers[chat_id] = worker
+                worker.start()
         return self._events(run)
 
     @staticmethod
@@ -691,15 +697,17 @@ class ChatService:
                 raise event
             yield event
 
-    def _work(self, user_id: str, agent_id: str, slot: _AgentSlot) -> None:
+    def _work(self, user_id: str, agent_id: str, slot: _AgentSlot, chat_id: str) -> None:
         while True:
             with slot.state:
-                if not slot.pending:
-                    slot.worker = None
-                    slot.active = None
+                pending = slot.pending.get(chat_id)
+                if not pending:
+                    slot.pending.pop(chat_id, None)
+                    slot.workers.pop(chat_id, None)
+                    slot.active.pop(chat_id, None)
                     return
-                run = slot.pending.popleft()
-                slot.active = run
+                run = pending.popleft()
+                slot.active[chat_id] = run
             try:
                 for event in self._run(user_id, agent_id, slot, run):
                     run.events.put(event)
@@ -709,57 +717,56 @@ class ChatService:
             finally:
                 run.events.put(None)
                 with slot.state:
-                    slot.active = None
+                    slot.active.pop(chat_id, None)
 
     def _run(
         self, user_id: str, agent_id: str, slot: _AgentSlot, run: _MessageRun,
     ) -> Iterator[ChatEvent]:
-        with slot.lock:
-            if slot.agent is None:
-                slot.agent = self._agent_factory(user_id, agent_id, run.chat_id)
-            elif slot.agent.chat_id != run.chat_id:
-                slot.agent.open_chat(run.chat_id)
-            agent = slot.agent
-            agent.refresh_user_models(user_models(self._user(user_id), self._preferences))
-            agent.config.language = self.language(user_id)
-            try:
-                result = agent.invoke(
-                    run.text, stream=run.stream, cancellation=run.cancellation,
-                    continuation=run.continuation, attachments=run.attachments,
-                )
-                if agent._assoc_match_count:
-                    yield ChatEvent(
-                        "memory", data={"matches": agent._assoc_match_count},
-                        generation_id=run.generation_id,
-                    )
-                if isinstance(result, str):
-                    for action in agent.last_actions:
-                        yield ChatEvent("tool", data=action, generation_id=run.generation_id)
-                    yield ChatEvent("text", result, generation_id=run.generation_id)
-                else:
-                    with closing(result) as chunks:
-                        for kind, chunk in chunks:
-                            if kind == "tool" and isinstance(chunk, dict):
-                                yield ChatEvent("tool", data=chunk, generation_id=run.generation_id)
-                            elif kind in ("reasoning", "content") and isinstance(chunk, str):
-                                yield ChatEvent(
-                                    "reasoning" if kind == "reasoning" else "text",
-                                    chunk, generation_id=run.generation_id,
-                                )
-                            else:
-                                raise ValueError(f"invalid agent event: {kind!r}")
-            except GenerationCancelled:
+        with slot.state:
+            agent = slot.agents.get(run.chat_id)
+            if agent is None:
+                agent = self._agent_factory(user_id, agent_id, run.chat_id)
+                slot.agents[run.chat_id] = agent
+        agent.refresh_user_models(user_models(self._user(user_id), self._preferences))
+        agent.config.language = self.language(user_id)
+        try:
+            result = agent.invoke(
+                run.text, stream=run.stream, cancellation=run.cancellation,
+                continuation=run.continuation, attachments=run.attachments,
+            )
+            if agent._assoc_match_count:
                 yield ChatEvent(
-                    "interrupted", agent.last_reply,
-                    {"reasoning": agent.last_reasoning, "actions": agent.last_actions},
+                    "memory", data={"matches": agent._assoc_match_count},
                     generation_id=run.generation_id,
                 )
-                return
-            if agent.last_usage:
-                report = agent.last_usage
-                if agent.last_latency_report:
-                    report += "\n\n" + agent.last_latency_report
-                yield ChatEvent("usage", report, generation_id=run.generation_id)
+            if isinstance(result, str):
+                for action in agent.last_actions:
+                    yield ChatEvent("tool", data=action, generation_id=run.generation_id)
+                yield ChatEvent("text", result, generation_id=run.generation_id)
+            else:
+                with closing(result) as chunks:
+                    for kind, chunk in chunks:
+                        if kind == "tool" and isinstance(chunk, dict):
+                            yield ChatEvent("tool", data=chunk, generation_id=run.generation_id)
+                        elif kind in ("reasoning", "content") and isinstance(chunk, str):
+                            yield ChatEvent(
+                                "reasoning" if kind == "reasoning" else "text",
+                                chunk, generation_id=run.generation_id,
+                            )
+                        else:
+                            raise ValueError(f"invalid agent event: {kind!r}")
+        except GenerationCancelled:
+            yield ChatEvent(
+                "interrupted", agent.last_reply,
+                {"reasoning": agent.last_reasoning, "actions": agent.last_actions},
+                generation_id=run.generation_id,
+            )
+            return
+        if agent.last_usage:
+            report = agent.last_usage
+            if agent.last_latency_report:
+                report += "\n\n" + agent.last_latency_report
+            yield ChatEvent("usage", report, generation_id=run.generation_id)
         self._name_chat(user_id, agent_id, run.chat_id)
 
     def _name_chat(self, user_id: str, agent_id: str, chat_id: str) -> None:
@@ -792,12 +799,14 @@ class ChatService:
 
     @staticmethod
     def _kept_chats(slot: _AgentSlot, keep: str | None = None) -> set[str]:
-        kept = {run.chat_id for run in slot.pending}
-        if slot.active is not None:
-            kept.add(slot.active.chat_id)
+        kept = set(slot.pending) | set(slot.active)
         if keep is not None:
             kept.add(keep)
         return kept
+
+    @staticmethod
+    def _chat_busy(slot: _AgentSlot, chat_id: str) -> bool:
+        return chat_id in slot.active or bool(slot.pending.get(chat_id))
 
     @staticmethod
     def _check_id(kind: str, value: str, error: type[ServiceError]) -> None:

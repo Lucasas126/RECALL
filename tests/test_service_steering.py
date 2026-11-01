@@ -188,19 +188,28 @@ class ServiceSteeringTests(SteeringFixture):
         self.assertEqual(events[0].text, "Partial")
         self.assertEqual(list(second)[0].text, "Answer: Correction")
 
-    def test_other_chat_is_serialized_and_does_not_interrupt(self) -> None:
+    def test_other_chat_runs_in_parallel_and_does_not_interrupt(self) -> None:
         started, release = self._gate("Original")
+        other_started, other_release = self._gate("Other chat")
         first = self._send("Original")
         self.assertTrue(started.wait(2))
         other = self.service.create_chat("user-one", "agent-one")["id"]
         second = self._send("Other chat", chat=other)
-        self.calls[("user-one", "agent-one")][0]["cancellation"].raise_if_cancelled()
+        self.assertTrue(other_started.wait(2))
         release.set()
+        other_release.set()
         self.assertNotIn("interrupted", [e.kind for e in first])
-        self.assertEqual(list(second)[0].text, "Answer: Other chat")
-        self.assertEqual([m["content"] for m in self._context() if m["role"] == "user"], ["Other chat"])
+        second_events = list(second)
+        self.assertEqual(
+            [event.text for event in second_events if event.kind == "text"][-1],
+            "Answer: Other chat",
+        )
+        contexts = [call["context"] for call in self.calls[("user-one", "agent-one")]]
+        users = [[m["content"] for m in context if m["role"] == "user"] for context in contexts]
+        self.assertIn(["Original"], users)
+        self.assertIn(["Other chat"], users)
 
-    def test_active_steering_has_priority_over_other_queued_chats(self) -> None:
+    def test_active_steering_stays_isolated_from_other_chat(self) -> None:
         self.memory = False
         started, release = self._gate("Original")
         first = self._send("Original")
@@ -214,7 +223,9 @@ class ServiceSteeringTests(SteeringFixture):
         self.assertEqual(list(queued)[0].text, "Answer: Other chat")
         contexts = [call["context"] for call in self.calls[("user-one", "agent-one")]]
         users = [[m["content"] for m in c if m["role"] == "user"] for c in contexts]
-        self.assertEqual(users, [["Original"], ["Original", "Correction"], ["Other chat"]])
+        self.assertIn(["Original"], users)
+        self.assertIn(["Original", "Correction"], users)
+        self.assertIn(["Other chat"], users)
 
     def test_no_memory_and_small_retention_preserve_active_turn_only(self) -> None:
         self.memory = False
