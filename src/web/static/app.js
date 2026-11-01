@@ -15,6 +15,7 @@ const state = {
   settingsModelDraft: null,
   preferences: null, preferencesRequest: 0, settingsBusy: false, settingsOriginal: null,
   translations: null, toolGroupCatalog: [],
+  mcpServers: [], mcpTools: new Map(), connectionsPoll: null,
   agentConfigs: [], agentForm: { originalId: null, busy: false },
 };
 // thinking blocks start open (streamed live); closing one keeps them closed from then on
@@ -53,6 +54,11 @@ function translateInterface() {
     ["agent-tokens-enabled-label", "Limit reasoning tokens"], ["agent-reasoning-tokens-label", "Reasoning tokens"],
     ["agent-retained-label", "Messages kept in context"],
     ["agent-retained-hint", "Empty keeps all messages."], ["agent-save", "Save agent"], ["agent-delete", "Delete agent"],
+    ["agent-tab-general", "General"], ["agent-tab-mcp", "MCP"],
+    ["agent-mcp-note", "MCP servers act on each user's own account. Connect accounts in Settings > Connections."],
+    ["connections-title", "Connections"],
+    ["connections-note", "Connect your own account for each service your agents can use. Every user connects separately."],
+    ["connections-browser-note", "Sign-in opens in a browser on the computer running RECALL."],
   ]) $(id).textContent = tr(text);
 }
 
@@ -239,10 +245,14 @@ function showTab(tab) {
 async function loadAgentConfigs() {
   const session = state.session;
   try {
-    const [agents, toolGroups] = await Promise.all([api("/api/agents"), api("/api/tool-groups")]);
+    const [agents, toolGroups, mcpServers] = await Promise.all([
+      api("/api/agents"), api("/api/tool-groups"), api("/api/mcp"),
+    ]);
     if (session !== state.session) return;
     state.agentConfigs = agents;
     state.toolGroupCatalog = toolGroups;
+    state.mcpServers = mcpServers;
+    state.mcpTools.clear();
     renderAgentList();
   } catch (err) {
     if (session === state.session) $("agent-error").textContent = err.message;
@@ -332,6 +342,138 @@ function fillAgentForm(agent) {
   $("agent-reasoning-tokens").disabled = config.reasoning_tokens == null;
   $("agent-reasoning-tokens").value = config.reasoning_tokens ?? "";
   $("agent-retained").value = config.conversation_messages_retained ?? "";
+  renderAgentMcp(config.mcp ?? {});
+  showAgentPanel("general");
+}
+
+function showAgentPanel(panel) {
+  const mcp = panel === "mcp";
+  $("agent-tab-general").setAttribute("aria-pressed", String(!mcp));
+  $("agent-tab-mcp").setAttribute("aria-pressed", String(mcp));
+  $("agent-panel-general").hidden = mcp;
+  $("agent-panel-mcp").hidden = !mcp;
+}
+
+// One fieldset per catalog server; the server is enabled for the agent while its entry exists.
+function renderAgentMcp(selections) {
+  if (!state.mcpServers.length) {
+    $("agent-mcp-list").replaceChildren(
+      Object.assign(document.createElement("p"), { className: "model-note", textContent: tr("No MCP servers are configured.") }),
+    );
+    return;
+  }
+  $("agent-mcp-list").replaceChildren(...state.mcpServers.map((server) => {
+    const selection = selections[server.id];
+    const box = document.createElement("fieldset");
+    box.className = "mcp-server";
+    box.dataset.server = server.id;
+    // keeps a saved tool list when the tools cannot be listed (for example, not connected)
+    box.dataset.savedTools = JSON.stringify(selection?.tools ?? null);
+    box.append(Object.assign(document.createElement("legend"), { textContent: server.name }));
+    if (server.description) {
+      box.append(Object.assign(document.createElement("p"), { className: "model-note", textContent: server.description }));
+    }
+    box.append(Object.assign(document.createElement("p"), {
+      className: server.connected ? "mcp-status connected" : "mcp-status",
+      textContent: tr(server.connected ? "Connected" : "Not connected"),
+    }));
+    const enabled = checkboxLabel("mcp-enabled", tr("Enable for this agent"), Boolean(selection));
+    const options = document.createElement("div");
+    options.className = "mcp-options";
+    options.hidden = !selection;
+    enabled.input.addEventListener("change", () => {
+      options.hidden = !enabled.input.checked;
+      if (enabled.input.checked) loadMcpTools(box, server);
+    });
+    const readOnly = checkboxLabel("mcp-read-only", tr("Read only"), selection?.read_only ?? false);
+    readOnly.label.title = tr("Only tools the server marks as read-only are exposed.");
+    const instructions = document.createElement("label");
+    const textarea = Object.assign(document.createElement("textarea"), {
+      className: "mcp-instructions", rows: 3, maxLength: 4000, value: selection?.instructions ?? "",
+    });
+    instructions.append(Object.assign(document.createElement("span"), { textContent: tr("Instructions for the agent") }), textarea);
+    const tools = document.createElement("fieldset");
+    tools.className = "mcp-tools";
+    const all = checkboxLabel("mcp-all-tools", tr("All tools, including new ones"), selection?.tools == null);
+    all.input.addEventListener("change", () => syncMcpToolInputs(box));
+    tools.append(
+      Object.assign(document.createElement("legend"), { textContent: tr("Tools") }),
+      all.label,
+      Object.assign(document.createElement("div"), { className: "mcp-tool-list" }),
+      Object.assign(document.createElement("p"), { className: "model-note mcp-tools-status" }),
+    );
+    options.append(readOnly.label, instructions, tools);
+    box.append(enabled.label, options);
+    if (selection) loadMcpTools(box, server);
+    return box;
+  }));
+}
+
+function checkboxLabel(className, text, checked) {
+  const label = document.createElement("label");
+  label.className = "model-filter";
+  const input = Object.assign(document.createElement("input"), { type: "checkbox", className, checked });
+  label.append(input, Object.assign(document.createElement("span"), { textContent: text }));
+  return { label, input };
+}
+
+async function loadMcpTools(box, server) {
+  const status = box.querySelector(".mcp-tools-status");
+  if (!server.connected) {
+    status.textContent = tr("Connect {server} in Settings > Connections to choose its tools.", { server: server.name });
+    return;
+  }
+  const session = state.session;
+  if (!state.mcpTools.has(server.id)) {
+    status.textContent = tr("Loading tools…");
+    try {
+      state.mcpTools.set(server.id, await api(`/api/mcp/${server.id}/tools`));
+    } catch (err) {
+      if (session === state.session) status.textContent = err.message;
+      return;
+    }
+  }
+  if (session !== state.session || !box.isConnected) return;
+  status.textContent = "";
+  const saved = JSON.parse(box.dataset.savedTools);
+  const chosen = new Set(saved ?? []);
+  box.querySelector(".mcp-tool-list").replaceChildren(...state.mcpTools.get(server.id).map((tool) => {
+    const text = tool.read_only ? tool.name : `${tool.name} (${tr("changes data")})`;
+    const item = checkboxLabel("mcp-tool", text, saved == null || chosen.has(tool.name));
+    item.input.value = tool.name;
+    item.input.dataset.readOnly = String(tool.read_only);
+    item.label.title = tool.description;
+    return item.label;
+  }));
+  syncMcpToolInputs(box);
+}
+
+function syncMcpToolInputs(box) {
+  const all = box.querySelector(".mcp-all-tools").checked;
+  for (const input of box.querySelectorAll(".mcp-tool")) {
+    input.disabled = all;
+    if (all) input.checked = true;
+  }
+}
+
+function agentMcpBody() {
+  const selections = {};
+  for (const box of document.querySelectorAll("#agent-mcp-list .mcp-server")) {
+    if (!box.querySelector(".mcp-enabled").checked) continue;
+    const toolInputs = [...box.querySelectorAll(".mcp-tool")];
+    let tools = null;
+    if (!box.querySelector(".mcp-all-tools").checked) {
+      tools = toolInputs.length
+        ? toolInputs.filter((input) => input.checked).map((input) => input.value)
+        : (JSON.parse(box.dataset.savedTools) ?? []);
+    }
+    selections[box.dataset.server] = {
+      tools,
+      read_only: box.querySelector(".mcp-read-only").checked,
+      instructions: box.querySelector(".mcp-instructions").value.trim(),
+    };
+  }
+  return selections;
 }
 
 // The id is derived from the name once, when the agent is created; it never changes from the form.
@@ -361,6 +503,7 @@ function agentFormBody() {
       conversation_messages_retained: optionalNumber("agent-retained"),
       tools: $("agent-tools").checked,
       tool_groups: [...document.querySelectorAll('input[name="agent-tool-group"]:checked')].map((input) => input.value),
+      mcp: agentMcpBody(),
       associative_memory: $("agent-associative").checked,
     },
   };
@@ -387,6 +530,10 @@ async function refreshAgents(previousId, currentId) {
 $("tab-chats").addEventListener("click", () => showTab("chats"));
 $("tab-agents").addEventListener("click", () => showTab("agents"));
 $("agent-new").addEventListener("click", openNewAgent);
+$("agent-tab-general").addEventListener("click", () => showAgentPanel("general"));
+$("agent-tab-mcp").addEventListener("click", () => showAgentPanel("mcp"));
+// required fields live in the General panel; show it so the browser can point at them
+$("agent-form").addEventListener("invalid", () => showAgentPanel("general"), true);
 
 $("agent-tokens-enabled").addEventListener("change", () => {
   const enabled = $("agent-tokens-enabled").checked;
@@ -540,6 +687,7 @@ $("settings-open").addEventListener("click", async () => {
   $("settings-error").textContent = "";
   $("settings-save").disabled = true;
   $("settings-dialog").showModal();
+  loadConnections();
   try {
     await refreshPreferences();
     if (session !== state.session) return;
@@ -551,6 +699,110 @@ $("settings-open").addEventListener("click", async () => {
 });
 
 $("settings-close").addEventListener("click", () => $("settings-dialog").close());
+$("settings-dialog").addEventListener("close", stopConnectionsPoll);
+
+// ------------------------------------------------------------------ mcp connections
+
+async function loadConnections() {
+  const session = state.session;
+  $("connections-error").textContent = "";
+  try {
+    const servers = await api("/api/mcp");
+    if (session !== state.session) return;
+    state.mcpServers = servers;
+    renderConnections();
+  } catch (err) {
+    if (session === state.session) $("connections-error").textContent = err.message;
+  }
+}
+
+function renderConnections() {
+  const servers = state.mcpServers;
+  if (!servers.length) {
+    $("connection-list").replaceChildren(
+      Object.assign(document.createElement("li"), { className: "model-note", textContent: tr("No MCP servers are configured.") }),
+    );
+  } else {
+    $("connection-list").replaceChildren(...servers.map(connectionItem));
+  }
+  if (servers.some((server) => server.pending)) startConnectionsPoll();
+  else stopConnectionsPoll();
+}
+
+function connectionItem(server) {
+  const item = document.createElement("li");
+  item.className = "connection";
+  const status = server.pending ? "Waiting for sign-in…" : (server.connected ? "Connected" : "Not connected");
+  const heading = document.createElement("div");
+  heading.append(
+    Object.assign(document.createElement("strong"), { textContent: server.name }),
+    Object.assign(document.createElement("span"), {
+      className: server.connected ? "mcp-status connected" : "mcp-status", textContent: ` ${tr(status)}`,
+    }),
+  );
+  item.append(heading);
+  if (server.description) {
+    item.append(Object.assign(document.createElement("p"), { className: "model-note", textContent: server.description }));
+  }
+  if (server.error) {
+    item.append(Object.assign(document.createElement("p"), {
+      className: "error", textContent: tr("Sign-in failed: {error}", { error: server.error }),
+    }));
+  }
+  if (server.pending && /^https?:\/\//.test(server.auth_url ?? "")) {
+    item.append(Object.assign(document.createElement("a"), {
+      href: server.auth_url, target: "_blank", rel: "noopener noreferrer", textContent: tr("Open sign-in page"),
+    }));
+  }
+  if (server.requires_auth) {
+    const actions = document.createElement("div");
+    actions.className = "agent-actions";
+    const connect = Object.assign(document.createElement("button"), {
+      type: "button", textContent: tr(server.connected ? "Reconnect" : "Connect"), disabled: server.pending,
+    });
+    connect.addEventListener("click", () => changeConnection(server, "connect"));
+    actions.append(connect);
+    if (server.connected || server.pending) {
+      const disconnect = Object.assign(document.createElement("button"), { type: "button", textContent: tr("Disconnect") });
+      disconnect.addEventListener("click", () => {
+        if (window.confirm(tr("Disconnect {server}? Your stored credentials for it are deleted.", { server: server.name }))) {
+          changeConnection(server, "disconnect");
+        }
+      });
+      actions.append(disconnect);
+    }
+    item.append(actions);
+  }
+  return item;
+}
+
+async function changeConnection(server, action) {
+  const session = state.session;
+  $("connections-error").textContent = "";
+  for (const button of $("connection-list").querySelectorAll("button")) button.disabled = true;
+  try {
+    const status = await api(
+      action === "connect" ? `/api/mcp/${server.id}/connect` : `/api/mcp/${server.id}/connection`,
+      { method: action === "connect" ? "POST" : "DELETE" },
+    );
+    if (session !== state.session) return;
+    state.mcpServers = state.mcpServers.map((item) => (item.id === status.id ? status : item));
+    state.mcpTools.delete(status.id);
+  } catch (err) {
+    if (session === state.session) $("connections-error").textContent = err.message;
+  }
+  if (session === state.session) renderConnections();
+}
+
+function startConnectionsPoll() {
+  if (state.connectionsPoll || !$("settings-dialog").open) return;
+  state.connectionsPoll = setInterval(loadConnections, 3000);
+}
+
+function stopConnectionsPoll() {
+  clearInterval(state.connectionsPoll);
+  state.connectionsPoll = null;
+}
 $("settings-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   if (state.settingsBusy || !state.settingsOriginal) return;

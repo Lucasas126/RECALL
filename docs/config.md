@@ -569,6 +569,15 @@ selectable in the web **Agents** tab. Agent YAML stores the selection as
 Existing `allow` and `deny` lists remain supported as an additional per-tool
 filter.
 
+## MCP servers
+
+External services such as Google Calendar are connected through MCP servers. The
+catalog lives under `mcp` in the root `settings.yaml`, each user connects their own
+account in Settings > Connections (credentials are stored in
+`.config/<user_id>/mcp/<server_id>/`), and each agent enables servers in
+`chat_config.mcp`. Shared values such as the Google OAuth client path come from
+environment variables (`GOOGLE_OAUTH_CREDENTIALS`). See [MCP servers](mcp.md).
+
 ## config files
 
 ```yaml
@@ -600,6 +609,8 @@ chat_config:
   conversation_messages_retained: 20 # last N messages kept in context (see sources.md)
   tools: true                       # enable the selected tool groups
   tool_groups: [memory_read, memory_edit]  # memory_read, memory_edit, web
+  mcp:                               # MCP servers enabled for this agent (see mcp.md)
+    google_calendar: {tools: null, read_only: false, instructions: ""}
 ```
 
 ## loading
@@ -619,6 +630,10 @@ the web **Agents** tab lists the user's agents and edits the name, `personality_
 | method | route | result |
 | --- | --- | --- |
 | `GET` | `/api/tool-groups` | shared tool-group catalog available to the user's agents |
+| `GET` | `/api/mcp` | shared MCP server catalog with the user's connection status |
+| `GET` | `/api/mcp/<server_id>/tools` | tools of a server the user has connected (`409` when not connected) |
+| `POST` | `/api/mcp/<server_id>/connect` | starts the server's sign-in for the user; returns the status and sign-in URL |
+| `DELETE` | `/api/mcp/<server_id>/connection` | stops the user's server and deletes their stored credentials |
 | `GET` | `/api/agents` | full configuration of each agent the user owns, including `chat_config.tool_groups` |
 | `POST` | `/api/agents` | creates `agents/<id>.yaml` and appends the id to `agents` in `user.yaml` (`201`) |
 | `GET` | `/api/agents/<agent_id>` | one agent's configuration |

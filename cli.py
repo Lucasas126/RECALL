@@ -4,7 +4,9 @@ import dotenv
 
 from src.agent.agent import Agent
 from src.config.loader import load_agent, load_user_models
+from src.config.settings import CONFIG_DIR, MCP
 from src.core.sources.registry import SourceRegistry
+from src.providers.mcp import McpManager
 from src.utils.logger import setup_logging
 
 dotenv.load_dotenv()
@@ -24,8 +26,15 @@ def main():
     # continue the most recent chat, or start a new one
     agent_id = load_agent(USER_ID, AGENT_ID).id
     latest = SourceRegistry.for_agent(USER_ID, agent_id).conversations().latest()
-    agent = Agent.from_config(USER_ID, agent_id, chat_id=latest)
+    mcp = McpManager(MCP, CONFIG_DIR)
+    try:
+        run(Agent.from_config(USER_ID, agent_id, chat_id=latest, mcp=mcp))
+    finally:
+        mcp.close()
 
+
+def run(agent: Agent) -> None:
+    """Read user messages from the terminal and print the agent's replies."""
     print(f"{agent.name} cli (chat {agent.chat_id}) — type 'exit' or 'quit' to stop.")
     if agent.last_usage:
         print(f"{GRAY_ITALIC}[context]\n{agent.last_usage}{RESET}")

@@ -1090,6 +1090,11 @@ def build_application(token: str, service: ChatService | None = None) -> Applica
         await application.bot.set_my_commands(application.bot_data["commands"])
 
     application.post_init = set_commands
+
+    async def close_service(_: Application) -> None:
+        state.service.close()
+
+    application.post_shutdown = close_service
     application.add_handler(TypeHandler(Update, refresh_language), group=-1)
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("settings", settings_command))

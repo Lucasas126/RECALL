@@ -20,3 +20,4 @@ main ideas:
     - safe mode: the agent should never be able to directly edit an obsidian file, it should only be given the impression that it does. That is, if the agent tries to edit/create vault-path/hobbies/arte.md, a copy should be created in vault-path/ai-agent/hobbies/arte.md. And when it tries to read an obsidian file (for example, that same file) it should be given the version edited by them, since it will be the last one they're aware of.
     apart from those two modes, there will be a boolean of "auto commit" to determine whether each change made by the agent should create a commit in the obsidian vault (requires the vault to be a git repository)
 - internet access and search, probably with Tavily search
+- external services through MCP servers (Google Calendar first): shared catalog, per-user accounts, enabled per agent; see [docs/mcp.md](docs/mcp.md)

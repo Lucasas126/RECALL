@@ -9,7 +9,7 @@
 
 - ~~Add date filters to web search tools.~~
 - ~~Separate and group all tools: web search, obsidian read only, obsidian read+edit, etc. All groups should be exposed and available to select for all agents, and should be configured in the agent tab in the web interface. This will allow users to easily manage and configure tool access for different agents, so not all agents have the same tools.~~
-- Add Google Calendar integration.
+- ~~Add Google Calendar integration.~~ (through MCP, see [mcp.md](mcp.md))
 
 ## Automation and behavior
 

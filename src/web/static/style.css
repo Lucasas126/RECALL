@@ -129,6 +129,19 @@ details.action pre { margin: 4px 0 0; padding: 8px; background: var(--bg); borde
 .agent-form fieldset { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
 .agent-form legend { padding: 0 6px; color: var(--muted); }
 .agent-form .agent-actions { display: flex; gap: 8px; }
+.agent-panel { display: flex; flex-direction: column; gap: 12px; }
+.agent-panel[hidden] { display: none; }
+.mcp-options { display: flex; flex-direction: column; gap: 10px; }
+.mcp-options[hidden] { display: none; }
+.mcp-tool-list { display: flex; flex-direction: column; gap: 4px; }
+.mcp-status { color: var(--muted); font-size: .9em; margin: 0; }
+.mcp-status.connected { color: #81c995; }
+.connections { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 8px; }
+.connections h3 { margin: 0 0 6px; }
+#connection-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.connection { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; }
+.connection p { margin: 0; }
+.connection .agent-actions { display: flex; gap: 8px; }
 #agent-delete { color: #f28b82; }
 #input { flex: 1; resize: none; }
 #pending-attachments { flex-basis: 100%; display: flex; gap: 6px; flex-wrap: wrap; }

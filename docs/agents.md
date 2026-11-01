@@ -31,6 +31,7 @@ isolation is enforced in one place: the per-agent `SourceRegistry` (path resolut
 
 - each agent has a **tool-group policy**: a selection from the shared tool-group catalog.
 - the available groups are memory read-only, memory read and edit, and web search.
+- each agent also chooses which shared **MCP servers** it uses (for example Google Calendar), optionally read-only, with a tool selection and extra instructions. The tools act on the agent's user's own connected account; see [MCP servers](mcp.md).
 - legacy `allow`/`deny` tool lists are still accepted as an additional per-tool filter.
 - **modes** (recall/dream) further restrict the active set on top of the policy.
 

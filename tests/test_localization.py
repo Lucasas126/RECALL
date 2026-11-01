@@ -35,10 +35,12 @@ class LocalizationCatalogTests(unittest.TestCase):
         localized_calls = {
             "InputError", "UnknownUser", "UnknownAgent", "UnknownChat", "AgentBusy",
             "PreferencesError", "FavoritesError", "CatalogUnavailable", "ChatMetadataError",
+            "McpError", "McpNotConnected", "UnknownMcpServer",
         }
         for relative in (
             "src/telegram/bot.py", "src/service/chat.py", "src/config/preferences.py",
             "src/config/favorites.py", "src/providers/catalog.py", "src/core/sources/conversations.py",
+            "src/providers/mcp.py",
         ):
             path = root.joinpath(*relative.split("/"))
             for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
