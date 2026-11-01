@@ -12,8 +12,8 @@
 
 - Preserve unrelated work in the worktree. Inspect `git status` before editing and do not overwrite existing user changes.
 - Keep changes focused. When behavior or configuration changes, update the directly related documentation and examples.
-- Treat each requested feature or change as a ticket. Before implementation, present a practical multi-step action plan, with each step scoped as a coherent commit, and ask for confirmation to begin.
-- Implement one plan step at a time. After each step, summarize what changed, suggest a commit message for that step, and ask whether to continue or stop. Do not create commits unless explicitly asked.
+- Treat each requested feature or change as a ticket. Before implementation, present a practical multi-step action plan, with each step scoped as a coherent commit, and ask for confirmation to begin the whole plan.
+- Once the plan is confirmed, implement its steps in order without asking for confirmation between steps. After each step, summarize what changed and suggest a commit message for that step. Do not create commits unless explicitly asked.
 - Never add credentials, `.env` contents, private user data, logs, or generated indexes to source control. API keys belong in environment variables; YAML may contain the variable name, never the secret.
 - Prefer existing project dependencies and patterns. When dependencies change, update `pyproject.toml` and `uv.lock` using `uv`.
 - Raise actionable errors for invalid input or failed operations; do not silently substitute success-shaped defaults.
@@ -29,6 +29,8 @@
 
 ## More specific guidance
 
-- Python source conventions: `.github/instructions/python.instructions.md`
-- YAML configuration conventions: `.github/instructions/config.instructions.md`
-- Documentation conventions: `.github/instructions/documentation.instructions.md`
+- Python source conventions: `.github/instructions/python.instructions.md` (Copilot) and `.claude/rules/python.md` (Claude)
+- YAML configuration conventions: `.github/instructions/config.instructions.md` (Copilot) and `.claude/rules/config.md` (Claude)
+- Documentation conventions: `.github/instructions/documentation.instructions.md` (Copilot) and `.claude/rules/documentation.md` (Claude)
+- Keep the Copilot and Claude copies in sync. When you change a file in `.github/instructions/`, make the same change to its `.claude/rules/` counterpart in the same commit, and the reverse. The body after the frontmatter must match exactly. Frontmatter is tool-specific: `applyTo` for Copilot, `paths` for Claude. Keep the two path lists equivalent when you change them.
+- `CLAUDE.md` imports this file with `@AGENTS.md`. Put shared project rules here, not in `CLAUDE.md`.
