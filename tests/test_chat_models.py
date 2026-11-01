@@ -17,6 +17,7 @@ from src.providers.catalog import CatalogUnavailable, ModelPricing, OpenRouterMo
 from src.service.chat import AgentBusy, ChatService, UnknownAgent, UnknownChat
 from src.utils.i18n import InputError
 from src.web.app import create_app
+from auth_helpers import login
 
 
 class ConversationModelTests(unittest.TestCase):
@@ -305,7 +306,7 @@ class ChatModelWebTests(ModelFixture):
         self.client = TestClient(create_app(self.service))
         self.client.__enter__()
         self.addCleanup(self.client.__exit__, None, None, None)
-        self.client.cookies.set("recall_user", "user-one")
+        login(self.client, "user-one")
         self.url = f"/api/agents/agent-one/chats/{self.chat}/model"
 
     def test_select_model_and_reopen_chat(self) -> None:
@@ -315,6 +316,16 @@ class ChatModelWebTests(ModelFixture):
         reopened = self.client.get(self.url.removesuffix("/model"))
         self.assertEqual(reopened.json()["model"], response.json())
         self.assertEqual(self.client.get("/api/me").json()["provider"], "openrouter")
+
+    def test_rename_chat_over_http(self) -> None:
+        url = self.url.removesuffix("/model") + "/title"
+        response = self.client.put(url, json={"title": "Weekly plan"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["title"], "Weekly plan")
+        self.assertEqual(self.client.get(url.removesuffix("/title")).json()["chat"]["title"], "Weekly plan")
+        self.assertEqual(self.client.put(url, json={"title": "  "}).status_code, 400)
+        missing = "/api/agents/agent-one/chats/missing/title"
+        self.assertEqual(self.client.put(missing, json={"title": "Title"}).status_code, 404)
 
     def test_busy_agent_returns_conflict_without_mutation(self) -> None:
         started, release = self._gate("Original")
@@ -380,7 +391,7 @@ class ChatListTests(ModelFixture):
         other = self.service.create_chat("user-one", "agent-two")["id"]
         list(self.service.send("user-one", "agent-two", other, "Hello"))
         with TestClient(create_app(self.service)) as client:
-            client.cookies.set("recall_user", "user-one")
+            login(client, "user-one")
             response = client.get(f"/api/chats?keep={self.chat}")
         self.assertEqual(response.status_code, 200)
         self.assertEqual({chat["id"] for chat in response.json()}, {self.chat, other})

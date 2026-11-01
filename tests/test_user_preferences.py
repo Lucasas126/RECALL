@@ -14,6 +14,7 @@ from src.config.models import AgentConfig, ProviderConfig, UserConfig
 from src.config.preferences import PreferencesError, UserPreferences, UserPreferencesStore
 from src.service.chat import ChatService
 from src.web.app import create_app
+from auth_helpers import TEST_PASSWORD_HASH, login
 
 
 def _update_in_process(root: Path, field: str, value: str | bool) -> None:
@@ -172,7 +173,7 @@ class UserPreferencesWebTests(unittest.TestCase):
         self.users = {
             user: UserConfig(
                 id=user, name=user, language=language, provider=ProviderConfig(name="openrouter"),
-                agents=agents,
+                password_hash=TEST_PASSWORD_HASH, agents=agents,
             )
             for user, language, agents in (
                 ("user-one", "es-ES", ["agent-a", "agent-b"]),
@@ -205,7 +206,7 @@ class UserPreferencesWebTests(unittest.TestCase):
         self.client = TestClient(create_app(self.service))
         self.client.__enter__()
         self.addCleanup(self.client.__exit__, None, None, None)
-        self.client.cookies.set("recall_user", "user-one")
+        login(self.client, "user-one")
         self.url = "/api/preferences"
         self.path = self.root / "user-one" / "preferences.json"
 
@@ -247,13 +248,13 @@ class UserPreferencesWebTests(unittest.TestCase):
 
     def test_preferences_are_scoped_to_cookie_user(self) -> None:
         self.client.patch(self.url, json={"language": "en", "show_thinking": False, "agent_id": "agent-b"})
-        self.client.cookies.set("recall_user", "user-two")
+        login(self.client, "user-two")
         self.assertEqual(self.client.get(self.url).json(), {
             "show_thinking": True, "language": "en", "agent_id": "agent-c",
             "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo",
         })
         self.client.patch(self.url, json={"language": "es"})
-        self.client.cookies.set("recall_user", "user-one")
+        login(self.client, "user-one")
         self.assertEqual(self.client.get(self.url).json(), {
             "show_thinking": False, "language": "en", "agent_id": "agent-b",
             "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo",
@@ -269,7 +270,13 @@ class UserPreferencesWebTests(unittest.TestCase):
                     "show_thinking": True, "language": "en", "agent_id": "agent-a",
                     "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo",
                 })
-        self.load_agent_config.side_effect = FileNotFoundError("missing config")
+        self.users["user-one"].agents = ["agent-a"]
+        def load_agent(user: str, agent: str) -> AgentConfig:
+            if agent == "agent-a":
+                return AgentConfig(id=agent, name=agent, personality_prompt="Test")
+            raise FileNotFoundError("missing config")
+
+        self.load_agent_config.side_effect = load_agent
         response = self.client.patch(self.url, json={"agent_id": "agent-b", "show_thinking": False})
         self.assertEqual(response.status_code, 404)
         self.assertEqual(UserPreferencesStore(self.root).get("user-one").model_dump(exclude_unset=True), {
@@ -288,7 +295,7 @@ class UserPreferencesWebTests(unittest.TestCase):
         self.assertEqual(response.json()["agent_id"], "agent-a")
 
     def test_no_agents_is_represented_explicitly_without_building_an_agent(self) -> None:
-        self.client.cookies.set("recall_user", "no-agents")
+        login(self.client, "no-agents")
         self.assertEqual(self.client.get(self.url).json()["agent_id"], None)
         self.assertEqual(self.client.patch(self.url, json={"language": "es"}).status_code, 200)
         self.factory.assert_not_called()
@@ -312,6 +319,11 @@ class UserPreferencesWebTests(unittest.TestCase):
                     self.client.cookies.set("recall_user", user)
                 self.assertEqual(self.client.get(self.url).status_code, 401)
                 self.assertEqual(self.client.patch(self.url, json={"language": "es"}).status_code, 401)
+                if user is not None:
+                    response = self.client.post(
+                        "/api/login", json={"user_id": user, "password": "test-password-123"},
+                    )
+                    self.assertEqual(response.status_code, 401)
         self.assertFalse(self.path.exists())
 
     def test_corrupt_preferences_produce_logged_http_errors_without_replacing_file(self) -> None:

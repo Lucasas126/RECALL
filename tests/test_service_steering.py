@@ -14,6 +14,7 @@ from src.core.sources.conversations import ConversationsSource
 from src.providers.cancellation import CancellationToken
 from src.providers.provider import LLMProvider
 from src.service.chat import ChatService, UnknownAgent, UnknownChat, UnknownUser
+from auth_helpers import TEST_PASSWORD_HASH
 
 
 class SteeringFixture(unittest.TestCase):
@@ -79,7 +80,7 @@ class SteeringFixture(unittest.TestCase):
             raise FileNotFoundError(user_id)
         return UserConfig(
             id=user_id, name="Test", provider=ProviderConfig(name="ollama"),
-            agents=["agent-one", "agent-two"],
+            password_hash=TEST_PASSWORD_HASH, agents=["agent-one", "agent-two"],
         )
 
     def _registry(self, user: str, agent: str) -> Mock:

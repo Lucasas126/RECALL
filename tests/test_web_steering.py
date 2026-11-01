@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 import test_service_steering as steering
 from src.providers.cancellation import GenerationCancelled
 from src.web.app import create_app
+from auth_helpers import login
 
 
 def _events(response) -> list[dict]:
@@ -30,8 +31,7 @@ class WebSteeringTests(steering.SteeringFixture):
         self.client = TestClient(create_app(self.service))
         self.client.__enter__()
         self.addCleanup(self.client.__exit__, None, None, None)
-        login = self.client.post("/api/login", json={"user_id": "user-one"})
-        self.assertEqual(login.status_code, 200)
+        login(self.client, "user-one")
         self.messages_url = f"/api/agents/agent-one/chats/{self.chat}/messages"
 
     def test_concurrent_http_messages_interrupt_and_preserve_history(self) -> None:

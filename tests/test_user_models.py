@@ -19,7 +19,9 @@ class UserModelDefaultsTests(models_tests.ModelFixture):
         source = self.sources[("user-one", "agent-one")]
         source.set_model(self.chat, "vendor/beta", zdr=False)
         with TestClient(create_app(self.service), raise_server_exceptions=False) as client:
-            self.assertEqual(client.post("/api/login", json={"user_id": "user-one"}).status_code, 200)
+            self.assertEqual(client.post(
+                "/api/login", json={"user_id": "user-one", "password": "test-password-123"},
+            ).status_code, 200)
             with patch.object(source, "load", side_effect=AssertionError("History must not be read")):
                 with patch.object(self.service._preferences, "get", wraps=self.service._preferences.get) as get:
                     response = client.get(f"/api/agents/agent-one/chats/{self.chat}/models")
@@ -34,7 +36,9 @@ class UserModelDefaultsTests(models_tests.ModelFixture):
                         },
                     })
                     get.assert_called_once_with("user-one")
-            self.assertEqual(client.post("/api/login", json={"user_id": "user-two"}).status_code, 200)
+            self.assertEqual(client.post(
+                "/api/login", json={"user_id": "user-two", "password": "test-password-123"},
+            ).status_code, 200)
             self.assertEqual(client.get(f"/api/agents/agent-one/chats/{self.chat}/models").status_code, 404)
             self.assertEqual(client.get(f"/api/agents/agent-two/chats/{self.chat}/models").status_code, 404)
         self.assertFalse(self.agents)
@@ -128,7 +132,9 @@ class UserModelDefaultsTests(models_tests.ModelFixture):
         }
         with patch("src.service.chat.load_agent") as load, patch("src.service.chat.OpenRouterProvider") as provider:
             with TestClient(create_app(self.service), raise_server_exceptions=False) as client:
-                self.assertEqual(client.post("/api/login", json={"user_id": "user-one"}).status_code, 200)
+                self.assertEqual(client.post(
+                    "/api/login", json={"user_id": "user-one", "password": "test-password-123"},
+                ).status_code, 200)
                 for chat_id in ("nonexistent", "..%2Fescape"):
                     with self.subTest(chat_id=chat_id):
                         response = client.post(
