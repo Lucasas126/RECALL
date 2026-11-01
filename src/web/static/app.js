@@ -42,9 +42,10 @@ function translateInterface() {
     ["model-inherit", "Use user default"],
     ["model-scope-note", "Choosing a model for a chat sets only that chat's override. Use user default removes it. Defaults in Settings are saved with Save settings. Default LLM and STT selections require ZDR. Favorites are shared across your agents."],
     ["model-zdr-warning", "ZDR is not required for your next selection. Providers may retain your prompts and replies. Your OpenRouter account may still enforce ZDR."],
-    ["tab-chats", "Chats"], ["tab-agents", "Agents"], ["agents-title", "Agents"],
+    ["tab-chats", "Chats"], ["tab-agents", "Agents"],
     ["agent-new", "+ New agent"], ["agents-empty", "Select an agent to edit it, or create a new one."],
-    ["agent-name-label", "Name"],
+    ["agent-name-label", "Name"], ["agent-description-label", "Description"],
+    ["agent-description-hint", "Optional. Shown in the agent list; not sent to the model."],
     ["agent-prompt-label", "System prompt"], ["agent-behavior-label", "Chat behavior"],
     ["agent-stream-label", "Stream replies"], ["agent-memory-label", "Use memory"],
     ["agent-reasoning-label", "Reasoning"], ["agent-keep-reasoning-label", "Keep reasoning in memory"],
@@ -239,6 +240,8 @@ function showTab(tab) {
   $("agents-view").hidden = !agents;
   $("chat-list").hidden = agents;
   $("new-chat").hidden = agents;
+  $("agent-list").hidden = !agents;
+  $("agent-new").hidden = !agents;
   if (agents) loadAgentConfigs();
 }
 
@@ -266,7 +269,17 @@ function renderAgentList() {
       const button = document.createElement("button");
       button.type = "button";
       button.className = agent.id === state.agentForm.originalId ? "active" : "";
-      button.textContent = agent.name;
+      const name = document.createElement("span");
+      name.className = "title";
+      name.textContent = agent.name;
+      button.append(name);
+      if (agent.description) {
+        const description = document.createElement("span");
+        description.className = "agent-description";
+        description.textContent = agent.description;
+        button.title = agent.description;
+        button.append(description);
+      }
       button.addEventListener("click", () => openAgent(agent.id));
       item.append(button);
       return item;
@@ -292,7 +305,7 @@ function openNewAgent() {
   $("agent-error").textContent = "";
   $("agent-status").textContent = "";
   fillAgentForm({
-    name: "", id: "", personality_prompt: "",
+    name: "", id: "", description: "", personality_prompt: "",
     chat_config: {
       stream: true, has_memory: true, reasoning: false, reasoning_effort: "medium", reasoning_tokens: null,
       keep_reasoning_in_memory: false, conversation_messages_retained: 30, tools: true, associative_memory: true,
@@ -312,6 +325,7 @@ function fillAgentForm(agent) {
   const config = agent.chat_config;
   $("agent-form-title").textContent = tr(state.agentForm.originalId ? "Edit agent" : "New agent");
   $("agent-name").value = agent.name;
+  $("agent-description").value = agent.description ?? "";
   $("agent-prompt").value = agent.personality_prompt;
   $("agent-stream").checked = config.stream;
   $("agent-memory").checked = config.has_memory;
@@ -492,6 +506,7 @@ function agentFormBody() {
   return {
     id: state.agentForm.originalId ?? agentIdFromName(name),
     name,
+    description: $("agent-description").value.trim(),
     personality_prompt: $("agent-prompt").value,
     chat_config: {
       stream: $("agent-stream").checked,
@@ -867,11 +882,66 @@ async function refreshChats() {
         e.stopPropagation();
         deleteChat(chat);
       });
-      li.append(meta, del);
+      li.append(meta);
+      // empty chats are pruned, so only chats with messages can keep a title
+      if (chat.turns > 0) {
+        const rename = document.createElement("button");
+        rename.className = "chat-action rename";
+        rename.textContent = "✎";
+        rename.title = tr("Rename chat");
+        rename.addEventListener("click", (e) => {
+          e.stopPropagation();
+          startRenameChat(chat, title);
+        });
+        title.addEventListener("dblclick", (e) => {
+          e.stopPropagation();
+          startRenameChat(chat, title);
+        });
+        li.append(rename);
+      }
+      li.append(del);
       li.addEventListener("click", () => openChatFromList(chat));
       return li;
     })
   );
+}
+
+function startRenameChat(chat, title) {
+  const input = document.createElement("input");
+  input.className = "rename-input";
+  input.value = chat.title;
+  input.maxLength = 60;
+  input.setAttribute("aria-label", tr("Rename chat"));
+  let finished = false;
+  const finish = async (save) => {
+    if (finished) return;
+    finished = true;
+    const value = input.value.trim();
+    const session = state.session;
+    try {
+      if (save && value && value !== chat.title) {
+        await api(`/api/agents/${chat.agent_id}/chats/${chat.id}/title`, {
+          method: "PUT", body: JSON.stringify({ title: value }),
+        });
+      }
+    } catch (err) {
+      if (session === state.session) addMessage("assistant").error(err.message);
+    }
+    if (session === state.session) await refreshChats();
+  };
+  input.addEventListener("click", (e) => e.stopPropagation());
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      finish(true);
+    } else if (e.key === "Escape") {
+      finish(false);
+    }
+  });
+  input.addEventListener("blur", () => finish(true));
+  title.replaceWith(input);
+  input.focus();
+  input.select();
 }
 
 async function newChat() {

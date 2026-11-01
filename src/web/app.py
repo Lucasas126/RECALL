@@ -62,6 +62,10 @@ class ChatReasoningEffortIn(BaseModel):
     effort: ReasoningEffort | None
 
 
+class ChatTitleIn(BaseModel):
+    title: str = Field(max_length=1000)
+
+
 def _sse(event: str, data, generation_id: str = "") -> str:
     event_id = f"id: {generation_id}\n" if generation_id else ""
     return f"{event_id}event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -299,6 +303,12 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
         agent_id: str, chat_id: str, body: ChatReasoningEffortIn, user_id: str = Depends(current_user),
     ):
         return service.set_chat_reasoning_effort(user_id, agent_id, chat_id, body.effort)
+
+    @app.put("/api/agents/{agent_id}/chats/{chat_id}/title")
+    def rename_chat(
+        agent_id: str, chat_id: str, body: ChatTitleIn, user_id: str = Depends(current_user),
+    ):
+        return service.rename_chat(user_id, agent_id, chat_id, body.title)
 
     @app.delete("/api/agents/{agent_id}/chats/{chat_id}", status_code=204)
     def delete_chat(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):

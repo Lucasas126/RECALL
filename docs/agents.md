@@ -46,7 +46,7 @@ example: an agent whose policy excludes the web group will not have `web_search`
 
 ## managing agents
 
-users create, edit and delete agents from the web **Agents** tab; the routes and rules are in [config.md](./config.md#managing-agents). A new agent's id comes from its name and stays fixed in the form. Changing an id through the API moves its data folder, and deleting an agent keeps its data on disk.
+users create, edit and delete agents from the web **Agents** tab, which lists the agents in the sidebar with their optional description; the routes and rules are in [config.md](./config.md#managing-agents). A new agent's id comes from its name and stays fixed in the form. Changing an id through the API moves its data folder, and deleting an agent keeps its data on disk.
 
 ## agent config (sketch)
 

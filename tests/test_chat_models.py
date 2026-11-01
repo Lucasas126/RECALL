@@ -386,6 +386,17 @@ class ChatListTests(ModelFixture):
         self.assertEqual({chat["id"] for chat in response.json()}, {self.chat, other})
 
 
+    def test_rename_chat_updates_the_listed_title(self) -> None:
+        list(self.service.send("user-one", "agent-one", self.chat, "Hello"))
+        summary = self.service.rename_chat("user-one", "agent-one", self.chat, "Weekly plan")
+        self.assertEqual(summary["title"], "Weekly plan")
+        self.assertEqual(self.service.get_chat("user-one", "agent-one", self.chat)["chat"]["title"], "Weekly plan")
+        with self.assertRaises(InputError):
+            self.service.rename_chat("user-one", "agent-one", self.chat, "  ")
+        with self.assertRaises(UnknownChat):
+            self.service.rename_chat("user-one", "agent-one", "missing", "Title")
+
+
 class ChatReasoningEffortServiceTests(ModelFixture):
     def setUp(self) -> None:
         super().setUp()

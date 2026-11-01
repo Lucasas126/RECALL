@@ -193,6 +193,7 @@ class AgentConfig(BaseModel):
 
     id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
     name: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=500)
     personality_prompt: str = Field(min_length=1, max_length=20000)
     chat_config: ChatConfig = ChatConfig()
 

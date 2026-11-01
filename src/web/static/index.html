@@ -29,7 +29,9 @@
       </nav>
       <button id="settings-open" type="button" aria-haspopup="dialog">Settings</button>
       <button id="new-chat">+ New chat</button>
+      <button id="agent-new" type="button" hidden>+ New agent</button>
       <ul id="chat-list"></ul>
+      <ul id="agent-list" hidden></ul>
     </aside>
     <main>
       <div id="chat-view">
@@ -65,13 +67,6 @@
       </form>
       </div>
       <section id="agents-view" hidden>
-        <div class="agents-list">
-          <div class="model-heading">
-            <h2 id="agents-title">Agents</h2>
-            <button id="agent-new" type="button">+ New agent</button>
-          </div>
-          <ul id="agent-list"></ul>
-        </div>
         <p id="agent-error" class="error" role="alert"></p>
         <p id="agent-status" class="model-note" role="status"></p>
         <p id="agents-empty" class="model-note">Select an agent to edit it, or create a new one.</p>
@@ -85,6 +80,11 @@
           <label>
             <span id="agent-name-label">Name</span>
             <input id="agent-name" required maxlength="100">
+          </label>
+          <label>
+            <span id="agent-description-label">Description</span>
+            <textarea id="agent-description" rows="2" maxlength="500"></textarea>
+            <span id="agent-description-hint" class="model-note">Optional. Shown in the agent list; not sent to the model.</span>
           </label>
           <label>
             <span id="agent-prompt-label">System prompt</span>

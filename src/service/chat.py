@@ -556,6 +556,16 @@ class ChatService:
                 slot.agents.pop(chat_id, None)
         return self.get_chat_models(user_id, agent_id, chat_id)["model"]
 
+    def rename_chat(self, user_id: str, agent_id: str, chat_id: str, title: str) -> dict:
+        """Replace a chat's title with a user-chosen one; automatic naming no longer changes it."""
+        conversations = self._conversations(user_id, agent_id)
+        self._load(conversations, chat_id)
+        try:
+            conversations.rename(chat_id, title)
+        except FileNotFoundError as exc:
+            raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
+        return conversations.summary(chat_id)
+
     def delete_chat(self, user_id: str, agent_id: str, chat_id: str) -> None:
         conversations = self._conversations(user_id, agent_id)
         slot = self._slot(user_id, agent_id)
