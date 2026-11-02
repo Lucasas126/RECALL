@@ -50,7 +50,11 @@ function translateInterface() {
     ["agent-stream-label", "Stream replies"], ["agent-memory-label", "Use memory"],
     ["agent-reasoning-label", "Reasoning"], ["agent-keep-reasoning-label", "Keep reasoning in memory"],
     ["agent-tools-label", "Use tools"], ["agent-associative-label", "Associative memory"],
-    ["agent-tool-groups-label", "Tool groups"], ["agent-associative-label", "Associative memory"],
+    ["agent-associative-off", "Off"], ["agent-associative-llm", "Query from a small model"],
+    ["agent-associative-question", "Search with your message"],
+    ["agent-associative-execution-label", "Associative search timing"],
+    ["agent-associative-parallel", "In parallel with the reply"], ["agent-associative-sequential", "Before the reply"],
+    ["agent-tool-groups-label", "Tool groups"],
     ["agent-effort-label", "Reasoning effort"], ["agent-effort-default", "Default"],
     ["agent-tokens-enabled-label", "Limit reasoning tokens"], ["agent-reasoning-tokens-label", "Reasoning tokens"],
     ["agent-retained-label", "Messages kept in context"],
@@ -308,7 +312,8 @@ function openNewAgent() {
     name: "", id: "", description: "", personality_prompt: "",
     chat_config: {
       stream: true, has_memory: true, reasoning: false, reasoning_effort: "medium", reasoning_tokens: null,
-      keep_reasoning_in_memory: false, conversation_messages_retained: 30, tools: true, associative_memory: true,
+      keep_reasoning_in_memory: false, conversation_messages_retained: 30, tools: true, associative_memory: "llm",
+      associative_execution: "parallel",
     },
   });
   $("agent-delete").hidden = true;
@@ -350,7 +355,9 @@ function fillAgentForm(agent) {
       return label;
     }),
   );
-  $("agent-associative").checked = config.associative_memory;
+  $("agent-associative").value = config.associative_memory;
+  $("agent-associative-execution").value = config.associative_execution;
+  $("agent-associative-execution").disabled = config.associative_memory === "off";
   $("agent-effort").value = config.reasoning_effort ?? "";
   $("agent-tokens-enabled").checked = config.reasoning_tokens != null;
   $("agent-reasoning-tokens").disabled = config.reasoning_tokens == null;
@@ -519,7 +526,8 @@ function agentFormBody() {
       tools: $("agent-tools").checked,
       tool_groups: [...document.querySelectorAll('input[name="agent-tool-group"]:checked')].map((input) => input.value),
       mcp: agentMcpBody(),
-      associative_memory: $("agent-associative").checked,
+      associative_memory: $("agent-associative").value,
+      associative_execution: $("agent-associative-execution").value,
     },
   };
 }
@@ -550,6 +558,9 @@ $("agent-tab-mcp").addEventListener("click", () => showAgentPanel("mcp"));
 // required fields live in the General panel; show it so the browser can point at them
 $("agent-form").addEventListener("invalid", () => showAgentPanel("general"), true);
 
+$("agent-associative").addEventListener("change", () => {
+  $("agent-associative-execution").disabled = $("agent-associative").value === "off";
+});
 $("agent-tokens-enabled").addEventListener("change", () => {
   const enabled = $("agent-tokens-enabled").checked;
   $("agent-reasoning-tokens").disabled = !enabled;
@@ -1422,7 +1433,8 @@ function renderMessages(messages) {
     const view = addMessage(m.role, container);
     if (m.reasoning) view.thinking(m.reasoning);
     for (const action of m.actions ?? []) view.action(action);
-    if (m.associative_matches) view.memoryMatches(m.associative_matches);
+    if (m.associative_skipped) view.memory({ state: "skipped" });
+    else if (m.associative_matches != null) view.memory({ state: "done", matches: m.associative_matches });
     view.text(m.content);
     if (m.interrupted) view.interrupted();
     if (m.usage_report) showUsage(m.usage_report);
@@ -1509,7 +1521,8 @@ function addMessage(role, parent = state.view ?? $("messages")) {
         });
         thinking.append(summary);
         thinking.append(document.createTextNode(""));
-        el.prepend(thinking);
+        if (memoryIndicator) memoryIndicator.after(thinking);
+        else el.prepend(thinking);
       }
       thinking.lastChild.textContent += chunk;
     },
@@ -1520,15 +1533,24 @@ function addMessage(role, parent = state.view ?? $("messages")) {
       note.textContent = text;
       el.insertBefore(note, body);
     },
-    memoryMatches(count) {
-      if (!Number.isInteger(count) || count < 1) return;
+    memory({ state, matches = 0 }) {
       if (!memoryIndicator) {
         memoryIndicator = document.createElement("div");
-        memoryIndicator.className = "memory-indicator";
         memoryIndicator.setAttribute("role", "status");
-        el.insertBefore(memoryIndicator, body);
+        el.prepend(memoryIndicator);  // always the first element of the bubble, above any thinking
       }
-      memoryIndicator.textContent = `Associative memory: ${count} match${count === 1 ? "" : "es"}`;
+      const outcome = state === "done" ? (matches > 0 ? "found" : "none") : state;
+      memoryIndicator.className = `memory-indicator ${outcome}`;
+      memoryIndicator.dataset.state = state;
+      if (outcome === "searching") memoryIndicator.textContent = tr("Associative memory: searching");
+      else if (outcome === "skipped") memoryIndicator.textContent = tr("Associative memory: skipped");
+      else if (outcome === "none") memoryIndicator.textContent = tr("Associative memory: no matches");
+      else if (matches === 1) memoryIndicator.textContent = tr("Associative memory: {count} match", { count: matches });
+      else memoryIndicator.textContent = tr("Associative memory: {count} matches", { count: matches });
+    },
+    settleMemory() {
+      // a search still running when the reply ends, fails or is interrupted was not used
+      if (memoryIndicator?.dataset.state === "searching") this.memory({ state: "skipped" });
     },
     action(a) {
       actionCount++;
@@ -1545,6 +1567,7 @@ function addMessage(role, parent = state.view ?? $("messages")) {
       el.insertBefore(item, body);
     },
     interrupted(snapshot = null) {
+      this.settleMemory();
       if (snapshot) {
         raw = snapshot.content;
         renderBody();
@@ -1566,6 +1589,7 @@ function addMessage(role, parent = state.view ?? $("messages")) {
       }
     },
     error(message) {
+      this.settleMemory();
       el.classList.add("error");
       const note = document.createElement("div");
       note.textContent = `[error] ${message}`;
@@ -1782,11 +1806,14 @@ function handleEvent(raw, request) {
   if (event === "text") reply.text(payload);
   else if (event === "reasoning") reply.thinking(payload);
   else if (event === "tool") reply.action(payload);
-  else if (event === "memory") reply.memoryMatches(payload.matches);
+  else if (event === "memory") reply.memory(payload);
   else if (event === "notice") reply.notice(payload);
   else if (event === "interrupted") reply.interrupted(payload);
   else if (event === "error") reply.error(payload);
-  else if (event === "done") request.done = true;
+  else if (event === "done") {
+    reply.settleMemory();
+    request.done = true;
+  }
   else if (event === "usage" && request === state.latest) {
     state.usages.set(chatKey(request.agentId, request.chatId), payload);
     // the first line is the headline; the full breakdown stays folded until expanded

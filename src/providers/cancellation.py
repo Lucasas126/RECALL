@@ -18,6 +18,7 @@ class CancellationToken:
         self._cancelled = False
         self._finished = False
         self._tasks: set[asyncio.Task] = set()
+        self._children: set[CancellationToken] = set()
 
     def cancel(self) -> bool:
         with self._lock:
@@ -26,7 +27,22 @@ class CancellationToken:
             self._cancelled = True
             for task in self._tasks:
                 task.get_loop().call_soon_threadsafe(task.cancel)
+            for child in self._children:
+                child.cancel()
             return True
+
+    @contextmanager
+    def _link(self, child: "CancellationToken") -> Generator[None]:
+        """Cancel `child` whenever this token is cancelled; cancelling `child` leaves this token alone."""
+        with self._lock:
+            if self._cancelled:
+                raise GenerationCancelled("generation interrupted by user")
+            self._children.add(child)
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._children.discard(child)
 
     @contextmanager
     def _commit(self) -> Generator[None]:

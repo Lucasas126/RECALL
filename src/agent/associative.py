@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import os
+import threading
 from contextlib import closing
+from time import perf_counter
 from typing import TYPE_CHECKING, Optional
 
-from src.config.settings import ASSOC_CONTEXT_MESSAGES, ASSOC_SCORE_THRESHOLD, ASSOC_TOP_N
+from src.config.settings import ASSOC
 from src.providers.cancellation import CancellationToken, GenerationCancelled
+from src.providers.openrouter import OpenRouterProvider
+from src.providers.provider import LLMProvider
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -20,29 +25,49 @@ _SYSTEM_PROMPT = (
     "If it would, reply with ONLY a short search query of key concepts/entities "
     "(3-6 words, no full sentences, no punctuation), written in the SAME LANGUAGE as the user "
     "so it matches how the memory was stored.\n"
+    "Always search when the message touches the user's own life (their pets, people, plans, trips, "
+    "preferences, projects or earlier conversations), even if the request is creative or general.\n"
     "If no lookup is needed (greetings, small talk, or nothing to recall), reply with exactly: NONE\n"
     "Output only the query or NONE, nothing else."
 )
 
 _FRAGMENT_LIMIT = 200
+# longest message searched as is in `question_only` mode
+_QUESTION_LIMIT = 1000
 
 
 def recall(
-    agent: "Agent", user_input: str, cancellation: CancellationToken | None = None
+    agent: "Agent", user_input: str, cancellation: CancellationToken | None = None,
+    history: list[dict] | None = None,
 ) -> tuple[Optional[str], int]:
     """Return a transient hint block and the number of matching memory fragments."""
-    query = _propose_query(agent, user_input, cancellation)
+    started_at = perf_counter()
+    if agent.config.associative_memory == "question_only":
+        query = user_input.strip()[:_QUESTION_LIMIT] or None
+    else:
+        query = _propose_query(agent, user_input, cancellation, history)
+    proposed_at = perf_counter()
     if cancellation is not None:
         cancellation.raise_if_cancelled()
     if not query:
+        logger.info("no lookup needed (query proposal %.0f ms)", (proposed_at - started_at) * 1000)
         return None, 0
-    hits = [h for h in agent.query_memory(query, ASSOC_TOP_N) if h["score"] >= ASSOC_SCORE_THRESHOLD]
+    # one extra result, because the message being answered may already be indexed and match itself
+    found = agent.query_memory(query, ASSOC.top_n + 1)
+    logger.info(
+        "query=%r proposed in %.0f ms, memory search took %.0f ms",
+        query, (proposed_at - started_at) * 1000, (perf_counter() - proposed_at) * 1000,
+    )
+    hits = [
+        h for h in found
+        if h["score"] >= ASSOC.score_threshold and not _is_message(h["document"], user_input)
+    ][:ASSOC.top_n]
     if cancellation is not None:
         cancellation.raise_if_cancelled()
     if not hits:
-        logger.debug("query=%r -> no hits above threshold %.2f", query, ASSOC_SCORE_THRESHOLD)
+        logger.debug("query=%r -> no hits above threshold %.2f", query, ASSOC.score_threshold)
         return None, 0
-    logger.info("query=%r -> %d hit(s) injected", query, len(hits))
+    logger.info("query=%r -> %d hit(s)", query, len(hits))
     lines = "\n".join(f"- [{h['address']}] {_fragment(h['document'])}" for h in hits)
     suggestion = (
         "[associative memory] possibly-relevant fragments from your own memory "
@@ -51,32 +76,112 @@ def recall(
     return suggestion, len(hits)
 
 
-def _propose_query(agent: "Agent", user_input: str, cancellation: CancellationToken | None = None) -> Optional[str]:
-    """Ask the memory subagent (trimmed context) for a search query, or None."""
+def _is_message(document: str, user_input: str) -> bool:
+    """Whether an indexed chunk is the user turn being answered."""
+    text = user_input.strip()
+    return bool(text) and document.strip().startswith(f"user: {text}")
+
+
+class RecallJob:
+    """Associative recall running in a worker thread while the main model already generates."""
+
+    def __init__(self, agent: "Agent", history: list[dict], user_input: str) -> None:
+        self._agent = agent
+        self._history = history
+        self._user_input = user_input
+        self._token = CancellationToken()
+        self._done = threading.Event()
+        self._lock = threading.Lock()
+        self._waker: CancellationToken | None = None
+        self._cut_ok: threading.Event | None = None
+        self._result: tuple[Optional[str], int] = (None, 0)
+        self.failed = False  # the lookup raised, as opposed to finding nothing
+        self.started_at = perf_counter()
+        self.finished_at: float | None = None
+        self._thread = threading.Thread(target=self._run, name="associative-recall", daemon=True)
+
+    def start(self) -> "RecallJob":
+        self._thread.start()
+        return self
+
+    def ready(self) -> bool:
+        return self._done.is_set()
+
+    def wait(self, timeout: float | None = None) -> bool:
+        """Block until the job finishes (or `timeout` seconds pass); whether it has finished."""
+        return self._done.wait(timeout)
+
+    def result(self) -> tuple[Optional[str], int]:
+        """The suggestion and match count of a finished job; (None, 0) when nothing was found (see `failed`)."""
+        return self._result
+
+    def cancel(self) -> None:
+        self._token.cancel()
+
+    def has_hit(self) -> bool:
+        return self._done.is_set() and bool(self._result[0])
+
+    def attach(self, waker: CancellationToken, cut_ok: threading.Event) -> None:
+        """Cancel `waker` once the job has a hit and `cut_ok` is set, i.e. the reply may be cut right now."""
+        with self._lock:
+            self._waker, self._cut_ok = waker, cut_ok
+            if self.has_hit() and cut_ok.is_set():
+                waker.cancel()
+
+    def detach(self) -> None:
+        with self._lock:
+            self._waker = self._cut_ok = None
+
+    def _run(self) -> None:
+        try:
+            self._result = recall(self._agent, self._user_input, self._token, history=self._history)
+        except GenerationCancelled:
+            logger.debug("associative recall cancelled")
+        except Exception:  # a failed lookup must never break the turn
+            self.failed = True
+            logger.exception("associative recall failed")
+        finally:
+            with self._lock:
+                self.finished_at = perf_counter()
+                self._done.set()
+                if self._result[0] and self._waker is not None and self._cut_ok.is_set():
+                    self._waker.cancel()
+
+
+def _query_model(agent: "Agent") -> tuple[LLMProvider, str, bool]:
+    """The provider, model and ZDR flag for query proposal: the configured small model, else the chat's own."""
+    if ASSOC.query_model is None:
+        return agent.provider, agent.config.models.chat, agent.zdr_required
+    api_key = os.environ.get(ASSOC.api_key, "").strip()
+    if not api_key:
+        raise RuntimeError(f"associative query model needs the env var {ASSOC.api_key} to be set")
+    return OpenRouterProvider(api_key=api_key), ASSOC.query_model, ASSOC.zdr
+
+
+def _propose_query(
+    agent: "Agent", user_input: str, cancellation: CancellationToken | None = None,
+    history: list[dict] | None = None,
+) -> Optional[str]:
+    """Ask the memory subagent (trimmed context) for a search query, or None when no lookup is needed."""
     recent = [
         {"role": m["role"], "content": m["content"]}
-        for m in agent.messages[1:]
+        for m in (agent.messages[1:] if history is None else history)
         if m.get("role") in ("user", "assistant") and m.get("content")
-    ][-ASSOC_CONTEXT_MESSAGES:]
+    ][-ASSOC.context_messages:] if ASSOC.context_messages else []
     messages = [{"role": "system", "content": _SYSTEM_PROMPT}, *recent, {"role": "user", "content": user_input}]
-    try:
-        # streamed to stay reliable on models whose non-streaming content can come back empty (e.g. R1)
-        text = ""
-        with closing(agent.provider.invoke(
-            messages, agent.config.models.chat, stream=True, reasoning=False, tools=None,
-            cancellation=cancellation,
-            zdr=agent.zdr_required,
-        )) as chunks:
-            for chunk in chunks:
-                if isinstance(chunk, tuple) and chunk[0] == "content":
-                    text += chunk[1]
-                elif isinstance(chunk, dict):
-                    text = chunk.get("response") or text
-    except GenerationCancelled:
-        raise
-    except Exception as e:  # a failed lookup must never break the turn
-        logger.warning("query proposal failed: %s", e)
-        return None
+    provider, model, zdr = _query_model(agent)
+    # streamed to stay reliable on models whose non-streaming content can come back empty (e.g. R1)
+    text = ""
+    with closing(provider.invoke(
+        messages, model, stream=True, reasoning=False, tools=None,
+        cancellation=cancellation,
+        zdr=zdr,
+    )) as chunks:
+        for chunk in chunks:
+            if isinstance(chunk, tuple) and chunk[0] == "content":
+                text += chunk[1]
+            elif isinstance(chunk, dict):
+                text = chunk.get("response") or text
     text = text.strip()
     if not text or text.upper().startswith("NONE"):
         return None

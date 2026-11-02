@@ -43,7 +43,7 @@ cli (cli.py, direct) ─┘
 
 - a channel resolves its own identity to a `user_id` (web: Argon2 password login and signed session; telegram: a telegram id → user, planned) and then calls the service with that `user_id`. the service never trusts ids to be well formed: it validates user, agent ownership and chat ids.
 - operations: `login`, `list_agents`, `list_chats`, `create_chat`, `get_chat`, `delete_chat`, `send`. CRUD returns plain dicts; `send` returns events.
-- `send` yields `ChatEvent`s (`reasoning`, `text`, `tool`, `usage`, `interrupted`, `notice` when a video was replaced by frames for an image-only model, and `memory` when associative recall finds matches), not channel formats. the `memory` event carries the number of matched fragments; adapters decide how to display it. a telegram adapter would call `send(..., stream=False)`, deliver the `text` event as a message and handle `interrupted` without claiming a completed answer. rendering and transport stay in the adapter.
+- `send` yields `ChatEvent`s (`reasoning`, `text`, `tool`, `usage`, `interrupted`, `notice` when a video was replaced by frames for an image-only model, and `memory` while associative recall searches and when it ends), not channel formats. the `memory` event carries the search state and the number of matched fragments (see the messages endpoint below); adapters decide how to display it. a telegram adapter would call `send(..., stream=False)`, deliver the `text` event as a message and handle `interrupted` without claiming a completed answer. rendering and transport stay in the adapter.
 - one `Agent` runtime is kept per (user, agent, chat), so chat context and mutable reply state cannot leak between conversations; different chats of the same configured agent can execute in parallel, while a new message can interrupt its active reply to the same chat.
 
 status: implemented for the web and Telegram channels; the cli still uses `Agent` directly.
@@ -180,21 +180,67 @@ Detaching a transport does not cancel a service generation on its own.
 
 The messages endpoint returns SSE with the generation id in each event's `id:`
 field. Existing `text`, `reasoning`, `tool`, `usage`, `error` and `done` payloads
-are unchanged. When associative recall finds fragments, a `memory` event carries
-`{"matches": N}` and the chat history includes `associative_matches` on the
-assistant message so the web UI can show the indicator after reopening a chat.
+are unchanged. When a turn runs an associative search, `memory` events report its
+state: `{"state": "searching"}` when the stream starts, then once
+`{"state": "done", "matches": N}` (`N` is 0 when nothing relevant was found) or
+`{"state": "skipped"}` when the search failed, finished too late to be used or was
+interrupted. The final event can arrive after `text` events, see
+[associative recall](#associative-recall-in-parallel). Replies that are not streamed
+get only the final event. The chat history stores the outcome on the assistant
+message (`associative_matches`, including 0, or `associative_skipped: true`) so the
+web UI can show the indicator after reopening a chat; turns without a search, and
+older ones, have neither.
 Assistant history also stores its formatted `usage_report`, allowing the web
 context panel to be restored when reopening a chat. Older turns that predate
 `usage_report` show their saved input/output token totals, when available.
 The current response's `usage` event also appends ephemeral latency measurements:
 total agent processing time, associative-memory lookup, summed main-model calls,
 and remaining tools/overhead time, each in milliseconds and as a share of total.
+When the lookup runs in parallel with the model its line is labelled
+`associative memory (parallel)` and the shares can add up to more than 100%;
+tools/overhead is the time covered by neither the lookup nor a model call.
 Latency is not stored in conversation history; model-call time includes waiting
 for streamed tokens and excludes the separate associative-memory query call.
 `interrupted` carries
 `{"content": "...", "reasoning": "...", "actions": [...]}` and is followed by
 `done`. Streams disable proxy buffering; a connection that ends without `done`
 is shown as an error rather than a completed answer.
+
+### associative recall in parallel
+
+For streamed replies the associative search (query model plus vector lookup) runs in
+a worker thread while the main model already generates, instead of delaying its first
+token. `Agent._take_assoc_result` uses its outcome once per turn:
+
+- finished before a model call starts: the `[associative memory]` block is appended to
+  that call's context, as before
+- finishes while a model call is running: that call is stopped at once if it has not
+  written any text yet, otherwise at the next sentence end (`.`, `!`, `?` or a line
+  break), so a sentence is never cut. The text written so far is kept as an assistant
+  message, the block (plus a note asking the model to continue and to correct anything
+  the fragments contradict) is added after it, and the model continues in a new call.
+  The final `memory` event is emitted, followed by a blank-line content chunk when the text ended
+  a sentence, so channels show one continuous reply and the stored turn is the partial
+  text, that gap and the continuation. Reasoning written before the pause is kept with
+  the turn but not resent
+- nothing found, or the search fails: the reply is never touched (a warning is logged
+  for failures)
+- not finished when the reply completes, or the turn is interrupted or steered: the
+  search is cancelled and its result discarded
+
+The system prompt tells the model this can happen. Agents with
+`associative_execution: sequential` never run this way: the stream emits `searching`,
+waits for the search (still cancellable), emits its final `memory` event and only then
+calls the model, so nothing is paused or skipped for arriving late, and the prompt
+omits the notice. Calls without a cancellation token and `stream=False` (the
+synchronous path) cannot be paused either, so they wait for the search first. The search only sees the history from before the current message and ignores an
+index hit on that message itself. `CancellationToken._link` lets the search stop one
+model call without cancelling the turn. Status: implemented; the web and Telegram
+channels receive the `memory` events from the service, the CLI prints the final one as
+a note. The web chat shows them as a small pill above the reply: a pulsing dot while
+searching (static with `prefers-reduced-motion`), then the number of matches, "no
+matches" or "skipped" (dimmed), restored from the stored outcome when a chat is
+reopened. Telegram ignores the events.
 
 ### generation cancellation
 
@@ -218,7 +264,7 @@ the answer as interrupted; reasoning still follows `keep_reasoning_in_memory`.
 No final usage report is produced for an interrupted generation. Tools already
 running are allowed to finish, not rolled back; pending tools are skipped and
 receive placeholder results in the active context to keep tool-call pairs valid.
-Associative query generation also receives the cancellation signal. Cancellable
+Associative query generation runs on its own token, which a turn cancellation also cancels. Cancellable
 agent calls use internal streaming even with `stream=False`, so channels without
 token-by-token delivery can still preserve partial replies. OpenRouter's
 non-streaming fallback emits the same reply events and is used only before any

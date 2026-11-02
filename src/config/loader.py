@@ -99,4 +99,5 @@ def load_agent(user_id: str, agent_id: Optional[str] = None) -> ResolvedAgent:
         deny=agent.chat_config.deny,
         mcp=agent.chat_config.mcp,
         associative_memory=agent.chat_config.associative_memory,
+        associative_execution=agent.chat_config.associative_execution,
     )

@@ -8,6 +8,7 @@ import httpx
 
 from src.agent.agent import Agent
 from src.agent.associative import _propose_query
+from src.config.models import AssociativeMemoryConfig
 from src.providers.openrouter import OpenRouterProvider
 
 
@@ -78,6 +79,7 @@ class OpenRouterZdrTests(unittest.TestCase):
                 self.assertEqual(called.call_args.args[1]["provider"], {"zdr": True})
 
     def test_associative_query_also_uses_zdr(self) -> None:
+        self.enterContext(patch("src.agent.associative.ASSOC", AssociativeMemoryConfig(query_model=None)))
         agent = Mock(spec=Agent)
         agent.messages = [{"role": "system", "content": "Test prompt"}]
         agent.config = Mock()
@@ -111,6 +113,7 @@ class OpenRouterZdrTests(unittest.TestCase):
         self.assertFalse(retry.call_args.args[1]["provider"]["zdr"])
 
     def test_associative_query_honors_explicit_chat_opt_out(self) -> None:
+        self.enterContext(patch("src.agent.associative.ASSOC", AssociativeMemoryConfig(query_model=None)))
         agent = Mock(spec=Agent)
         agent.messages = [{"role": "system", "content": "Test"}]
         agent.config = Mock()
@@ -120,6 +123,31 @@ class OpenRouterZdrTests(unittest.TestCase):
         with patch("src.providers.openrouter.stream_chat", side_effect=lambda *_args, **_kwargs: _stream("NONE")) as stream:
             self.assertIsNone(_propose_query(agent, "Question"))
         self.assertFalse(stream.call_args.args[1]["provider"]["zdr"])
+
+    def test_associative_query_uses_configured_small_model(self) -> None:
+        config = AssociativeMemoryConfig(query_model="vendor/small", api_key="TEST_ASSOC_KEY", zdr=False)
+        self.enterContext(patch("src.agent.associative.ASSOC", config))
+        self.enterContext(patch.dict("os.environ", {"TEST_ASSOC_KEY": "secret"}))
+        agent = Mock(spec=Agent)
+        agent.messages = [{"role": "system", "content": "Test"}]
+        agent.config = Mock()
+        agent.config.models.chat = "vendor/model"
+        agent.zdr_required = True
+        agent.provider = Mock()
+        with patch("src.providers.openrouter.stream_chat", side_effect=lambda *_args, **_kwargs: _stream("cats")) as stream:
+            self.assertEqual(_propose_query(agent, "Question"), "cats")
+        agent.provider.invoke.assert_not_called()
+        self.assertEqual(stream.call_args.args[1]["model"], "vendor/small")
+        self.assertFalse(stream.call_args.args[1]["provider"]["zdr"])
+
+    def test_associative_query_without_api_key_raises_an_actionable_error(self) -> None:
+        config = AssociativeMemoryConfig(query_model="vendor/small", api_key="TEST_ASSOC_MISSING")
+        self.enterContext(patch("src.agent.associative.ASSOC", config))
+        self.enterContext(patch.dict("os.environ", {}, clear=False))
+        agent = Mock(spec=Agent)
+        agent.messages = [{"role": "system", "content": "Test"}]
+        with self.assertRaisesRegex(RuntimeError, "TEST_ASSOC_MISSING"):
+            _propose_query(agent, "Question")
 
 
 if __name__ == "__main__":

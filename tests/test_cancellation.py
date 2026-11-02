@@ -35,7 +35,7 @@ class AgentCancellationTests(unittest.TestCase):
             user_id="test-user", id="test-agent", name="Test", personality_prompt="Test prompt",
             models=ModelsConfig(), provider_name="ollama", api_key="",
             embeddings_provider_name="ollama", embeddings_api_key="",
-            tools=False, associative_memory=False,
+            tools=False, associative_memory="off",
         )
         with (
             patch("src.agent.agent.SourceRegistry.for_agent", return_value=registry),
@@ -149,7 +149,16 @@ class AgentCancellationTests(unittest.TestCase):
         ])
 
     def test_associative_cancellation_is_not_swallowed(self) -> None:
-        self.agent.config.associative_memory = True
+        self.agent.config.associative_memory = "llm"
+        recall_token: list[CancellationToken] = []
+
+        def slow_recall(agent, user_input, cancellation, history=None):
+            recall_token.append(cancellation)
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                cancellation.raise_if_cancelled()
+                time.sleep(0.01)
+            return None, 0
 
         def response():
             self.token.cancel()
@@ -157,11 +166,15 @@ class AgentCancellationTests(unittest.TestCase):
             yield
 
         self.provider.invoke.return_value = response()
-        with self.assertRaises(GenerationCancelled):
-            self.agent.invoke("Question", cancellation=self.token)
+        with patch("src.agent.agent.associative.recall", side_effect=slow_recall):
+            with self.assertRaises(GenerationCancelled):
+                list(self.agent.invoke("Question", cancellation=self.token))
         self.assertEqual([t["role"] for t in self.turns()], ["user", "assistant"])
         self.assertTrue(self.turns()[-1]["interrupted"])
-        self.assertIs(self.provider.invoke.call_args.kwargs["cancellation"], self.token)
+        with self.assertRaises(GenerationCancelled):
+            self.provider.invoke.call_args.kwargs["cancellation"].raise_if_cancelled()
+        with self.assertRaises(GenerationCancelled):
+            recall_token[0].raise_if_cancelled()
 
     def test_new_generation_uses_fresh_token_and_interrupted_context(self) -> None:
         events = self.agent.invoke("First", cancellation=self.token)

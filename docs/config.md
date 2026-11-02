@@ -610,6 +610,59 @@ integer between 1,000 and 100,000. The client resolves the key when constructed,
 not when settings are imported. An unset/blank key leaves web access unavailable;
 it does not prevent normal chat. Restart after changing configuration or the key.
 
+## associative memory
+
+Each agent chooses in `chat_config` how it searches its memory before replying:
+
+```yaml
+chat_config:
+  associative_memory: llm          # off | llm | question_only
+  associative_execution: parallel  # parallel | sequential
+```
+
+- `off`: no search, no indicator and no associative-memory note in the system prompt
+- `llm` (default): a small model reads the recent conversation and proposes a short
+  search query, or decides nothing needs recalling
+- `question_only`: the user's message (at most 1,000 characters) is searched as is, with
+  no model call. It is faster, but it searches every message and cannot resolve references
+  to earlier turns; the similarity threshold filters irrelevant hits
+
+`associative_execution` (default `parallel`) chooses when the search runs. `parallel`
+starts it beside the model call and, if it finds something while the reply is being
+written, pauses the reply to add it (see
+[associative recall in parallel](architecture.md#associative-recall-in-parallel)).
+`sequential` waits for the search to finish before the model starts, so its result is
+always in the first call and a reply is never paused, at the cost of the search time
+added to the first token. The system prompt only mentions mid-reply hints in
+`parallel`. It has no effect when `associative_memory` is `off`.
+
+`true` and `false` from older agent files are still accepted and mean `llm` and `off`.
+Other values are rejected when the agent is loaded. A chat without memory
+(`has_memory: false`) never searches.
+
+The root `settings.yaml` holds the framework-wide tuning shared by all agents. The
+`llm` mode query step is a small, fast model call that runs before every reply, so it
+should not use the chat's own model:
+
+```yaml
+associative_memory:
+  context_messages: 6
+  top_n: 3
+  score_threshold: 0.25
+  query_model: openai/gpt-4o-mini
+  api_key: OPENROUTER_API_KEY
+  zdr: true
+```
+
+`query_model` is an OpenRouter model ID and `zdr` restricts routing to zero data
+retention providers. `api_key` names the env var holding the shared OpenRouter key.
+Set `query_model: null` to propose the query with each chat's own provider, model and
+ZDR choice instead (the only option for Ollama-only setups); `question_only` uses
+neither. If the env var is unset or the query request fails, the error is logged, the
+turn continues without associative memory and the indicator shows "skipped".
+`context_messages` (0-100) is how many recent messages the query model sees,
+`top_n` (1-20) the fragments injected, and `score_threshold` (0-1) the minimum similarity.
+
 ## chat naming
 
 The root `settings.yaml` holds a framework-wide small model used to generate chat
@@ -727,7 +780,7 @@ messages.
 
 ## managing agents
 
-the web **Agents** tab lists the user's agents in the sidebar (name and description) and edits the name, `description`, `personality_prompt` and all `chat_config` options. a new agent's `id` is derived from its name (lowercase, accents removed, non-alphanumeric characters replaced by `-`) and is not editable from the form. the same operations are available as routes:
+the web **Agents** tab lists the user's agents in the sidebar (name and description) and edits the name, `description`, `personality_prompt` and all `chat_config` options (associative memory is a mode selector plus a timing selector, the latter disabled while the mode is off). a new agent's `id` is derived from its name (lowercase, accents removed, non-alphanumeric characters replaced by `-`) and is not editable from the form. the same operations are available as routes:
 
 | method | route | result |
 | --- | --- | --- |

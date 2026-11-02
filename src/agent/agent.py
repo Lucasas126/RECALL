@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import datetime
 from time import perf_counter
-from contextlib import closing
+from contextlib import ExitStack, closing
 from typing import Iterator, Optional, Union
 
 import src.providers.openrouter  # noqa: F401  (registers the openrouter provider)
@@ -35,6 +36,43 @@ _FINAL_NUDGE = "Stop calling tools. Answer the user now using what you already h
 # max characters of a tool result shown to channels and stored with the turn
 _ACTION_RESULT_CHARS = 500
 _INTERRUPTED_MARKER = "[Response interrupted by user.]"
+# separates the text written before an associative-memory hit interrupted the reply from its continuation
+_HIT_BREAK = "\n\n"
+_ASSOC_NOTICE = (
+    "## Associative memory\n\n"
+    "While you write, the system searches your long-term memory in parallel. If it finds something relevant, "
+    "your reply is paused and a system message starting with [associative memory] is added after the text you "
+    "had written so far. Treat it as a hint: continue from where you stopped, correct yourself if the fragments "
+    "show you were wrong, and do not repeat what you already wrote."
+)
+_HIT_CUT_NOTE = (
+    "Your reply above was paused at this point so this could be added. Continue it from exactly where it "
+    "stopped, without repeating anything (if it stopped mid-sentence, finish that sentence directly, with "
+    "no ellipsis). If the fragments contradict or fill in what you already wrote, say so and correct it."
+)
+
+
+def _ends_sentence(text: str) -> bool:
+    """Whether `text` stops at a point where a reply can be paused without cutting a sentence."""
+    return text.rstrip()[-1:] in (".", "!", "?") or text.endswith("\n")
+
+
+def _continuation_gap(partial: str) -> str:
+    """What joins a paused reply to its continuation so the combined text reads naturally."""
+    return _HIT_BREAK if partial.rstrip()[-1:] in (".", "!", "?") and not partial.endswith("\n") else ""
+
+
+def _union_seconds(spans: list[tuple[float, float]]) -> float:
+    """Total time covered by possibly overlapping (start, end) spans."""
+    total, reach = 0.0, None
+    for start, end in sorted(spans):
+        if reach is None or start > reach:
+            total += end - start
+            reach = end
+        elif end > reach:
+            total += end - reach
+            reach = end
+    return total
 
 
 def _dedupe_tool_calls(tool_calls: list[dict]) -> list[dict]:
@@ -118,8 +156,17 @@ class Agent:
         # transient associative-memory hint, injected into the context of the current turn only
         self._assoc_suggestion: Optional[str] = None
         self._assoc_match_count = 0
-        self._assoc_elapsed = 0.0
-        self._model_elapsed = 0.0
+        self._assoc_job: Optional[associative.RecallJob] = None
+        self._assoc_taken = False  # the job's outcome was already used (or found empty) this turn
+        # how the search ended: "found", "none" (nothing relevant) or "skipped" (failed, late or interrupted)
+        self._assoc_outcome: Optional[str] = None
+        self._assoc_parallel = False
+        self._assoc_span: Optional[tuple[float, float]] = None
+        self._model_spans: list[tuple[float, float]] = []
+        # reply text written before a memory hit paused it, and the reasoning that came with it
+        self._partial = ""
+        self._carried_reasoning = ""
+        self._index_lock = threading.Lock()
         self._turn_started_at = 0.0
         # thinking tokens from the last reply, kept apart from the answer
         self.last_reasoning: str = ""
@@ -162,11 +209,22 @@ class Agent:
     def name(self) -> str:
         return self.config.name
 
+    def _associative_enabled(self) -> bool:
+        """Whether this agent searches its memory each turn."""
+        return self.config.has_memory and self.config.associative_memory != "off"
+
+    def _associative_parallel(self) -> bool:
+        """Whether the search may run beside the model and pause its reply."""
+        return self._associative_enabled() and self.config.associative_execution == "parallel"
+
     def _system_prompt(self) -> str:
+        prompt = self.config.personality_prompt
+        if self._associative_parallel():
+            prompt = f"{prompt}\n\n{_ASSOC_NOTICE}"
         if not self._mcp_notes:
-            return self.config.personality_prompt
+            return prompt
         notes = "\n\n".join(self._mcp_notes)
-        return f"{self.config.personality_prompt}\n\n## Connected services (MCP)\n\n{notes}"
+        return f"{prompt}\n\n## Connected services (MCP)\n\n{notes}"
 
     def _refresh_mcp_tools(self) -> None:
         """Rebuild this turn's MCP tools, so connecting or disconnecting a service applies at once."""
@@ -191,9 +249,15 @@ class Agent:
 
     def query_memory(self, query: str, top_k: int = 5) -> list[dict]:
         """Semantic recall over the agent's indexed memory (exposed to the model as a tool)."""
-        self.index.sync()
-        results = self.index.query(query, top_k)
-        logger.debug("query_memory %r -> %d hits", query, len(results))
+        with self._index_lock:
+            synced_at = perf_counter()
+            self.index.sync()
+            queried_at = perf_counter()
+            results = self.index.query(query, top_k)
+        logger.debug(
+            "query_memory %r -> %d hits (index sync %.0f ms, query %.0f ms)",
+            query, len(results), (queried_at - synced_at) * 1000, (perf_counter() - queried_at) * 1000,
+        )
         return results
 
     def invoke(
@@ -219,25 +283,22 @@ class Agent:
         if not self.config.has_memory and not continuation:
             self.messages = [{"role": "system", "content": self._system_prompt()}]
             self._truncated = False
-        # associative memory: run before logging the turn so the search can't match this message
         self._assoc_suggestion = None
         self._assoc_match_count = 0
-        self._assoc_elapsed = 0.0
-        self._model_elapsed = 0.0
+        self._assoc_job = None
+        self._assoc_taken = False
+        self._assoc_outcome = None
+        self._assoc_parallel = False
+        self._assoc_span = None
+        self._model_spans = []
+        self._partial = ""
+        self._carried_reasoning = ""
         self.last_actions = []
         self.last_reasoning = ""
         self.last_usage = ""
         self.last_latency_report = ""
         self.last_reply = ""
         try:
-            if cancellation is not None:
-                cancellation.raise_if_cancelled()
-            if self.config.has_memory and self.config.associative_memory:
-                assoc_started_at = perf_counter()
-                self._assoc_suggestion, self._assoc_match_count = associative.recall(
-                    self, user_input, cancellation
-                )
-                self._assoc_elapsed = perf_counter() - assoc_started_at
             if cancellation is not None:
                 cancellation.raise_if_cancelled()
         except GenerationCancelled:
@@ -247,6 +308,10 @@ class Agent:
                 self._trim_context()
             self._remember_interrupted("", "")
             raise
+        if self._associative_enabled():
+            # the search runs beside the model call and sees the history without this message
+            self._assoc_parallel = self._associative_parallel() and (stream or cancellation is not None)
+            self._assoc_job = associative.RecallJob(self, list(self.messages[1:]), user_input).start()
         self.messages.append({"role": "user", "content": self._stamped(user_content, ts)})
         self._log_turn("user", user_content, ts=ts)
         if not continuation:
@@ -323,41 +388,93 @@ class Agent:
                         reasoning += chunk
                     yield kind, chunk
         except GenerationCancelled:
+            self._partial = ""  # `reply` already holds everything that was shown
+            self._close_assoc_job()
             self._remember_interrupted(reply, reasoning)
             raise
+        finally:
+            self._close_assoc_job()
 
     def _stream_reply(self, cancellation: CancellationToken) -> Iterator[tuple]:
+        if self._assoc_job is not None and not self._assoc_taken:
+            yield ("memory", {"state": "searching"})
+            if not self._assoc_parallel:  # sequential: the model starts once the search has finished
+                while not self._assoc_job.wait(0.05):
+                    cancellation.raise_if_cancelled()
+                yield from self._take_assoc_result()
         for hop in range(AGENT_MAX_TOOL_HOPS + 1):
             cancellation.raise_if_cancelled()
             is_last = hop == AGENT_MAX_TOOL_HOPS
             tools = None if is_last else (self._tool_specs or None)
-            context = self._context()
-            if is_last:
-                context = context + [{"role": "system", "content": _FINAL_NUDGE}]
-            reasoning, reply, api_usage, tool_calls = "", "", None, None
-            model_started_at = perf_counter()
-            with closing(self.provider.invoke(
-                context, self.config.models.chat,
-                stream=True, reasoning=self.config.reasoning,
-                reasoning_tokens=self.config.reasoning_tokens,
-                reasoning_effort=self.config.reasoning_effort, tools=tools,
-                cancellation=cancellation,
-                zdr=self.zdr_required,
-            )) as chunks:
-                for chunk in chunks:
-                    cancellation.raise_if_cancelled()
-                    if isinstance(chunk, tuple):
-                        kind, text = chunk
-                        if kind == "reasoning":
-                            reasoning += text
-                        else:
-                            reply += text
-                        yield chunk
-                    elif isinstance(chunk, dict):
-                        api_usage = chunk.get("usage")
-                        tool_calls = chunk.get("tool_calls")
-            self._model_elapsed += perf_counter() - model_started_at
+            while True:  # runs again when a memory hit pauses the call
+                yield from self._take_assoc_result()
+                context = self._context()
+                if is_last:
+                    context = context + [{"role": "system", "content": _FINAL_NUDGE}]
+                reasoning, reply, api_usage, tool_calls = "", "", None, None
+                job = None if self._assoc_taken else self._assoc_job
+                call_token = CancellationToken() if job is not None else cancellation
+                paused = False
+                cut_ok = threading.Event()  # set while the text written so far ends a sentence (or is empty)
+                cut_ok.set()
+                model_started_at = perf_counter()
+                try:
+                    with ExitStack() as stack:
+                        if job is not None:
+                            # the job cancels only this call (not the turn) the moment it finds something
+                            stack.enter_context(cancellation._link(call_token))
+                            job.attach(call_token, cut_ok)
+                            stack.callback(job.detach)
+                        chunks = stack.enter_context(closing(self.provider.invoke(
+                            context, self.config.models.chat,
+                            stream=True, reasoning=self.config.reasoning,
+                            reasoning_tokens=self.config.reasoning_tokens,
+                            reasoning_effort=self.config.reasoning_effort, tools=tools,
+                            cancellation=call_token,
+                            zdr=self.zdr_required,
+                        )))
+                        for chunk in chunks:
+                            call_token.raise_if_cancelled()
+                            if isinstance(chunk, tuple):
+                                kind, text = chunk
+                                if kind == "reasoning":
+                                    reasoning += text
+                                else:
+                                    reply += text
+                                    cut_ok.set() if _ends_sentence(reply) else cut_ok.clear()
+                                yield chunk
+                                if job is not None and job.ready() and not job.has_hit():
+                                    yield from self._take_assoc_result()  # nothing to add: settle the indicator now
+                                if job is not None and cut_ok.is_set() and job.has_hit():
+                                    paused = True  # the hit arrived while mid-sentence; this is the next sentence end
+                                    break
+                            elif isinstance(chunk, dict):
+                                api_usage = chunk.get("usage")
+                                tool_calls = chunk.get("tool_calls")
+                except GenerationCancelled:
+                    cancellation.raise_if_cancelled()  # an interrupt from the user ends the turn
+                    if job is None or not job.ready():
+                        raise
+                    paused = True
+                self._model_spans.append((model_started_at, perf_counter()))
+                if not paused:
+                    break
+                partial = reply
+                logger.info(
+                    "memory hit paused the reply after %.0f ms (%d chars written); continuing with the hint",
+                    (perf_counter() - self._turn_started_at) * 1000, len(partial),
+                )
+                yield from self._take_assoc_result()
+                self._carried_reasoning += reasoning
+                if partial.strip():
+                    self._partial = partial
+                    if gap := _continuation_gap(partial):
+                        yield ("content", gap)
             cancellation.raise_if_cancelled()
+            reasoning = self._carried_reasoning + reasoning
+            if self._partial:
+                reply = f"{self._partial}{_continuation_gap(self._partial)}{reply}"
+            self._partial = self._carried_reasoning = ""
             if tool_calls and not is_last:
                 tool_calls = _dedupe_tool_calls(tool_calls)
                 self._remember_tool_calls(reply, reasoning, tool_calls)
@@ -365,6 +482,10 @@ class Agent:
                     yield ("tool", action)
                 continue
             self.last_reasoning = reasoning
+            unused = self._assoc_job is not None and not self._assoc_taken
+            self._close_assoc_job()  # a hit that arrives after the reply is complete is not used
+            if unused:
+                yield ("memory", self.memory_event())
             usage_report = self._format_usage_report(context, reply, reasoning, api_usage)
             with cancellation._commit():
                 self._remember_reply(reply, reasoning, api_usage, usage_report=usage_report)
@@ -372,7 +493,54 @@ class Agent:
             self._record_latency_report()
             return
 
+    def _take_assoc_result(self) -> Iterator[tuple[str, dict]]:
+        """Use the finished recall job's hint (once per turn), yielding a memory event for the channels."""
+        job = self._assoc_job
+        if job is None or self._assoc_taken or not job.ready():
+            return
+        self._assoc_taken = True
+        suggestion, count = job.result()
+        waited = ((job.finished_at or perf_counter()) - job.started_at) * 1000
+        if job.failed:
+            self._assoc_outcome = "skipped"
+        elif not suggestion:
+            logger.info("associative recall found nothing (%.0f ms)", waited)
+            self._assoc_outcome = "none"
+        else:
+            logger.info("associative recall ready: %d fragment(s) after %.0f ms", count, waited)
+            self._assoc_suggestion, self._assoc_match_count = suggestion, count
+            self._assoc_outcome = "found"
+        yield ("memory", self.memory_event())
+
+    def memory_event(self) -> Optional[dict]:
+        """Payload of the final `memory` event for the search of this turn, or None when none ran."""
+        if self._assoc_outcome == "skipped":
+            return {"state": "skipped"}
+        if self._assoc_outcome is None:
+            return None
+        return {"state": "done", "matches": self._assoc_match_count}
+
+    def _close_assoc_job(self) -> None:
+        """Stop the recall job if it is still running and remember how long it ran."""
+        job = self._assoc_job
+        if job is None:
+            return
+        self._assoc_job = None
+        if not self._assoc_taken:
+            if job.ready() and not job.failed and not job.result()[0]:
+                self._assoc_outcome = "none"
+            else:
+                self._assoc_outcome = "skipped"  # failed, late or interrupted: its result was never used
+                logger.info("associative recall not used: %s", "still running" if not job.ready() else "arrived too late")
+        job.cancel()
+        self._assoc_span = (job.started_at, job.finished_at or perf_counter())
+
     def _complete(self) -> str:
+        if self._assoc_job is not None:  # no way to pause a reply here, so the search finishes first
+            self._assoc_job.wait()
+            for _ in self._take_assoc_result():
+                pass
+            self._close_assoc_job()
         for hop in range(AGENT_MAX_TOOL_HOPS + 1):
             is_last = hop == AGENT_MAX_TOOL_HOPS
             tools = None if is_last else (self._tool_specs or None)
@@ -387,7 +555,7 @@ class Agent:
                 reasoning_effort=self.config.reasoning_effort, tools=tools,
                 zdr=self.zdr_required,
             )
-            self._model_elapsed += perf_counter() - model_started_at
+            self._model_spans.append((model_started_at, perf_counter()))
             reasoning = result.get("reasoning") or ""
             reply = result.get("response") or ""
             tool_calls = result.get("tool_calls")
@@ -501,7 +669,8 @@ class Agent:
             "zdr": self.zdr_required,
             "reasoning": reasoning or None,
             "actions": self.last_actions or None,
-            "associative_matches": self._assoc_match_count or None,
+            "associative_matches": self._assoc_match_count if self._assoc_outcome in ("found", "none") else None,
+            "associative_skipped": True if self._assoc_outcome == "skipped" else None,
             "usage_report": usage_report or self.last_usage or None,
         }
         if interrupted:
@@ -569,8 +738,11 @@ class Agent:
         ctx = self.messages
         if self._truncated:
             ctx = [self.messages[0], {"role": "system", "content": "[CUTOFF CONVERSATION]"}] + self.messages[1:]
+        if self._partial:
+            ctx = ctx + [{"role": "assistant", "content": self._partial.rstrip()}]
         if self._assoc_suggestion:
-            ctx = ctx + [{"role": "system", "content": self._assoc_suggestion}]
+            hint = f"{self._assoc_suggestion}\n\n{_HIT_CUT_NOTE}" if self._partial else self._assoc_suggestion
+            ctx = ctx + [{"role": "system", "content": hint}]
         return ctx
 
     def _ensure_max_context(self) -> None:
@@ -597,9 +769,14 @@ class Agent:
     def _record_latency_report(self) -> None:
         """Format ephemeral wall-clock timings for the latest completed response."""
         total = max(0.0, perf_counter() - self._turn_started_at)
-        assoc = self._assoc_elapsed
-        model = self._model_elapsed
-        other = max(0.0, total - assoc - model)
+        spans = list(self._model_spans)
+        assoc = 0.0
+        if self._assoc_span is not None:
+            assoc = self._assoc_span[1] - self._assoc_span[0]
+            spans.append(self._assoc_span)
+        model = sum(end - start for start, end in self._model_spans)
+        # parallel work counts once toward the turn, so the parts below may add up to more than the total
+        other = max(0.0, total - _union_seconds(spans))
 
         def part(name: str, seconds: float) -> str:
             percentage = seconds / total * 100 if total else 0.0
@@ -608,7 +785,7 @@ class Agent:
         self.last_latency_report = "\n".join(
             [
                 f"latency: total={total * 1000:.0f} ms",
-                part("associative memory", assoc),
+                part("associative memory (parallel)" if self._assoc_parallel else "associative memory", assoc),
                 part("model calls", model),
                 part("tools/other", other),
             ]

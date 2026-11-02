@@ -65,6 +65,12 @@ def run(agent: Agent) -> None:
                         print(f"\n{GRAY_ITALIC}[tool] {text['name']}({args}){RESET}", end="")
                         mode = None
                         continue
+                    if kind == "memory":
+                        if text["state"] != "searching":
+                            outcome = "skipped" if text["state"] == "skipped" else f"{text['matches']} match(es)"
+                            print(f"\n{GRAY_ITALIC}[associative memory] {outcome}{RESET}", end="")
+                            mode = None
+                        continue
                     if kind != mode:
                         if mode == "reasoning":
                             print(RESET, end="")  # close reasoning styling

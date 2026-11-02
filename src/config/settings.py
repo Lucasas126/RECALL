@@ -5,7 +5,7 @@ from pathlib import Path
 import yaml
 
 from src.config.models import (
-    ChatNamingConfig, McpSettings, PdfConfig, SpeechToTextConfig, TavilyConfig, VideoDecompositionConfig,
+    AssociativeMemoryConfig, ChatNamingConfig, McpSettings, PdfConfig, SpeechToTextConfig, TavilyConfig, VideoDecompositionConfig,
 )
 
 """Framework-level settings, loaded from `settings.yaml` at the repo root.
@@ -22,7 +22,6 @@ with open(_SETTINGS_FILE, "r", encoding="utf-8") as _fh:
 _paths = _raw["paths"]
 _index = _raw["index"]
 _agent = _raw["agent"]
-_assoc = _raw["associative_memory"]
 _web = _raw["web"]
 _telegram = _raw["telegram"]
 _speech_to_text = _raw["speech_to_text"]
@@ -70,6 +69,4 @@ CHAT_NAMING = ChatNamingConfig.model_validate(_raw.get("chat_naming", {}))
 MCP = McpSettings.model_validate(_raw.get("mcp", {}))
 
 # ------------------------------------------------------------------ associative memory
-ASSOC_CONTEXT_MESSAGES = _assoc["context_messages"]   # recent messages the memory subagent sees
-ASSOC_TOP_N = _assoc["top_n"]                        # fragments injected per turn
-ASSOC_SCORE_THRESHOLD = _assoc["score_threshold"]    # min similarity to inject a fragment
+ASSOC = AssociativeMemoryConfig.model_validate(_raw.get("associative_memory", {}))

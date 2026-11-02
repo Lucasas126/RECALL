@@ -105,8 +105,21 @@
             <fieldset id="agent-tool-groups" class="model-capabilities">
               <legend id="agent-tool-groups-label">Tool groups</legend>
             </fieldset>
-            <label class="model-filter"><input id="agent-associative" type="checkbox">
-              <span id="agent-associative-label">Associative memory</span></label>
+            <label>
+              <span id="agent-associative-label">Associative memory</span>
+              <select id="agent-associative">
+                <option value="off" id="agent-associative-off">Off</option>
+                <option value="llm" id="agent-associative-llm">Query from a small model</option>
+                <option value="question_only" id="agent-associative-question">Search with your message</option>
+              </select>
+            </label>
+            <label>
+              <span id="agent-associative-execution-label">Associative search timing</span>
+              <select id="agent-associative-execution">
+                <option value="parallel" id="agent-associative-parallel">In parallel with the reply</option>
+                <option value="sequential" id="agent-associative-sequential">Before the reply</option>
+              </select>
+            </label>
             <label>
               <span id="agent-effort-label">Reasoning effort</span>
               <select id="agent-effort">

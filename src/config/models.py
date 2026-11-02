@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Annotated, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints, field_validator
 
 from src.agent.tool_groups import validate_tool_groups
 ReasoningEffort = Literal["minimal", "low", "medium", "high", "xhigh", "max"]
@@ -12,6 +12,19 @@ _ENV_NAME = r"^[A-Za-z_][A-Za-z0-9_]*$"
 # a bare file name inside the user's private MCP folder; no separators, so it cannot escape it
 _STATE_FILE = r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$"
 McpServerId = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{0,31}$")]
+
+
+def _legacy_associative_mode(value: object) -> object:
+    """Accept the former on/off boolean: true means `llm`, false means `off`."""
+    if isinstance(value, bool):
+        return "llm" if value else "off"
+    return value
+
+
+# how an agent searches its memory each turn: not at all, with a query proposed by a small model, or with the user's message
+AssociativeMode = Annotated[Literal["off", "llm", "question_only"], BeforeValidator(_legacy_associative_mode)]
+# whether the search runs beside the model (and may pause its reply) or finishes before the model starts
+AssociativeExecution = Literal["parallel", "sequential"]
 
 
 class McpEnvFromEnvironment(BaseModel):
@@ -115,6 +128,19 @@ class ChatNamingConfig(BaseModel):
     min_messages: int = Field(default=5, ge=1, le=1000, strict=True)
 
 
+class AssociativeMemoryConfig(BaseModel):
+    """Framework-wide associative-memory settings; api_key names an environment variable, not a secret."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    context_messages: int = Field(default=6, ge=0, le=100, strict=True)
+    top_n: int = Field(default=3, ge=1, le=20, strict=True)
+    score_threshold: float = Field(default=0.25, ge=0, le=1)
+    query_model: Optional[str] = Field(default=None, strict=True, min_length=1, max_length=256)
+    api_key: str = Field(default="OPENROUTER_API_KEY", pattern=_ENV_NAME)
+    zdr: bool = Field(default=True, strict=True)
+
+
 class SpeechToTextConfig(BaseModel):
     """OpenRouter speech-to-text settings."""
 
@@ -189,8 +215,9 @@ class ChatConfig(BaseModel):
     deny: list[str] | None = None
     # MCP servers from the shared catalog enabled for this agent, keyed by server id
     mcp: dict[McpServerId, AgentMcpConfig] = Field(default_factory=dict)
-    # run a memory subagent each turn that suggests relevant fragments from long-term memory
-    associative_memory: bool = True
+    # suggest relevant fragments from long-term memory each turn (true/false are accepted for llm/off)
+    associative_memory: AssociativeMode = "llm"
+    associative_execution: AssociativeExecution = "parallel"
 
     @field_validator("tool_groups")
     @classmethod
@@ -235,4 +262,5 @@ class ResolvedAgent(BaseModel):
     allow: list[str] | None = None
     deny: list[str] | None = None
     mcp: dict[str, AgentMcpConfig] = Field(default_factory=dict)
-    associative_memory: bool = True
+    associative_memory: AssociativeMode = "llm"
+    associative_execution: AssociativeExecution = "parallel"

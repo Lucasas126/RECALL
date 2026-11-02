@@ -39,5 +39,27 @@ class AgentDescriptionTests(unittest.TestCase):
         self.assertEqual(self.store.list_agents("user-a")[0].description, "Notes")
 
 
+    def test_associative_settings_round_trip_through_the_store(self):
+        chat_config = {"associative_memory": "question_only", "associative_execution": "sequential"}
+        config = AgentConfig(id="aria", name="Aria", personality_prompt="Hi", chat_config=chat_config)
+        self.store.create("user-a", config)
+        loaded = self.store.load("user-a", "aria").chat_config
+        self.assertEqual((loaded.associative_memory, loaded.associative_execution), ("question_only", "sequential"))
+
+    def test_associative_defaults_and_legacy_boolean_in_agent_files(self):
+        default = AgentConfig(id="aria", name="Aria", personality_prompt="Hi").chat_config
+        self.assertEqual((default.associative_memory, default.associative_execution), ("llm", "parallel"))
+        for legacy, mode in ((True, "llm"), (False, "off")):
+            config = AgentConfig(
+                id="aria", name="Aria", personality_prompt="Hi", chat_config={"associative_memory": legacy},
+            )
+            self.assertEqual(config.chat_config.associative_memory, mode)
+
+    def test_unknown_associative_values_are_rejected(self):
+        for field, value in (("associative_memory", "sometimes"), ("associative_execution", "later")):
+            with self.assertRaises(ValidationError):
+                AgentConfig(id="aria", name="Aria", personality_prompt="Hi", chat_config={field: value})
+
+
 if __name__ == "__main__":
     unittest.main()

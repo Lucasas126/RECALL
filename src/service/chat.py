@@ -436,7 +436,7 @@ class ChatService:
             {
                 k: t[k] for k in (
                     "role", "content", "ts", "reasoning", "actions", "interrupted",
-                    "associative_matches", "usage", "usage_report",
+                    "associative_matches", "associative_skipped", "usage", "usage_report",
                 )
                 if t.get(k) is not None
             }
@@ -820,11 +820,8 @@ class ChatService:
                 run.text, stream=run.stream, cancellation=run.cancellation,
                 continuation=run.continuation, attachments=run.attachments,
             )
-            if agent._assoc_match_count:
-                yield ChatEvent(
-                    "memory", data={"matches": agent._assoc_match_count},
-                    generation_id=run.generation_id,
-                )
+            if memory := agent.memory_event():  # a search that already finished (replies that are not streamed)
+                yield ChatEvent("memory", data=memory, generation_id=run.generation_id)
             if isinstance(result, str):
                 for action in agent.last_actions:
                     yield ChatEvent("tool", data=action, generation_id=run.generation_id)
@@ -832,8 +829,8 @@ class ChatService:
             else:
                 with closing(result) as chunks:
                     for kind, chunk in chunks:
-                        if kind == "tool" and isinstance(chunk, dict):
-                            yield ChatEvent("tool", data=chunk, generation_id=run.generation_id)
+                        if kind in ("tool", "memory") and isinstance(chunk, dict):
+                            yield ChatEvent(kind, data=chunk, generation_id=run.generation_id)
                         elif kind in ("reasoning", "content") and isinstance(chunk, str):
                             yield ChatEvent(
                                 "reasoning" if kind == "reasoning" else "text",

@@ -84,7 +84,7 @@ class WebSteeringTests(steering.SteeringFixture):
         original_invoke = provider.invoke.side_effect
 
         def delayed_model(*args, **kwargs):
-            time.sleep(0.03)
+            time.sleep(0.15)  # the hit lands while the model is still silent
             return original_invoke(*args, **kwargs)
 
         provider.invoke.side_effect = delayed_model
@@ -100,12 +100,13 @@ class WebSteeringTests(steering.SteeringFixture):
             response = self.client.post(self.messages_url, json={"content": "Question"})
 
         events = _events(response)
-        self.assertEqual([event["event"] for event in events], ["memory", "text", "usage", "done"])
-        self.assertEqual(events[0]["data"], {"matches": 2})
+        self.assertEqual([event["event"] for event in events], ["memory", "memory", "text", "usage", "done"])
+        self.assertEqual(events[0]["data"], {"state": "searching"})
+        self.assertEqual(events[1]["data"], {"state": "done", "matches": 2})
         report = self.agents[("user-one", "agent-one")].last_latency_report
-        self.assertIn(report, events[2]["data"])
+        self.assertIn(report, events[3]["data"])
         total_match = re.search(r"latency: total=(\d+) ms", report)
-        assoc_match = re.search(r"associative memory: (\d+) ms \(([\d.]+)%\)", report)
+        assoc_match = re.search(r"associative memory \(parallel\): (\d+) ms \(([\d.]+)%\)", report)
         model_match = re.search(r"model calls: (\d+) ms \(([\d.]+)%\)", report)
         self.assertIsNotNone(total_match)
         self.assertIsNotNone(assoc_match)
@@ -129,6 +130,45 @@ class WebSteeringTests(steering.SteeringFixture):
         self.assertIn("context:", history[-1]["usage_report"])
         self.assertNotIn("latency:", history[-1]["usage_report"])
         self.assertEqual(history[-1]["usage"], {"in": 10, "out": 5})
+
+    def _slow_model(self) -> None:
+        provider = self.providers[("user-one", "agent-one")]
+        original_invoke = provider.invoke.side_effect
+
+        def delayed_model(*args, **kwargs):
+            time.sleep(0.1)
+            return original_invoke(*args, **kwargs)
+
+        provider.invoke.side_effect = delayed_model
+
+    def _memory_events(self, response) -> list[dict]:
+        return [e["data"] for e in _events(response) if e["event"] == "memory"]
+
+    def _last_message(self) -> dict:
+        return self.client.get(f"/api/agents/agent-one/chats/{self.chat}").json()["messages"][-1]
+
+    def test_search_without_matches_is_sent_and_persisted(self) -> None:
+        self.associative_memory = True
+        self._slow_model()
+        with steering.patch("src.agent.agent.associative.recall", return_value=(None, 0)):
+            response = self.client.post(self.messages_url, json={"content": "Question"})
+        self.assertEqual(self._memory_events(response), [
+            {"state": "searching"}, {"state": "done", "matches": 0},
+        ])
+        self.assertEqual(self._last_message()["associative_matches"], 0)
+
+    def test_failed_search_is_sent_as_skipped_and_persisted(self) -> None:
+        self.associative_memory = True
+        self._slow_model()
+        with (
+            steering.patch("src.agent.agent.associative.recall", side_effect=RuntimeError("index offline")),
+            self.assertLogs("recall", level="ERROR"),
+        ):
+            response = self.client.post(self.messages_url, json={"content": "Question"})
+        self.assertEqual(self._memory_events(response), [{"state": "searching"}, {"state": "skipped"}])
+        message = self._last_message()
+        self.assertTrue(message["associative_skipped"])
+        self.assertNotIn("associative_matches", message)
 
     def test_validation_precedes_sse_response(self) -> None:
         response = self.client.post(self.messages_url, json={"content": " "})
