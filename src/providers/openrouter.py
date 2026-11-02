@@ -13,6 +13,7 @@ from src.providers.provider import LLMProvider, format_completion
 from src.providers.catalog import list_openrouter_models
 from src.providers.catalog import list_openrouter_transcription_models
 from src.providers.transport import post_chat, stream_chat
+from src.utils.i18n import UserMessageError
 from src.utils.logger import get_logger
 
 import dotenv
@@ -25,12 +26,30 @@ _MODEL_CONTEXT: dict[str, int] = {}
 _MODEL_CONTEXT_LOADED = False
 
 
+class OpenRouterRateLimited(UserMessageError, RuntimeError):
+    """The model's upstream provider is temporarily rate-limited (HTTP 429)."""
+
+
 def _raise_openrouter_error(status_code, body) -> None:
-    """Raise a clear error carrying OpenRouter's own message (never swallow it)."""
+    """Raise a clear error carrying OpenRouter's own message and upstream detail (never swallow it)."""
     try:
-        message = json.loads(body)["error"]["message"] if isinstance(body, str) else body["message"]
+        error = json.loads(body)["error"] if isinstance(body, str) else body
+        message = error["message"]
     except Exception:
-        message = str(body)[:300]
+        error, message = {}, str(body)[:300]
+    metadata = error.get("metadata") if isinstance(error.get("metadata"), dict) else {}
+    # "Provider returned error" hides the real cause, which OpenRouter puts in metadata.raw
+    detail = str(metadata.get("raw") or "")[:300]
+    provider = metadata.get("provider_name")
+    if str(status_code or error.get("code")) == "429":
+        suffix = f" ({provider})" if provider else ""
+        raise OpenRouterRateLimited(
+            "The model's provider is temporarily rate-limited{suffix}: {detail} "
+            "Retry shortly or choose another model.",
+            suffix=suffix, detail=detail or message,
+        )
+    if detail and detail not in message:
+        message = f"{message}: {detail}"
     raise RuntimeError(f"openrouter API error {status_code}: {message}")
 
 

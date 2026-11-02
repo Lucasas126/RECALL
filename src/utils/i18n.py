@@ -60,6 +60,7 @@ _SPANISH = {
     "Tesseract could not read a page. Check that the language packs {languages} are installed.": "Tesseract no ha podido leer una página. Comprueba que los paquetes de idioma {languages} están instalados.",
     "Tesseract timed out reading a page.": "Tesseract ha tardado demasiado en leer una página.",
     "Tesseract executable not found at {path}. Fix pdf.tesseract_cmd in settings.yaml.": "No se ha encontrado el ejecutable de Tesseract en {path}. Corrige pdf.tesseract_cmd en settings.yaml.",
+    "The model's provider is temporarily rate-limited{suffix}: {detail} Retry shortly or choose another model.": "El proveedor del modelo está limitado temporalmente{suffix}: {detail} Reinténtalo en un momento o elige otro modelo.",
     "The operation failed. Please try again.": "La operación ha fallado. Inténtalo de nuevo.",
     "I could not load your agents right now.": "No se han podido cargar tus agentes ahora.",
     "Choose the agent for new and incoming messages:": "Elige el agente para los mensajes nuevos y entrantes:",

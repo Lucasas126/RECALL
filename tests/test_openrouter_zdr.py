@@ -9,7 +9,8 @@ import httpx
 from src.agent.agent import Agent
 from src.agent.associative import _propose_query
 from src.config.models import AssociativeMemoryConfig
-from src.providers.openrouter import OpenRouterProvider
+from src.providers.openrouter import OpenRouterProvider, OpenRouterRateLimited
+from src.utils.i18n import error_message
 
 
 def _stream(text: str = "Answer"):
@@ -77,6 +78,20 @@ class OpenRouterZdrTests(unittest.TestCase):
                 self.assertEqual(post.call_count, 0 if streaming else 1)
                 called = stream if streaming else post
                 self.assertEqual(called.call_args.args[1]["provider"], {"zdr": True})
+
+    def test_rate_limit_error_explains_upstream_cause_and_is_localized(self) -> None:
+        request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+        response = httpx.Response(429, request=request, json={"error": {
+            "message": "Provider returned error", "code": 429,
+            "metadata": {"raw": "vendor/model:free is temporarily rate-limited upstream.", "provider_name": "Phala"},
+        }})
+        error = httpx.HTTPStatusError("Too many requests", request=request, response=response)
+        with patch("src.providers.openrouter.post_chat", side_effect=error):
+            with self.assertRaises(OpenRouterRateLimited) as caught:
+                self.provider.invoke([], "vendor/model:free", stream=False)
+        self.assertIn("temporarily rate-limited upstream", error_message("en", caught.exception))
+        self.assertIn("(Phala)", error_message("en", caught.exception))
+        self.assertIn("elige otro modelo", error_message("es", caught.exception))
 
     def test_associative_query_also_uses_zdr(self) -> None:
         self.enterContext(patch("src.agent.associative.ASSOC", AssociativeMemoryConfig(query_model=None)))
