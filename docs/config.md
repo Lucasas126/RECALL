@@ -663,6 +663,88 @@ turn continues without associative memory and the indicator shows "skipped".
 `context_messages` (0-100) is how many recent messages the query model sees,
 `top_n` (1-20) the fragments injected, and `score_threshold` (0-1) the minimum similarity.
 
+## prompt caching
+
+Prompt caching lets the provider reuse the part of a request it has already
+processed (the system prompt and earlier messages), billed at a fraction of the
+input price. It is framework-wide, in the root `settings.yaml`:
+
+```yaml
+prompt_cache:
+  enabled: true
+  anthropic_providers: [Amazon Bedrock]
+  trim_slack_percent: 25
+```
+
+How each model family is handled:
+
+- **Claude on OpenRouter** (`anthropic/...` and `~anthropic/...` aliases) does not
+  cache on its own. When `enabled` is true, RECALL puts a `cache_control` breakpoint
+  on the system prompt and another on the last message that has text, on every chat
+  request (streaming or not). The second breakpoint moves forward each turn, and the
+  provider reuses the longest prefix it already has, so a conversation keeps reading
+  its history from the cache. The cache lives about five minutes since its last use
+  (OpenRouter's default). A system prompt shorter than the model's minimum
+  (roughly 1,000-4,000 tokens, depending on the model) is not cached at all, which
+  costs nothing. Cache writes are billed above the normal input price and reads
+  well below it; a chat that sends fewer than two messages within the cache
+  lifetime pays the write without ever reading it.
+- **Other models** (DeepSeek, GPT, Gemini, Grok, ...) cache the repeated prefix on
+  their own, so RECALL sends their requests unchanged. Which ones do is up to
+  OpenRouter and the provider.
+- The associative-memory hint, the `[CUTOFF CONVERSATION]` marker and other
+  `system` messages that follow the conversation do not break the cache: the
+  prefix before them is unchanged.
+
+`anthropic_providers` is the list of OpenRouter provider names tried first for
+Claude requests (`provider.order`). It exists because routing matters for caching:
+in tests, requests routed through Google Vertex lost the cache whenever any text
+after the breakpoint changed, and sometimes without a visible reason, while Amazon
+Bedrock behaved as documented. Other providers stay available as a fallback, and
+the ZDR policy still applies on top, so the list is a preference, not a restriction.
+An unknown provider name is ignored and the request still works, so a renamed or
+dropped provider degrades to OpenRouter's default routing. Use an empty list (`[]`)
+to let OpenRouter choose freely. Requiring the `Anthropic` provider alone (no
+fallback) returned "no endpoints found" when tested with ZDR on, so it is not a
+useful value here.
+
+`trim_slack_percent` (0-90) controls how the context window is cut. A cut moves
+the start of the history, which invalidates the cached history. Without slack the
+agent drops one message per turn once `conversation_messages_retained` is reached,
+so the cache would be lost on every turn. With slack, the agent cuts down to
+`retained - slack%` and then lets the window grow again until it passes
+`retained`, so the cache survives between cuts. The window never exceeds
+`conversation_messages_retained`; it only holds fewer messages right after a cut
+(20 retained with 25% slack goes from 21 to 15 messages). Use `0` for the exact
+sliding window. It applies to every provider, not only OpenRouter. Small windows
+(for example 3 or less) are not reduced.
+
+What still invalidates the cache, by design:
+
+- Changing the agent's tools, personality prompt or model. Tools come before the
+  system prompt in the cached prefix, so a change in the tool list (an MCP server
+  connecting, going down or being disabled) also invalidates the system prompt. That
+  is why MCP notes live in the system prompt and are not split into a separate block.
+- A different chat or model: each has its own prefix.
+- A pause longer than the cache lifetime.
+- Editing earlier messages or the first message in the window being cut off.
+
+The web debug panel and the saved `usage_report` show the result on a second line
+of the usage report:
+
+```
+cache: read=4958 (91% of input) write=13
+```
+
+`read` are input tokens served from the cache, `write` tokens stored in it for
+later, and the percentage is the share of input that was read. The line is absent
+when the provider returns no breakdown (it is unknown, not zero). The report covers
+the last model call of the turn, so a turn that used tools shows the final call
+only. The chat history also stores `cache_read` and `cache_write` next to the saved
+input and output tokens. Prefer this line to the cost estimate when checking that
+caching works: after the first message of a chat, `read` should be close to the
+whole previous context.
+
 ## chat naming
 
 The root `settings.yaml` holds a framework-wide small model used to generate chat
@@ -761,7 +843,7 @@ chat_config:
   reasoning: true                    # request and separate thinking tokens
   reasoning_tokens: 20               # optional reasoning budget
   keep_reasoning_in_memory: false    # store the thinking in context/history
-  conversation_messages_retained: 20 # last N messages kept in context (see sources.md)
+  conversation_messages_retained: 20 # at most N messages kept in context; cuts go below N (see prompt caching)
   tools: true                       # enable the selected tool groups
   tool_groups: [memory_read, memory_edit]  # memory_read, memory_edit, web
   mcp:                               # MCP servers enabled for this agent (see mcp.md)

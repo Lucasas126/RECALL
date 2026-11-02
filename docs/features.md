@@ -13,6 +13,8 @@
 - ~~Add date filters to web search tools.~~
 - ~~Separate and group all tools: web search, obsidian read only, obsidian read+edit, etc. All groups should be exposed and available to select for all agents, and should be configured in the agent tab in the web interface. This will allow users to easily manage and configure tool access for different agents, so not all agents have the same tools.~~
 - ~~Add Google Calendar integration.~~ (through MCP, see [mcp.md](mcp.md))
+- ~~prompt caching for Claude on OpenRouter, with cache usage in the debug panel~~ (see [config.md](config.md#prompt-caching))
+- ~~allow claude suscription to be used, similarly to how its implemented in other agent frameworks with and sdk~~ (discarded: other agent frameworks reuses Claude Code's OAuth token and impersonates its client, and Anthropic's Agent SDK terms do not allow third-party products to offer claude.ai login; use an API key through OpenRouter or a native Anthropic provider instead)
 
 ## Automation and behavior
 
@@ -36,7 +38,7 @@
 - ~~user authentication. allowed users must be defined beforehand in a configuration file, there is no user registration system, only password authentication~~
 
 ## Recall
-- make it so associaive memory is inyected into the system prompt while the model has started generating text, so its faster and more efficient. This will allow the model to have access to relevant information without having to wait for the entire context to be processed before generating a response. Make it so the model is aware that this can happen, so it can adjust its behavior accordingly. This will improve latency. Since the process will be parallel, we have to adjust the timings so it makes sense (right now since they are not parallel, they are just summed in the latency metric that we print in the debug panel in the web ui)
+- ~~make it so associaive memory is inyected into the system prompt while the model has started generating text, so its faster and more efficient. This will allow the model to have access to relevant information without having to wait for the entire context to be processed before generating a response. Make it so the model is aware that this can happen, so it can adjust its behavior accordingly. This will improve latency. Since the process will be parallel, we have to adjust the timings so it makes sense (right now since they are not parallel, they are just summed in the latency metric that we print in the debug panel in the web ui)~~
 
 ## Errors
 - [error] openrouter API error 429: Provider returned error, happened when trying to use cheapeast model in openrouter, probably because its not zdr or something like that, try to handle it better and show a more user friendly message, such as a suggestion to changing the model

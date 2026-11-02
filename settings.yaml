@@ -38,6 +38,11 @@ speech_to_text:
   zdr: true
   language: null  # optional ISO-639-1 code; null enables provider auto-detection
 
+prompt_cache:
+  enabled: true                     # mark Claude prompts on OpenRouter with cache breakpoints (see docs/config.md)
+  anthropic_providers: [Amazon Bedrock]  # preferred OpenRouter routes for Claude; other ZDR routes stay as fallback
+  trim_slack_percent: 25            # when history passes conversation_messages_retained, cut this much extra; 0 trims one message at a time
+
 tavily:
   api_key: TAVILY_API_KEY   # shared env var NAME, never the secret; unset = no web access
   timeout_seconds: 30

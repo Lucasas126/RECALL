@@ -73,7 +73,22 @@ def _pct(tokens: int, max_context: int | None) -> str:
     return f"{tokens / max_context * 100:.1f}% of {max_context}" if max_context else "unknown model context"
 
 
-def format_turn(b: dict, prev: dict | None, approx: bool, max_context: int | None) -> str:
+def cache_tokens(api_usage: dict | None) -> tuple[int, int] | None:
+    """(read, written) prompt-cache tokens from the api usage, or None when the provider reported no breakdown."""
+    details = (api_usage or {}).get("prompt_tokens_details")
+    if not isinstance(details, dict) or "cached_tokens" not in details:
+        return None
+    return details["cached_tokens"] or 0, details.get("cache_write_tokens") or 0
+
+
+def _format_cache(cache: tuple[int, int], prompt_tokens: int) -> str:
+    read, written = cache
+    share = f" ({read / prompt_tokens * 100:.0f}% of input)" if prompt_tokens else ""
+    return f"cache: read={read}{share} write={written}\n"
+
+
+def format_turn(b: dict, prev: dict | None, approx: bool, max_context: int | None,
+                cache: tuple[int, int] | None = None) -> str:
     in_s = f"~in={b['in']}" if approx else f"in={b['in']}"
     out_s = f"~out={b['out']}" if approx else f"out={b['out']}"
     note = "  (approx: no api usage)" if approx else ""
@@ -83,8 +98,10 @@ def format_turn(b: dict, prev: dict | None, approx: bool, max_context: int | Non
     d_usr = b["user_tokens"] - p.get("user_tokens", 0)
     d_agt = b["agent_tokens"] - p.get("agent_tokens", 0)
     d_tool = b["tool_tokens"] - p.get("tool_tokens", 0)
+    cache_line = _format_cache(cache, b["in"]) if cache is not None and not approx else ""
     return (
         f"context: {_pct(b['in'], max_context)} | {in_s} {out_s}{note}\n"
+        f"{cache_line}"
         f"  ~ system_tokens={b['system_tokens']} user_tokens={b['user_tokens']} agent_tokens={b['agent_tokens']} tool_tokens={b['tool_tokens']}"
         f"  ·  response={b['response']} thinking={b['thinking']}\n"
         f"turn Δ: in={d_in:+d} out={b['out']}\n"

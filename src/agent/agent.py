@@ -15,7 +15,7 @@ from src.agent.tools import build_tools
 from src.agent.toolsets.mcp import build_mcp_tools
 from src.config.loader import load_agent
 from src.config.models import ModelsConfig, ResolvedAgent
-from src.config.settings import AGENT_MAX_TOOL_HOPS, TAVILY
+from src.config.settings import AGENT_MAX_TOOL_HOPS, PROMPT_CACHE, TAVILY
 from src.core.index import VectorIndex
 from src.core.sources.registry import SourceRegistry
 from src.utils.logger import get_logger
@@ -677,6 +677,8 @@ class Agent:
             extra["interrupted"] = True
         if api_usage:
             extra["usage"] = {"in": api_usage.get("prompt_tokens"), "out": api_usage.get("completion_tokens")}
+            if (cache := usage.cache_tokens(api_usage)) is not None:
+                extra["usage"].update(cache_read=cache[0], cache_write=cache[1])
         self._log_turn("assistant", reply, **extra)
 
     @staticmethod
@@ -720,13 +722,18 @@ class Agent:
         self._truncated = truncated
 
     def _trim_context(self) -> None:
-        """Keep only the last N turns (system prompt aside), flagging that older ones were cut."""
+        """Keep at most the last N messages (system prompt aside), flagging that older ones were cut.
+
+        A cut moves the start of the history, which invalidates the provider's prompt cache for all of it, so
+        each cut goes `trim_slack_percent` below N and the next ones wait until the window fills up again.
+        """
         n = self.config.conversation_messages_retained
         if not n:
             return
         rest = self.messages[1:]
         if len(rest) > n:
-            kept = rest[-n:]
+            keep = max(1, n - n * PROMPT_CACHE.trim_slack_percent // 100)
+            kept = rest[-keep:]
             # never start on an orphan tool result (its assistant tool_calls would be gone)
             while kept and kept[0].get("role") == "tool":
                 kept.pop(0)
@@ -763,7 +770,8 @@ class Agent:
             self._tool_specs or None,
         )
         return usage.format_turn(
-            breakdown, self._prev_breakdown, approx, self._max_context or None
+            breakdown, self._prev_breakdown, approx, self._max_context or None,
+            cache=usage.cache_tokens(api_usage),
         )
 
     def _record_latency_report(self) -> None:
@@ -810,7 +818,10 @@ class Agent:
         if approx:
             logger.warning("token usage approximated with chars/4 (provider returned no usage)")
         self._ensure_max_context()
-        self.last_usage = usage.format_turn(breakdown, self._prev_breakdown, approx, self._max_context or None)
+        self.last_usage = usage.format_turn(
+            breakdown, self._prev_breakdown, approx, self._max_context or None,
+            cache=usage.cache_tokens(api_usage),
+        )
         self._prev_breakdown = breakdown
         self._ctx_input_tokens = breakdown["in"]  # for the next reconstruct
         logger.info("usage\n%s", self.last_usage)

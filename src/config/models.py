@@ -128,6 +128,18 @@ class ChatNamingConfig(BaseModel):
     min_messages: int = Field(default=5, ge=1, le=1000, strict=True)
 
 
+class PromptCacheConfig(BaseModel):
+    """Framework-wide OpenRouter prompt-caching settings for Claude models."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(default=True, strict=True)
+    anthropic_providers: list[Annotated[str, StringConstraints(min_length=1, max_length=64)]] = Field(
+        default_factory=lambda: ["Amazon Bedrock"], max_length=10,
+    )
+    trim_slack_percent: int = Field(default=25, ge=0, le=90, strict=True)
+
+
 class AssociativeMemoryConfig(BaseModel):
     """Framework-wide associative-memory settings; api_key names an environment variable, not a secret."""
 

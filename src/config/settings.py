@@ -5,7 +5,8 @@ from pathlib import Path
 import yaml
 
 from src.config.models import (
-    AssociativeMemoryConfig, ChatNamingConfig, McpSettings, PdfConfig, SpeechToTextConfig, TavilyConfig, VideoDecompositionConfig,
+    AssociativeMemoryConfig, ChatNamingConfig, McpSettings, PdfConfig, PromptCacheConfig, SpeechToTextConfig, TavilyConfig,
+    VideoDecompositionConfig,
 )
 
 """Framework-level settings, loaded from `settings.yaml` at the repo root.
@@ -58,6 +59,9 @@ VIDEO_DECOMPOSITION = VideoDecompositionConfig.model_validate(_video)
 
 # ------------------------------------------------------------------ pdf text extraction
 PDF = PdfConfig.model_validate(_pdf)
+
+# ------------------------------------------------------------------ prompt caching
+PROMPT_CACHE = PromptCacheConfig.model_validate(_raw.get("prompt_cache", {}))
 
 # ------------------------------------------------------------------ external web access
 TAVILY = TavilyConfig.model_validate(_raw.get("tavily", {}))

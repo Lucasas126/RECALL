@@ -6,6 +6,8 @@ from typing import ClassVar
 
 import httpx
 
+from src.config.models import PromptCacheConfig
+from src.config.settings import PROMPT_CACHE
 from src.providers.cancellation import CancellationToken, GenerationCancelled
 from src.providers.provider import LLMProvider, format_completion
 from src.providers.catalog import list_openrouter_models
@@ -39,6 +41,50 @@ def _reasoning_payload(effort, tokens) -> dict:
     if tokens:
         return {"max_tokens": tokens}
     return {}
+
+
+_CACHE_BREAKPOINT = {"type": "ephemeral"}
+
+
+def is_anthropic_model(model: str) -> bool:
+    """True for Claude models on OpenRouter, including `~anthropic/...-latest` aliases."""
+    return model.removeprefix("~").startswith("anthropic/")
+
+
+def _with_breakpoint(message: dict) -> dict | None:
+    """Copy of the message with a cache breakpoint on its last text block, or None when it has no text to mark."""
+    content = message.get("content")
+    if isinstance(content, str):
+        blocks = [{"type": "text", "text": content}]
+    elif isinstance(content, list):
+        blocks = [dict(block) if isinstance(block, dict) else block for block in content]
+    else:
+        return None
+    for index in range(len(blocks) - 1, -1, -1):
+        block = blocks[index]
+        if isinstance(block, dict) and block.get("type") == "text" and str(block.get("text", "")).strip():
+            blocks[index] = {**block, "cache_control": _CACHE_BREAKPOINT}
+            return {**message, "content": blocks}
+    return None
+
+
+def with_prompt_cache(messages: list[dict]) -> list[dict]:
+    """Copy of the messages with Anthropic cache breakpoints on the system prompt and the last markable message.
+
+    Anthropic caches everything before a breakpoint and, on the next call, reuses the longest prefix it finds
+    within the previous 20 blocks, so the second breakpoint moves forward with the conversation.
+    """
+    marked = list(messages)
+    system_index = next((i for i, m in enumerate(marked) if m.get("role") == "system"), None)
+    if system_index is not None and (system := _with_breakpoint(marked[system_index])) is not None:
+        marked[system_index] = system
+    for index in range(len(marked) - 1, -1, -1):
+        if marked[index].get("role") == "system":
+            continue
+        if (message := _with_breakpoint(marked[index])) is not None:
+            marked[index] = message
+            break
+    return marked
 
 
 def _normalize_tool_calls(tool_calls):
@@ -90,10 +136,20 @@ class OpenRouterProvider(LLMProvider):
     name: ClassVar[str] = "openrouter"
 
     api_key: str = ""
+    prompt_cache: PromptCacheConfig = PROMPT_CACHE
 
     def __init__(self, **data):
         super().__init__(**data)
         # self.api_key = os.environ.get("OPENROUTER_API_KEY", "")
+
+    def _chat_request(self, model: str, messages: list[dict], zdr: bool) -> tuple[list[dict], dict]:
+        """Messages and OpenRouter routing preferences for one chat request; Claude gets cache breakpoints."""
+        routing: dict = {"zdr": zdr}
+        if self.prompt_cache.enabled and is_anthropic_model(model):
+            messages = with_prompt_cache(messages)
+            if self.prompt_cache.anthropic_providers:
+                routing["order"] = list(self.prompt_cache.anthropic_providers)
+        return messages, routing
 
     def supported_modalities(self, model: str) -> set[str]:
         """Read the selected model's declared input modalities from OpenRouter."""
@@ -152,11 +208,12 @@ class OpenRouterProvider(LLMProvider):
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
+        messages, routing = self._chat_request(model, messages, zdr)
         payload = {
             "model": model,
             "messages": messages,
             "stream": True,
-            "provider": {"zdr": zdr},
+            "provider": routing,
         }
         logger.debug("openrouter streaming request; payload=%s", payload)
         if reasoning:
@@ -270,7 +327,8 @@ class OpenRouterProvider(LLMProvider):
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
-        payload = {"model": model, "messages": messages, "stream": False, "provider": {"zdr": zdr}}
+        messages, routing = self._chat_request(model, messages, zdr)
+        payload = {"model": model, "messages": messages, "stream": False, "provider": routing}
         logger.debug("openrouter non-streaming request; payload=%s", payload)
         if reasoning:
             payload["reasoning"] = _reasoning_payload(reasoning_effort, reasoning_tokens)

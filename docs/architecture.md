@@ -192,7 +192,10 @@ web UI can show the indicator after reopening a chat; turns without a search, an
 older ones, have neither.
 Assistant history also stores its formatted `usage_report`, allowing the web
 context panel to be restored when reopening a chat. Older turns that predate
-`usage_report` show their saved input/output token totals, when available.
+`usage_report` show their saved input/output token totals, when available. When
+the provider reports prompt-cache usage, the report has a `cache:` line with the
+tokens read from and written to the cache, and the saved totals include
+`cache_read` and `cache_write` (see [prompt caching](config.md#prompt-caching)).
 The current response's `usage` event also appends ephemeral latency measurements:
 total agent processing time, associative-memory lookup, summed main-model calls,
 and remaining tools/overhead time, each in milliseconds and as a share of total.
