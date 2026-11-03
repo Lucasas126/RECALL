@@ -230,3 +230,6 @@ gcp-oauth.keys.json
 
 # Data
 /data
+
+# Docker deploy: compose bind mount for .config/ (see docs/deployment.md)
+/config/

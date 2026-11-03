@@ -1,0 +1,74 @@
+# RECALL on a home server. Copy .env.deploy.example to .env next to this file,
+# fill it in, then `docker compose up -d`. See docs/deployment.md.
+#
+# The image tag below (default `latest`) only moves when a GitHub Release is
+# published, so Watchtower updates the server per release, not per push.
+
+# Shared by both RECALL services: same image, env, and state.
+x-recall: &recall
+  image: ghcr.io/${GHCR_OWNER:?set GHCR_OWNER in .env}/recall:${RECALL_TAG:-latest}
+  restart: unless-stopped
+  # Secrets and per-user API key variables (their NAMES live in user.yaml, so
+  # they cannot be listed here). See .env.deploy.example.
+  env_file: .env
+  environment:
+    TZ: ${TZ:-UTC}
+  volumes:
+    # User & agent YAML, password hashes, preferences and MCP tokens.
+    # You provide .config/<user_id>/ on the server (see docs/deployment.md).
+    - ${RECALL_CONFIG_DIR:-./config}:/app/.config
+    # Per-agent data plane: mind palace, conversations, vector index.
+    - ${RECALL_DATA_DIR:-./data}:/app/data
+    # One folder per run (web / telegram), plus MCP server logs.
+    - ${RECALL_LOGS_DIR:-./logs}:/app/logs
+    # Optional: override framework defaults without rebuilding the image.
+    # - ./settings.yaml:/app/settings.yaml:ro
+  labels:
+    # Opt this container in to Watchtower's update loop.
+    com.centurylinklabs.watchtower.enable: "true"
+
+services:
+  recall-web:
+    <<: *recall
+    container_name: recall-web
+    ports:
+      # Plain HTTP (the session cookie is not `Secure`): keep it on the LAN or
+      # put Caddy/Traefik in front for HTTPS.
+      - "${RECALL_PORT:-8000}:8000"
+
+  recall-telegram:
+    <<: *recall
+    container_name: recall-telegram
+    command: ["python", "run_telegram.py"]
+    # Opt-in: starts only with COMPOSE_PROFILES=telegram in .env, so the bot
+    # can keep running elsewhere (one process per bot token).
+    profiles: ["telegram"]
+    # No HTTP server in this process; the image's web healthcheck would fail.
+    healthcheck:
+      disable: true
+
+  watchtower:
+    # Maintained fork; compatible with Docker Engine >= 26.
+    image: nickfedor/watchtower:latest
+    container_name: watchtower
+    restart: unless-stopped
+    environment:
+      # Only touch containers that explicitly opt in via the label above.
+      WATCHTOWER_LABEL_ENABLE: "true"
+      # Poll the registry every 5 minutes. `latest` only changes on a GitHub
+      # Release, so polling often is cheap; raise to 86400 for daily checks.
+      WATCHTOWER_POLL_INTERVAL: "300"
+      # Remove old images after a successful update so the disk stays slim.
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_INCLUDE_RESTARTING: "true"
+      # Update the opted-in containers one at a time instead of stopping all
+      # of them first, so web and Telegram are never both down at once.
+      WATCHTOWER_ROLLING_RESTART: "true"
+      TZ: ${TZ:-UTC}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # GHCR is private → mount the host's docker login config (read-only).
+      # Create it once with:
+      #   echo "$GHCR_PAT" | docker login ghcr.io -u <github-user> --password-stdin
+      # Remove this line if the package is public.
+      - /root/.docker/config.json:/config.json:ro
