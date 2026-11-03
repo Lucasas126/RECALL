@@ -1,0 +1,52 @@
+# VCS / IDE
+.git
+.gitignore
+.github
+.vscode
+.idea
+.claude
+
+# Python virtualenv & caches (built fresh inside the image)
+.venv
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# Local runtime state — never bake into the image, mounted as volumes.
+# .config/ holds user/agent YAML, password hashes and MCP OAuth tokens.
+.config/
+data/
+logs/
+chroma_db/
+var/
+
+# Secrets — runtime values come from the host / compose env.
+.env
+.env.*
+gcp-oauth.keys.json
+*.keys.json
+
+# Deploy files, docs, tests and scratch (not needed at runtime)
+docker-compose*.yml
+Dockerfile
+.dockerignore
+docs/
+tests/
+README.md
+AGENTS.md
+CLAUDE.md
+*.png
+tempCodeRunnerFile.py
+
+# Build / dist artifacts (none expected, but harmless)
+dist/
+build/
+*.egg-info/
+
+# OS junk
+.DS_Store
+Thumbs.db
