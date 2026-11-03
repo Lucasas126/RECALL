@@ -88,14 +88,18 @@
         <p id="agent-error" class="error" role="alert"></p>
         <p id="agent-status" class="model-note" role="status"></p>
         <p id="agents-empty" class="model-note">Select an agent to edit it, or create a new one.</p>
-        <form id="agent-form" class="agent-form" hidden>
+        <div id="agent-editor" class="agent-form" hidden>
           <h3 id="agent-form-title">Edit agent</h3>
           <nav class="tabs agent-tabs" aria-label="Agent configuration">
             <button id="agent-tab-basic" type="button" aria-pressed="true">Basic</button>
             <button id="agent-tab-advanced" type="button" aria-pressed="false">Advanced</button>
             <button id="agent-tab-tools" type="button" aria-pressed="false">Tools</button>
             <button id="agent-tab-mcp" type="button" aria-pressed="false">MCP</button>
+            <button id="agent-tab-soul" type="button" aria-pressed="false">Soul &amp; memory</button>
+            <button id="agent-tab-dream" type="button" aria-pressed="false">Dream</button>
+            <button id="agent-tab-sessions" type="button" aria-pressed="false">Dream sessions</button>
           </nav>
+        <form id="agent-form" class="agent-form-body">
           <div id="agent-panel-basic" class="agent-panel">
             <label>
               <span id="agent-name-label">Name</span>
@@ -106,9 +110,10 @@
               <textarea id="agent-description" rows="2" maxlength="500"></textarea>
               <span id="agent-description-hint" class="model-note">Optional. Shown in the agent list; not sent to the model.</span>
             </label>
-            <label>
-              <span id="agent-prompt-label">System prompt</span>
-              <textarea id="agent-prompt" rows="10" required maxlength="20000"></textarea>
+            <label id="agent-prompt-field">
+              <span id="agent-prompt-label">Personality (SOUL.md)</span>
+              <textarea id="agent-prompt" rows="10" maxlength="20000"></textarea>
+              <span id="agent-prompt-hint" class="model-note">Saved as the agent's SOUL.md. After creating the agent, edit it in the Soul &amp; memory tab.</span>
             </label>
           </div>
           <div id="agent-panel-advanced" class="agent-panel" hidden>
@@ -173,11 +178,191 @@
             <p id="agent-mcp-note" class="model-note">MCP servers act on each user's own account. Connect accounts in Settings &gt; Connections.</p>
             <div id="agent-mcp-list"></div>
           </div>
-          <div class="agent-actions">
-            <button id="agent-save" type="submit" class="primary">Save agent</button>
+        </form>
+          <div id="agent-panel-soul" class="agent-panel" hidden>
+            <p id="soul-note" class="model-note">These files are part of every chat's system prompt. Changes apply to new chats.</p>
+            <section class="agent-file">
+              <div class="agent-file-heading">
+                <h4 id="soul-title">Personality (SOUL.md)</h4>
+                <span id="soul-count" class="char-count"></span>
+              </div>
+              <textarea id="soul-content" rows="12" maxlength="20000" aria-labelledby="soul-title"></textarea>
+              <p id="soul-error" class="error" role="alert"></p>
+              <div class="agent-actions">
+                <button id="soul-save" type="button" class="primary">Save SOUL.md</button>
+                <span id="soul-status" class="model-note" role="status"></span>
+              </div>
+              <details id="soul-history" class="agent-disclosure">
+                <summary id="soul-history-title">SOUL history</summary>
+                <p id="soul-history-note" class="model-note">The last versions are saved before every change.</p>
+                <ul id="soul-history-list" class="soul-history-list"></ul>
+                <div id="soul-version" class="soul-version" hidden>
+                  <div class="agent-file-heading">
+                    <strong id="soul-version-title"></strong>
+                    <button id="soul-version-close" type="button" class="link">Close</button>
+                  </div>
+                  <pre id="soul-version-content"></pre>
+                </div>
+              </details>
+            </section>
+            <section class="agent-file">
+              <div class="agent-file-heading">
+                <h4 id="memory-title">Agent notes (MEMORY.md)</h4>
+                <span id="memory-count" class="char-count"></span>
+              </div>
+              <textarea id="memory-content" rows="8" aria-labelledby="memory-title"></textarea>
+              <p id="memory-error" class="error" role="alert"></p>
+              <div class="agent-actions">
+                <button id="memory-save" type="button" class="primary">Save MEMORY.md</button>
+                <span id="memory-status" class="model-note" role="status"></span>
+              </div>
+            </section>
+            <section class="agent-file">
+              <div class="agent-file-heading">
+                <h4 id="user-memory-title">About the user (USER.md)</h4>
+                <span id="user-memory-count" class="char-count"></span>
+              </div>
+              <textarea id="user-memory-content" rows="8" aria-labelledby="user-memory-title"></textarea>
+              <p id="user-memory-error" class="error" role="alert"></p>
+              <div class="agent-actions">
+                <button id="user-memory-save" type="button" class="primary">Save USER.md</button>
+                <span id="user-memory-status" class="model-note" role="status"></span>
+              </div>
+            </section>
+            <p id="memory-entries-note" class="model-note">Separate memory entries with a line holding only §. Limits are set in the Dream tab.</p>
+          </div>
+          <form id="dream-form" class="agent-panel" hidden>
+            <p id="dream-note" class="model-note">In a dream the agent reviews its recent chats in the background and updates its own SOUL, memories, skills and notes. Nothing is sent to you during a dream.</p>
+            <fieldset>
+              <legend id="dream-schedule-label">Schedule</legend>
+              <label class="model-filter"><input id="dream-mode-manual" type="radio" name="dream-mode" value="manual">
+                <span id="dream-mode-manual-label">Manual only</span></label>
+              <label class="model-filter"><input id="dream-mode-every" type="radio" name="dream-mode" value="every">
+                <span id="dream-mode-every-label">Every</span>
+                <input id="dream-every-hours" type="number" min="1" max="720" step="1" class="inline-number" aria-labelledby="dream-mode-every-label dream-hours-label">
+                <span id="dream-hours-label">hours</span></label>
+              <label class="model-filter"><input id="dream-mode-daily" type="radio" name="dream-mode" value="daily">
+                <span id="dream-mode-daily-label">Daily at</span>
+                <input id="dream-daily-at" type="time" class="inline-number" aria-labelledby="dream-mode-daily-label"></label>
+              <label class="model-filter"><input id="dream-enabled" type="checkbox">
+                <span id="dream-enabled-label">Schedule enabled</span></label>
+              <span id="dream-schedule-hint" class="model-note">Scheduled sessions are skipped while no chat is pending. You can always start one by hand, from the Dream sessions tab or with /dream start in a chat.</span>
+            </fieldset>
+            <fieldset>
+              <legend id="dream-model-legend">Model and limits</legend>
+              <label>
+                <span id="dream-model-label">Model</span>
+                <span class="inline-row">
+                  <input id="dream-model" maxlength="256" placeholder="Your chat model" autocomplete="off">
+                  <button id="dream-model-browse" type="button">Browse</button>
+                </span>
+                <span id="dream-model-hint" class="model-note">Empty uses your default chat model. Dreams always require ZDR routes.</span>
+              </label>
+              <label>
+                <span id="dream-effort-label">Reasoning effort</span>
+                <select id="dream-effort">
+                  <option value="" id="dream-effort-none">No reasoning request</option>
+                  <option value="minimal">minimal</option>
+                  <option value="low">low</option>
+                  <option value="medium">medium</option>
+                  <option value="high">high</option>
+                  <option value="xhigh">xhigh</option>
+                  <option value="max">max</option>
+                </select>
+              </label>
+              <label>
+                <span id="dream-max-steps-label">Maximum steps</span>
+                <input id="dream-max-steps" type="number" min="1" max="500" step="1" required>
+                <span id="dream-max-steps-hint" class="model-note">Model calls per session (1–500).</span>
+              </label>
+              <label>
+                <span id="dream-max-tokens-label">Maximum tokens</span>
+                <input id="dream-max-tokens" type="number" min="1000" max="10000000" step="1" required>
+                <span id="dream-max-tokens-hint" class="model-note">Input plus output tokens per session (1,000–10,000,000).</span>
+              </label>
+              <label>
+                <span id="dream-max-minutes-label">Maximum minutes</span>
+                <input id="dream-max-minutes" type="number" min="1" max="120" step="1" required>
+                <span id="dream-max-minutes-hint" class="model-note">Time limit per session (1–120). One minute before it the agent is told to wrap up; at the limit the session is closed.</span>
+              </label>
+            </fieldset>
+            <fieldset>
+              <legend id="dream-tools-legend">Dream reading tools</legend>
+              <span id="dream-tools-hint" class="model-note">Chats, mind palace and the agent's own files are always available.</span>
+              <label class="model-filter"><input id="dream-tool-web" type="checkbox" value="web">
+                <span id="dream-tool-web-label">Web search (needs Tavily)</span></label>
+              <label class="model-filter"><input id="dream-tool-vault" type="checkbox" value="vault">
+                <span id="dream-tool-vault-label">Vault, read-only (needs a vault folder)</span></label>
+              <label>
+                <span id="dream-vault-label">Vault folder</span>
+                <input id="dream-vault" maxlength="1024" autocomplete="off">
+                <span id="dream-vault-hint" class="model-note">A folder on the computer running RECALL, such as an Obsidian vault. Chats reach it with the vault tool groups; dreams only read it. Empty means no vault.</span>
+              </label>
+            </fieldset>
+            <fieldset>
+              <legend id="dream-limits-legend">Memory limits</legend>
+              <label>
+                <span id="dream-memory-chars-label">MEMORY.md characters</span>
+                <input id="dream-memory-chars" type="number" min="100" max="50000" step="1" required>
+              </label>
+              <label>
+                <span id="dream-user-chars-label">USER.md characters</span>
+                <input id="dream-user-chars" type="number" min="100" max="50000" step="1" required>
+              </label>
+            </fieldset>
+            <fieldset>
+              <legend id="dream-prompt-legend">Dream prompt</legend>
+              <textarea id="dream-prompt" rows="10" maxlength="20000" aria-labelledby="dream-prompt-legend"></textarea>
+              <span id="dream-prompt-hint" class="model-note">Empty uses the built-in prompt, shown as the placeholder.</span>
+              <div class="agent-actions">
+                <button id="dream-prompt-copy" type="button">Edit a copy of the default</button>
+                <button id="dream-prompt-reset" type="button">Reset to default</button>
+              </div>
+            </fieldset>
+            <label class="model-filter"><input id="dream-notify" type="checkbox">
+              <span id="dream-notify-label">Notify me on Telegram when a session ends</span></label>
+            <p id="dream-error" class="error" role="alert"></p>
+            <div class="agent-actions">
+              <button id="dream-save" type="submit" class="primary">Save dream settings</button>
+              <span id="dream-status-text" class="model-note" role="status"></span>
+            </div>
+          </form>
+          <div id="agent-panel-sessions" class="agent-panel" hidden>
+            <section id="dream-status" class="dream-status" aria-live="polite">
+              <div class="agent-file-heading">
+                <h4 id="dream-status-title">Dream status</h4>
+                <span class="dream-status-actions">
+                  <button id="dream-cancel" type="button" hidden>Cancel dream</button>
+                  <button id="dream-start" type="button" class="primary">Start dream</button>
+                </span>
+              </div>
+              <dl id="dream-status-list"></dl>
+              <p id="dream-start-status" class="model-note" role="status"></p>
+              <p id="dream-status-error" class="error" role="alert"></p>
+            </section>
+            <div id="dream-sessions-view">
+              <h4 id="dream-sessions-title">Dream sessions</h4>
+              <div class="table-scroll">
+                <table id="dream-sessions" class="dream-sessions">
+                  <thead><tr>
+                    <th id="dream-col-date">Date</th><th id="dream-col-trigger">Trigger</th><th id="dream-col-status">Status</th>
+                    <th id="dream-col-chats">Chats reviewed</th><th id="dream-col-duration">Duration</th><th id="dream-col-tokens">Tokens</th>
+                  </tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <p id="dream-sessions-empty" class="model-note" hidden>No dream sessions yet.</p>
+            </div>
+            <div id="dream-session-detail" hidden>
+              <button id="dream-session-back" type="button" class="link">← All sessions</button>
+              <div id="dream-session-body"></div>
+            </div>
+          </div>
+          <div class="agent-actions agent-form-actions">
+            <button id="agent-save" type="submit" form="agent-form" class="primary">Save agent</button>
             <button id="agent-delete" type="button">Delete agent</button>
           </div>
-        </form>
+        </div>
       </section>
     </main>
   </section>

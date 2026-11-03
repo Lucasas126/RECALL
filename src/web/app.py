@@ -5,6 +5,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator, Iterator, Literal, Optional
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -14,7 +15,8 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from src.config.agents import AgentConflict
 from src.config.favorites import FavoriteModelId, FavoritesError
-from src.config.models import AgentConfig, ReasoningEffort
+from src.config.models import AgentConfig, DreamConfig, MemoryLimits, ReasoningEffort
+from src.core.sources.agent_files import MemoryTarget
 from src.config.preferences import PreferencesError, UserPreferences
 from src.core.sources.conversations import ChatMetadataError
 from src.providers.catalog import CatalogUnavailable
@@ -26,6 +28,7 @@ from src.service.chat import (
     ServiceError,
     UnknownAgent,
     UnknownChat,
+    UnknownDreamSession,
     UnknownUser,
 )
 from src.utils.logger import get_logger
@@ -66,20 +69,35 @@ class ChatTitleIn(BaseModel):
     title: str = Field(max_length=1000)
 
 
+class DreamSettingsIn(BaseModel):
+    dream: DreamConfig
+    vault: Optional[str] = Field(default=None, min_length=1, max_length=1024)
+    memory_limits: MemoryLimits = Field(default_factory=MemoryLimits)
+
+
+class TextIn(BaseModel):
+    content: str = Field(max_length=50_000)
+
+
 def _sse(event: str, data, generation_id: str = "") -> str:
     event_id = f"id: {generation_id}\n" if generation_id else ""
     return f"{event_id}event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def create_app(service: Optional[ChatService] = None) -> FastAPI:
+def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Optional[bool] = None) -> FastAPI:
     """Web channel: an HTTP/SSE adapter over `ChatService`.
 
-    The user comes from a signed session cookie set after password authentication.
+    The user comes from a signed session cookie set after password authentication. The dream
+    scheduler runs while the app is up; by default only when the app builds its own service.
     """
+    if dream_scheduler is None:
+        dream_scheduler = service is None
     service = service or ChatService()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        if dream_scheduler:
+            service.start_dream_scheduler()
         yield
         service.close()
 
@@ -132,6 +150,7 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
 
     @app.exception_handler(UnknownAgent)
     @app.exception_handler(UnknownChat)
+    @app.exception_handler(UnknownDreamSession)
     def _not_found(request: Request, exc: ServiceError):
         return localized_error(request, 404, exc)
 
@@ -314,11 +333,78 @@ def create_app(service: Optional[ChatService] = None) -> FastAPI:
     def delete_chat(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):
         service.delete_chat(user_id, agent_id, chat_id)
 
+    # ------------------------------------------------------------------ dream mode and own files
+
+    @app.get("/api/agents/{agent_id}/dream/settings")
+    def get_dream_settings(agent_id: str, user_id: str = Depends(current_user)):
+        return service.get_dream_settings(user_id, agent_id)
+
+    @app.put("/api/agents/{agent_id}/dream/settings")
+    def update_dream_settings(agent_id: str, body: DreamSettingsIn, user_id: str = Depends(current_user)):
+        return service.update_dream_settings(user_id, agent_id, body.dream, body.vault, body.memory_limits)
+
+    @app.get("/api/agents/{agent_id}/dream/status")
+    def dream_status(agent_id: str, user_id: str = Depends(current_user)):
+        return service.dream_status(user_id, agent_id)
+
+    @app.post("/api/agents/{agent_id}/dream/start", status_code=202)
+    def start_dream(agent_id: str, user_id: str = Depends(current_user)):
+        return service.start_dream(user_id, agent_id)
+
+    @app.post("/api/agents/{agent_id}/dream/cancel", status_code=202)
+    def cancel_dream(agent_id: str, user_id: str = Depends(current_user)):
+        return service.cancel_dream(user_id, agent_id)
+
+    @app.get("/api/agents/{agent_id}/dream/sessions")
+    def list_dream_sessions(agent_id: str, user_id: str = Depends(current_user)):
+        return service.list_dream_sessions(user_id, agent_id)
+
+    @app.get("/api/agents/{agent_id}/dream/sessions/{session_id}")
+    def get_dream_session(agent_id: str, session_id: str, user_id: str = Depends(current_user)):
+        return service.get_dream_session(user_id, agent_id, session_id)
+
+    @app.get("/api/agents/{agent_id}/soul")
+    def get_soul(agent_id: str, user_id: str = Depends(current_user)):
+        return service.get_soul(user_id, agent_id)
+
+    @app.put("/api/agents/{agent_id}/soul")
+    def update_soul(agent_id: str, body: TextIn, user_id: str = Depends(current_user)):
+        return service.update_soul(user_id, agent_id, body.content)
+
+    @app.get("/api/agents/{agent_id}/soul/history")
+    def soul_history(agent_id: str, user_id: str = Depends(current_user)):
+        return service.soul_history(user_id, agent_id)
+
+    @app.get("/api/agents/{agent_id}/soul/history/{version}")
+    def get_soul_version(agent_id: str, version: str, user_id: str = Depends(current_user)):
+        return service.get_soul_version(user_id, agent_id, version)
+
+    @app.post("/api/agents/{agent_id}/soul/history/{version}/restore")
+    def restore_soul(agent_id: str, version: str, user_id: str = Depends(current_user)):
+        return service.restore_soul(user_id, agent_id, version)
+
+    @app.get("/api/agents/{agent_id}/memories/{target}")
+    def get_memory(agent_id: str, target: MemoryTarget, user_id: str = Depends(current_user)):
+        return service.get_memory(user_id, agent_id, target)
+
+    @app.put("/api/agents/{agent_id}/memories/{target}")
+    def update_memory(agent_id: str, target: MemoryTarget, body: TextIn, user_id: str = Depends(current_user)):
+        return service.update_memory(user_id, agent_id, target, body.content)
+
     @app.post("/api/agents/{agent_id}/chats/{chat_id}/messages")
     def send_message(
         agent_id: str, chat_id: str, body: MessageIn, user_id: str = Depends(current_user),
     ):
         language = service.language(user_id)
+        command_reply = None if body.attachments else service.dream_command(user_id, agent_id, body.content)
+        if command_reply is not None:
+            # commands are answered by RECALL itself: not sent to the model, not stored in the chat
+            generation_id = uuid4().hex
+            return StreamingResponse(
+                iter([_sse("text", command_reply, generation_id), _sse("done", "", generation_id)]),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
         events = service.send(
             user_id, agent_id, chat_id, body.content, stream=True,
             attachments=[attachment.model_dump() for attachment in body.attachments],

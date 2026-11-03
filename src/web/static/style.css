@@ -321,3 +321,83 @@ details.action, details.thinking { border-left: 2px solid var(--line); padding-l
 /* Agent editor: four tabs, keep them on one row */
 .agent-tabs button { padding-inline: 6px; }
 .agent-form > .agent-actions { position: sticky; bottom: 0; padding: 10px 0; background: var(--bg); }
+/* Agent editor: dream mode panels (Soul & memory, Dream, Dream sessions) */
+.agent-tabs { flex-wrap: wrap; }
+.agent-tabs button { flex: 1 1 auto; }
+.agent-form-body { display: flex; flex-direction: column; gap: 12px; }
+#dream-form { display: flex; flex-direction: column; gap: 12px; }
+#dream-form[hidden] { display: none; }
+.agent-file { display: flex; flex-direction: column; gap: 8px; }
+.agent-file-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.agent-file-heading h4 { margin: 0; }
+.agent-file .error:empty, #dream-error:empty, #dream-status-error:empty { display: none; }
+.char-count { color: var(--muted); font-size: .85em; font-variant-numeric: tabular-nums; }
+.char-count.over { color: var(--danger); font-weight: 600; }
+.agent-actions { align-items: center; flex-wrap: wrap; }
+.agent-disclosure > summary { cursor: pointer; color: var(--muted); padding: 4px 0; }
+.soul-history-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.soul-history-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); }
+.soul-history-list .agent-actions { display: flex; gap: 6px; }
+.soul-version { margin-top: 8px; }
+.soul-version pre, .dream-trace pre, .diff { margin: 4px 0 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); font: 12.5px/1.45 ui-monospace, monospace; white-space: pre-wrap; word-break: break-word; overflow-x: auto; }
+.soul-version pre { max-height: 40vh; overflow-y: auto; }
+.inline-row { display: flex; gap: 8px; }
+.inline-row input { flex: 1; min-width: 0; }
+.agent-form .inline-number { width: 7.5em; padding: 4px 8px; }
+.agent-form input:disabled, .agent-form select:disabled { opacity: .55; }
+.dream-status { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.dream-status h4, #dream-sessions-view h4 { margin: 0; }
+.agent-panel dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; margin: 0; }
+.agent-panel dt { color: var(--muted); }
+.agent-panel dd { margin: 0; overflow-wrap: anywhere; }
+.dream-last-summary { display: block; color: var(--muted); font-size: .9em; }
+.dream-running { color: var(--ok); font-weight: 600; }
+#dream-start-status:empty { display: none; }
+.table-scroll { overflow-x: auto; }
+.dream-sessions { width: 100%; border-collapse: collapse; font-size: .9em; }
+.dream-sessions th, .dream-sessions td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.dream-sessions th { color: var(--muted); font-weight: 600; }
+.dream-sessions tr.active td { background: var(--accent-soft); }
+.dream-sessions button.link, #dream-status button.link { color: var(--accent); }
+.dream-badge { display: inline-block; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); font-size: .85em; }
+.dream-badge.completed { color: var(--ok); }
+.dream-badge.running { color: var(--accent); border-color: var(--accent); }
+.dream-badge.failed, .dream-badge.interrupted { color: var(--danger); }
+.dream-badge.budget_exhausted, .dream-badge.cancelled, .dream-badge.timed_out { color: var(--warn); border-color: var(--warn-line); }
+.dream-status-actions { display: inline-flex; gap: 8px; }
+#dream-cancel { color: var(--danger); }
+#dream-cancel:hover:not(:disabled) { border-color: var(--danger); }
+.trace-stop { color: var(--warn); font-size: .85em; border-left: 3px solid var(--warn-line); padding-left: 8px; }
+#dream-session-detail { display: flex; flex-direction: column; gap: 10px; }
+#dream-session-detail[hidden] { display: none; }
+#dream-session-detail > button.link { align-self: flex-start; }
+#dream-session-body { display: flex; flex-direction: column; gap: 10px; }
+#dream-session-body h4, #dream-session-body h5 { margin: 6px 0 0; }
+#dream-session-body h5 { font-size: .95em; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+#dream-session-body > .body { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.dream-files { display: flex; flex-direction: column; gap: 6px; }
+.dream-file > summary { cursor: pointer; }
+.dream-file code { font: .9em ui-monospace, monospace; }
+.diff { max-height: 50vh; overflow-y: auto; }
+.diff span { display: block; }
+.diff .diff-add { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.diff .diff-del { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.diff .diff-hunk { color: var(--accent); }
+.diff .diff-file { color: var(--muted); font-weight: 600; }
+.dream-trace { display: flex; flex-direction: column; gap: 6px; }
+.trace-step { margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--line); color: var(--muted); font-size: .8em; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+.trace-note { color: var(--muted); font-size: .82em; }
+.trace-assistant .body { padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.trace-call { font: 13px/1.4 ui-monospace, monospace; }
+.trace-call-name { color: var(--accent); font-weight: 600; }
+.trace-call pre { max-height: 40vh; overflow-y: auto; }
+.trace-result pre { max-height: 50vh; }
+.trace-result button.link { margin-top: 4px; color: var(--accent); }
+/* /dream command replies: written by RECALL, not by the agent's model */
+.msg.command { align-self: stretch; max-width: none; background: transparent; border-style: dashed; color: var(--muted); font-size: .9em; }
+.msg.command .body { white-space: pre-wrap; }
+.msg.command[data-author]::before { content: attr(data-author); display: block; margin-bottom: 4px; color: var(--muted); font-size: .75em; font-weight: 650; letter-spacing: .12em; }
+@media (max-width: 800px) {
+  .agent-panel dl { grid-template-columns: minmax(0, 1fr); }
+  .agent-panel dt { margin-top: 4px; }
+}

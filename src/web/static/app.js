@@ -27,6 +27,7 @@ const state = {
   translations: null, toolGroupCatalog: [],
   mcpServers: [], mcpTools: new Map(), connectionsPoll: null,
   agentConfigs: [], agentForm: { originalId: null, busy: false },
+  dream: null,
 };
 // thinking blocks start open (streamed live); closing one keeps them closed from then on
 const prefs = { thinkingOpen: localStorage.getItem("thinkingOpen") !== "false" };
@@ -79,7 +80,8 @@ function translateInterface() {
     ["agent-new-label", "New agent"], ["agents-empty", "Select an agent to edit it, or create a new one."],
     ["agent-name-label", "Name"], ["agent-description-label", "Description"],
     ["agent-description-hint", "Optional. Shown in the agent list; not sent to the model."],
-    ["agent-prompt-label", "System prompt"], ["agent-behavior-label", "Chat behavior"],
+    ["agent-prompt-label", "Personality (SOUL.md)"], ["agent-behavior-label", "Chat behavior"],
+    ["agent-prompt-hint", "Saved as the agent's SOUL.md. After creating the agent, edit it in the Soul & memory tab."],
     ["agent-stream-label", "Stream replies"], ["agent-memory-label", "Use memory"],
     ["agent-reasoning-label", "Reasoning"], ["agent-keep-reasoning-label", "Keep reasoning in memory"],
     ["agent-tools-label", "Use tools"], ["agent-associative-label", "Associative memory"],
@@ -93,12 +95,48 @@ function translateInterface() {
     ["agent-retained-label", "Messages kept in context"],
     ["agent-retained-hint", "Empty keeps all messages."], ["agent-save", "Save agent"], ["agent-delete", "Delete agent"],
     ["agent-tab-basic", "Basic"], ["agent-tab-advanced", "Advanced"], ["agent-tab-tools", "Tools"],
-    ["agent-tab-mcp", "MCP"],
+    ["agent-tab-mcp", "MCP"], ["agent-tab-soul", "Soul & memory"], ["agent-tab-dream", "Dream"],
+    ["agent-tab-sessions", "Dream sessions"],
+    ["soul-note", "These files are part of every chat's system prompt. Changes apply to new chats."],
+    ["soul-title", "Personality (SOUL.md)"], ["soul-save", "Save SOUL.md"],
+    ["soul-history-note", "The last versions are saved before every change."], ["soul-version-close", "Close"],
+    ["memory-title", "Agent notes (MEMORY.md)"], ["memory-save", "Save MEMORY.md"],
+    ["user-memory-title", "About the user (USER.md)"], ["user-memory-save", "Save USER.md"],
+    ["memory-entries-note", "Separate memory entries with a line holding only §. Limits are set in the Dream tab."],
+    ["dream-note", "In a dream the agent reviews its recent chats in the background and updates its own SOUL, memories, skills and notes. Nothing is sent to you during a dream."],
+    ["dream-schedule-label", "Schedule"], ["dream-mode-manual-label", "Manual only"],
+    ["dream-mode-every-label", "Every"], ["dream-hours-label", "hours"], ["dream-mode-daily-label", "Daily at"],
+    ["dream-enabled-label", "Schedule enabled"],
+    ["dream-schedule-hint", "Scheduled sessions are skipped while no chat is pending. You can always start one by hand, from the Dream sessions tab or with /dream start in a chat."],
+    ["dream-model-legend", "Model and limits"], ["dream-model-label", "Model"], ["dream-model-browse", "Browse"],
+    ["dream-model-hint", "Empty uses your default chat model. Dreams always require ZDR routes."],
+    ["dream-effort-label", "Reasoning effort"], ["dream-effort-none", "No reasoning request"],
+    ["dream-max-steps-label", "Maximum steps"], ["dream-max-steps-hint", "Model calls per session (1–500)."],
+    ["dream-max-tokens-label", "Maximum tokens"],
+    ["dream-max-tokens-hint", "Input plus output tokens per session (1,000–10,000,000)."],
+    ["dream-max-minutes-label", "Maximum minutes"],
+    ["dream-max-minutes-hint", "Time limit per session (1–120). One minute before it the agent is told to wrap up; at the limit the session is closed."],
+    ["dream-cancel", "Cancel dream"],
+    ["dream-tools-legend", "Dream reading tools"],
+    ["dream-tools-hint", "Chats, mind palace and the agent's own files are always available."],
+    ["dream-tool-web-label", "Web search (needs Tavily)"],
+    ["dream-tool-vault-label", "Vault, read-only (needs a vault folder)"], ["dream-vault-label", "Vault folder"],
+    ["dream-vault-hint", "A folder on the computer running RECALL, such as an Obsidian vault. Chats reach it with the vault tool groups; dreams only read it. Empty means no vault."],
+    ["dream-limits-legend", "Memory limits"], ["dream-memory-chars-label", "MEMORY.md characters"],
+    ["dream-user-chars-label", "USER.md characters"], ["dream-prompt-legend", "Dream prompt"],
+    ["dream-prompt-hint", "Empty uses the built-in prompt, shown as the placeholder."],
+    ["dream-prompt-copy", "Edit a copy of the default"], ["dream-prompt-reset", "Reset to default"],
+    ["dream-notify-label", "Notify me on Telegram when a session ends"], ["dream-save", "Save dream settings"],
+    ["dream-status-title", "Dream status"], ["dream-sessions-title", "Dream sessions"],
+    ["dream-col-date", "Date"], ["dream-col-trigger", "Trigger"], ["dream-col-status", "Status"],
+    ["dream-col-chats", "Chats reviewed"], ["dream-col-duration", "Duration"], ["dream-col-tokens", "Tokens"],
+    ["dream-sessions-empty", "No dream sessions yet."], ["dream-session-back", "← All sessions"],
     ["agent-mcp-note", "MCP servers act on each user's own account. Connect accounts in Settings > Connections."],
     ["connections-title", "Connections"],
     ["connections-note", "Connect your own account for each service your agents can use. Every user connects separately."],
     ["connections-browser-note", "Sign-in opens in a browser on the computer running RECALL."],
   ]) $(id).textContent = tr(text);
+  $("dream-model").placeholder = tr("Your chat model");
   for (const [id, text] of [
     ["settings-open", "Settings"], ["settings-close", "Close"],
     ["logout", "Log out"], ["theme-toggle", "Switch theme"],
@@ -163,6 +201,7 @@ function showLogin() {
   setComposer(false);
   state.agentConfigs = [];
   state.agentForm = { originalId: null, busy: false };
+  resetDream();
   showTab("chats");
   $("app").hidden = true;
   $("login").hidden = false;
@@ -196,6 +235,9 @@ function renderAgentBanner() {
 }
 
 async function showApp(user) {
+  // read before showTab("chats") below drops the hash of the agents page
+  const route = pendingRoute || location.hash;
+  pendingRoute = "";
   resetStreams();
   state.user = user;
   const session = state.session;
@@ -211,6 +253,8 @@ async function showApp(user) {
     if (session !== state.session) return;
     await selectAgent(state.preferences.agent_id);
     if (session === state.session && state.agentId) await newChat();
+    // a deep link (for example from a dream notification) opens its agent page after login
+    if (session === state.session && route) await routeFromHash(route);
   } catch (err) {
     if (session === state.session) addMessage("assistant").error(err.message);
   }
@@ -323,7 +367,10 @@ function showTab(tab) {
   $("new-chat").hidden = agents;
   $("agent-list").hidden = !agents;
   $("agent-new").hidden = !agents;
-  if (agents) loadAgentConfigs();
+  if (agents) return loadAgentConfigs();
+  stopDreamPoll();
+  setDreamHash(null);
+  return Promise.resolve();
 }
 
 async function loadAgentConfigs() {
@@ -373,20 +420,23 @@ function openAgent(agentId) {
   const agent = state.agentConfigs.find((item) => item.id === agentId);
   if (!agent) return;
   state.agentForm.originalId = agent.id;
+  resetDream(agent.id);
   $("agent-error").textContent = "";
   $("agent-status").textContent = "";
   fillAgentForm(agent);
   $("agent-delete").hidden = false;
   setAgentFormOpen(true);
+  setDreamHash(agentHash());
 }
 
 function openNewAgent() {
   if (state.agentForm.busy) return;
   state.agentForm.originalId = null;
+  resetDream();
   $("agent-error").textContent = "";
   $("agent-status").textContent = "";
   fillAgentForm({
-    name: "", id: "", description: "", personality_prompt: "",
+    name: "", id: "", description: "",
     chat_config: {
       stream: true, has_memory: true, reasoning: false, reasoning_effort: "medium", reasoning_tokens: null,
       keep_reasoning_in_memory: false, conversation_messages_retained: 30, tools: true, associative_memory: "llm",
@@ -395,10 +445,11 @@ function openNewAgent() {
   });
   $("agent-delete").hidden = true;
   setAgentFormOpen(true);
+  setDreamHash("agents");
 }
 
 function setAgentFormOpen(open) {
-  $("agent-form").hidden = !open;
+  $("agent-editor").hidden = !open;
   $("agents-empty").hidden = open;
   renderAgentList();
 }
@@ -408,13 +459,18 @@ function fillAgentForm(agent) {
   $("agent-form-title").textContent = tr(state.agentForm.originalId ? "Edit agent" : "New agent");
   $("agent-name").value = agent.name;
   $("agent-description").value = agent.description ?? "";
-  $("agent-prompt").value = agent.personality_prompt;
+  // only a new agent's form has the personality field: it becomes SOUL.md right after the agent is created;
+  // a saved agent's SOUL.md is edited in its own tab, with history
+  if (!state.agentForm.originalId) $("agent-prompt").value = "";
+  $("agent-prompt-field").hidden = Boolean(state.agentForm.originalId);
+  for (const name of DREAM_PANELS) $(`agent-tab-${name}`).hidden = !state.agentForm.originalId;
   $("agent-stream").checked = config.stream;
   $("agent-memory").checked = config.has_memory;
   $("agent-reasoning").checked = config.reasoning;
   $("agent-keep-reasoning").checked = config.keep_reasoning_in_memory;
   $("agent-tools").checked = config.tools;
-  const selected = new Set(config.tool_groups ?? state.toolGroupCatalog.map((group) => group.id));
+  const selected = new Set(config.tool_groups
+    ?? state.toolGroupCatalog.filter((group) => group.default !== false).map((group) => group.id));
   $("agent-tool-groups").replaceChildren(
     Object.assign(document.createElement("legend"), { id: "agent-tool-groups-label", textContent: tr("Tool groups") }),
     ...state.toolGroupCatalog.map((group) => {
@@ -425,13 +481,18 @@ function fillAgentForm(agent) {
       checkbox.name = "agent-tool-group";
       checkbox.value = group.id;
       checkbox.checked = selected.has(group.id);
-      checkbox.title = group.description;
+      const description = translatedText(group.description);
+      checkbox.title = description;
+      label.title = description;
       const text = document.createElement("span");
-      text.textContent = group.name;
+      text.textContent = translatedText(group.name);
       label.append(checkbox, text);
       return label;
     }),
   );
+  $("agent-tool-groups").append(Object.assign(document.createElement("p"), {
+    className: "model-note", textContent: tr("The vault groups need a vault folder, set in the Dream tab."),
+  }));
   $("agent-associative").value = config.associative_memory;
   $("agent-associative-execution").value = config.associative_execution;
   $("agent-associative-execution").disabled = config.associative_memory === "off";
@@ -445,12 +506,36 @@ function fillAgentForm(agent) {
 }
 
 const AGENT_PANELS = ["basic", "advanced", "tools", "mcp"];
+// panels of a saved agent with their own saves, outside the agent form
+const DREAM_PANELS = ["soul", "dream", "sessions"];
+
+function agentPanel(name) {
+  return $(name === "dream" ? "dream-form" : `agent-panel-${name}`);
+}
+
+// Catalog names and descriptions come from the server in English; show the translation when one exists.
+function translatedText(text) {
+  return state.preferences?.language === "es" && typeof state.translations?.[text] === "string" ? state.translations[text] : text;
+}
 
 function showAgentPanel(panel) {
-  for (const name of AGENT_PANELS) {
+  if (DREAM_PANELS.includes(panel) && !state.agentForm.originalId) panel = "basic";
+  for (const name of [...AGENT_PANELS, ...DREAM_PANELS]) {
     $(`agent-tab-${name}`).setAttribute("aria-pressed", String(name === panel));
-    $(`agent-panel-${name}`).hidden = name !== panel;
+    agentPanel(name).hidden = name !== panel;
   }
+  const formPanel = AGENT_PANELS.includes(panel);
+  $("agent-form").hidden = !formPanel;
+  document.querySelector(".agent-form-actions").hidden = !formPanel;
+  if (panel !== "sessions") stopDreamPoll();
+  if (state.agentForm.originalId) setDreamHash(agentHash(panel));
+  if (formPanel) return Promise.resolve();
+  if (panel === "sessions") {
+    state.dream.sessionId = null;
+    $("dream-session-detail").hidden = true;
+    $("dream-sessions-view").hidden = false;
+  }
+  return loadDreamPanel(panel);
 }
 
 // One fieldset per catalog server; the server is enabled for the agent while its entry exists.
@@ -588,11 +673,13 @@ function agentFormBody() {
     return value === "" ? null : Number(value);
   };
   const name = $("agent-name").value.trim();
+  const saved = state.agentConfigs.find((agent) => agent.id === state.agentForm.originalId);
   return {
     id: state.agentForm.originalId ?? agentIdFromName(name),
     name,
     description: $("agent-description").value.trim(),
-    personality_prompt: $("agent-prompt").value,
+    // edited in the Dream tab; sent back unchanged so saving the agent does not reset them
+    ...(saved ? { dream: saved.dream, vault: saved.vault, memory_limits: saved.memory_limits } : {}),
     chat_config: {
       stream: $("agent-stream").checked,
       has_memory: $("agent-memory").checked,
@@ -631,7 +718,7 @@ async function refreshAgents(previousId, currentId) {
 $("tab-chats").addEventListener("click", () => showTab("chats"));
 $("tab-agents").addEventListener("click", () => showTab("agents"));
 $("agent-new").addEventListener("click", openNewAgent);
-for (const name of AGENT_PANELS) $(`agent-tab-${name}`).addEventListener("click", () => showAgentPanel(name));
+for (const name of [...AGENT_PANELS, ...DREAM_PANELS]) $(`agent-tab-${name}`).addEventListener("click", () => showAgentPanel(name));
 // a field the browser rejects may sit in a hidden panel; show that panel so it can point at the field
 $("agent-form").addEventListener("invalid", (e) => {
   const panel = e.target.closest(".agent-panel");
@@ -653,6 +740,7 @@ $("agent-form").addEventListener("submit", async (event) => {
   const session = state.session;
   const previousId = state.agentForm.originalId;
   const body = JSON.stringify(agentFormBody());
+  const soul = previousId ? "" : $("agent-prompt").value;
   setAgentBusy(true);
   $("agent-error").textContent = "";
   $("agent-status").textContent = "";
@@ -665,6 +753,10 @@ $("agent-form").addEventListener("submit", async (event) => {
     $("agent-delete").hidden = false;
     fillAgentForm(saved);
     await refreshAgents(previousId, saved.id);
+    // the agent exists now; its personality goes to SOUL.md through the soul route
+    if (soul.trim()) {
+      await api(`/api/agents/${saved.id}/soul`, { method: "PUT", body: JSON.stringify({ content: soul }) });
+    }
     $("agent-status").textContent = tr("Agent saved.");
   } catch (err) {
     if (session === state.session) $("agent-error").textContent = err.message;
@@ -684,7 +776,9 @@ $("agent-delete").addEventListener("click", async () => {
     await api(`/api/agents/${agentId}`, { method: "DELETE" });
     if (session !== state.session) return;
     state.agentForm.originalId = null;
+    resetDream();
     setAgentFormOpen(false);
+    setDreamHash("agents");
     await refreshAgents(agentId, null);
     $("agent-status").textContent = tr("Agent deleted.");
   } catch (err) {
@@ -1125,8 +1219,9 @@ function updateModelControls() {
   $("model-refresh").disabled = state.modelLoading || state.modelBusy;
   $("model-close").disabled = state.modelBusy;
   $("model-zdr").disabled = state.modelBusy || state.modelLoading || state.modelTarget !== "chat-llm";
+  const dreamTarget = state.modelTarget === "dream-llm";
   $("model-inherit").hidden = state.modelTarget.startsWith("default-");
-  $("model-inherit").disabled = !state.chatId || state.busy || state.modelBusy;
+  $("model-inherit").disabled = dreamTarget ? state.modelBusy : (!state.chatId || state.busy || state.modelBusy);
   renderSettingsModels();
   $("model-zdr-warning").hidden = $("model-zdr").checked;
   $("model-favorites-only").setAttribute("aria-pressed", String(state.modelFavoritesOnly));
@@ -1246,10 +1341,12 @@ function renderModelList() {
     const choose = document.createElement("button");
     choose.type = "button";
     choose.className = "model-choice";
-    choose.disabled = !available || (state.busy && !state.modelTarget.startsWith("default-")) || state.modelBusy;
-    const selected = state.modelTarget.startsWith("default-")
-      ? state.settingsModelDraft?.[stt ? "default_stt_model" : "default_llm_model"]
-      : state.model?.id;
+    choose.disabled = !available || (state.busy && state.modelTarget === "chat-llm") || state.modelBusy;
+    let selected = state.model?.id;
+    if (state.modelTarget === "dream-llm") selected = $("dream-model").value.trim();
+    else if (state.modelTarget.startsWith("default-")) {
+      selected = state.settingsModelDraft?.[stt ? "default_stt_model" : "default_llm_model"];
+    }
     choose.setAttribute("aria-pressed", String(
       model.id === selected && (state.modelTarget !== "chat-llm" || (state.model?.zdr !== false) === $("model-zdr").checked)
     ));
@@ -1346,6 +1443,12 @@ async function selectModel(modelId) {
   const defaultSelection = target.startsWith("default-");
   const stt = target.endsWith("-stt");
   if (state.modelBusy || (state.modelLoading && modelId !== null)) return;
+  if (target === "dream-llm") {
+    // only fills the Dream tab's field; Save dream settings stores it
+    $("dream-model").value = modelId ?? "";
+    $("model-dialog").close();
+    return;
+  }
   if (defaultSelection) {
     if (!state.settingsOriginal || state.settingsBusy || modelId === null) return;
     state.settingsModelDraft[stt ? "default_stt_model" : "default_llm_model"] = modelId;
@@ -1387,7 +1490,9 @@ function openModelPicker(target) {
   const defaultSelection = target.startsWith("default-");
   const stt = target.endsWith("-stt");
   if (state.modelBusy || !state.user || state.user.provider !== "openrouter") return;
-  if (defaultSelection ? (!state.settingsOriginal || state.settingsBusy) : (!state.chatId || state.busy)) return;
+  if (target === "dream-llm") {
+    if (!state.dream?.agentId) return;
+  } else if (defaultSelection ? (!state.settingsOriginal || state.settingsBusy) : (!state.chatId || state.busy)) return;
   const previousStt = state.modelTarget.endsWith("-stt");
   state.modelTarget = target;
   $("model-search").value = "";
@@ -1402,9 +1507,12 @@ function openModelPicker(target) {
     option.disabled = stt && (option.value === "favorites" || option.value.startsWith("completion-"));
   }
   $("model-title").textContent = tr(stt ? "Speech-to-text models" : "OpenRouter models");
-  $("model-subtitle").textContent = tr(defaultSelection
-    ? (stt ? "Choose the user's default STT model. This does not set a chat override." : "Choose the user's default LLM model. This does not set a chat override.")
-    : "Choose a model for this chat.");
+  let subtitle = "Choose a model for this chat.";
+  if (target === "dream-llm") subtitle = "Choose the model for this agent's dreams. Use user default leaves the field empty.";
+  else if (defaultSelection) {
+    subtitle = stt ? "Choose the user's default STT model. This does not set a chat override." : "Choose the user's default LLM model. This does not set a chat override.";
+  }
+  $("model-subtitle").textContent = tr(subtitle);
   $("model-filters").open = false;
   $("model-info").open = false;
   $("model-dialog").showModal();
@@ -1551,6 +1659,7 @@ function addMessage(role, parent = state.view ?? $("messages")) {
   const el = document.createElement("div");
   el.className = `msg ${role}`;
   if (role === "assistant") el.dataset.author = currentAgentName();
+  else if (role === "command") el.dataset.author = "RECALL";
   const body = document.createElement("div");
   body.className = "body";
   let raw = "";
@@ -1790,7 +1899,9 @@ $("composer").addEventListener("submit", async (e) => {
   const userMessage = addMessage("user", state.view);
   userMessage.text(content);
   userMessage.attachments(attachments);
-  const reply = addMessage("assistant", state.view);
+  // /dream commands are answered by RECALL itself (not stored, not the model): shown as a system reply
+  const command = !attachments.length && DREAM_COMMAND.test(content);
+  const reply = addMessage(command ? "command" : "assistant", state.view);
   const request = {
     userId: state.user.id, agentId: state.agentId, chatId: state.chatId,
     session: state.session, controller: new AbortController(), reply,
@@ -1919,6 +2030,796 @@ function handleEvent(raw, request) {
     if (isCurrent(request)) showUsage(payload);
   }
 }
+
+// ------------------------------------------------------------------ dream mode (agent page)
+
+// Soul & memory, Dream and Dream sessions tabs of a saved agent. Every load is tagged with the
+// agent it was made for, so a slow reply for a previous agent never fills the current page.
+const DREAM_POLL_MS = 4000;
+const TRACE_RESULT_CHARS = 4000;
+// same grammar as the server's /dream parser: such messages are answered by RECALL, not the model
+const DREAM_COMMAND = /^\/dream(?:@\w+)?(?:\s[\s\S]*)?$/i;
+const numberFormat = new Intl.NumberFormat("en-US");
+
+function dreamUrl(suffix) {
+  return `/api/agents/${encodeURIComponent(state.dream.agentId)}${suffix}`;
+}
+
+function resetDream(agentId = null) {
+  stopDreamPoll();
+  state.dream = {
+    agentId, token: (state.dream?.token ?? 0) + 1, settings: null, status: null,
+    sessions: [], sessionId: null, loaded: new Set(), memoryLimits: {},
+  };
+}
+
+// a check made after every await: same login, same agent page, same load generation
+function dreamCurrent(session, token) {
+  return session === state.session && token === state.dream.token;
+}
+
+function pad(value) {
+  return String(value).padStart(2, "0");
+}
+
+// local "YYYY-MM-DD HH:MM", the format the /dream reply and the Telegram notification use
+function formatDate(iso) {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+// sessions without a summary only have their id, which is the local start time
+function sessionDate(session) {
+  if (session.started_at) return formatDate(session.started_at);
+  const match = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/.exec(session.id ?? "");
+  return match ? `${match[1]}-${match[2]}-${match[3]} ${match[4]}:${match[5]}` : session.id;
+}
+
+function formatDuration(seconds) {
+  if (seconds == null) return "—";
+  const total = Math.round(seconds);
+  if (total < 60) return `${total} s`;
+  const minutes = Math.floor(total / 60);
+  if (minutes < 60) return `${minutes} min ${pad(total % 60)} s`;
+  return `${Math.floor(minutes / 60)} h ${pad(minutes % 60)} min`;
+}
+
+function formatCount(value) {
+  return value == null ? "—" : numberFormat.format(value);
+}
+
+function dreamStatusLabel(status) {
+  const labels = {
+    completed: tr("completed"), budget_exhausted: tr("out of budget"), failed: tr("failed"),
+    cancelled: tr("cancelled"), timed_out: tr("timed out"), running: tr("running"), interrupted: tr("interrupted"),
+  };
+  return labels[status] ?? status ?? "—";
+}
+
+function dreamTriggerLabel(trigger) {
+  const labels = {
+    web: tr("web UI"), command: tr("/dream command"), schedule: tr("schedule"), manual: tr("manual"),
+  };
+  return labels[trigger] ?? trigger ?? "—";
+}
+
+function element(tag, props = {}, ...children) {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...children);
+  return node;
+}
+
+function descriptionList(rows) {
+  const list = document.createElement("dl");
+  for (const [term, value] of rows) {
+    list.append(element("dt", { textContent: term }), element("dd", {}, value));
+  }
+  return list;
+}
+
+function markdown(text) {
+  const body = element("div", { className: "body" });
+  body.innerHTML = DOMPurify.sanitize(marked.parse(text ?? "", { breaks: true }));
+  for (const link of body.querySelectorAll("a")) {
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+  }
+  return body;
+}
+
+function setDreamHash(path) {
+  const target = path ? `#${path}` : `${location.pathname}${location.search}`;
+  if (location.hash !== (path ? `#${path}` : "")) history.replaceState(null, "", target);
+}
+
+function agentHash(panel = null, sessionId = null) {
+  const id = encodeURIComponent(state.agentForm.originalId ?? "");
+  if (!state.agentForm.originalId) return "agents";
+  if (sessionId) return `agents/${id}/dreams/${encodeURIComponent(sessionId)}`;
+  const suffix = { soul: "/soul", dream: "/dream", sessions: "/dreams" }[panel] ?? "";
+  return `agents/${id}${suffix}`;
+}
+
+// Loads what a panel shows the first time it is opened for the current agent.
+async function loadDreamPanel(panel) {
+  const agentId = state.agentForm.originalId;
+  if (!agentId) return;
+  if (state.dream.agentId !== agentId) resetDream(agentId);
+  if (panel === "soul" && !state.dream.loaded.has("soul")) {
+    state.dream.loaded.add("soul");
+    await Promise.all([loadSoul(), loadSoulHistory(), loadMemory("memory"), loadMemory("user")]);
+  } else if (panel === "dream" && !state.dream.loaded.has("dream")) {
+    state.dream.loaded.add("dream");
+    await loadDreamSettings();
+  } else if (panel === "sessions") {
+    // the list and status may have changed in the background: reload them on every visit
+    await Promise.all([refreshDreamStatus(), refreshDreamSessions()]);
+  }
+}
+
+// ---- SOUL.md and history
+
+function renderCount(id, chars, limit) {
+  $(id).textContent = tr("{chars} / {limit} characters", { chars: formatCount(chars), limit: formatCount(limit) });
+  $(id).classList.toggle("over", chars > limit);
+}
+
+async function loadSoul() {
+  const session = state.session;
+  const token = state.dream.token;
+  $("soul-error").textContent = "";
+  try {
+    const soul = await api(dreamUrl("/soul"));
+    if (!dreamCurrent(session, token)) return;
+    $("soul-content").value = soul.content;
+    $("soul-content").dataset.max = soul.max_chars;
+    $("soul-content").maxLength = soul.max_chars;
+    renderCount("soul-count", soul.chars, soul.max_chars);
+  } catch (err) {
+    if (dreamCurrent(session, token)) $("soul-error").textContent = err.message;
+  }
+}
+
+async function loadSoulHistory() {
+  const session = state.session;
+  const token = state.dream.token;
+  try {
+    const versions = await api(dreamUrl("/soul/history"));
+    if (!dreamCurrent(session, token)) return;
+    $("soul-history-title").textContent = tr("SOUL history ({count})", { count: versions.length });
+    if (!versions.length) {
+      $("soul-history-list").replaceChildren(element("li", { className: "model-note", textContent: tr("No saved versions yet.") }));
+      return;
+    }
+    $("soul-history-list").replaceChildren(...versions.map((version) => {
+      const view = element("button", { type: "button", textContent: tr("View") });
+      view.addEventListener("click", () => viewSoulVersion(version));
+      const restore = element("button", { type: "button", textContent: tr("Restore") });
+      restore.addEventListener("click", () => restoreSoulVersion(version));
+      return element("li", {},
+        element("span", { textContent: `${formatDate(version.saved_at)} · ${tr("{count} characters", { count: formatCount(version.chars) })}` }),
+        element("span", { className: "agent-actions" }, view, restore),
+      );
+    }));
+  } catch (err) {
+    if (dreamCurrent(session, token)) $("soul-error").textContent = err.message;
+  }
+}
+
+async function viewSoulVersion(version) {
+  const session = state.session;
+  const token = state.dream.token;
+  try {
+    const saved = await api(dreamUrl(`/soul/history/${encodeURIComponent(version.version)}`));
+    if (!dreamCurrent(session, token)) return;
+    $("soul-version-title").textContent = tr("Version saved {date}", { date: formatDate(version.saved_at) });
+    $("soul-version-content").textContent = saved.content;
+    $("soul-version").hidden = false;
+  } catch (err) {
+    if (dreamCurrent(session, token)) $("soul-error").textContent = err.message;
+  }
+}
+
+async function restoreSoulVersion(version) {
+  if (!window.confirm(tr("Restore the SOUL.md version saved {date}? The current text is saved to the history first.", { date: formatDate(version.saved_at) }))) return;
+  const session = state.session;
+  const token = state.dream.token;
+  $("soul-error").textContent = "";
+  $("soul-status").textContent = "";
+  try {
+    await api(dreamUrl(`/soul/history/${encodeURIComponent(version.version)}/restore`), { method: "POST" });
+    if (!dreamCurrent(session, token)) return;
+    $("soul-version").hidden = true;
+    await Promise.all([loadSoul(), loadSoulHistory()]);
+    if (dreamCurrent(session, token)) $("soul-status").textContent = tr("Version restored.");
+  } catch (err) {
+    if (dreamCurrent(session, token)) $("soul-error").textContent = err.message;
+  }
+}
+
+async function saveSoul() {
+  const session = state.session;
+  const token = state.dream.token;
+  $("soul-error").textContent = "";
+  $("soul-status").textContent = "";
+  $("soul-save").disabled = true;
+  try {
+    const soul = await api(dreamUrl("/soul"), {
+      method: "PUT", body: JSON.stringify({ content: $("soul-content").value }),
+    });
+    if (!dreamCurrent(session, token)) return;
+    $("soul-content").value = soul.content;
+    renderCount("soul-count", soul.chars, soul.max_chars);
+    $("soul-status").textContent = tr("Saved. New chats use it.");
+    await loadSoulHistory();
+  } catch (err) {
+    if (dreamCurrent(session, token)) $("soul-error").textContent = err.message;
+  } finally {
+    $("soul-save").disabled = false;
+  }
+}
+
+// ---- MEMORY.md and USER.md
+
+const MEMORY_IDS = { memory: "memory", user: "user-memory" };
+
+async function loadMemory(target) {
+  const session = state.session;
+  const token = state.dream.token;
+  const id = MEMORY_IDS[target];
+  $(`${id}-error`).textContent = "";
+  try {
+    const memory = await api(dreamUrl(`/memories/${target}`));
+    if (!dreamCurrent(session, token)) return;
+    state.dream.memoryLimits[target] = memory.limit;
+    $(`${id}-content`).value = memory.content;
+    renderCount(`${id}-count`, memory.chars, memory.limit);
+  } catch (err) {
+    if (dreamCurrent(session, token)) $(`${id}-error`).textContent = err.message;
+  }
+}
+
+async function saveMemory(target) {
+  const session = state.session;
+  const token = state.dream.token;
+  const id = MEMORY_IDS[target];
+  $(`${id}-error`).textContent = "";
+  $(`${id}-status`).textContent = "";
+  $(`${id}-save`).disabled = true;
+  try {
+    const memory = await api(dreamUrl(`/memories/${target}`), {
+      method: "PUT", body: JSON.stringify({ content: $(`${id}-content`).value }),
+    });
+    if (!dreamCurrent(session, token)) return;
+    $(`${id}-content`).value = memory.content;
+    renderCount(`${id}-count`, memory.chars, memory.limit);
+    $(`${id}-status`).textContent = tr("Saved. New chats use it.");
+  } catch (err) {
+    if (dreamCurrent(session, token)) $(`${id}-error`).textContent = err.message;
+  } finally {
+    $(`${id}-save`).disabled = false;
+  }
+}
+
+// ---- dream settings
+
+function dreamScheduleMode() {
+  return document.querySelector('input[name="dream-mode"]:checked')?.value ?? "manual";
+}
+
+function syncDreamScheduleInputs() {
+  const mode = dreamScheduleMode();
+  $("dream-every-hours").disabled = mode !== "every";
+  $("dream-daily-at").disabled = mode !== "daily";
+  $("dream-enabled").disabled = mode === "manual";
+  $("dream-every-hours").required = mode === "every";
+  $("dream-daily-at").required = mode === "daily";
+}
+
+function fillDreamSettings(settings) {
+  const dream = settings.dream;
+  const mode = dream.every_hours != null ? "every" : dream.daily_at != null ? "daily" : "manual";
+  $(`dream-mode-${mode}`).checked = true;
+  $("dream-every-hours").value = dream.every_hours ?? "";
+  $("dream-daily-at").value = dream.daily_at ?? "";
+  $("dream-enabled").checked = dream.enabled;
+  $("dream-model").value = dream.model ?? "";
+  $("dream-effort").value = dream.reasoning_effort ?? "";
+  $("dream-max-steps").value = dream.max_steps;
+  $("dream-max-tokens").value = dream.max_tokens;
+  $("dream-max-minutes").value = dream.max_minutes;
+  $("dream-tool-web").checked = dream.tools.includes("web");
+  $("dream-tool-vault").checked = dream.tools.includes("vault");
+  $("dream-vault").value = settings.vault ?? "";
+  $("dream-memory-chars").value = settings.memory_limits.memory_chars;
+  $("dream-user-chars").value = settings.memory_limits.user_chars;
+  $("dream-prompt").value = dream.prompt;
+  $("dream-prompt").placeholder = settings.default_prompt;
+  $("dream-notify").checked = dream.notify_telegram;
+  $("dream-model-browse").disabled = state.user?.provider !== "openrouter";
+  syncDreamScheduleInputs();
+}
+
+async function loadDreamSettings() {
+  const session = state.session;
+  const token = state.dream.token;
+  $("dream-error").textContent = "";
+  try {
+    const settings = await api(dreamUrl("/dream/settings"));
+    if (!dreamCurrent(session, token)) return;
+    state.dream.settings = settings;
+    fillDreamSettings(settings);
+  } catch (err) {
+    if (dreamCurrent(session, token)) $("dream-error").textContent = err.message;
+  }
+}
+
+function dreamSettingsBody() {
+  const mode = dreamScheduleMode();
+  const vault = $("dream-vault").value.trim();
+  return {
+    dream: {
+      enabled: mode !== "manual" && $("dream-enabled").checked,
+      every_hours: mode === "every" ? Number($("dream-every-hours").value) : null,
+      daily_at: mode === "daily" ? $("dream-daily-at").value : null,
+      model: $("dream-model").value.trim() || null,
+      reasoning_effort: $("dream-effort").value || null,
+      max_steps: Number($("dream-max-steps").value),
+      max_tokens: Number($("dream-max-tokens").value),
+      max_minutes: Number($("dream-max-minutes").value),
+      tools: ["web", "vault"].filter((tool) => $(`dream-tool-${tool}`).checked),
+      prompt: $("dream-prompt").value.trim() ? $("dream-prompt").value : "",
+      notify_telegram: $("dream-notify").checked,
+    },
+    vault: vault || null,
+    memory_limits: {
+      memory_chars: Number($("dream-memory-chars").value),
+      user_chars: Number($("dream-user-chars").value),
+    },
+  };
+}
+
+async function saveDreamSettings(event) {
+  event.preventDefault();
+  const session = state.session;
+  const token = state.dream.token;
+  const agentId = state.dream.agentId;
+  $("dream-error").textContent = "";
+  $("dream-status-text").textContent = "";
+  $("dream-save").disabled = true;
+  try {
+    const settings = await api(dreamUrl("/dream/settings"), {
+      method: "PUT", body: JSON.stringify(dreamSettingsBody()),
+    });
+    if (!dreamCurrent(session, token)) return;
+    state.dream.settings = settings;
+    fillDreamSettings(settings);
+    // keep the agent form's copy current, so saving the agent later does not revert these fields
+    const agent = state.agentConfigs.find((item) => item.id === agentId);
+    if (agent) Object.assign(agent, { dream: settings.dream, vault: settings.vault, memory_limits: settings.memory_limits });
+    // the memory limits shown in the Soul & memory tab may have changed
+    state.dream.loaded.delete("soul");
+    $("dream-status-text").textContent = tr("Dream settings saved.");
+    await refreshDreamStatus();
+    const next = state.dream.status?.schedule.next_run;
+    if (dreamCurrent(session, token) && next) {
+      $("dream-status-text").textContent += ` ${tr("Next run: {date}.", { date: formatDate(next) })}`;
+    }
+  } catch (err) {
+    if (dreamCurrent(session, token)) $("dream-error").textContent = err.message;
+  } finally {
+    $("dream-save").disabled = false;
+  }
+}
+
+// ---- status, start and polling
+
+function scheduleText(schedule) {
+  if (schedule.every_hours == null && schedule.daily_at == null) return tr("Manual only");
+  const plan = schedule.every_hours != null
+    ? tr("Every {hours} h", { hours: schedule.every_hours })
+    : tr("Daily at {time}", { time: schedule.daily_at });
+  return schedule.enabled ? plan : tr("{plan} (schedule disabled)", { plan });
+}
+
+function renderDreamStatus(status) {
+  const last = status.last_session;
+  let lastValue = tr("No dream sessions yet.");
+  if (last) {
+    const open = element("button", { type: "button", className: "link", textContent: `${sessionDate(last)} · ${dreamStatusLabel(last.status)}` });
+    open.addEventListener("click", () => openDreamSession(last.id));
+    lastValue = element("span", {}, open);
+    const summary = (last.summary ?? "").split(/\s+/).join(" ").trim();
+    if (summary) lastValue.append(element("span", { className: "dream-last-summary", textContent: summary.length > 300 ? `${summary.slice(0, 299)}…` : summary }));
+  }
+  let running = status.running
+    ? tr("Running since {date}", { date: formatDate(status.last_started_at) })
+    : tr("Not running");
+  if (status.running && status.cancelling) running += ` · ${tr("cancelling…")}`;
+  $("dream-status-list").replaceChildren(...descriptionList([
+    [tr("State"), element("span", { className: status.running ? "dream-running" : "", textContent: running })],
+    [tr("Last session"), lastValue],
+    [tr("Schedule"), scheduleText(status.schedule)],
+    [tr("Next run"), status.schedule.next_run ? formatDate(status.schedule.next_run) : "—"],
+    [tr("Pending chats"), formatCount(status.pending_chats)],
+  ]).childNodes);
+  $("dream-start").disabled = status.running;
+  $("dream-start").textContent = tr(status.running ? "Dream running…" : "Start dream");
+  $("dream-cancel").hidden = !status.running;
+  $("dream-cancel").disabled = Boolean(status.cancelling);
+}
+
+async function refreshDreamStatus() {
+  const session = state.session;
+  const token = state.dream.token;
+  try {
+    const status = await api(dreamUrl("/dream/status"), { cache: "no-store" });
+    if (!dreamCurrent(session, token)) return;
+    $("dream-status-error").textContent = "";
+    const wasRunning = state.dream.status?.running;
+    state.dream.status = status;
+    renderDreamStatus(status);
+    if (status.running) startDreamPoll();
+    else if (wasRunning) {
+      // the session just ended: show its final summary and trace
+      stopDreamPoll();
+      await refreshDreamSessions();
+      if (state.dream.sessionId) await openDreamSession(state.dream.sessionId, { quiet: true });
+    }
+  } catch (err) {
+    if (dreamCurrent(session, token)) $("dream-status-error").textContent = err.message;
+  }
+}
+
+async function startDream() {
+  const session = state.session;
+  const token = state.dream.token;
+  $("dream-status-error").textContent = "";
+  $("dream-start-status").textContent = "";
+  $("dream-start").disabled = true;
+  try {
+    const result = await api(dreamUrl("/dream/start"), { method: "POST" });
+    if (!dreamCurrent(session, token)) return;
+    $("dream-start-status").textContent = {
+      started: tr("Dream session started."),
+      started_nothing_pending: tr("Nothing is pending; starting a dream session anyway."),
+      already_running: tr("A dream session is already running for this agent."),
+    }[result.status] ?? result.status;
+    await Promise.all([refreshDreamStatus(), refreshDreamSessions()]);
+    // the session's trace file may appear just after the reply: open it once it is listed
+    for (let attempt = 0; result.session_id && attempt < 5 && dreamCurrent(session, token); attempt++) {
+      if (state.dream.sessions.some((item) => item.id === result.session_id)) {
+        if (!state.dream.sessionId) await openDreamSession(result.session_id);
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await refreshDreamSessions();
+    }
+  } catch (err) {
+    if (dreamCurrent(session, token)) {
+      $("dream-status-error").textContent = err.message;
+      $("dream-start").disabled = false;
+    }
+  }
+}
+
+async function cancelDream() {
+  if (!window.confirm(tr("Cancel the running dream session? A tool call in progress finishes first; chats it has not marked reviewed stay pending."))) return;
+  const session = state.session;
+  const token = state.dream.token;
+  $("dream-status-error").textContent = "";
+  $("dream-cancel").disabled = true;
+  try {
+    const result = await api(dreamUrl("/dream/cancel"), { method: "POST" });
+    if (!dreamCurrent(session, token)) return;
+    $("dream-start-status").textContent = result.status === "not_running"
+      ? tr("No dream session is running for this agent.")
+      : tr("Cancelling the dream session: a running tool call finishes first, then the session stops.");
+    await refreshDreamStatus();
+  } catch (err) {
+    if (dreamCurrent(session, token)) {
+      $("dream-status-error").textContent = err.message;
+      $("dream-cancel").disabled = false;
+    }
+  }
+}
+
+function startDreamPoll() {
+  if (state.dream.poll) return;
+  state.dream.poll = setInterval(async () => {
+    if ($("agent-panel-sessions").hidden || $("agents-view").hidden) {
+      stopDreamPoll();
+      return;
+    }
+    await refreshDreamStatus();
+    if (!state.dream.poll) return;
+    await refreshDreamSessions();
+    const open = state.dream.sessions.find((item) => item.id === state.dream.sessionId);
+    if (open?.status === "running") await openDreamSession(open.id, { quiet: true });
+  }, DREAM_POLL_MS);
+}
+
+function stopDreamPoll() {
+  if (state.dream?.poll) clearInterval(state.dream.poll);
+  if (state.dream) state.dream.poll = null;
+}
+
+// ---- sessions list and detail
+
+async function refreshDreamSessions() {
+  const session = state.session;
+  const token = state.dream.token;
+  try {
+    const sessions = await api(dreamUrl("/dream/sessions"), { cache: "no-store" });
+    if (!dreamCurrent(session, token)) return;
+    state.dream.sessions = sessions;
+    renderDreamSessions();
+  } catch (err) {
+    if (dreamCurrent(session, token)) $("dream-status-error").textContent = err.message;
+  }
+}
+
+function renderDreamSessions() {
+  const sessions = state.dream.sessions;
+  $("dream-sessions-empty").hidden = sessions.length > 0;
+  $("dream-sessions").hidden = sessions.length === 0;
+  $("dream-sessions").tBodies[0].replaceChildren(...sessions.map((item) => {
+    const open = element("button", { type: "button", className: "link", textContent: sessionDate(item) });
+    open.addEventListener("click", () => openDreamSession(item.id));
+    const row = element("tr", { className: item.id === state.dream.sessionId ? "active" : "" });
+    row.append(
+      element("td", {}, open),
+      element("td", { textContent: item.trigger ? dreamTriggerLabel(item.trigger) : "—" }),
+      element("td", {}, element("span", { className: `dream-badge ${item.status}`, textContent: dreamStatusLabel(item.status) })),
+      element("td", { textContent: item.chats_reviewed ? formatCount(item.chats_reviewed.length) : "—" }),
+      element("td", { textContent: formatDuration(item.duration_seconds) }),
+      element("td", { textContent: formatCount(item.tokens?.total) }),
+    );
+    return row;
+  }));
+}
+
+function showDreamList() {
+  state.dream.sessionId = null;
+  $("dream-session-detail").hidden = true;
+  $("dream-sessions-view").hidden = false;
+  renderDreamSessions();
+  setDreamHash(agentHash("sessions"));
+}
+
+async function openDreamSession(sessionId, { quiet = false } = {}) {
+  const session = state.session;
+  const token = state.dream.token;
+  if (!quiet) {
+    state.dream.sessionId = sessionId;
+    $("dream-session-body").replaceChildren(element("p", { className: "model-note", textContent: tr("Loading…") }));
+    $("dream-sessions-view").hidden = true;
+    $("dream-session-detail").hidden = false;
+    setDreamHash(agentHash("sessions", sessionId));
+  }
+  try {
+    const detail = await api(dreamUrl(`/dream/sessions/${encodeURIComponent(sessionId)}`), { cache: "no-store" });
+    if (!dreamCurrent(session, token) || state.dream.sessionId !== sessionId) return;
+    const listed = state.dream.sessions.find((item) => item.id === sessionId);
+    const scroll = $("agents-view").scrollTop;
+    $("dream-session-body").replaceChildren(...renderDreamSession(detail, listed?.status));
+    if (quiet) $("agents-view").scrollTop = scroll;
+  } catch (err) {
+    if (dreamCurrent(session, token) && state.dream.sessionId === sessionId) {
+      $("dream-session-body").replaceChildren(element("p", { className: "error", textContent: err.message }));
+    }
+  }
+}
+
+function renderDreamSession(detail, listedStatus) {
+  const summary = detail.summary;
+  const status = summary?.status ?? listedStatus ?? "running";
+  const started = summary ?? { id: detail.id };
+  const parts = [element("h4", {}, `${tr("Dream session")} ${sessionDate(started)} · `,
+    element("span", { className: `dream-badge ${status}`, textContent: dreamStatusLabel(status) }))];
+  if (!summary) {
+    parts.push(element("p", { className: "model-note", textContent: tr(status === "running"
+      ? "This session is still running; the trace below updates automatically."
+      : "This session ended without a summary (the process stopped while it ran).") }));
+  } else {
+    const tokens = summary.tokens ?? {};
+    parts.push(descriptionList([
+      [tr("Trigger"), dreamTriggerLabel(summary.trigger)],
+      [tr("Model"), summary.model ?? "—"],
+      [tr("Duration"), formatDuration(summary.duration_seconds)],
+      [tr("Steps"), formatCount(summary.steps)],
+      [tr("Tool calls"), `${formatCount(summary.tool_calls)} (${tr("{count} failed", { count: formatCount(summary.errors) })})`],
+      [tr("Tokens"), tr("{total} (input {input}, output {output})", {
+        total: formatCount(tokens.total), input: formatCount(tokens.input), output: formatCount(tokens.output),
+      })],
+      [tr("Pending chats"), tr("{before} before, {after} after", {
+        before: formatCount(summary.pending_before), after: formatCount(summary.pending_after),
+      })],
+      [tr("Chats reviewed"), summary.chats_reviewed?.length ? summary.chats_reviewed.join(", ") : "—"],
+      ...(summary.timing ? [
+        [tr("Time limit"), tr("{minutes} min, deadline {date}", {
+          minutes: formatCount(summary.timing.max_minutes), date: formatDate(summary.timing.deadline_at),
+        })],
+        [tr("Wrap-up warning"), summary.timing.warning_at ? formatDate(summary.timing.warning_at) : "—"],
+        [tr("Stop requested"), summary.timing.stop_requested_at ? formatDate(summary.timing.stop_requested_at) : "—"],
+        [tr("Closed"), formatDate(summary.timing.closed_at)],
+      ] : []),
+    ]));
+    if (summary.error) parts.push(element("p", { className: "error", textContent: summary.error }));
+    parts.push(element("h5", { textContent: tr("Summary") }),
+      summary.summary ? markdown(summary.summary) : element("p", { className: "model-note", textContent: tr("No summary.") }));
+    parts.push(element("h5", { textContent: tr("Files changed") }), renderFilesChanged(summary));
+  }
+  parts.push(element("h5", { textContent: tr("Trace") }), renderTrace(detail.events));
+  return parts;
+}
+
+function renderFilesChanged(summary) {
+  const files = summary.files_changed ?? [];
+  if (!files.length) return element("p", { className: "model-note", textContent: tr("No files changed.") });
+  const changes = { created: tr("created"), modified: tr("modified"), deleted: tr("deleted") };
+  const list = element("div", { className: "dream-files" });
+  for (const file of files) {
+    const diff = summary.diffs?.[file.path];
+    const label = [element("code", { textContent: file.path }), ` · ${changes[file.change] ?? file.change}`];
+    if (diff) {
+      list.append(element("details", { className: "dream-file", open: files.length <= 3 },
+        element("summary", {}, ...label), renderDiff(diff)));
+    } else {
+      list.append(element("div", { className: "dream-file" }, ...label));
+    }
+  }
+  return list;
+}
+
+function renderDiff(diff) {
+  const pre = element("pre", { className: "diff" });
+  for (const line of diff.replace(/\n$/, "").split("\n")) {
+    let kind = "";
+    if (line.startsWith("+++") || line.startsWith("---")) kind = "diff-file";
+    else if (line.startsWith("@@")) kind = "diff-hunk";
+    else if (line.startsWith("+")) kind = "diff-add";
+    else if (line.startsWith("-")) kind = "diff-del";
+    pre.append(element("span", { className: kind, textContent: `${line}\n` }));
+  }
+  return pre;
+}
+
+// a <pre> cut to TRACE_RESULT_CHARS, with a button that shows the rest
+function expandablePre(text) {
+  const pre = element("pre", { textContent: text.length > TRACE_RESULT_CHARS ? `${text.slice(0, TRACE_RESULT_CHARS)}…` : text });
+  if (text.length <= TRACE_RESULT_CHARS) return [pre];
+  const more = element("button", { type: "button", className: "link", textContent: tr("Show all ({count} characters)", { count: formatCount(text.length) }) });
+  more.addEventListener("click", () => {
+    pre.textContent = text;
+    more.remove();
+  });
+  return [pre, more];
+}
+
+function renderTrace(events) {
+  const trace = element("div", { className: "dream-trace" });
+  if (!events?.length) {
+    trace.append(element("p", { className: "model-note", textContent: tr("The trace is empty.") }));
+    return trace;
+  }
+  let step = null;
+  for (const event of events) {
+    if (event.step != null && event.step !== step && event.type !== "session_finished") {
+      step = event.step;
+      trace.append(element("div", { className: "trace-step", textContent: tr("Step {step}", { step }) }));
+    }
+    trace.append(renderTraceEvent(event));
+  }
+  return trace;
+}
+
+function renderTraceEvent(event) {
+  const time = event.ts ? formatDate(event.ts).slice(11) : "";
+  const note = (text) => element("div", { className: "trace-note", textContent: time ? `${time} · ${text}` : text });
+  switch (event.type) {
+    case "session_started":
+      return note(tr("Session started ({trigger}) with {model}; {pending} pending chats; limits {steps} steps, {tokens} tokens, {minutes} min.", {
+        trigger: dreamTriggerLabel(event.trigger), model: event.model ?? "—", pending: formatCount(event.pending),
+        steps: formatCount(event.max_steps), tokens: formatCount(event.max_tokens), minutes: formatCount(event.max_minutes),
+      }));
+    case "usage":
+      return note(tr("Tokens: input {input}, output {output}", {
+        input: formatCount(event.input_tokens), output: formatCount(event.output_tokens),
+      }));
+    case "reasoning":
+      return element("details", { className: "thinking" },
+        element("summary", { textContent: tr("Reasoning") }), element("div", { className: "thinking-text", textContent: event.text ?? "" }));
+    case "assistant":
+      return element("div", { className: "trace-assistant" }, markdown(event.text));
+    case "tool_call":
+      return element("div", { className: "trace-call" },
+        element("div", { className: "trace-call-name", textContent: `→ ${event.name}` }),
+        ...expandablePre(JSON.stringify(event.arguments ?? {}, null, 2)));
+    case "tool_result":
+      return element("details", { className: `action trace-result${event.error ? " failed" : ""}` },
+        element("summary", { textContent: `${event.error ? tr("Failed") : tr("Result")} · ${event.name} · ${tr("{count} characters", { count: formatCount((event.result ?? "").length) })}` }),
+        ...expandablePre(event.result ?? ""));
+    case "wrap_up_warning":
+      return element("div", { className: "trace-stop" },
+        element("div", { textContent: `${time ? `${time} · ` : ""}${tr("Wrap-up warning sent to the agent")}` }),
+        ...expandablePre(event.text ?? ""));
+    case "force_closed":
+      return element("div", { className: "trace-stop", textContent: `${time ? `${time} · ` : ""}${{
+        timed_out: tr("Time limit reached"), cancelled: tr("Cancel requested"),
+      }[event.reason] ?? event.reason}: ${event.aborted_model_call
+        ? tr("the model call in flight was aborted and its reply discarded.")
+        : event.skipped_tool_calls
+          ? tr("{count} remaining tool calls were skipped.", { count: formatCount(event.skipped_tool_calls) })
+          : tr("the session was closed before the next model call.")}` });
+    case "error":
+      return element("div", { className: "trace-error error", textContent: `[${tr("error")}] ${event.message ?? event.error ?? ""}` });
+    case "session_finished":
+      return note(tr("Session finished: {status}", { status: dreamStatusLabel(event.status) }) + (event.error ? ` — ${event.error}` : ""));
+    default:
+      return element("pre", { className: "trace-note", textContent: JSON.stringify(event, null, 2) });
+  }
+}
+
+// ---- deep links: #agents/<agent id>[/soul|/dream|/dreams[/<session id>]]
+
+// the link the page was opened with; kept until a login shows the app
+let pendingRoute = location.hash;
+const AGENT_ROUTE = /^#agents(?:\/([^/]+)(?:\/(soul|dream|dreams)(?:\/([^/]+))?)?)?$/;
+
+async function routeFromHash(hash = location.hash) {
+  const match = AGENT_ROUTE.exec(hash);
+  if (!match || !state.user) return false;
+  await showTab("agents");
+  const agentId = match[1] && decodeURIComponent(match[1]);
+  if (!agentId || !state.agentConfigs.some((agent) => agent.id === agentId)) return true;
+  openAgent(agentId);
+  const panel = { soul: "soul", dream: "dream", dreams: "sessions" }[match[2]] ?? "basic";
+  await showAgentPanel(panel);
+  if (match[3]) await openDreamSession(decodeURIComponent(match[3]));
+  return true;
+}
+
+globalThis.addEventListener("hashchange", () => routeFromHash());
+
+$("soul-content").addEventListener("input", () => {
+  renderCount("soul-count", $("soul-content").value.length, Number($("soul-content").dataset.max || 20000));
+});
+$("soul-save").addEventListener("click", saveSoul);
+$("soul-version-close").addEventListener("click", () => { $("soul-version").hidden = true; });
+for (const [target, id] of Object.entries(MEMORY_IDS)) {
+  $(`${id}-content`).addEventListener("input", () => {
+    renderCount(`${id}-count`, $(`${id}-content`).value.length, state.dream.memoryLimits[target] ?? 0);
+  });
+  $(`${id}-save`).addEventListener("click", () => saveMemory(target));
+}
+for (const radio of document.querySelectorAll('input[name="dream-mode"]')) {
+  radio.addEventListener("change", syncDreamScheduleInputs);
+}
+// typing a value in a schedule field selects that schedule
+$("dream-every-hours").closest("label").addEventListener("click", () => {
+  if (!$("dream-mode-every").checked) { $("dream-mode-every").checked = true; syncDreamScheduleInputs(); }
+});
+$("dream-daily-at").closest("label").addEventListener("click", () => {
+  if (!$("dream-mode-daily").checked) { $("dream-mode-daily").checked = true; syncDreamScheduleInputs(); }
+});
+$("dream-prompt-copy").addEventListener("click", () => {
+  if ($("dream-prompt").value.trim() && !window.confirm(tr("Replace the current prompt with the default one?"))) return;
+  $("dream-prompt").value = state.dream.settings?.default_prompt ?? "";
+});
+$("dream-prompt-reset").addEventListener("click", () => {
+  if ($("dream-prompt").value.trim() && !window.confirm(tr("Clear the custom prompt and use the default one? Save to apply."))) return;
+  $("dream-prompt").value = "";
+});
+$("dream-model-browse").addEventListener("click", () => openModelPicker("dream-llm"));
+$("dream-form").addEventListener("submit", saveDreamSettings);
+$("dream-start").addEventListener("click", startDream);
+$("dream-cancel").addEventListener("click", cancelDream);
+$("dream-session-back").addEventListener("click", showDreamList);
+
+resetDream();
 
 // ------------------------------------------------------------------ boot
 
