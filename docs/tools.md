@@ -28,7 +28,7 @@ when a Tavily client is configured.
 ## MCP tools
 
 Tools from external MCP servers (for example Google Calendar) are added per
-agent from the **MCP** tab of the agent form, on top of the tool groups. They are
+agent from the **MCP** tab of the agent form, on top of the tool groups (selected in its **Tools** tab). They are
 named `<server_id>__<tool>`, use the server's own descriptions and schemas, are
 refreshed at each turn and require `chat_config.tools: true`. Results are marked
 `untrusted`. See [MCP servers](mcp.md).

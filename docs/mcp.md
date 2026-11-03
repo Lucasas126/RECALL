@@ -73,7 +73,7 @@ computer that runs RECALL.
 
 ## enabling a server for an agent
 
-The agent form has **General** and **MCP** tabs. In **MCP**, each catalog server
+The agent form has **Basic**, **Advanced**, **Tools** and **MCP** tabs. In **MCP**, each catalog server
 can be enabled, and then configured with:
 
 - **Read only**: expose only tools the server annotates as read-only

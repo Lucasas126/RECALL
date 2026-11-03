@@ -1,4 +1,14 @@
 const $ = (id) => document.getElementById(id);
+// inline line icons (currentColor); constants only, never built from user data
+const ICONS = {
+  send: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M12 19V5\"/><path d=\"m5 12 7-7 7 7\"/></svg>",
+  steer: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><polygon points=\"3 11 22 2 13 21 11 13 3 11\"/></svg>",
+  pencil: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M12 20h9\"/><path d=\"M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z\"/></svg>",
+  trash: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M3 6h18\"/><path d=\"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6\"/><path d=\"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2\"/></svg>",
+  star: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><polygon points=\"12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2\"/></svg>",
+  sun: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><circle cx=\"12\" cy=\"12\" r=\"4\"/><path d=\"M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41\"/></svg>",
+  moon: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z\"/></svg>",
+};
 const state = {
   user: null, agentId: null, chatId: null, busy: false, session: 0,
   requests: new Set(), latest: null, sendQueue: Promise.resolve(),
@@ -24,6 +34,29 @@ const tokenPriceFormat = new Intl.NumberFormat("en-US", {
   style: "currency", currency: "USD", maximumSignificantDigits: 6,
 });
 
+// Theme is a per-browser preference: "system" removes the override so prefers-color-scheme applies.
+function applyTheme(theme) {
+  if (theme === "light" || theme === "dark") {
+    localStorage.setItem("theme", theme);
+    document.documentElement.dataset.theme = theme;
+  } else {
+    localStorage.removeItem("theme");
+    delete document.documentElement.dataset.theme;
+  }
+  renderThemeToggle();
+}
+
+function effectiveTheme() {
+  return document.documentElement.dataset.theme
+    ?? (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+}
+
+// the toggle shows the theme it would switch to
+function renderThemeToggle() {
+  $("theme-toggle").innerHTML = effectiveTheme() === "dark" ? ICONS.sun : ICONS.moon;
+}
+matchMedia("(prefers-color-scheme: light)").addEventListener("change", renderThemeToggle);
+
 function tr(template, values = {}) {
   const text = state.preferences?.language === "es" ? state.translations[template] : template;
   if (typeof text !== "string") throw new Error(`Missing translation: ${template}`);
@@ -32,10 +65,10 @@ function tr(template, values = {}) {
 
 function translateInterface() {
   for (const [id, text] of [
-    ["settings-open", "Settings"], ["settings-title", "User settings"],
-    ["settings-close", "Close"], ["settings-save", "Save settings"],
+    ["settings-title", "User settings"], ["settings-save", "Save settings"],
     ["settings-thinking-label", "Show model thinking"],
-    ["settings-language-label", "Alerts and errors"],
+    ["settings-language-label", "Alerts and errors"], ["settings-theme-label", "Theme"],
+    ["settings-theme-system", "System"], ["settings-theme-light", "Light"], ["settings-theme-dark", "Dark"],
     ["settings-note", "Settings are shared with Telegram. Chats without a selected model use your current defaults."],
     ["settings-llm-label", "Default LLM model"], ["settings-stt-label", "Default STT model"],
     ["agent-label", "Agent"], ["chat-model-label", "Chat model"], ["chat-effort-text", "Reasoning effort"],
@@ -43,7 +76,7 @@ function translateInterface() {
     ["model-scope-note", "Choosing a model for a chat sets only that chat's override. Use user default removes it. Defaults in Settings are saved with Save settings. Default LLM and STT selections require ZDR. Favorites are shared across your agents."],
     ["model-zdr-warning", "ZDR is not required for your next selection. Providers may retain your prompts and replies. Your OpenRouter account may still enforce ZDR."],
     ["tab-chats", "Chats"], ["tab-agents", "Agents"],
-    ["agent-new", "+ New agent"], ["agents-empty", "Select an agent to edit it, or create a new one."],
+    ["agent-new-label", "New agent"], ["agents-empty", "Select an agent to edit it, or create a new one."],
     ["agent-name-label", "Name"], ["agent-description-label", "Description"],
     ["agent-description-hint", "Optional. Shown in the agent list; not sent to the model."],
     ["agent-prompt-label", "System prompt"], ["agent-behavior-label", "Chat behavior"],
@@ -59,12 +92,24 @@ function translateInterface() {
     ["agent-tokens-enabled-label", "Limit reasoning tokens"], ["agent-reasoning-tokens-label", "Reasoning tokens"],
     ["agent-retained-label", "Messages kept in context"],
     ["agent-retained-hint", "Empty keeps all messages."], ["agent-save", "Save agent"], ["agent-delete", "Delete agent"],
-    ["agent-tab-general", "General"], ["agent-tab-mcp", "MCP"],
+    ["agent-tab-basic", "Basic"], ["agent-tab-advanced", "Advanced"], ["agent-tab-tools", "Tools"],
+    ["agent-tab-mcp", "MCP"],
     ["agent-mcp-note", "MCP servers act on each user's own account. Connect accounts in Settings > Connections."],
     ["connections-title", "Connections"],
     ["connections-note", "Connect your own account for each service your agents can use. Every user connects separately."],
     ["connections-browser-note", "Sign-in opens in a browser on the computer running RECALL."],
   ]) $(id).textContent = tr(text);
+  for (const [id, text] of [
+    ["settings-open", "Settings"], ["settings-close", "Close"],
+    ["logout", "Log out"], ["theme-toggle", "Switch theme"],
+  ]) {
+    $(id).title = tr(text);
+    $(id).setAttribute("aria-label", tr(text));
+  }
+  for (const button of document.querySelectorAll(".nav-toggle")) {
+    button.title = tr("Menu");
+    button.setAttribute("aria-label", tr("Menu"));
+  }
 }
 
 function tokenPrice(value) {
@@ -133,6 +178,21 @@ function renderAgentOptions() {
     })
   );
   $("agent-select").value = state.agentId ?? "";
+  renderAgentBanner();
+}
+
+function currentAgentName() {
+  return state.user?.agents.find((a) => a.id === state.agentId)?.name ?? "";
+}
+
+// The active agent is the header's headline; the select is stretched invisibly over it as the switcher.
+function renderAgentBanner() {
+  const name = currentAgentName();
+  $("agent-title").textContent = name || "—";
+  $("agent-avatar").textContent = [...name][0]?.toUpperCase() ?? "?";
+  $("input").placeholder = state.busy
+    ? "Send another message to steer the response..."
+    : name ? `Message ${name}...` : "Write a message...";
 }
 
 async function showApp(user) {
@@ -142,6 +202,8 @@ async function showApp(user) {
   $("login").hidden = true;
   $("app").hidden = false;
   $("user-name").textContent = user.name;
+  $("user-avatar").textContent = [...user.name][0]?.toUpperCase() ?? "?";
+  renderThemeToggle();
   renderAgentOptions();
   showTab("chats");
   try {
@@ -177,6 +239,20 @@ $("logout").addEventListener("click", async () => {
   showLogin();
 });
 
+// ------------------------------------------------------------------ navigation drawer (narrow screens)
+
+function setNav(open) {
+  document.body.classList.toggle("nav-open", open);
+  for (const button of document.querySelectorAll(".nav-toggle")) button.setAttribute("aria-expanded", String(open));
+}
+for (const button of document.querySelectorAll(".nav-toggle")) {
+  button.addEventListener("click", () => setNav(!document.body.classList.contains("nav-open")));
+}
+$("nav-scrim").addEventListener("click", () => setNav(false));
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") setNav(false); });
+// choosing a chat or agent, or starting a new one, closes the drawer
+$("sidebar").addEventListener("click", (e) => { if (e.target.closest("#chat-list li, #agent-list button, #new-chat")) setNav(false); });
+
 // ------------------------------------------------------------------ agents & chats
 
 function chatKey(agentId, chatId) {
@@ -197,6 +273,7 @@ async function selectAgent(agentId) {
   state.model = null;
   updateModelControls();
   $("agent-select").value = agentId ?? "";
+  renderAgentBanner();
   renderMessages([]);
   setComposer(false);
   await refreshChats();
@@ -364,15 +441,16 @@ function fillAgentForm(agent) {
   $("agent-reasoning-tokens").value = config.reasoning_tokens ?? "";
   $("agent-retained").value = config.conversation_messages_retained ?? "";
   renderAgentMcp(config.mcp ?? {});
-  showAgentPanel("general");
+  showAgentPanel("basic");
 }
 
+const AGENT_PANELS = ["basic", "advanced", "tools", "mcp"];
+
 function showAgentPanel(panel) {
-  const mcp = panel === "mcp";
-  $("agent-tab-general").setAttribute("aria-pressed", String(!mcp));
-  $("agent-tab-mcp").setAttribute("aria-pressed", String(mcp));
-  $("agent-panel-general").hidden = mcp;
-  $("agent-panel-mcp").hidden = !mcp;
+  for (const name of AGENT_PANELS) {
+    $(`agent-tab-${name}`).setAttribute("aria-pressed", String(name === panel));
+    $(`agent-panel-${name}`).hidden = name !== panel;
+  }
 }
 
 // One fieldset per catalog server; the server is enabled for the agent while its entry exists.
@@ -553,10 +631,12 @@ async function refreshAgents(previousId, currentId) {
 $("tab-chats").addEventListener("click", () => showTab("chats"));
 $("tab-agents").addEventListener("click", () => showTab("agents"));
 $("agent-new").addEventListener("click", openNewAgent);
-$("agent-tab-general").addEventListener("click", () => showAgentPanel("general"));
-$("agent-tab-mcp").addEventListener("click", () => showAgentPanel("mcp"));
-// required fields live in the General panel; show it so the browser can point at them
-$("agent-form").addEventListener("invalid", () => showAgentPanel("general"), true);
+for (const name of AGENT_PANELS) $(`agent-tab-${name}`).addEventListener("click", () => showAgentPanel(name));
+// a field the browser rejects may sit in a hidden panel; show that panel so it can point at the field
+$("agent-form").addEventListener("invalid", (e) => {
+  const panel = e.target.closest(".agent-panel");
+  if (panel) showAgentPanel(panel.id.replace("agent-panel-", ""));
+}, true);
 
 $("agent-associative").addEventListener("change", () => {
   $("agent-associative-execution").disabled = $("agent-associative").value === "off";
@@ -694,6 +774,7 @@ function fillSettings() {
   };
   $("settings-thinking").checked = state.preferences.show_thinking;
   $("settings-language").value = state.preferences.language;
+  $("settings-theme").value = localStorage.getItem("theme") ?? "system";
   renderSettingsModels();
 }
 
@@ -724,8 +805,17 @@ $("settings-open").addEventListener("click", async () => {
   }
 });
 
+$("settings-theme").addEventListener("change", (e) => applyTheme(e.target.value));
+$("theme-toggle").addEventListener("click", () => {
+  applyTheme(effectiveTheme() === "dark" ? "light" : "dark");
+  $("settings-theme").value = localStorage.getItem("theme") ?? "system";
+});
 $("settings-close").addEventListener("click", () => $("settings-dialog").close());
 $("settings-dialog").addEventListener("close", stopConnectionsPoll);
+$("connections").addEventListener("toggle", () => {
+  if (!$("connections").open) stopConnectionsPoll();
+  else if (state.mcpServers.some((server) => server.pending)) startConnectionsPoll();
+});
 
 // ------------------------------------------------------------------ mcp connections
 
@@ -751,6 +841,8 @@ function renderConnections() {
   } else {
     $("connection-list").replaceChildren(...servers.map(connectionItem));
   }
+  $("connections-count").textContent = servers.length
+    ? `(${servers.filter((server) => server.connected).length}/${servers.length})` : "";
   if (servers.some((server) => server.pending)) startConnectionsPoll();
   else stopConnectionsPoll();
 }
@@ -821,7 +913,7 @@ async function changeConnection(server, action) {
 }
 
 function startConnectionsPoll() {
-  if (state.connectionsPoll || !$("settings-dialog").open) return;
+  if (state.connectionsPoll || !$("settings-dialog").open || !$("connections").open) return;
   state.connectionsPoll = setInterval(loadConnections, 3000);
 }
 
@@ -884,7 +976,7 @@ async function refreshChats() {
       meta.append(title, agent);
       const del = document.createElement("button");
       del.className = "del";
-      del.textContent = "✕";
+      del.innerHTML = ICONS.trash;
       del.title = "Delete chat";
       del.disabled = generating || state.modelBusy;
       del.dataset.agent = chat.agent_id;
@@ -898,7 +990,7 @@ async function refreshChats() {
       if (chat.turns > 0) {
         const rename = document.createElement("button");
         rename.className = "chat-action rename";
-        rename.textContent = "✎";
+        rename.innerHTML = ICONS.pencil;
         rename.title = tr("Rename chat");
         rename.addEventListener("click", (e) => {
           e.stopPropagation();
@@ -1038,7 +1130,6 @@ function updateModelControls() {
   renderSettingsModels();
   $("model-zdr-warning").hidden = $("model-zdr").checked;
   $("model-favorites-only").setAttribute("aria-pressed", String(state.modelFavoritesOnly));
-  $("model-favorites-only").textContent = state.modelFavoritesOnly ? "\u2605" : "\u2606";
   $("model-favorites-only").title = state.modelFavoritesOnly ? "Show all models" : "Show favorites only";
   const activeFilters = ["model-tools", "model-images", "model-reasoning"]
     .filter((id) => $(id).checked).length;
@@ -1060,6 +1151,7 @@ function updateReasoningEffortControls() {
     else note = tr(effort.override === null ? "Agent default" : "Chat override");
   }
   $("effort-policy").textContent = note;
+  $("chat-effort").title = note || tr("Reasoning effort");
 }
 
 $("chat-effort").addEventListener("change", async (e) => {
@@ -1177,7 +1269,7 @@ function renderModelList() {
     const star = document.createElement("button");
     star.type = "button";
     star.className = "model-star";
-    star.textContent = saved.has(model.id) ? "\u2605" : "\u2606";
+    star.innerHTML = ICONS.star;
     const label = saved.has(model.id) ? `Remove ${model.id} from favorites` : `Add ${model.id} to favorites`;
     star.setAttribute("aria-label", label);
     star.setAttribute("aria-pressed", String(saved.has(model.id)));
@@ -1363,10 +1455,10 @@ function updateBusy() {
   setComposer(Boolean(state.chatId));
   updateModelControls();
   if ($("model-dialog").open) renderModelList();
-  $("send").textContent = state.busy ? "Steer" : "Send";
-  $("input").placeholder = state.busy
-    ? "Send another message to steer the response..."
-    : "Write a message...";
+  $("send").innerHTML = state.busy ? ICONS.steer : ICONS.send;
+  $("send").title = state.busy ? "Steer" : "Send";
+  $("send").setAttribute("aria-label", state.busy ? "Steer" : "Send");
+  renderAgentBanner();
 }
 
 function resetStreams() {
@@ -1458,10 +1550,12 @@ function showUsage(report) {
 function addMessage(role, parent = state.view ?? $("messages")) {
   const el = document.createElement("div");
   el.className = `msg ${role}`;
+  if (role === "assistant") el.dataset.author = currentAgentName();
   const body = document.createElement("div");
   body.className = "body";
   let raw = "";
   let thinking = null;
+  let thinkingRaw = "";
   let memoryIndicator = null;
   let actionCount = 0;
   let attachmentBox = null;
@@ -1520,11 +1614,15 @@ function addMessage(role, parent = state.view ?? $("messages")) {
           localStorage.setItem("thinkingOpen", prefs.thinkingOpen);
         });
         thinking.append(summary);
-        thinking.append(document.createTextNode(""));
+        const text = document.createElement("div");
+        text.className = "thinking-text";
+        thinking.append(text);
         if (memoryIndicator) memoryIndicator.after(thinking);
         else el.prepend(thinking);
       }
-      thinking.lastChild.textContent += chunk;
+      // models end their reasoning with newlines; trimming keeps an empty line from showing under the block
+      thinkingRaw += chunk;
+      thinking.lastChild.textContent = thinkingRaw.trimEnd();
     },
     notice(text) {
       const note = document.createElement("div");
@@ -1571,6 +1669,7 @@ function addMessage(role, parent = state.view ?? $("messages")) {
       if (snapshot) {
         raw = snapshot.content;
         renderBody();
+        thinkingRaw = "";
         if (thinking) thinking.lastChild.textContent = "";
         if (snapshot.reasoning) this.thinking(snapshot.reasoning);
         else if (thinking) {

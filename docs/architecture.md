@@ -60,6 +60,32 @@ any later chat model. PDFs follow the same rule: `ChatService.send` replaces eac
 extracted text, with page markers, before validation, so no provider receives the file or
 its page images (see [config.md](./config.md#pdf-input)).
 
+### web interface
+
+The web UI (`src/web/static`, vanilla HTML/CSS/JS) is a thin adapter and holds no backend logic.
+Status: implemented.
+
+- theme: light, dark or follow the system (`prefers-color-scheme`). The choice is per browser,
+  stored in `localStorage` (`theme`) and set in Settings > Theme, not shared with Telegram. All
+  colors are CSS variables in `style.css`; a small inline script in `index.html` applies the saved
+  theme before first paint.
+- layout: a centered reading column on desktop; below 800px the sidebar becomes a drawer opened
+  from the menu button, dialogs go full screen and touch devices get 44px hit areas.
+- active agent: the chat header shows the agent's initial, name and a switcher (a transparent
+  `<select>` over the banner, so the native picker is used on every device). Assistant messages
+  carry the agent's name and the composer placeholder addresses it.
+- sidebar and composer: the sidebar has the brand, New chat and the Chats/Agents tabs on top, and
+  the account row (user, theme toggle, Settings, Log out) at the bottom. The composer is a single
+  card; the chat model and reasoning effort are compact chips inside it, next to the attach and
+  send icons. Buttons use inline SVG line icons with an `aria-label`.
+- settings and agent editor: Settings > Connections is a collapsed disclosure showing how many
+  services are connected (it only polls for sign-in while open). The agent editor has four tabs:
+  Basic (name, description, system prompt), Advanced (streaming, memory, reasoning and
+  associative-memory options, retained messages), Tools (Use tools and the tool groups) and MCP.
+  Save and Delete stay visible under every tab, and a rejected field opens the tab that holds it.
+- reasoning blocks: trailing newlines from the model are trimmed so no empty line shows under an
+  expanded block.
+
 ### model catalog and chat selection
 
 The provider layer fetches OpenRouter's public model and ZDR endpoint catalogs;
@@ -108,7 +134,7 @@ reasoning generation, stored history or service events. Telegram captures each
 reply's user/agent/chat before asynchronous delivery, so changing a session
 cannot reroute an accepted message. The settings agent option changes the
 active Telegram agent like `/selectagent`, rather than just saving a future
-preference. Web agent switching is the chat header's Agent selector.
+preference. Web agent switching is the chat header's agent banner, which shows the active agent's name and switches agent when clicked.
 English/Spanish operational notices and
 application errors use a shared translation catalog served to the browser.
 Errors carry their RECALL-owned template separately from opaque interpolation

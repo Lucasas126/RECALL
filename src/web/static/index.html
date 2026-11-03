@@ -4,42 +4,59 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RECALL</title>
+  <meta name="color-scheme" content="dark light">
+  <script>
+    // apply the saved theme before first paint to avoid a flash
+    (() => { const t = localStorage.getItem("theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; })();
+  </script>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
   <section id="login" hidden>
     <form id="login-form">
       <h1>RECALL</h1>
-      <input id="login-user" placeholder="user" autocomplete="username" autofocus required>
-      <input id="login-password" type="password" placeholder="password" autocomplete="current-password" required>
+      <input id="login-user" placeholder="user" aria-label="user" autocomplete="username" autofocus required>
+      <input id="login-password" type="password" placeholder="password" aria-label="password" autocomplete="current-password" required>
       <button type="submit">Enter</button>
-      <p id="login-error" class="error"></p>
+      <p id="login-error" class="error" role="alert"></p>
     </form>
   </section>
 
   <section id="app" hidden>
-    <aside>
-      <div class="bar">
-        <strong id="user-name"></strong>
-        <button id="logout" class="link">Log out</button>
-      </div>
+    <div id="nav-scrim"></div>
+    <aside id="sidebar">
+      <div class="bar"><span class="brand">RECALL</span></div>
       <nav class="tabs" aria-label="Sections">
         <button id="tab-chats" type="button" aria-pressed="true">Chats</button>
         <button id="tab-agents" type="button" aria-pressed="false">Agents</button>
       </nav>
-      <button id="settings-open" type="button" aria-haspopup="dialog">Settings</button>
-      <button id="new-chat">+ New chat</button>
-      <button id="agent-new" type="button" hidden>+ New agent</button>
+      <button id="new-chat" class="primary"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg> New chat</button>
+      <button id="agent-new" type="button" class="primary" hidden><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg> <span id="agent-new-label">New agent</span></button>
       <ul id="chat-list"></ul>
       <ul id="agent-list" hidden></ul>
+      <div class="sidebar-footer">
+        <span id="user-avatar" aria-hidden="true"></span>
+        <strong id="user-name"></strong>
+        <button id="theme-toggle" type="button" class="icon-btn" title="Switch theme" aria-label="Switch theme"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button>
+        <button id="settings-open" type="button" class="icon-btn" aria-haspopup="dialog" title="Settings" aria-label="Settings"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
+        <button id="logout" type="button" class="icon-btn" title="Log out" aria-label="Log out"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></button>
+      </div>
     </aside>
     <main>
       <div id="chat-view">
       <header id="model-bar">
-        <span id="agent-label">Agent</span>
-        <select id="agent-select"></select>
+        <button class="nav-toggle" type="button" aria-controls="sidebar" aria-expanded="false" title="Menu" aria-label="Menu"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+        <div id="agent-banner">
+          <span id="agent-avatar" aria-hidden="true"></span>
+          <span id="agent-text">
+            <label id="agent-label" for="agent-select">Agent</label>
+            <strong id="agent-title"></strong>
+          </span>
+          <span id="agent-chevron" aria-hidden="true">&#9662;</span>
+          <select id="agent-select"></select>
+        </div>
       </header>
-      <div id="messages"></div>
+      <div id="messages" role="log" aria-live="polite" aria-relevant="additions"></div>
       <details id="usage" hidden><summary></summary><pre></pre></details>
       <form id="composer">
         <div id="chat-controls">
@@ -62,95 +79,102 @@
         </div>
         <textarea id="input" rows="2" placeholder="Write a message…" disabled></textarea>
         <input id="file-input" type="file" accept="image/*,video/*,audio/*,application/pdf,.pdf" multiple hidden>
-        <button id="attach" type="button" disabled title="Attach image, video, audio or PDF">Attach</button>
-        <button id="send" type="submit" disabled>Send</button>
+        <button id="attach" type="button" class="icon-btn" disabled title="Attach image, video, audio or PDF" aria-label="Attach image, video, audio or PDF"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+        <button id="send" type="submit" class="icon-btn" disabled title="Send" aria-label="Send"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg></button>
       </form>
       </div>
       <section id="agents-view" hidden>
+        <button class="nav-toggle" type="button" aria-controls="sidebar" aria-expanded="false" title="Menu" aria-label="Menu"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
         <p id="agent-error" class="error" role="alert"></p>
         <p id="agent-status" class="model-note" role="status"></p>
         <p id="agents-empty" class="model-note">Select an agent to edit it, or create a new one.</p>
         <form id="agent-form" class="agent-form" hidden>
           <h3 id="agent-form-title">Edit agent</h3>
           <nav class="tabs agent-tabs" aria-label="Agent configuration">
-            <button id="agent-tab-general" type="button" aria-pressed="true">General</button>
+            <button id="agent-tab-basic" type="button" aria-pressed="true">Basic</button>
+            <button id="agent-tab-advanced" type="button" aria-pressed="false">Advanced</button>
+            <button id="agent-tab-tools" type="button" aria-pressed="false">Tools</button>
             <button id="agent-tab-mcp" type="button" aria-pressed="false">MCP</button>
           </nav>
-          <div id="agent-panel-general" class="agent-panel">
-          <label>
-            <span id="agent-name-label">Name</span>
-            <input id="agent-name" required maxlength="100">
-          </label>
-          <label>
-            <span id="agent-description-label">Description</span>
-            <textarea id="agent-description" rows="2" maxlength="500"></textarea>
-            <span id="agent-description-hint" class="model-note">Optional. Shown in the agent list; not sent to the model.</span>
-          </label>
-          <label>
-            <span id="agent-prompt-label">System prompt</span>
-            <textarea id="agent-prompt" rows="10" required maxlength="20000"></textarea>
-          </label>
-          <fieldset class="agent-behavior">
-            <legend id="agent-behavior-label">Chat behavior</legend>
-            <label class="model-filter"><input id="agent-stream" type="checkbox">
-              <span id="agent-stream-label">Stream replies</span></label>
-            <label class="model-filter"><input id="agent-memory" type="checkbox">
-              <span id="agent-memory-label">Use memory</span></label>
-            <label class="model-filter"><input id="agent-reasoning" type="checkbox">
-              <span id="agent-reasoning-label">Reasoning</span></label>
-            <label class="model-filter"><input id="agent-keep-reasoning" type="checkbox">
-              <span id="agent-keep-reasoning-label">Keep reasoning in memory</span></label>
+          <div id="agent-panel-basic" class="agent-panel">
+            <label>
+              <span id="agent-name-label">Name</span>
+              <input id="agent-name" required maxlength="100">
+            </label>
+            <label>
+              <span id="agent-description-label">Description</span>
+              <textarea id="agent-description" rows="2" maxlength="500"></textarea>
+              <span id="agent-description-hint" class="model-note">Optional. Shown in the agent list; not sent to the model.</span>
+            </label>
+            <label>
+              <span id="agent-prompt-label">System prompt</span>
+              <textarea id="agent-prompt" rows="10" required maxlength="20000"></textarea>
+            </label>
+          </div>
+          <div id="agent-panel-advanced" class="agent-panel" hidden>
+            <fieldset class="agent-behavior">
+              <legend id="agent-behavior-label">Chat behavior</legend>
+              <label class="model-filter"><input id="agent-stream" type="checkbox">
+                <span id="agent-stream-label">Stream replies</span></label>
+              <label class="model-filter"><input id="agent-memory" type="checkbox">
+                <span id="agent-memory-label">Use memory</span></label>
+              <label class="model-filter"><input id="agent-reasoning" type="checkbox">
+                <span id="agent-reasoning-label">Reasoning</span></label>
+              <label class="model-filter"><input id="agent-keep-reasoning" type="checkbox">
+                <span id="agent-keep-reasoning-label">Keep reasoning in memory</span></label>
+              <label>
+                <span id="agent-associative-label">Associative memory</span>
+                <select id="agent-associative">
+                  <option value="off" id="agent-associative-off">Off</option>
+                  <option value="llm" id="agent-associative-llm">Query from a small model</option>
+                  <option value="question_only" id="agent-associative-question">Search with your message</option>
+                </select>
+              </label>
+              <label>
+                <span id="agent-associative-execution-label">Associative search timing</span>
+                <select id="agent-associative-execution">
+                  <option value="parallel" id="agent-associative-parallel">In parallel with the reply</option>
+                  <option value="sequential" id="agent-associative-sequential">Before the reply</option>
+                </select>
+              </label>
+              <label>
+                <span id="agent-effort-label">Reasoning effort</span>
+                <select id="agent-effort">
+                  <option value="" id="agent-effort-default">Default</option>
+                  <option value="minimal">minimal</option>
+                  <option value="low">low</option>
+                  <option value="medium">medium</option>
+                  <option value="high">high</option>
+                  <option value="xhigh">xhigh</option>
+                  <option value="max">max</option>
+                </select>
+              </label>
+              <label class="model-filter"><input id="agent-tokens-enabled" type="checkbox">
+                <span id="agent-tokens-enabled-label">Limit reasoning tokens</span></label>
+              <label>
+                <span id="agent-reasoning-tokens-label">Reasoning tokens</span>
+                <input id="agent-reasoning-tokens" type="number" min="1" step="1" disabled>
+              </label>
+              <label>
+                <span id="agent-retained-label">Messages kept in context</span>
+                <input id="agent-retained" type="number" min="1" step="1">
+                <span id="agent-retained-hint" class="model-note">Empty keeps all messages.</span>
+              </label>
+            </fieldset>
+          </div>
+          <div id="agent-panel-tools" class="agent-panel" hidden>
             <label class="model-filter"><input id="agent-tools" type="checkbox">
               <span id="agent-tools-label">Use tools</span></label>
             <fieldset id="agent-tool-groups" class="model-capabilities">
               <legend id="agent-tool-groups-label">Tool groups</legend>
             </fieldset>
-            <label>
-              <span id="agent-associative-label">Associative memory</span>
-              <select id="agent-associative">
-                <option value="off" id="agent-associative-off">Off</option>
-                <option value="llm" id="agent-associative-llm">Query from a small model</option>
-                <option value="question_only" id="agent-associative-question">Search with your message</option>
-              </select>
-            </label>
-            <label>
-              <span id="agent-associative-execution-label">Associative search timing</span>
-              <select id="agent-associative-execution">
-                <option value="parallel" id="agent-associative-parallel">In parallel with the reply</option>
-                <option value="sequential" id="agent-associative-sequential">Before the reply</option>
-              </select>
-            </label>
-            <label>
-              <span id="agent-effort-label">Reasoning effort</span>
-              <select id="agent-effort">
-                <option value="" id="agent-effort-default">Default</option>
-                <option value="minimal">minimal</option>
-                <option value="low">low</option>
-                <option value="medium">medium</option>
-                <option value="high">high</option>
-                <option value="xhigh">xhigh</option>
-                <option value="max">max</option>
-              </select>
-            </label>
-            <label class="model-filter"><input id="agent-tokens-enabled" type="checkbox">
-              <span id="agent-tokens-enabled-label">Limit reasoning tokens</span></label>
-            <label>
-              <span id="agent-reasoning-tokens-label">Reasoning tokens</span>
-              <input id="agent-reasoning-tokens" type="number" min="1" step="1" disabled>
-            </label>
-            <label>
-              <span id="agent-retained-label">Messages kept in context</span>
-              <input id="agent-retained" type="number" min="1" step="1">
-              <span id="agent-retained-hint" class="model-note">Empty keeps all messages.</span>
-            </label>
-          </fieldset>
           </div>
           <div id="agent-panel-mcp" class="agent-panel" hidden>
             <p id="agent-mcp-note" class="model-note">MCP servers act on each user's own account. Connect accounts in Settings &gt; Connections.</p>
             <div id="agent-mcp-list"></div>
           </div>
           <div class="agent-actions">
-            <button id="agent-save" type="submit">Save agent</button>
+            <button id="agent-save" type="submit" class="primary">Save agent</button>
             <button id="agent-delete" type="button">Delete agent</button>
           </div>
         </form>
@@ -161,7 +185,7 @@
   <dialog id="settings-dialog" aria-labelledby="settings-title">
     <div class="model-heading">
       <h2 id="settings-title">User settings</h2>
-      <button id="settings-close" type="button">Close</button>
+      <button id="settings-close" type="button" class="icon-btn" title="Close" aria-label="Close"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
     </div>
     <p id="settings-note" class="model-note">Settings are shared with Telegram. Chats without a selected model use your current defaults.</p>
     <form id="settings-form">
@@ -174,6 +198,13 @@
       <p><span id="settings-stt-label">Default STT model</span><br>
         <button id="settings-stt" type="button" aria-haspopup="dialog" disabled></button>
       </p>
+      <label for="settings-theme"><span id="settings-theme-label">Theme</span>
+        <select id="settings-theme">
+          <option value="system" id="settings-theme-system">System</option>
+          <option value="light" id="settings-theme-light">Light</option>
+          <option value="dark" id="settings-theme-dark">Dark</option>
+        </select>
+      </label>
       <label for="settings-language"><span id="settings-language-label">Alerts and errors</span>
         <select id="settings-language">
           <option value="en">English</option>
@@ -181,29 +212,29 @@
         </select>
       </label>
       <p id="settings-error" class="error" role="alert"></p>
-      <button id="settings-save" type="submit">Save settings</button>
+      <button id="settings-save" type="submit" class="primary">Save settings</button>
     </form>
-    <section id="connections" class="connections" aria-labelledby="connections-title">
-      <h3 id="connections-title">Connections</h3>
+    <details id="connections" class="connections">
+      <summary><span id="connections-title">Connections</span> <span id="connections-count" class="model-note"></span></summary>
       <p id="connections-note" class="model-note">Connect your own account for each service your agents can use. Every user connects separately.</p>
       <p id="connections-browser-note" class="model-note">Sign-in opens in a browser on the computer running RECALL.</p>
       <ul id="connection-list"></ul>
       <p id="connections-error" class="error" role="alert"></p>
-    </section>
+    </details>
   </dialog>
 
   <dialog id="model-dialog" aria-labelledby="model-title">
     <div class="model-heading">
       <h2 id="model-title">OpenRouter models</h2>
-      <button id="model-close" type="button" aria-label="Close model selector">Close</button>
+      <button id="model-close" type="button" class="icon-btn" title="Close" aria-label="Close model selector"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
     </div>
     <p id="model-subtitle" class="model-subtitle">Choose a model for this chat.</p>
     <button id="model-inherit" type="button">Use user default</button>
     <div class="model-toolbar">
       <input id="model-search" type="search" placeholder="Search by model name or ID" aria-label="Search models">
       <button id="model-favorites-only" class="model-favorites-toggle" type="button"
-        aria-label="Favorites only" aria-pressed="false" title="Show favorites only">&#9734;</button>
-      <button id="model-refresh" type="button">Refresh</button>
+        aria-label="Favorites only" aria-pressed="false" title="Show favorites only"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></button>
+      <button id="model-refresh" type="button" class="icon-btn" title="Refresh" aria-label="Refresh"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg></button>
     </div>
     <div class="model-options">
       <label id="model-zdr-label" class="model-filter" title="Resets to checked each time you open the selector">
