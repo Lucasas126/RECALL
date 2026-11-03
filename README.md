@@ -11,9 +11,10 @@ main ideas:
     - asks a subagent to summarize the query in 3-5 simple words
     - those words are vectorized and searched within a vector database for related information
     - the agent is suggested the top n results from that vector query as suggestions so they can search and use them to respond to the user
-- vector database with multiple sources:
-    - agent's mind palace
-    - user-provided file folder
+- vector database with multiple sources, indexed incrementally in the background (see [docs/config.md](docs/config.md#memory-index)):
+    - agent's mind palace and skills
+    - its conversations (one chunk per exchange)
+    - user-provided folders (`folders:` in the agent config, e.g. an Obsidian vault)
 - tools for editing/reading from a user's obsidian vault with two modes:
     - auto mode: the agent can edit/create files directly in the vault
     - safe mode: the agent should never be able to directly edit an obsidian file, it should only be given the impression that it does. That is, if the agent tries to edit/create vault-path/hobbies/arte.md, a copy should be created in vault-path/ai-agent/hobbies/arte.md. And when it tries to read an obsidian file (for example, that same file) it should be given the version edited by them, since it will be the last one they're aware of.

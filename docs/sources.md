@@ -8,19 +8,17 @@ the data plane (L1) is a set of **sources**: named, typed locations the agent ca
 |---|---|---|---|---|
 | `mind_palace` | the agent | read/write | yes | none |
 | `conversations` | the system | read (append-only) | yes | none |
-| `agent` | the agent | read (writes through its methods) | no | none |
+| `agent` | the agent | read (writes through its methods) | `skills/` only | none |
 | `dream` | the system | none for tools | no | none |
-| `vault` | the user | read, or read/write with `vault_edit` | no | none (overlay planned) |
+| `<folder name>` | the user | read with `folders_read`, read/write with `folders_edit` unless `read_only` | when `indexed` (default) | none (overlay planned) |
 | `obsidian` | the user | read/write | yes | safe or auto |
-| `user_folder` | the user | read-only | yes | none |
 
 - **mind_palace**: the agent's private space. obsidian-like structure (folders, frontmatter, tags). the user does not normally read it.
 - **conversations**: chats with the user, written by the system, never edited by the agent. stored as one JSONL file per chat, `conversations:<chat_id>.jsonl` (one turn per line, timestamped). a chat title is derived from its first user message. assistant turns may carry `reasoning` and `actions` (the tool calls of that turn, with truncated results) for display. the agent can read and search all of its chats. chats are created, appended to and deleted through `ConversationsSource` methods (`create`, `append`, `delete_chat`), not through the generic write/delete. chat ids match `[A-Za-z0-9_-]{1,64}`; new ids look like `20261030-114140-3ad2f3`. older per-day files (`2026-08-31.jsonl`) are valid chats whose id is the day.
-- **agent**: the agent's own files, rooted at `data/<user_id>/<agent_id>/` but limited to `SOUL.md`, `soul_history/`, `memories/` and `skills/` (`AgentFilesSource`). tools read it as `agent:SOUL.md`, `agent:skills/<name>/SKILL.md`, ...; changes go through the `self` tools and the web API, which keep the SOUL history, memory limits and skill frontmatter valid.
+- **agent**: the agent's own files, rooted at `data/<user_id>/<agent_id>/` but limited to `SOUL.md`, `soul_history/`, `memories/` and `skills/` (`AgentFilesSource`). tools read it as `agent:SOUL.md`, `agent:skills/<name>/SKILL.md`, ...; changes go through the `self` tools and the web API, which keep the SOUL history, memory limits and skill frontmatter valid. only `skills/` is indexed (read-only through the index), so a relevant skill surfaces by itself; `SOUL.md` and the memory files are always in the system prompt and are not indexed.
 - **dream**: dream mode bookkeeping in `dream/` (`review_state.json`, `sessions/`, `.lock`), used by the dream runner and the service only (`DreamStateSource`); listing or reading it through tools is refused.
-- **vault**: a folder set with `vault:` in the agent config, registered only when a vault tool group is enabled (chats) or `dream.tools` includes `vault` (dreams, always read-only). the folder must exist; hidden entries are skipped. see [dream mode](dream.md#vault).
-- **obsidian**: the user's vault, bound per agent (see agents.md). accessed through the safe/auto overlay (see overlay.md). planned; the simple `vault` source above is implemented.
-- **user_folder**: extra reference material the user drops in. read-only.
+- **user folders** (`FolderSource`): each entry of the agent's `folders:` list (name, path, `indexed`, `read_only`) is a source named after the folder, e.g. `notes:Projects/plan.md`. every configured folder is registered, so indexed ones feed the index; tools can read them only with a folder tool group (`folders_read` / `folders_edit` in chats, the `folders` dream tool group in dreams) and write them only with `folders_edit` in chats, never in dreams and never when `read_only`. the folder must exist; hidden entries are skipped by listings, searches, reads and the index. see [user folders](config.md#user-folders).
+- **obsidian**: the user's vault, bound per agent (see agents.md). accessed through the safe/auto overlay (see overlay.md). planned; a user folder pointing at the vault is the implemented way to use one today.
 
 Cancelled agent generations append an assistant turn with `interrupted: true`,
 the emitted partial `content` (possibly empty), partial `reasoning` and completed
@@ -61,6 +59,7 @@ every memory is addressed as `source:relative/path`:
 mind_palace:hobbies/arte.md
 obsidian:projects/recall.md
 conversations:2026-08-31.jsonl
+notes:Projects/plan.md
 ```
 
 - the prefix before `:` is the source name; the rest is a path relative to that source's root.
@@ -83,10 +82,10 @@ a capability never opens files directly — it always asks the registry, so isol
 
 ## indexing
 
-sources marked `indexed: true` feed the shared vector index. each chunk carries metadata: `agent_id`, `source`, `path`, `md5`, and (for obsidian-like sources) `tags`. the index is **namespaced per agent** so retrieval never crosses agents (see agents.md). the overlay is applied before indexing, so vectors reflect the agent's view, not the raw user files.
+sources marked `indexed` feed the agent's vector index (`VectorIndex`, one Chroma collection per agent in `data/<user_id>/<agent_id>/.index`, so retrieval never crosses agents): the mind palace, `agent:skills/`, the conversations and the indexed user folders. each chunk carries `source`, `address`, `context` (heading path, or chat title and date) and, for chats, `chat`. what has been indexed (each file's `(mtime, size)` and MD5, each chat's indexed byte offset and turn count) is kept in `.index/manifest.sqlite3`, so a reconcile only stats files and a chat only embeds its new exchanges (chunk ids `conversations:<chat_id>::turn<N>`). the index reads files through the source's path guard (`Source.index_scan`, `Source.resolve`), not through the tools' read permission, so a folder with no folder tool group is still indexed. see [memory index](config.md#memory-index) for the chunking, the update schedule and cross-process locking. planned: tags in chunk metadata, and indexing obsidian through the overlay so vectors reflect the agent's view.
 
 ## status
 
-implemented: the `SourceRegistry` (address resolution `source:path` + traversal guard), the `mind_palace`, `conversations`, `agent`, `dream` and `vault` sources, and read/write/list/delete over them. `list_memories` without a source lists only readable sources. source roots are derived by convention as `data/<user_id>/<agent_id>/<source>` (per-agent source config is planned).
+implemented: the `SourceRegistry` (address resolution `source:path` + traversal guard), the `mind_palace`, `conversations`, `agent`, `dream` and user folder sources, read/write/list/delete over them, and the vector index (`query_memory`, associative memory). `list_memories` without a source lists only readable sources. the agent's own source roots are derived by convention as `data/<user_id>/<agent_id>/<source>`; user folders come from the agent's `folders:` list.
 
-planned: the `obsidian` source + safe/auto overlay, the `user_folder` source, and the vector index (`query_memory`, tags) described above.
+planned: the `obsidian` source + safe/auto overlay, and tags in the index.

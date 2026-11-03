@@ -264,8 +264,13 @@ The system prompt tells the model this can happen. Agents with
 waits for the search (still cancellable), emits its final `memory` event and only then
 calls the model, so nothing is paused or skipped for arriving late, and the prompt
 omits the notice. Calls without a cancellation token and `stream=False` (the
-synchronous path) cannot be paused either, so they wait for the search first. The search only sees the history from before the current message and ignores an
-index hit on that message itself. `CancellationToken._link` lets the search stop one
+synchronous path) cannot be paused either, so they wait for the search first. The search only sees the history from before the current message and never
+returns chunks of the chat being answered (`recall(..., chat_id=...)` passes it to
+`VectorIndex.query(exclude_chat=...)`). The lookup itself never updates the index: it
+queries what is already indexed, and the index is kept current in background workers
+(the chat's new exchange and the files the turn wrote, queued after each reply; a
+stat-only reconcile at chat and dream start; user folders on an interval), see
+[memory index](config.md#memory-index). `CancellationToken._link` lets the search stop one
 model call without cancelling the turn. Status: implemented; the web and Telegram
 channels receive the `memory` events from the service, the CLI prints the final one as
 a note. The web chat shows them as a small pill above the reply: a pulsing dot while

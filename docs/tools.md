@@ -7,7 +7,7 @@ Implementations are grouped under `src/agent/toolsets/`: `memory.py` contains
 memory search, listing and reading; `tags.py` contains tag lookup;
 `editing.py` contains memory mutations; `web.py` contains public web
 search and retrieval; `self_files.py` contains the tools that edit the agent's
-own files; `vault.py` contains the vault tools; and `dream.py` contains the
+own files; `folders.py` contains the user folder tools; and `dream.py` contains the
 review-queue tools of dream sessions. Shared source checks are in `common.py`.
 
 ## Tool-group catalog
@@ -23,15 +23,20 @@ The web **Agents** tab configures these groups for each agent:
   final result), `skill_view`, `skill_manage` (create, edit, patch, delete,
   write_file, remove_file) and `soul_edit` (replace or patch `SOUL.md`, saving
   the previous version). Changes apply to new chats.
-- `vault_read`: `vault_list`, `vault_read` and `vault_search` over the agent's
-  `vault` folder.
-- `vault_edit`: the read tools plus `vault_write`, `vault_append`, `vault_edit`,
-  `vault_move` and `vault_delete`.
+- `folders_read`: `folder_list`, `folder_read` and `folder_search` over every
+  folder in the agent's `folders:` list. paths take the folder name as the source
+  prefix (`notes:Projects/plan.md`); with a single folder the prefix may be omitted.
+- `folders_edit`: the read tools plus `folder_write`, `folder_append`,
+  `folder_edit`, `folder_move` and `folder_delete`, refused on folders marked
+  `read_only`.
 
 Without `tool_groups`, agents get `memory_read`, `memory_edit`, `web` and
 `self`. `skill_view` is added whenever the agent has skills, even without
-`self`. The vault groups need `vault` set in the agent config; the vault
-becomes a `vault:` source, writable only with `vault_edit`.
+`self`. The folder groups need at least one entry in `folders:`; each folder is a
+source named after it, readable by the generic memory tools too while a folder
+group is enabled and writable only with `folders_edit` (and not `read_only`).
+Edits made by tools (memory, folder and `skill_manage`) are reindexed in the
+background after the reply, together with the chat's new exchange.
 
 The catalog is available through `GET /api/tool-groups`. Groups are an
 agent-level selection and do not bypass source isolation or the effective mode
@@ -61,8 +66,8 @@ recall_mode
 query_memory
 - parameters: query (str), top_k (int), sources (list of str, optional)
 - agent description: performs a vectorial (semantic) search on your memory to find relevant information based on the query. optionally restrict it to specific sources.
-- background behaviour: a vectorial search is performed across the configured sources (mind palace, conversations, obsidian, user folder) to retrieve the top_k most relevant chunks. if sources is given, only those are searched.
-- return: the top_k most relevant chunks, each with its content, score and origin (source + path) so the result can be read or edited afterwards.
+- background behaviour: a vectorial search over the agent's index (mind palace, `agent:skills/`, conversations and indexed user folders) returns the top_k most similar chunks. it never updates the index; changes are indexed in the background (see [memory index](config.md#memory-index)). implemented without the `sources` filter.
+- return: the top_k most relevant chunks, each as `[address > heading path] (score)` followed by the chunk text, so the result can be read or edited afterwards.
 
 
 list_memories
@@ -164,6 +169,6 @@ in recall mode the subagent keeps only search/read tools — it can look things 
 
 dream sessions get the review-queue tools (`dream_pending`, `dream_read_chat`,
 `dream_mark_reviewed`), the memory read tools, the edit tools (writes succeed
-only in `mind_palace`), the `self` tools, and optionally `vault_list`,
-`vault_read`, `vault_search` (read-only) and the web tools, per `dream.tools`.
+only in `mind_palace`), the `self` tools, and optionally `folder_list`,
+`folder_read`, `folder_search` (read-only) and the web tools, per `dream.tools`.
 No MCP tools. See [dream mode](dream.md#dream-toolset).

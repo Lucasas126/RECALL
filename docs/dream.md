@@ -5,7 +5,7 @@ user and curates its own files: personality (`SOUL.md`), memories, skills, mind
 palace and journal. it is the deeper, batch version of a "self-improvement
 review": nothing is answered to the user during a dream, the agent only learns.
 
-Status: **implemented** (files, prompt assembly, `self` and vault tool groups,
+Status: **implemented** (files, prompt assembly, `self` and folder tool groups,
 review queue, runner, schedule, commands, Telegram notification, the web API and
 the [web UI](#web-ui) pages). this page replaces the earlier
 separate "sleep mode" and "dream mode" ideas in the README; they are one feature.
@@ -163,9 +163,9 @@ read (scoped to the agent, existing guards apply):
   turns of context; long chats are read in parts), `dream_mark_reviewed`
 - the memory read tools (`query_memory`, `search`, `list_memories`, `read`,
   tags) over the palace, conversations and `agent:` files
-- the agent's vault (a folder path set in its config, typically an Obsidian
-  vault), **read-only** in dreams, when configured and the `vault` dream tool
-  group is enabled (see [vault](#vault))
+- the agent's user folders (set in its config, typically an Obsidian vault),
+  **read-only** in dreams, when configured and the `folders` dream tool group is
+  enabled (see [user folders](#user-folders))
 - web search / retrieve when enabled
 
 write (only the agent's own files; everything else is refused):
@@ -181,7 +181,12 @@ write (only the agent's own files; everything else is refused):
 
 no tools that act outside the agent: no MCP actions, no messages to the user.
 the toolset is configurable per agent within this set: `dream.tools` adds `web`
-and/or `vault` reads.
+and/or `folders` reads.
+
+the dream's `query_memory` searches the same index as the chats and never updates
+it: a dream start queues a stat-only reconcile of the agent's own sources, and the
+end of the session queues another one so the notes and skills it wrote are indexed
+for the next chats (see [memory index](config.md#memory-index)).
 
 ### default dream prompt (summary)
 
@@ -190,7 +195,7 @@ and/or `vault` reads.
 - update `USER.md` / `MEMORY.md` (compact, durable facts only), create or
   improve skills for repeated procedures, write longer material to the palace.
 - adjust `SOUL.md` only for lasting changes in how to behave; small, explained.
-- look things up (palace, vault, web) when it helps understand a topic the user
+- look things up (palace, user folders, web) when it helps understand a topic the user
   cares about.
 - keep `questions.md`: things it is curious about, with why it asks. be curious
   and creative, not intrusive: few, worthwhile questions; remove answered ones.
@@ -200,16 +205,19 @@ and/or `vault` reads.
 the prompt is configurable per agent (`dream.prompt`); the default lives in the
 code and is used when it is empty.
 
-### vault
+### user folders
 
-an agent can have one `vault` path (any folder, usually the user's Obsidian
-vault) exposed as the `vault:` source with the usual path guard. in chats, the
-`vault_read` tool group gives `vault_list`/`vault_read`/`vault_search` and
-`vault_edit` adds `vault_write`/`vault_append`/`vault_edit`/`vault_move`/
-`vault_delete`. in dreams the vault is always read-only. the folder must exist
-(saving a missing one is a `400`); hidden entries (`.obsidian/`, `.git/`) are
-skipped by listings and searches. the vault is not indexed. the safe/auto
-[overlay](overlay.md) is still planned.
+an agent can have several named `folders` (any folder, usually the user's
+Obsidian vault), each exposed as the source `<name>:` with the usual path guard
+(see [user folders](config.md#user-folders)). in chats, the `folders_read` tool
+group gives `folder_list`/`folder_read`/`folder_search` over every folder and
+`folders_edit` adds `folder_write`/`folder_append`/`folder_edit`/`folder_move`/
+`folder_delete`, except on folders marked `read_only`. in dreams the folders are
+always read-only, and readable only with the `folders` dream tool group. the
+folders must exist (saving a missing one is a `400`); hidden entries
+(`.obsidian/`, `.git/`) are skipped by listings, searches and the index. folders
+with `indexed: true` feed associative memory. the safe/auto [overlay](overlay.md)
+is still planned.
 
 ### questions for the user
 
@@ -257,7 +265,7 @@ form (`src/web/static`):
 - **Dream**: schedule (manual only, every N hours or daily at HH:MM, plus the
   enabled switch), model (free text or the OpenRouter model picker; empty = the
   user's chat model), reasoning effort, `max_steps`, `max_tokens`, `max_minutes`, dream read
-  tools, vault folder, memory limits, the dream prompt (the default prompt is
+  tools, memory limits, the dream prompt (the default prompt is
   the placeholder; it can be copied for editing or reset to empty) and the
   Telegram notification. API validation errors are shown under the form.
 - **Dream sessions**: a status box (running or not, "cancelling…" after a
@@ -294,10 +302,10 @@ dream:
   max_steps: 60
   max_tokens: 500000         # total input+output for the session
   max_minutes: 5             # wall-clock limit; wrap-up warning 1 minute before, then force-closed
-  tools: [web, vault]        # optional read groups; palace, chats and own-file writes always on
+  tools: [web, folders]      # optional read groups; palace, chats and own-file writes always on
   prompt: ""                 # empty = built-in default
   notify_telegram: false     # "dream session completed" + where to see it in the web
-vault: null                  # folder path for the vault source (e.g. an Obsidian vault)
+folders: []                  # user folders, edited in the agent's Folders tab (see config.md#user-folders)
 memory_limits:
   memory_chars: 2200
   user_chars: 1400
@@ -310,7 +318,8 @@ session start; before the first one it counts from `scheduled_since`, the moment
 a process first saw the schedule, so enabling a schedule never starts a session
 at once. scheduled runs are skipped while nothing is pending.
 
-`tools` defaults to `[web, vault]`; web needs Tavily and vault needs `vault`.
+`tools` defaults to `[web, folders]`; web needs Tavily and folders needs at least one
+entry in `folders`.
 `reasoning_effort: null` sends no reasoning request. `max_steps` is 1–500 and
 `max_tokens` 1000–10000000, `max_minutes` 1–120; limits are 100–50000 chars.
 
@@ -328,8 +337,8 @@ routes (`404` for agents the user does not own):
 
 | method | route | result |
 | --- | --- | --- |
-| `GET` | `/api/agents/<id>/dream/settings` | `{dream, vault, memory_limits, default_prompt}` |
-| `PUT` | `/api/agents/<id>/dream/settings` | saves `{dream, vault, memory_limits}`; `422` for both schedules, `400` for a missing vault folder |
+| `GET` | `/api/agents/<id>/dream/settings` | `{dream, memory_limits, default_prompt}` |
+| `PUT` | `/api/agents/<id>/dream/settings` | saves `{dream, memory_limits}`; `422` for both schedules or an unknown dream tool group |
 | `GET` | `/api/agents/<id>/dream/status` | `{running, cancelling, current_session_id, last_session, schedule: {enabled, every_hours, daily_at, next_run}, last_started_at, last_finished_at, pending_chats}` |
 | `POST` | `/api/agents/<id>/dream/start` | `202` with `{status: started \| started_nothing_pending \| already_running, session_id, pending}` |
 | `POST` | `/api/agents/<id>/dream/cancel` | `202` with `{status: cancelling \| not_running, session_id}`; returns at once, the session ends after its running tool call (see [time limit and cancel](#time-limit-and-cancel)) |

@@ -9,7 +9,7 @@ an agent instance is defined by:
 - **identity**: id, name, and its own files: `SOUL.md` (personality), memories and skills (see [dream mode](dream.md#per-agent-files)).
 - **data scope**: its own mind palace, its bound obsidian vault(s), its conversations, its user folders.
 - **tool policy**: which tools it is allowed to use.
-- **config**: chat behavior, its vault folder, dream mode (schedule, model, limits).
+- **config**: chat behavior, its user folders (`folders:`), dream mode (schedule, model, limits).
 
 Model IDs belong to the user, not the agent. The user's LLM/STT defaults apply
 unless a chat has an explicit override; embeddings also use the user
@@ -30,7 +30,7 @@ isolation is enforced in one place: the per-agent `SourceRegistry` (path resolut
 ## tool separation
 
 - each agent has a **tool-group policy**: a selection from the shared tool-group catalog.
-- the available groups are memory read-only, memory read and edit, web search, self (edit its own SOUL, memories and skills), vault read-only and vault read and edit.
+- the available groups are memory read-only, memory read and edit, web search, self (edit its own SOUL, memories and skills), folders read-only and folders read and edit.
 - each agent also chooses which shared **MCP servers** it uses (for example Google Calendar), optionally read-only, with a tool selection and extra instructions. The tools act on the agent's user's own connected account; see [MCP servers](mcp.md).
 - legacy `allow`/`deny` tool lists are still accepted as an additional per-tool filter.
 - dream sessions use their own toolset (see [dream mode](dream.md#dream-toolset)); recall mode (planned) would restrict the set further.
@@ -70,7 +70,7 @@ dream: { enabled: true, every_hours: 6 }
 ```
 
 the `sources` block is a sketch; today source roots follow the
-`data/<user_id>/<agent_id>/<source>` convention and only `vault` is configurable.
+`data/<user_id>/<agent_id>/<source>` convention and only the user `folders:` list is configurable.
 
 ## resolution order for a tool call
 

@@ -682,6 +682,58 @@ neither. If the env var is unset or the query request fails, the error is logged
 turn continues without associative memory and the indicator shows "skipped".
 `context_messages` (0-100) is how many recent messages the query model sees,
 `top_n` (1-20) the fragments injected, and `score_threshold` (0-1) the minimum similarity.
+Each fragment is shown with its address and heading path (or chat title and date) and
+up to 400 characters of its text, cut at a sentence end when possible. Chunks of the
+chat being answered are never suggested: that chat is already in the context.
+
+### memory index
+
+The search runs over the agent's vector index (`data/<user_id>/<agent_id>/.index`),
+which covers the mind palace, the agent's skills (`agent:skills/**`), its conversations
+and every user folder with `indexed: true` (see [user folders](#user-folders)).
+`SOUL.md`, `MEMORY.md` and `USER.md` are not indexed: they are in every system prompt.
+Hidden entries (names starting with `.`) are skipped. The search never updates the
+index; it queries what is already indexed, which is kept current in the background:
+
+- after each reply: the chat's new exchanges and the files the turn's tools wrote;
+- when a chat opens and when a dream starts: a stat-only reconcile of the agent's own
+  sources (unchanged files are never read; deleted files and chats are dropped);
+- user folders: when a chat opens or the index worker is idle, once
+  `folders_reconcile_minutes` have passed since the last scan, and on demand with
+  **Reindex** in the agent's Folders tab.
+
+The framework-wide settings live in the `index` block of the root `settings.yaml`:
+
+```yaml
+index:
+  dir_name: .index          # index folder inside each agent's data folder
+  collection: memory        # Chroma collection name
+  file_types: [txt, md, jsonl]  # files the text search tools read; md and txt are indexed
+  chunk_tokens: 400         # target chunk size, in estimated tokens (characters / 4)
+  max_chunk_tokens: 600     # larger paragraphs and code blocks are split
+  overlap_tokens: 60        # repeated at the start of the next chunk of the same section
+  embed_batch: 64           # texts per embeddings request
+  folders_reconcile_minutes: 10
+```
+
+Markdown is split by headings, then packed by paragraphs; fenced code blocks are kept
+whole unless they exceed `max_chunk_tokens`. Each chunk starts with its context
+(`<source>:<path> > <title> > <heading path>`). A conversation chunk is one exchange
+(the user message and the reply), prefixed with the chat title and date. Skills are
+one chunk per section, prefixed with the skill name and description.
+
+The collection stores the embeddings model and the chunking scheme (a version plus
+the three sizes above). When either differs from the current configuration (for
+example after changing `models.embeddings` or a chunk size), the index is dropped and
+rebuilt in the background on the next chat or dream start; searches return only what
+the new index already holds until it is complete. The web UI shows the index status
+and can force a rebuild (see [managing agents](#managing-agents)).
+
+The web and Telegram processes may share a data folder. Chroma's persistent client is
+not safe across processes, so every index access holds a short cross-process lock
+(`.index/store.lock`) and reloads Chroma when another process wrote since; embedding
+work holds a second lock (`.index/write.lock`) per file or chat. See the module notes
+in `src/core/index.py`.
 
 ## prompt caching
 
@@ -822,7 +874,7 @@ to 500 characters.
 The shared tool-group catalog is returned by `GET /api/tool-groups` (each group
 with `id`, `name`, `description` and `default`) and is selectable in the web
 **Agents** tab. Agent YAML stores the selection as `chat_config.tool_groups`;
-omitting it selects the groups marked `default`: every group except the vault
+omitting it selects the groups marked `default`: every group except the folder
 ones, which are always an explicit choice.
 Existing `allow` and `deny` lists remain supported as an additional per-tool
 filter.
@@ -865,7 +917,7 @@ chat_config:
   keep_reasoning_in_memory: false    # store the thinking in context/history
   conversation_messages_retained: 20 # at most N messages kept in context; cuts go below N (see prompt caching)
   tools: true                       # enable the selected tool groups
-  tool_groups: [memory_read, memory_edit, self]  # memory_read, memory_edit, web, self, vault_read, vault_edit
+  tool_groups: [memory_read, memory_edit, self]  # memory_read, memory_edit, web, self, folders_read, folders_edit
   mcp:                               # MCP servers enabled for this agent (see mcp.md)
     google_calendar: {tools: null, read_only: false, instructions: ""}
 dream:                               # background self-review sessions (see dream.md)
@@ -877,10 +929,14 @@ dream:                               # background self-review sessions (see drea
   max_steps: 60                      # model calls per session
   max_tokens: 500000                 # input + output tokens per session
   max_minutes: 5                     # wall-clock limit (1-120); wrap-up warning 1 minute before
-  tools: [web, vault]                # optional read groups for dreams
+  tools: [web, folders]              # optional read groups for dreams
   prompt: ""                         # empty = built-in default
   notify_telegram: false
-vault: null                          # folder exposed as the `vault` source (e.g. an Obsidian vault)
+folders:                             # user folders, each exposed as the source `<name>:` (see user folders)
+  - name: notes                      # ^[a-z0-9_-]{1,32}$, unique, not a built-in source name
+    path: /path/to/obsidian-vault    # must exist; never created
+    indexed: true                    # feeds associative memory and query_memory (default true)
+    read_only: false                 # never writable, whatever the tool groups (default false)
 memory_limits:                       # chars of MEMORY.md / USER.md, injected in every prompt
   memory_chars: 2200
   user_chars: 1400
@@ -890,7 +946,35 @@ the agent's personality lives only in `data/<user_id>/<agent_id>/SOUL.md` (a
 missing file is an empty personality; the agent YAML has no personality field),
 with its memories and skills next to it; see [dream mode](dream.md#per-agent-files) for the
 layout and the prompt assembly. when `tool_groups` is omitted, the default is
-`[memory_read, memory_edit, web, self]`; vault groups are always explicit.
+`[memory_read, memory_edit, web, self]`; folder groups are always explicit.
+
+### user folders
+
+`folders` lists folders on the machine running RECALL (an Obsidian vault, a project
+notes folder) that one agent may use. each folder becomes a source named after it, so
+`notes:Projects/plan.md` addresses a file inside the `notes` folder, with the usual path
+guard; hidden entries (`.obsidian/`, `.git/`, `.trash/`) are left out of listings,
+searches, reads and the index.
+
+- names match `^[a-z0-9_-]{1,32}$`, are unique within the agent and cannot be a built-in
+  source (`mind_palace`, `conversations`, `agent`, `dream`); invalid names are a `422`.
+- the path must be an existing folder: saving an agent with a missing one is a `400`
+  naming the folder. When an agent loads and a folder is missing (an unmounted drive, a
+  moved vault), that folder is skipped with a warning in the log and the agent works
+  without it; its indexed chunks are kept.
+- `indexed: true` (default) adds the folder to the [memory index](#memory-index).
+- in chats, `folders_read` gives `folder_list`, `folder_read` and `folder_search` over every
+  folder, and `folders_edit` adds `folder_write`, `folder_append`, `folder_edit`,
+  `folder_move` and `folder_delete`; with either group the generic memory tools can also
+  read the folders, and with `folders_edit` they can write them. `read_only: true` refuses
+  every write to that folder, whatever the groups. without a folder group the folders are
+  still indexed but no tool can read them.
+- dreams only read folders, and only with the `folders` dream tool group.
+
+the former single `vault: <path>` key was removed; an agent file that still has it is
+rejected with a message pointing to `folders`. move the path to
+`folders: [{name: vault, path: <path>}]` and rename the `vault_read` / `vault_edit` tool
+groups to `folders_read` / `folders_edit` and the `vault` dream tool group to `folders`.
 
 ## loading
 
@@ -898,13 +982,13 @@ layout and the prompt assembly. when `tool_groups` is omitted, the default is
 
 checks today: the agent belongs to the user, and the provider key env var (if configured) is set.
 
-planned: a `defaults.yaml < user.yaml < agent.yaml` merge, resource/vault
+planned: a `defaults.yaml < user.yaml < agent.yaml` merge, resource/folder
 references, and a `ConfigStore` with a channel→user index for routing incoming
 messages.
 
 ## managing agents
 
-the web **Agents** tab lists the user's agents in the sidebar (name and description) and edits the name, `description` and all `chat_config` options (associative memory is a mode selector plus a timing selector, the latter disabled while the mode is off). a new agent's `id` is derived from its name (lowercase, accents removed, non-alphanumeric characters replaced by `-`) and is not editable from the form. the same operations are available as routes:
+the web **Agents** tab lists the user's agents in the sidebar (name and description) and edits the name, `description`, all `chat_config` options (associative memory is a mode selector plus a timing selector, the latter disabled while the mode is off) and, in the **Folders** tab, the folder list (name, path, indexed, read-only) with the agent's memory index status (sources, files, chats and chunks indexed, last reconciles, rebuilding or indexing) and **Reindex** / **Rebuild from scratch** buttons. a new agent's `id` is derived from its name (lowercase, accents removed, non-alphanumeric characters replaced by `-`) and is not editable from the form. the same operations are available as routes:
 
 | method | route | result |
 | --- | --- | --- |
@@ -918,6 +1002,8 @@ the web **Agents** tab lists the user's agents in the sidebar (name and descript
 | `GET` | `/api/agents/<agent_id>` | one agent's configuration |
 | `PUT` | `/api/agents/<agent_id>` | replaces the agent; the body `id` may differ, which renames it |
 | `DELETE` | `/api/agents/<agent_id>` | removes the agent from `user.yaml` and deletes its file (`204`) |
+| `GET` | `/api/agents/<agent_id>/index` | memory index status: `sources`, `files`, `chats`, `chunks`, `last_reconcile`, `folders_reconciled_at`, `rebuilding`, `busy`, `model`, `error` |
+| `POST` | `/api/agents/<agent_id>/index/reindex` | queues a reconcile of every source, folders included (`202`); body `{"full": true}` drops the index and rebuilds it |
 
 dream settings, SOUL (with history), memories and dream sessions have their own
 routes, listed in [dream mode](dream.md#web-api).
