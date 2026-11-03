@@ -6,6 +6,10 @@ dream:                 # background self-review sessions (see docs/dream.md); ma
   every_hours: null
   daily_at: null       # e.g. "04:00" (local time); do not set it together with every_hours
   max_minutes: 5       # wall-clock limit per session (1-120); the agent is told to wrap up 1 minute before
-  tools: [web, vault]
+  tools: [web, folders]  # dreams read the user folders (never write them)
   notify_telegram: false
-vault: null            # e.g. a folder path to an Obsidian vault, exposed as the vault source
+folders: []            # user folders, each a source named after it; e.g.
+#  - name: notes        # addresses notes:path/note.md; ^[a-z0-9_-]{1,32}$
+#    path: /path/to/obsidian-vault
+#    indexed: true      # feeds associative memory (default true)
+#    read_only: false   # never writable, whatever the tool groups

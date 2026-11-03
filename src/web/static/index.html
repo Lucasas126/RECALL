@@ -95,6 +95,7 @@
             <button id="agent-tab-advanced" type="button" aria-pressed="false">Advanced</button>
             <button id="agent-tab-tools" type="button" aria-pressed="false">Tools</button>
             <button id="agent-tab-mcp" type="button" aria-pressed="false">MCP</button>
+            <button id="agent-tab-folders" type="button" aria-pressed="false">Folders</button>
             <button id="agent-tab-soul" type="button" aria-pressed="false">Soul &amp; memory</button>
             <button id="agent-tab-dream" type="button" aria-pressed="false">Dream</button>
             <button id="agent-tab-sessions" type="button" aria-pressed="false">Dream sessions</button>
@@ -177,6 +178,22 @@
           <div id="agent-panel-mcp" class="agent-panel" hidden>
             <p id="agent-mcp-note" class="model-note">MCP servers act on each user's own account. Connect accounts in Settings &gt; Connections.</p>
             <div id="agent-mcp-list"></div>
+          </div>
+          <div id="agent-panel-folders" class="agent-panel" hidden>
+            <p id="agent-folders-note" class="model-note">Folders on the computer running RECALL, such as an Obsidian vault. Each one is a source named after it (name:path/note.md). Chats reach them with the folder tool groups; dreams only read them.</p>
+            <p id="agent-folders-flags-note" class="model-note">Indexed folders feed associative memory and query_memory. A read-only folder is never edited, whatever the tool groups.</p>
+            <div id="agent-folder-list" class="folder-list"></div>
+            <div><button id="agent-folder-add" type="button">Add folder</button></div>
+            <section id="index-status" class="index-status" aria-live="polite">
+              <h4 id="index-title">Memory index</h4>
+              <p id="index-status-text" class="model-note"></p>
+              <p id="index-status-error" class="error" role="alert"></p>
+              <div class="agent-actions">
+                <button id="index-reindex" type="button">Reindex</button>
+                <button id="index-rebuild" type="button">Rebuild from scratch</button>
+              </div>
+              <p id="index-hint" class="model-note">Reindex scans every source now, folders included, and embeds only what changed. Rebuilding embeds everything again.</p>
+            </section>
           </div>
         </form>
           <div id="agent-panel-soul" class="agent-panel" hidden>
@@ -291,13 +308,8 @@
               <span id="dream-tools-hint" class="model-note">Chats, mind palace and the agent's own files are always available.</span>
               <label class="model-filter"><input id="dream-tool-web" type="checkbox" value="web">
                 <span id="dream-tool-web-label">Web search (needs Tavily)</span></label>
-              <label class="model-filter"><input id="dream-tool-vault" type="checkbox" value="vault">
-                <span id="dream-tool-vault-label">Vault, read-only (needs a vault folder)</span></label>
-              <label>
-                <span id="dream-vault-label">Vault folder</span>
-                <input id="dream-vault" maxlength="1024" autocomplete="off">
-                <span id="dream-vault-hint" class="model-note">A folder on the computer running RECALL, such as an Obsidian vault. Chats reach it with the vault tool groups; dreams only read it. Empty means no vault.</span>
-              </label>
+              <label class="model-filter"><input id="dream-tool-folders" type="checkbox" value="folders">
+                <span id="dream-tool-folders-label">User folders, read-only (needs a folder in the Folders tab)</span></label>
             </fieldset>
             <fieldset>
               <legend id="dream-limits-legend">Memory limits</legend>

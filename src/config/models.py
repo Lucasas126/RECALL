@@ -153,6 +153,30 @@ class AssociativeMemoryConfig(BaseModel):
     zdr: bool = Field(default=True, strict=True)
 
 
+class IndexConfig(BaseModel):
+    """Framework-wide vector index settings: storage names, chunk sizes and the folder reconcile interval."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dir_name: str = Field(default=".index", min_length=1, max_length=64)
+    collection: str = Field(default="memory", pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{1,62}[A-Za-z0-9]$")
+    # files searched by the text tools; Markdown and text files are indexed, `.jsonl` only as conversations
+    file_types: list[str] = Field(default_factory=lambda: ["txt", "md", "jsonl"], min_length=1)
+    chunk_tokens: int = Field(default=400, ge=50, le=4000, strict=True)        # target chunk size (chars / 4)
+    max_chunk_tokens: int = Field(default=600, ge=50, le=8000, strict=True)    # hard limit before a block is split
+    overlap_tokens: int = Field(default=60, ge=0, le=1000, strict=True)        # repeated between chunks of a section
+    embed_batch: int = Field(default=64, ge=1, le=2048, strict=True)           # texts per embeddings request
+    folders_reconcile_minutes: float = Field(default=10, ge=0, le=10_080, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def _sizes(self) -> "IndexConfig":
+        if self.max_chunk_tokens < self.chunk_tokens:
+            raise ValueError("index.max_chunk_tokens must be at least index.chunk_tokens")
+        if self.overlap_tokens >= self.chunk_tokens:
+            raise ValueError("index.overlap_tokens must be smaller than index.chunk_tokens")
+        return self
+
+
 class SpeechToTextConfig(BaseModel):
     """OpenRouter speech-to-text settings."""
 
@@ -237,7 +261,7 @@ class ChatConfig(BaseModel):
         return None if value is None else validate_tool_groups(value)
 
 
-DreamToolGroup = Literal["web", "vault"]
+DreamToolGroup = Literal["web", "folders"]
 # local wall-clock time of day, 24-hour HH:MM
 _DAILY_AT = r"^(?:[01]\d|2[0-3]):[0-5]\d$"
 
@@ -255,7 +279,7 @@ class DreamConfig(BaseModel):
     max_steps: int = Field(default=60, ge=1, le=500, strict=True)
     max_tokens: int = Field(default=500_000, ge=1_000, le=10_000_000, strict=True)  # input + output per session
     max_minutes: int = Field(default=5, ge=1, le=120, strict=True)  # wall-clock limit; then the session is force-closed
-    tools: list[DreamToolGroup] = Field(default_factory=lambda: ["web", "vault"])
+    tools: list[DreamToolGroup] = Field(default_factory=lambda: ["web", "folders"])
     prompt: str = Field(default="", max_length=20000)  # empty = built-in default
     notify_telegram: bool = Field(default=False, strict=True)
 
@@ -282,6 +306,37 @@ class MemoryLimits(BaseModel):
     user_chars: int = Field(default=1400, ge=100, le=50_000, strict=True)
 
 
+# source names the agent's own data already uses; a folder cannot take them
+RESERVED_SOURCE_NAMES = frozenset({"mind_palace", "conversations", "agent", "dream"})
+FOLDER_NAME_PATTERN = r"^[a-z0-9_-]{1,32}$"
+
+
+class FolderConfig(BaseModel):
+    """A user folder exposed to one agent as the source `<name>:`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(pattern=FOLDER_NAME_PATTERN)
+    path: str = Field(min_length=1, max_length=1024)
+    indexed: bool = Field(default=True, strict=True)     # used by associative memory and query_memory
+    read_only: bool = Field(default=False, strict=True)  # never writable, whatever the tool groups
+
+    @field_validator("name")
+    @classmethod
+    def _not_reserved(cls, value: str) -> str:
+        if value in RESERVED_SOURCE_NAMES:
+            raise ValueError(f"folder name '{value}' is reserved; choose another (reserved: {', '.join(sorted(RESERVED_SOURCE_NAMES))})")
+        return value
+
+
+def _unique_folders(folders: list[FolderConfig]) -> list[FolderConfig]:
+    names = [folder.name for folder in folders]
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    if duplicates:
+        raise ValueError(f"folder names must be unique: {', '.join(duplicates)}")
+    return folders
+
+
 class AgentConfig(BaseModel):
     """One agent's own configuration; `id` identifies the agent and its data folder."""
 
@@ -292,8 +347,23 @@ class AgentConfig(BaseModel):
     description: str = Field(default="", max_length=500)
     chat_config: ChatConfig = ChatConfig()
     dream: DreamConfig = Field(default_factory=DreamConfig)
-    vault: Optional[str] = Field(default=None, min_length=1, max_length=1024)  # folder exposed as the `vault` source
+    folders: list[FolderConfig] = Field(default_factory=list, max_length=20)  # user folders, each a source
     memory_limits: MemoryLimits = Field(default_factory=MemoryLimits)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _removed_vault(cls, data: object) -> object:
+        if isinstance(data, dict) and "vault" in data:
+            raise ValueError(
+                "`vault` was replaced by `folders` (a list of name/path entries); "
+                "move the path to `folders: [{name: vault, path: ...}]`"
+            )
+        return data
+
+    @field_validator("folders")
+    @classmethod
+    def _validate_folders(cls, value: list[FolderConfig]) -> list[FolderConfig]:
+        return _unique_folders(value)
 
 
 class ResolvedAgent(BaseModel):
@@ -323,5 +393,5 @@ class ResolvedAgent(BaseModel):
     associative_memory: AssociativeMode = "llm"
     associative_execution: AssociativeExecution = "parallel"
     dream: DreamConfig = Field(default_factory=DreamConfig)
-    vault: Optional[str] = None
+    folders: list[FolderConfig] = Field(default_factory=list)
     memory_limits: MemoryLimits = Field(default_factory=MemoryLimits)

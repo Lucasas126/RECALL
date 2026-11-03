@@ -6,9 +6,12 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
 from src.agent.profile import AgentProfile, load_profile, open_questions, system_prompt
-from src.agent.tools import build_tools, chat_vault_options
+from pydantic import ValidationError
+
+from src.agent.dream import dream_folder_options
+from src.agent.tools import build_tools, chat_folder_options
 from src.agent.toolsets.self_files import MemoryOperationError, apply_memory_operations
-from src.config.models import MemoryLimits, ModelsConfig, ResolvedAgent
+from src.config.models import AgentConfig, ChatConfig, DreamConfig, FolderConfig, MemoryLimits, ModelsConfig, ResolvedAgent
 from src.core.sources.registry import SourceRegistry
 from src.utils.i18n import InputError
 
@@ -228,51 +231,121 @@ class PromptAssemblyTests(AgentFilesFixture):
         self.assertEqual(open_questions("no list here"), [])
 
 
-class VaultTests(AgentFilesFixture):
+class FolderTests(AgentFilesFixture):
     def setUp(self) -> None:
         super().setUp()
-        self.vault_dir = self.root / "vault"
-        (self.vault_dir / "Projects").mkdir(parents=True)
-        (self.vault_dir / ".obsidian").mkdir()
-        (self.vault_dir / ".obsidian" / "app.json").write_text("{}", encoding="utf-8")
-        (self.vault_dir / "Projects" / "plan.md").write_text("# Plan\nship dream mode\n", encoding="utf-8")
+        self.notes_dir = self.root / "notes"
+        (self.notes_dir / "Projects").mkdir(parents=True)
+        (self.notes_dir / ".obsidian").mkdir()
+        (self.notes_dir / ".obsidian" / "app.json").write_text("{}", encoding="utf-8")
+        (self.notes_dir / "Projects" / "plan.md").write_text("# Plan\nship dream mode\n", encoding="utf-8")
+        self.work_dir = self.root / "work"
+        self.work_dir.mkdir()
+        (self.work_dir / "todo.md").write_text("call the bank\n", encoding="utf-8")
+        self.folders = [
+            FolderConfig(name="notes", path=str(self.notes_dir)),
+            FolderConfig(name="work", path=str(self.work_dir), read_only=True, indexed=False),
+        ]
 
-    def registry(self, writable: bool) -> SourceRegistry:
-        return SourceRegistry.for_agent(
-            "u", "a", data_dir=self.root / "data", vault=str(self.vault_dir), vault_writable=writable,
-        )
+    def registry(self, groups: list[str], folders: list[FolderConfig] | None = None) -> SourceRegistry:
+        options = chat_folder_options(_config(folders=self.folders if folders is None else folders, tool_groups=groups))
+        return SourceRegistry.for_agent("u", "a", data_dir=self.root / "data", **options)
 
-    def test_read_tools_and_hidden_folders(self) -> None:
-        tools = self.tools(["vault_read"], sources=self.registry(False))
-        self.assertNotIn("vault_write", tools)
-        self.assertEqual(tools["vault_list"](), "Projects/")
-        self.assertIn("ship dream mode", tools["vault_read"](path="Projects/plan.md"))
-        self.assertIn("[Projects/plan.md:2]", tools["vault_search"](query="DREAM"))
+    def test_read_tools_hidden_entries_and_source_prefix(self) -> None:
+        tools = self.tools(["folders_read"], sources=self.registry(["folders_read"]))
+        self.assertNotIn("folder_write", tools)
+        self.assertEqual(tools["folder_list"](), "notes: (read-only)\nwork: (read-only)")
+        self.assertEqual(tools["folder_list"](path="notes:"), "notes:Projects/")
+        self.assertIn("ship dream mode", tools["folder_read"](path="notes:Projects/plan.md"))
+        self.assertIn("[notes:Projects/plan.md:2]", tools["folder_search"](query="DREAM"))
+        self.assertIn("[work:todo.md:1]", tools["folder_search"](query="bank", path="work"))
         with self.assertRaises(ValueError):
-            tools["vault_read"](path="../data/u/a/SOUL.md")
+            tools["folder_read"](path="notes:../data/u/a/SOUL.md")
+        with self.assertRaises(ValueError):
+            tools["folder_read"](path="notes:.obsidian/app.json")
+        with self.assertRaises(ValueError):  # two folders: the prefix is required
+            tools["folder_read"](path="Projects/plan.md")
         with self.assertRaises(PermissionError):
-            self.registry(False).write("vault:x.md", "x")
+            self.registry(["folders_read"]).write("notes:x.md", "x")
+        # the generic memory tools see the folders as sources too
+        self.assertIn("notes", self.registry(["folders_read"]).names())
 
-    def test_edit_tools_change_files_only_when_writable(self) -> None:
-        tools = self.tools(["vault_edit"], sources=self.registry(True))
-        self.assertIn("edited", tools["vault_edit"](path="Projects/plan.md", old_string="ship", new_string="shipped"))
-        tools["vault_append"](path="Projects/plan.md", content="done")
-        tools["vault_move"](path="Projects/plan.md", new_path="Archive/plan.md")
-        self.assertEqual((self.vault_dir / "Archive" / "plan.md").read_text(encoding="utf-8"), "# Plan\nshipped dream mode\ndone")
-        self.assertIn("deleted", tools["vault_delete"](path="Archive/plan.md"))
+    def test_edit_tools_respect_read_only(self) -> None:
+        sources = self.registry(["folders_edit"])
+        tools = self.tools(["folders_edit"], sources=sources)
+        self.assertEqual(tools["folder_list"](), "notes:\nwork: (read-only)")
+        self.assertIn("edited", tools["folder_edit"](path="notes:Projects/plan.md", old_string="ship", new_string="shipped"))
+        tools["folder_append"](path="notes:Projects/plan.md", content="done")
+        tools["folder_move"](path="notes:Projects/plan.md", new_path="notes:Archive/plan.md")
+        self.assertEqual((self.notes_dir / "Archive" / "plan.md").read_text(encoding="utf-8"), "# Plan\nshipped dream mode\ndone")
+        self.assertIn("deleted", tools["folder_delete"](path="notes:Archive/plan.md"))
+        # `read_only` wins over folders_edit, in the folder tools and in the generic edit tools
+        self.assertEqual(tools["folder_write"](path="work:new.md", content="x"), "error: folder 'work' is read-only here")
+        self.assertIn("read-only", tools["folder_move"](path="notes:Projects", new_path="work:x.md"))
+        with self.assertRaises(PermissionError):
+            sources.write("work:new.md", "x")
+        self.assertFalse((self.work_dir / "new.md").exists())
+        self.assertTrue(sources.get("notes").writable)
+        self.assertFalse(sources.get("work").writable)
 
-    def test_missing_vault_folder_is_an_actionable_error(self) -> None:
-        with self.assertRaises(InputError) as raised:
-            SourceRegistry.for_agent("u", "a", data_dir=self.root / "data", vault=str(self.root / "missing"))
-        self.assertIn("fix `vault`", str(raised.exception))
+    def test_single_folder_accepts_paths_without_prefix(self) -> None:
+        folders = [FolderConfig(name="notes", path=str(self.notes_dir))]
+        tools = self.tools(["folders_read"], sources=self.registry(["folders_read"], folders))
+        self.assertIn("ship dream mode", tools["folder_read"](path="Projects/plan.md"))
 
-    def test_chat_vault_options_follow_the_tool_groups(self) -> None:
-        vault = str(self.vault_dir)
-        self.assertEqual(chat_vault_options(_config(vault=vault, tool_groups=["memory_read"])), {})
-        self.assertEqual(chat_vault_options(_config(vault=vault, tool_groups=["vault_read"])), {"vault": vault, "vault_writable": False})
-        self.assertEqual(chat_vault_options(_config(vault=vault, tool_groups=["vault_edit"])), {"vault": vault, "vault_writable": True})
-        self.assertEqual(chat_vault_options(_config(vault=vault, tool_groups=["vault_edit"], tools=False)), {})
-        self.assertEqual(chat_vault_options(_config(tool_groups=["vault_edit"])), {})
+    def test_folders_without_tool_groups_are_indexed_but_not_readable(self) -> None:
+        sources = self.registry(["memory_read"])
+        self.assertNotIn("notes", sources.names())
+        self.assertEqual([source.name for source in sources.indexed_sources() if source.name in ("notes", "work")], ["notes"])
+        with self.assertRaises(PermissionError):
+            sources.read("notes:Projects/plan.md")
+        self.assertNotIn("folder_list", self.tools(["memory_read"], sources=sources))
+
+    def test_missing_folder_is_skipped_when_loading(self) -> None:
+        # an unmounted drive must not stop the agent; saving still rejects the path (see the API tests)
+        with self.assertLogs("recall.sources", level="WARNING"):
+            sources = self.registry(["folders_read"], [FolderConfig(name="gone", path=str(self.root / "missing"))])
+        self.assertNotIn("gone", sources.names())
+
+    def test_folder_validation(self) -> None:
+        with self.assertRaises(ValidationError):
+            FolderConfig(name="Bad Name", path=".")
+        with self.assertRaises(ValidationError) as reserved:
+            FolderConfig(name="mind_palace", path=".")
+        self.assertIn("reserved", str(reserved.exception))
+        with self.assertRaises(ValidationError) as duplicated:
+            AgentConfig(id="a", name="A", folders=[{"name": "x", "path": "."}, {"name": "x", "path": ".."}])
+        self.assertIn("unique", str(duplicated.exception))
+        with self.assertRaises(ValidationError) as legacy:
+            AgentConfig.model_validate({"id": "a", "name": "A", "vault": "C:/notes"})
+        self.assertIn("folders", str(legacy.exception))
+
+    def test_chat_and_dream_folder_options(self) -> None:
+        self.assertEqual(chat_folder_options(_config(tool_groups=["folders_edit"])), {})
+        self.assertEqual(
+            chat_folder_options(_config(folders=self.folders, tool_groups=["memory_read"])),
+            {"folders": self.folders, "folders_readable": False, "folders_writable": False},
+        )
+        self.assertEqual(
+            chat_folder_options(_config(folders=self.folders, tool_groups=["folders_read"])),
+            {"folders": self.folders, "folders_readable": True, "folders_writable": False},
+        )
+        self.assertEqual(
+            chat_folder_options(_config(folders=self.folders, tool_groups=["folders_edit"]))["folders_writable"], True,
+        )
+        self.assertFalse(chat_folder_options(_config(folders=self.folders, tool_groups=["folders_edit"], tools=False))["folders_readable"])
+        dream = dream_folder_options(_config(folders=self.folders, dream=DreamConfig(tools=["folders"])))
+        self.assertEqual(dream, {"folders": self.folders, "folders_readable": True, "folders_writable": False})
+        self.assertFalse(dream_folder_options(_config(folders=self.folders, dream=DreamConfig(tools=["web"])))["folders_readable"])
+
+    def test_tool_group_renames(self) -> None:
+        from src.agent.tool_groups import TOOL_GROUP_IDS, TOOL_GROUP_TOOLS
+
+        self.assertTrue({"folders_read", "folders_edit"} <= TOOL_GROUP_IDS)
+        self.assertFalse({"vault_read", "vault_edit"} & TOOL_GROUP_IDS)
+        self.assertEqual(TOOL_GROUP_TOOLS["folders_read"], ("folder_list", "folder_read", "folder_search"))
+        with self.assertRaises(ValidationError):
+            ChatConfig(tool_groups=["vault_read"])
 
 
 if __name__ == "__main__":

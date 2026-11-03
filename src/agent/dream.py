@@ -15,7 +15,7 @@ from src.agent.toolsets.editing import build_edit_tools
 from src.agent.toolsets.memory import build_memory_tools
 from src.agent.toolsets.self_files import build_self_tools
 from src.agent.toolsets.tags import build_tag_tools
-from src.agent.toolsets.vault import build_vault_tools
+from src.agent.toolsets.folders import build_folder_tools
 from src.agent.toolsets.web import build_web_tools
 from src.config.models import ResolvedAgent
 from src.core.review import ReviewQueue
@@ -56,7 +56,7 @@ For each pending chat (use dream_pending, then dream_read_chat; long chats come 
 Change `SOUL.md` (`soul_edit`) only for lasting lessons about how to behave; keep changes small and say
 why in the journal.
 
-Be curious: look things up in your mind palace, the vault or the web when it helps you understand a
+Be curious: look things up in your mind palace, the user's folders or the web when it helps you understand a
 topic the user cares about. Keep `mind_palace:questions.md` as a short list of things you would like to
 ask the user, one `- ` item each with why you ask; few, worthwhile, never intrusive. Remove the ones that
 were answered. The opening message says which of your files do not exist yet: create them, do not read them.
@@ -71,21 +71,17 @@ arrives, do that at once: the session is closed soon after it.
 class DreamIndex(Protocol):
     """The semantic index used by a dream's memory tools."""
 
-    def sync(self) -> None: ...
-    def sync_source(self, name: str) -> None: ...
-    def query(self, query: str, top_k: int = 5) -> list[dict]: ...
+    def reconcile(self, *, folders: bool | None = None) -> None: ...
+    def query(self, query: str, top_k: int = 5, *, exclude_chat: str | None = None) -> list[dict]: ...
 
 
 class _NoIndex:
-    """Stand-in when no semantic index is available: syncs do nothing and queries find nothing."""
+    """Stand-in when no semantic index is available: reconciles do nothing and queries find nothing."""
 
-    def sync(self) -> None:
+    def reconcile(self, *, folders: bool | None = None) -> None:
         return None
 
-    def sync_source(self, name: str) -> None:
-        return None
-
-    def query(self, query: str, top_k: int = 5) -> list[dict]:
+    def query(self, query: str, top_k: int = 5, *, exclude_chat: str | None = None) -> list[dict]:
         return []
 
 
@@ -97,31 +93,30 @@ class _ToolHost:
     sources: SourceRegistry
     index: DreamIndex
 
-    def query_memory(self, query: str, top_k: int = 5) -> list[dict]:
-        self.index.sync()
-        return self.index.query(query, top_k)
+    def query_memory(self, query: str, top_k: int = 5, *, exclude_chat: str | None = None) -> list[dict]:
+        return self.index.query(query, top_k, exclude_chat=exclude_chat)
 
 
-def dream_vault_options(config: ResolvedAgent) -> dict:
-    """Registry options for a dream: the vault is opened read-only, and only when `vault` is a dream tool."""
-    if not config.vault or "vault" not in config.dream.tools:
+def dream_folder_options(config: ResolvedAgent) -> dict:
+    """Registry options for a dream: folders are never writable, and readable only with the `folders` dream tool."""
+    if not config.folders:
         return {}
-    return {"vault": config.vault, "vault_writable": False}
+    return {"folders": config.folders, "folders_readable": "folders" in config.dream.tools, "folders_writable": False}
 
 
 def build_dream_tools(
     host: _ToolHost, queue: ReviewQueue, read_until: dict[str, int], reviewed: list[str],
     web_client: TavilyClient | None,
 ) -> tuple[list[dict], dict[str, Callable[..., str]]]:
-    """The dream toolset: review queue, memory read, palace edits, own-file edits and optional web/vault reads."""
+    """The dream toolset: review queue, memory read, palace edits, own-file edits and optional web/folder reads."""
     funcs = [
         *build_review_tools(queue, read_until, reviewed),
         *build_memory_tools(host), *build_tag_tools(host),
         *build_edit_tools(host),  # only mind_palace is writable in a dream registry
         *build_self_tools(host),
     ]
-    if "vault" in host.config.dream.tools and host.sources.vault() is not None:
-        funcs.extend(build_vault_tools(host, writable=False))
+    if "folders" in host.config.dream.tools and any(folder.readable for folder in host.sources.folders()):
+        funcs.extend(build_folder_tools(host, writable=False))
     if "web" in host.config.dream.tools and web_client is not None:
         funcs.extend(build_web_tools(web_client))
     return [func.tool_spec for func in funcs], {func.tool_spec["function"]["name"]: func for func in funcs}
@@ -435,6 +430,7 @@ class DreamRunner:
         error: Optional[str] = None
         final_text = ""
         before: dict[str, str] | None = None  # None until the snapshot is taken; {} is a valid empty snapshot
+        index: DreamIndex | None = None
         pending_before = 0
         warning_at: str | None = None
         try:
@@ -448,6 +444,7 @@ class DreamRunner:
             before = _snapshot(self.sources)
             profile = load_profile(self.sources, self.config.memory_limits)
             index = self._index_factory() if self._index_factory is not None else _NoIndex()
+            index.reconcile()  # queued stat-only scan; the session searches what is already indexed
             host = _ToolHost(self.config, self.sources, index)
             specs, handlers = build_dream_tools(host, self._queue, read_until, reviewed, self._web_client)
             messages: list[dict] = [
@@ -560,6 +557,11 @@ class DreamRunner:
             errors += 1
             self._safe_event("error", steps, message=error)
         changed, diffs = self._safe_changes(before)
+        if index is not None:
+            try:
+                index.reconcile(folders=False)  # index what the session wrote, in the background
+            except Exception:  # indexing never changes the session's outcome
+                logger.exception("could not queue the index reconcile after dream session %s", self.session_id)
         pending_after = self._safe_pending()
         finished_at = self._now()
         summary = {

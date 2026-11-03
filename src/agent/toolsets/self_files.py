@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Annotated, Callable, Optional
 
 from src.agent.tooling import tool
+from src.agent.toolsets.common import mark_written
 from src.core.sources.agent_files import SKILL_FILE, join_memory
 from src.utils.i18n import InputError
 
@@ -179,6 +180,7 @@ def build_self_tools(agent: Agent) -> list[Callable[..., str]]:
         except InputError as exc:
             return f"error: {exc}"
         target = file_path if action in ("write_file", "remove_file") or (action == "patch" and file_path) else SKILL_FILE
+        mark_written(agent, f"agent:skills/{name}/{target}")
         return f"{action} done: skill '{name}' ({target}). {_APPLIES_LATER}"
 
     @tool

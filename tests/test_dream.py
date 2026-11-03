@@ -206,7 +206,7 @@ class DreamRunnerTests(DreamFixture):
         self.assertTrue(first["messages"][0]["content"].startswith("I am Aria."))
         names = {spec["function"]["name"] for spec in first["tools"]}
         self.assertTrue({"dream_pending", "dream_read_chat", "dream_mark_reviewed", "memory", "soul_edit", "skill_manage", "append"} <= names)
-        self.assertFalse(names & {"web_search", "vault_read", "vault_write"})
+        self.assertFalse(names & {"web_search", "folder_read", "folder_write"})
         # trace and summary files
         trace = self.state.trace("20261103-040000-abcd")
         kinds = [event["type"] for event in trace]

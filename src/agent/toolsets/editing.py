@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Annotated, Callable
 
 from src.agent.tooling import tool
-from src.agent.toolsets.common import readonly_error
+from src.agent.toolsets.common import mark_written, readonly_error
 
 if TYPE_CHECKING:
     from src.agent.agent import Agent
@@ -23,7 +23,7 @@ def build_edit_tools(agent: Agent) -> list[Callable[..., str]]:
         if error := readonly_error(sources, memory_path):
             return error
         path = sources.write(memory_path, content)
-        agent.index.sync_source(memory_path.split(":", 1)[0])
+        mark_written(agent, memory_path)
         return f"wrote {path}"
 
     @tool
@@ -39,7 +39,7 @@ def build_edit_tools(agent: Agent) -> list[Callable[..., str]]:
         existing = source.read(rel) if source.exists(rel) else ""
         joined = content if not existing else existing + ("" if existing.endswith("\n") else "\n") + content
         path = source.write(rel, joined)
-        agent.index.sync_source(source.name)
+        mark_written(agent, memory_path)
         return f"appended to {path}"
 
     @tool
@@ -60,7 +60,7 @@ def build_edit_tools(agent: Agent) -> list[Callable[..., str]]:
         if count > 1:
             return f"error: old_string is not unique in {memory_path} ({count} matches); add surrounding context"
         source.write(rel, content.replace(old_string, new_string, 1))
-        agent.index.sync_source(source.name)
+        mark_written(agent, memory_path)
         return f"edited {memory_path}"
 
     @tool
@@ -75,8 +75,8 @@ def build_edit_tools(agent: Agent) -> list[Callable[..., str]]:
         content = source.read(rel)
         destination = sources.write(new_path, content)
         source.delete(rel)
-        agent.index.sync_source(source.name)
-        agent.index.sync_source(new_path.split(":", 1)[0])
+        mark_written(agent, memory_path)
+        mark_written(agent, new_path)
         return f"moved {memory_path} -> {destination}"
 
     @tool
@@ -85,7 +85,7 @@ def build_edit_tools(agent: Agent) -> list[Callable[..., str]]:
         if error := readonly_error(sources, memory_path):
             return error
         sources.delete(memory_path)
-        agent.index.sync_source(memory_path.split(":", 1)[0])
+        mark_written(agent, memory_path)
         return f"deleted {memory_path}"
 
     return [write, append, edit, move, delete]

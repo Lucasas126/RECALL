@@ -1,6 +1,40 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+
+def scan_files(root: Path, exts: set[str] | None = None, base: Path | None = None) -> dict[str, tuple[int, int]]:
+    """Map each non-hidden file under `root` to its `(mtime_ns, size)`, keyed by its path relative to `base`.
+
+    Hidden entries (names starting with '.') are skipped and never descended into; the stat data comes from the
+    directory listing itself, so unchanged files are never opened.
+    """
+    base = base or root
+    found: dict[str, tuple[int, int]] = {}
+    pending = [root]
+    while pending:
+        folder = pending.pop()
+        try:
+            entries = list(os.scandir(folder))
+        except (FileNotFoundError, NotADirectoryError, PermissionError):
+            continue
+        for entry in entries:
+            if entry.name.startswith("."):
+                continue
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    pending.append(Path(entry.path))
+                    continue
+                if not entry.is_file():
+                    continue
+                if exts is not None and Path(entry.name).suffix.lstrip(".").lower() not in exts:
+                    continue
+                info = entry.stat()
+            except OSError:
+                continue
+            found[Path(entry.path).relative_to(base).as_posix()] = (info.st_mtime_ns, info.st_size)
+    return found
 
 
 class Source:
@@ -66,6 +100,10 @@ class Source:
             rel = child.relative_to(root).as_posix()
             entries.append(rel + "/" if child.is_dir() else rel)
         return sorted(entries)
+
+    def index_scan(self, exts: set[str]) -> dict[str, tuple[int, int]]:
+        """Files the vector index covers, as `{relative path: (mtime_ns, size)}`; hidden entries are skipped."""
+        return scan_files(self.root.resolve(), exts)
 
     def walk(self, exts: set[str] | None = None) -> list[str]:
         """Recursively list file paths under the source, optionally filtered by extension."""

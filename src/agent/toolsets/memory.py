@@ -28,10 +28,15 @@ def build_memory_tools(agent: Agent) -> list[Callable[..., str]]:
         conversational sentence or question. E.g. use 'user-a home city favorite color'
         instead of 'where does the user live and what is their favorite color?'.
         Run several focused queries rather than one long one when you need different facts."""
-        hits = agent.query_memory(query, top_k)
+        # the current chat is already in context: searching it would only echo the conversation back
+        hits = agent.query_memory(query, top_k, exclude_chat=getattr(agent, "chat_id", None))
         if not hits:
             return "no matching memories."
-        return "\n".join(f"[{hit['address']}] {hit['document']}" for hit in hits)
+        return "\n\n".join(
+            f"[{hit['address']}{' > ' + hit['context'] if hit.get('context') else ''}] (score {hit['score']:.2f})\n"
+            f"{hit.get('body', hit['document'])}"
+            for hit in hits
+        )
 
     @tool
     def search(
@@ -72,8 +77,6 @@ def build_memory_tools(agent: Agent) -> list[Callable[..., str]]:
     ) -> str:
         """Retrieve the content of a specific memory by its 'source:path' address.
         Optionally limit the result to a [start, end] line range for large files."""
-        name = memory_path.split(":", 1)[0]
-        agent.index.sync_source(name)
         content = sources.read(memory_path)
         if lines:
             rows = content.splitlines()

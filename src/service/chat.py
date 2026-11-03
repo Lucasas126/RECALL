@@ -17,11 +17,14 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.agent.agent import Agent, embeddings_provider
+from src.agent.tools import chat_folder_options
 from src.agent.dream import DEFAULT_DREAM_PROMPT
 from src.config.agents import AgentStore
 from src.config.favorites import ModelFavorites
 from src.config.loader import load_agent, load_agent_config, load_user, user_models
-from src.config.models import AgentConfig, DreamConfig, MemoryLimits, ReasoningEffort, ResolvedAgent, UserConfig
+from src.config.models import (
+    AgentConfig, DreamConfig, FolderConfig, MemoryLimits, ReasoningEffort, ResolvedAgent, UserConfig,
+)
 from src.agent.tool_groups import DEFAULT_TOOL_GROUPS, TOOL_GROUP_CATALOG
 from src.config.preferences import UserPreferences, UserPreferencesStore
 from src.config.settings import (
@@ -58,6 +61,7 @@ _NAMING_PROMPT = (
 _NAMING_TURN_CHARS = 1000
 
 AgentFactory = Callable[[str, str, Optional[str]], Agent]
+IndexFactory = Callable[[ResolvedAgent, SourceRegistry], VectorIndex]
 
 
 _DECOMPOSITION_NOTICE = {
@@ -196,8 +200,9 @@ class ChatService:
 
     def __init__(
         self, agent_factory: AgentFactory | None = None, mcp: McpManager | None = None,
-        dream: DreamManager | None = None,
+        dream: DreamManager | None = None, index_factory: IndexFactory | None = None,
     ):
+        self._index_factory = index_factory or self._build_index
         self._mcp = mcp or McpManager(MCP, CONFIG_DIR)
         self._agent_factory = agent_factory or (
             lambda user_id, agent_id, chat_id: Agent.from_config(user_id, agent_id, chat_id, self._mcp)
@@ -211,20 +216,22 @@ class ChatService:
         self._reasoning_support: dict[str, tuple[float, bool]] = {}
         self._dream = dream or DreamManager(self._dream_dependencies())
 
+    @staticmethod
+    def _build_index(config: ResolvedAgent, sources: SourceRegistry) -> VectorIndex:
+        """The agent's vector index with its configured embeddings provider and model."""
+        chat = get_provider(config.provider_name, api_key=config.api_key)
+        return VectorIndex.for_agent(
+            config.user_id, config.id, sources, embeddings_provider(config, chat), config.models.embeddings,
+        )
+
     def _dream_dependencies(self) -> DreamDependencies:
         """Production wiring of dream sessions: real agents, providers, index, web access and Telegram."""
         notifier = TelegramNotifier.from_env(TELEGRAM_ALLOWED_USERS_ENV)
 
-        def index(config: ResolvedAgent, sources: SourceRegistry) -> VectorIndex:
-            chat = get_provider(config.provider_name, api_key=config.api_key)
-            return VectorIndex.for_agent(
-                config.user_id, config.id, sources, embeddings_provider(config, chat), config.models.embeddings,
-            )
-
         return DreamDependencies(
             resolve_agent=load_agent,
             provider=lambda config: get_provider(config.provider_name, api_key=config.api_key),
-            index=index,
+            index=lambda config, sources: self._index_factory(config, sources),
             web_client=lambda: TavilyClient.from_config(TAVILY),
             agents=self._all_agents,
             language=self.language,
@@ -337,7 +344,7 @@ class ChatService:
         """Create an agent; its personality is written afterwards to SOUL.md through `update_soul`."""
         self._user(user_id)
         self._check_mcp(config)
-        self._check_vault(config.vault)
+        self._check_folders(config.folders)
         created = self._agents.create(user_id, config)
         return self._agent_view(user_id, created)
 
@@ -345,7 +352,7 @@ class ChatService:
         """Save an idle agent's configuration; a changed id also moves its data folder and preference."""
         self._owned_agent(user_id, agent_id)
         self._check_mcp(config)
-        self._check_vault(config.vault)
+        self._check_folders(config.folders)
         slot = self._slot(user_id, agent_id)
         with slot.state:
             if slot.active or slot.pending:
@@ -646,6 +653,10 @@ class ChatService:
                 raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from e
             with slot.state:
                 slot.agents.pop(chat_id, None)
+        try:
+            self._agent_index(user_id, agent_id).forget_chat(chat_id)
+        except Exception:  # the chat is gone; a stale index entry is dropped by the next reconcile anyway
+            logger.warning("could not drop the index chunks of deleted chat %s/%s/%s", user_id, agent_id, chat_id, exc_info=True)
 
     # ------------------------------------------------------------------ messaging
 
@@ -1048,21 +1059,19 @@ class ChatService:
         config = self._agent_config(user_id, agent_id)
         return {
             "dream": config.dream.model_dump(mode="json"),
-            "vault": config.vault,
             "memory_limits": config.memory_limits.model_dump(mode="json"),
             "default_prompt": DEFAULT_DREAM_PROMPT,
         }
 
     def update_dream_settings(
-        self, user_id: str, agent_id: str, dream: DreamConfig, vault: str | None, memory_limits: MemoryLimits,
+        self, user_id: str, agent_id: str, dream: DreamConfig, memory_limits: MemoryLimits,
     ) -> dict:
-        """Save the dream block, vault and memory limits; idle cached chats pick them up when rebuilt."""
+        """Save the dream block and memory limits; idle cached chats pick them up when rebuilt."""
         self._owned_agent(user_id, agent_id)
-        self._check_vault(vault)
         slot = self._slot(user_id, agent_id)
         with slot.lock:
             config = self._agent_config(user_id, agent_id)
-            updated = config.model_copy(update={"dream": dream, "vault": vault, "memory_limits": memory_limits})
+            updated = config.model_copy(update={"dream": dream, "memory_limits": memory_limits})
             self._agents.update(user_id, agent_id, AgentConfig.model_validate(updated.model_dump()))
             with slot.state:
                 for chat_id in [chat for chat in slot.agents if not self._chat_busy(slot, chat)]:
@@ -1127,10 +1136,32 @@ class ChatService:
             files.write_memory_text(target, content)
         return self.get_memory(user_id, agent_id, target)
 
+    # ------------------------------------------------------------------ vector index
+
+    def index_status(self, user_id: str, agent_id: str) -> dict:
+        """The agent's index: sources, files, chats and chunks indexed, last reconciles, rebuilding or busy."""
+        return self._agent_index(user_id, agent_id).status()
+
+    def reindex(self, user_id: str, agent_id: str, *, full: bool = False) -> dict:
+        """Queue a reconcile of every source now (folders included); `full` rebuilds the index from scratch."""
+        index = self._agent_index(user_id, agent_id)
+        index.reindex(full=full)
+        return index.status()
+
+    def _agent_index(self, user_id: str, agent_id: str) -> VectorIndex:
+        self._owned_agent(user_id, agent_id)
+        config = load_agent(user_id, agent_id)
+        sources = SourceRegistry.for_agent(config.user_id, config.id, **chat_folder_options(config))
+        return self._index_factory(config, sources)
+
     @staticmethod
-    def _check_vault(vault: str | None) -> None:
-        if vault is not None and not Path(vault).expanduser().is_dir():
-            raise InputError("vault folder not found: {path}; fix `vault` in the agent configuration", path=vault)
+    def _check_folders(folders: list[FolderConfig]) -> None:
+        for folder in folders:
+            if not Path(folder.path).expanduser().is_dir():
+                raise InputError(
+                    "folder '{name}' not found: {path}; fix `folders` in the agent configuration",
+                    name=folder.name, path=folder.path,
+                )
 
     def _agent_files(self, user_id: str, agent_id: str) -> AgentFilesSource:
         return SourceRegistry.for_agent(user_id, agent_id).agent_files()

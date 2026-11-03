@@ -9,7 +9,7 @@ from typing import Literal
 
 import yaml
 
-from src.core.sources.base import Source
+from src.core.sources.base import Source, scan_files
 from src.utils.files import atomic_write_text, exclusive_file_lock
 from src.utils.i18n import InputError
 
@@ -59,11 +59,12 @@ class AgentFilesSource(Source):
 
     Rooted at the agent's data folder but restricted to those entries, so chats, dream state and
     the index stay out of reach. Readable by the generic tools; changes go through the methods
-    below, which keep the SOUL history, memory limits and skill format consistent.
+    below, which keep the SOUL history, memory limits and skill format consistent. Only `skills/` is
+    indexed: SOUL.md and the memory files are always in the system prompt already.
     """
 
     def __init__(self, root: Path):
-        super().__init__("agent", root, readable=True, writable=False, indexed=False)
+        super().__init__("agent", root, readable=True, writable=False, indexed=True)
 
     # ------------------------------------------------------------------ guard
 
@@ -93,6 +94,10 @@ class AgentFilesSource(Source):
                     continue
                 out.append(item.relative_to(root).as_posix())
         return sorted(out)
+
+    def index_scan(self, exts: set[str]) -> dict[str, tuple[int, int]]:
+        root = self.root.resolve()
+        return scan_files(root / "skills", exts, base=root)
 
     def _lock(self):
         return exclusive_file_lock(self.root / ".agent_files.lock")

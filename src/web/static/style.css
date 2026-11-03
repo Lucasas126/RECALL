@@ -401,3 +401,17 @@ details.action, details.thinking { border-left: 2px solid var(--line); padding-l
   .agent-panel dl { grid-template-columns: minmax(0, 1fr); }
   .agent-panel dt { margin-top: 4px; }
 }
+
+/* user folders and the memory index (agent Folders tab) */
+.folder-list { display: flex; flex-direction: column; gap: 10px; }
+.folder-row { display: grid; grid-template-columns: minmax(8em, 14em) 1fr; gap: 6px 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+.folder-row label { display: flex; flex-direction: column; gap: 4px; }
+.folder-row .folder-flags { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; }
+.folder-row .folder-flags label { flex-direction: row; }
+.folder-row .folder-remove { margin-left: auto; color: var(--danger); }
+.index-status { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.index-status h4 { margin: 0; }
+.index-status .agent-actions { display: flex; gap: 8px; }
+#index-rebuild { color: var(--danger); }
+#index-status-error:empty { display: none; }
+@media (max-width: 700px) { .folder-row { grid-template-columns: 1fr; } }

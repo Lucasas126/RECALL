@@ -72,7 +72,7 @@ class ParallelRecallTests(unittest.TestCase):
             written.set()
             yield from self._wait_for_cancel(cancellation)
 
-        def recall(agent, user_input, cancellation, history=None):
+        def recall(agent, user_input, cancellation, history=None, chat_id=None):
             self.assertTrue(written.wait(3))
             return HINT, 1
 
@@ -111,7 +111,7 @@ class ParallelRecallTests(unittest.TestCase):
             yield "content", "ed Luna."
             yield from self._wait_for_cancel(cancellation)  # never reached: the pause happens at the full stop
 
-        def recall(agent, user_input, cancellation, history=None):
+        def recall(agent, user_input, cancellation, history=None, chat_id=None):
             self.assertTrue(written.wait(3))
             found.set()
             return HINT, 1
@@ -137,7 +137,7 @@ class ParallelRecallTests(unittest.TestCase):
             started.set()
             yield from self._wait_for_cancel(cancellation)
 
-        def recall(agent, user_input, cancellation, history=None):
+        def recall(agent, user_input, cancellation, history=None, chat_id=None):
             self.assertTrue(started.wait(3))
             return HINT, 1
 
@@ -187,7 +187,7 @@ class ParallelRecallTests(unittest.TestCase):
     def test_late_hit_is_cancelled_and_not_used(self) -> None:
         job_token: list[CancellationToken] = []
 
-        def recall(agent, user_input, cancellation, history=None):
+        def recall(agent, user_input, cancellation, history=None, chat_id=None):
             job_token.append(cancellation)
             deadline = time.monotonic() + 3
             while time.monotonic() < deadline:
@@ -229,7 +229,7 @@ class ParallelRecallTests(unittest.TestCase):
             yield "content", "Misu"
             yield {"usage": {"prompt_tokens": 10, "completion_tokens": 5}}
 
-        def recall(agent, user_input, cancellation, history=None):
+        def recall(agent, user_input, cancellation, history=None, chat_id=None):
             return HINT, 1
 
         self._model(first_call)
@@ -302,7 +302,7 @@ class ParallelRecallTests(unittest.TestCase):
             yield "content", " Always."
             yield {"usage": {"prompt_tokens": 10, "completion_tokens": 5}}
 
-        def recall(agent, user_input, cancellation, history=None):
+        def recall(agent, user_input, cancellation, history=None, chat_id=None):
             time.sleep(0.1)  # slower than the model would have been
             return HINT, 1
 
@@ -326,7 +326,7 @@ class ParallelRecallTests(unittest.TestCase):
             yield "content", "Answer"
             yield {"usage": {"prompt_tokens": 10, "completion_tokens": 5}}
 
-        def recall(agent, user_input, cancellation, history=None):
+        def recall(agent, user_input, cancellation, history=None, chat_id=None):
             time.sleep(0.15)
             return None, 0
 
@@ -343,7 +343,7 @@ class ParallelRecallTests(unittest.TestCase):
         token = CancellationToken()
         job_token: list[CancellationToken] = []
 
-        def recall(agent, user_input, cancellation, history=None):
+        def recall(agent, user_input, cancellation, history=None, chat_id=None):
             job_token.append(cancellation)
             threading.Timer(0.05, token.cancel).start()
             deadline = time.monotonic() + 3

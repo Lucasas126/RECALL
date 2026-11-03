@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Callable, Iterable, Literal, Optional
 
-from src.agent.dream import DreamIndex, DreamRunner, dream_vault_options
+from src.agent.dream import DreamIndex, DreamRunner, dream_folder_options
 from src.config.models import DreamConfig, ResolvedAgent
 from src.core.review import ReviewQueue
 from src.core.sources.registry import SourceRegistry
@@ -87,7 +87,7 @@ class DreamDependencies:
     resolve_agent: Callable[[str, str], ResolvedAgent]
     provider: Callable[[ResolvedAgent], LLMProvider]
     registry: Callable[[ResolvedAgent], SourceRegistry] = field(
-        default=lambda config: SourceRegistry.for_agent(config.user_id, config.id, **dream_vault_options(config)),
+        default=lambda config: SourceRegistry.for_agent(config.user_id, config.id, **dream_folder_options(config)),
     )
     index: Callable[[ResolvedAgent, SourceRegistry], DreamIndex] | None = None
     web_client: Callable[[], TavilyClient | None] = field(default=lambda: None)

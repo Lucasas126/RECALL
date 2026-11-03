@@ -8,8 +8,12 @@ paths:
 index:
   dir_name: .index          # index folder inside each agent's data dir
   collection: memory        # chroma collection name
-  file_types: [txt, md, jsonl]  # source files eligible for indexing
-  chunk_words: 100          # words per chunk for non-jsonl files
+  file_types: [txt, md, jsonl]  # files the text search tools read; md/txt are indexed, jsonl only as conversations
+  chunk_tokens: 400         # target chunk size in estimated tokens (characters / 4)
+  max_chunk_tokens: 600     # larger paragraphs or code blocks are split
+  overlap_tokens: 60        # text repeated at the start of the next chunk of the same section
+  embed_batch: 64           # texts per embeddings request
+  folders_reconcile_minutes: 10  # minimum time between background scans of the agents' user folders
 
 agent:
   max_tool_hops: 5          # max tool round-trips before forcing a final answer

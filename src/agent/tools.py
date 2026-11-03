@@ -6,7 +6,7 @@ from src.agent.toolsets.editing import build_edit_tools
 from src.agent.toolsets.memory import build_memory_tools
 from src.agent.toolsets.self_files import build_self_tools
 from src.agent.toolsets.tags import build_tag_tools
-from src.agent.toolsets.vault import build_vault_tools
+from src.agent.toolsets.folders import build_folder_tools
 from src.agent.toolsets.web import build_web_tools
 from src.agent.tool_groups import validate_tool_groups
 from src.config.models import ResolvedAgent
@@ -19,18 +19,22 @@ _ORDER = (
     "query_memory", "search", "list_memories", "list_tags", "find_notes_by_tag",
     "read", "write", "append", "edit", "move", "delete",
     "memory", "skill_view", "skill_manage", "soul_edit",
-    "vault_list", "vault_read", "vault_search",
-    "vault_write", "vault_append", "vault_edit", "vault_move", "vault_delete",
+    "folder_list", "folder_read", "folder_search",
+    "folder_write", "folder_append", "folder_edit", "folder_move", "folder_delete",
     "web_search", "web_retrieve",
 )
 
 
-def chat_vault_options(config: ResolvedAgent) -> dict:
-    """Registry options that expose the agent's vault to its chats, per its vault tool groups."""
-    groups = set(config.tool_groups or ())
-    if not config.vault or not config.tools or not groups & {"vault_read", "vault_edit"}:
+def chat_folder_options(config: ResolvedAgent) -> dict:
+    """Registry options for a chat: every folder is registered; the folder tool groups decide access."""
+    if not config.folders:
         return {}
-    return {"vault": config.vault, "vault_writable": "vault_edit" in groups}
+    groups = set(config.tool_groups or ()) if config.tools else set()
+    return {
+        "folders": config.folders,
+        "folders_readable": bool(groups & {"folders_read", "folders_edit"}),
+        "folders_writable": "folders_edit" in groups,
+    }
 
 
 def build_tools(
@@ -55,8 +59,8 @@ def build_tools(
         base_tools.extend(self_tools if "self" in selected else [
             func for func in self_tools if func.tool_spec["function"]["name"] == "skill_view"
         ])
-    if {"vault_read", "vault_edit"} & set(selected) and agent.sources.vault() is not None:
-        base_tools.extend(build_vault_tools(agent, writable="vault_edit" in selected))
+    if {"folders_read", "folders_edit"} & set(selected) and agent.sources.folders():
+        base_tools.extend(build_folder_tools(agent, writable="folders_edit" in selected))
     if web_client is not None and "web" in selected:
         base_tools.extend(build_web_tools(web_client))
     tools_by_name = {

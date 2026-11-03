@@ -71,8 +71,11 @@ class ChatTitleIn(BaseModel):
 
 class DreamSettingsIn(BaseModel):
     dream: DreamConfig
-    vault: Optional[str] = Field(default=None, min_length=1, max_length=1024)
     memory_limits: MemoryLimits = Field(default_factory=MemoryLimits)
+
+
+class ReindexIn(BaseModel):
+    full: bool = Field(default=False, strict=True)  # drop the index and rebuild it from scratch
 
 
 class TextIn(BaseModel):
@@ -341,7 +344,17 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
 
     @app.put("/api/agents/{agent_id}/dream/settings")
     def update_dream_settings(agent_id: str, body: DreamSettingsIn, user_id: str = Depends(current_user)):
-        return service.update_dream_settings(user_id, agent_id, body.dream, body.vault, body.memory_limits)
+        return service.update_dream_settings(user_id, agent_id, body.dream, body.memory_limits)
+
+    # ------------------------------------------------------------------ vector index
+
+    @app.get("/api/agents/{agent_id}/index")
+    def index_status(agent_id: str, user_id: str = Depends(current_user)):
+        return service.index_status(user_id, agent_id)
+
+    @app.post("/api/agents/{agent_id}/index/reindex", status_code=202)
+    def reindex(agent_id: str, body: Optional[ReindexIn] = None, user_id: str = Depends(current_user)):
+        return service.reindex(user_id, agent_id, full=bool(body and body.full))
 
     @app.get("/api/agents/{agent_id}/dream/status")
     def dream_status(agent_id: str, user_id: str = Depends(current_user)):

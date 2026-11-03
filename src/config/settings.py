@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 
 from src.config.models import (
-    AssociativeMemoryConfig, ChatNamingConfig, McpSettings, PdfConfig, PromptCacheConfig, SpeechToTextConfig, TavilyConfig,
+    AssociativeMemoryConfig, ChatNamingConfig, IndexConfig, McpSettings, PdfConfig, PromptCacheConfig, SpeechToTextConfig, TavilyConfig,
     VideoDecompositionConfig,
 )
 
@@ -22,7 +22,6 @@ with open(_SETTINGS_FILE, "r", encoding="utf-8") as _fh:
     _raw = yaml.safe_load(_fh) or {}
 
 _paths = _raw["paths"]
-_index = _raw["index"]
 _agent = _raw["agent"]
 _web = _raw["web"]
 _telegram = _raw["telegram"]
@@ -36,10 +35,10 @@ DATA_DIR = Path(_paths["data_dir"])      # per-agent data plane (sources + index
 LOGS_DIR = Path(_paths["logs_dir"])      # per-run log folders
 
 # ------------------------------------------------------------------ vector index
-INDEX_DIR_NAME = _index["dir_name"]              # index folder inside each agent's data dir
-INDEX_COLLECTION = _index["collection"]          # chroma collection name
-INDEX_FILE_TYPES = set(_index["file_types"])     # source files eligible for indexing
-INDEX_CHUNK_WORDS = _index["chunk_words"]        # words per chunk for non-jsonl files
+INDEX = IndexConfig.model_validate(_raw["index"])
+INDEX_DIR_NAME = INDEX.dir_name                  # index folder inside each agent's data dir
+INDEX_COLLECTION = INDEX.collection              # chroma collection name
+INDEX_FILE_TYPES = set(INDEX.file_types)         # files searched by the text tools; md/txt are also indexed
 
 # ------------------------------------------------------------------ agent
 AGENT_MAX_TOOL_HOPS = _agent["max_tool_hops"]    # max tool round-trips per turn

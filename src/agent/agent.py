@@ -12,7 +12,7 @@ import src.providers.ollama  # noqa: F401  (registers the ollama provider)
 from src.agent import usage
 from src.agent import associative
 from src.agent.profile import AgentProfile, load_profile, system_prompt
-from src.agent.tools import build_tools, chat_vault_options
+from src.agent.tools import build_tools, chat_folder_options
 from src.agent.toolsets.mcp import build_mcp_tools
 from src.config.loader import load_agent
 from src.config.models import ModelsConfig, ResolvedAgent
@@ -110,16 +110,18 @@ class Agent:
         self._default_reasoning_effort = config.reasoning_effort
         self.provider = provider
         self._mcp = mcp
-        # per-agent access to the data plane (mind palace, conversations, own files, vault)
-        self.sources = sources or SourceRegistry.for_agent(config.user_id, config.id, **chat_vault_options(config))
+        # per-agent access to the data plane (mind palace, conversations, own files, user folders)
+        self.sources = sources or SourceRegistry.for_agent(config.user_id, config.id, **chat_folder_options(config))
         # SOUL, memories, skills index and questions, frozen for this chat's lifetime
         self.profile = profile or AgentProfile(limits=config.memory_limits)
-        # semantic index over the indexed sources; kept in sync as memory changes
+        # semantic index over the indexed sources; updated in the background, never on a turn's path
         self.index = VectorIndex.for_agent(
             config.user_id, config.id, self.sources,
             self._embeddings_provider(), config.models.embeddings,
         )
-        self.index.sync()
+        self.index.reconcile()  # cheap stat-only scan, queued; user folders only when their interval passed
+        # addresses the tools of the current turn wrote, indexed with the turn's exchange after the reply
+        self._written: set[str] = set()
         self._base_tool_specs, self._base_tool_handlers = (
             build_tools(
                 self, TavilyClient.from_config(TAVILY), config.tool_groups, config.allow, config.deny,
@@ -178,7 +180,6 @@ class Agent:
         # reply text written before a memory hit paused it, and the reasoning that came with it
         self._partial = ""
         self._carried_reasoning = ""
-        self._index_lock = threading.Lock()
         self._turn_started_at = 0.0
         # thinking tokens from the last reply, kept apart from the answer
         self.last_reasoning: str = ""
@@ -211,7 +212,7 @@ class Agent:
     ) -> "Agent":
         config = load_agent(user_id, agent_id)
         provider = get_provider(config.provider_name, api_key=config.api_key)
-        sources = SourceRegistry.for_agent(config.user_id, config.id, **chat_vault_options(config))
+        sources = SourceRegistry.for_agent(config.user_id, config.id, **chat_folder_options(config))
         profile = load_profile(sources, config.memory_limits)
         logger.debug(
             "loaded agent user=%s agent=%s provider=%s model=%s",
@@ -253,18 +254,18 @@ class Agent:
     def _embeddings_provider(self) -> LLMProvider:
         return embeddings_provider(self.config, self.provider)
 
-    def query_memory(self, query: str, top_k: int = 5) -> list[dict]:
-        """Semantic recall over the agent's indexed memory (exposed to the model as a tool)."""
-        with self._index_lock:
-            synced_at = perf_counter()
-            self.index.sync()
-            queried_at = perf_counter()
-            results = self.index.query(query, top_k)
+    def query_memory(self, query: str, top_k: int = 5, *, exclude_chat: str | None = None) -> list[dict]:
+        """Semantic recall over what is indexed (never syncs); `exclude_chat` leaves one chat's chunks out."""
+        queried_at = perf_counter()
+        results = self.index.query(query, top_k, exclude_chat=exclude_chat)
         logger.debug(
-            "query_memory %r -> %d hits (index sync %.0f ms, query %.0f ms)",
-            query, len(results), (queried_at - synced_at) * 1000, (perf_counter() - queried_at) * 1000,
+            "query_memory %r -> %d hits (%.0f ms)", query, len(results), (perf_counter() - queried_at) * 1000,
         )
         return results
+
+    def note_written(self, address: str) -> None:
+        """Record that a tool changed `address`; it is reindexed in the background after the reply."""
+        self._written.add(address)
 
     def invoke(
         self, user_input: str, stream: Optional[bool] = None,
@@ -317,7 +318,9 @@ class Agent:
         if self._associative_enabled():
             # the search runs beside the model call and sees the history without this message
             self._assoc_parallel = self._associative_parallel() and (stream or cancellation is not None)
-            self._assoc_job = associative.RecallJob(self, list(self.messages[1:]), user_input).start()
+            self._assoc_job = associative.RecallJob(
+                self, list(self.messages[1:]), user_input, chat_id=self.chat_id,
+            ).start()
         self.messages.append({"role": "user", "content": self._stamped(user_content, ts)})
         self._log_turn("user", user_content, ts=ts)
         if not continuation:
@@ -686,6 +689,8 @@ class Agent:
             if (cache := usage.cache_tokens(api_usage)) is not None:
                 extra["usage"].update(cache_read=cache[0], cache_write=cache[1])
         self._log_turn("assistant", reply, **extra)
+        written, self._written = self._written, set()
+        self.index.after_turn(self.chat_id, written)  # queued: the reply is not delayed
 
     @staticmethod
     def _reply_content(reply: str | list[dict], interrupted: bool) -> str | list[dict]:

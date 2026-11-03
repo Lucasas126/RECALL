@@ -100,8 +100,9 @@ class DreamApiTests(unittest.TestCase):
         groups = {group["id"]: group for group in self.client.get("/api/tool-groups").json()}
         self.assertTrue(groups["self"]["default"])
         self.assertTrue(groups["memory_read"]["default"])
-        self.assertFalse(groups["vault_read"]["default"])
-        self.assertFalse(groups["vault_edit"]["default"])
+        self.assertFalse(groups["folders_read"]["default"])
+        self.assertFalse(groups["folders_edit"]["default"])
+        self.assertNotIn("vault_read", groups)
 
     def test_soul_history_and_restore(self) -> None:
         self.assertEqual(self.client.get(f"{self.base}/soul").json()["content"], "I am Aria.")
@@ -124,25 +125,25 @@ class DreamApiTests(unittest.TestCase):
         self.assertEqual(self.client.put(f"{self.base}/memories/user", json={"content": "x" * 1401}).status_code, 400)
         self.assertEqual(self.client.get(f"{self.base}/memories/other").status_code, 422)
 
-    def test_dream_settings_validation_and_vault(self) -> None:
+    def test_dream_settings_validation(self) -> None:
         settings = self.client.get(f"{self.base}/dream/settings").json()
         self.assertFalse(settings["dream"]["enabled"])
+        self.assertEqual(settings["dream"]["tools"], ["web", "folders"])
+        self.assertNotIn("vault", settings)
         self.assertIn("## Dream session", settings["default_prompt"])
         both = {**settings["dream"], "every_hours": 6, "daily_at": "04:00"}
         self.assertEqual(self.client.put(f"{self.base}/dream/settings", json={"dream": both}).status_code, 422)
-        missing = self.client.put(f"{self.base}/dream/settings", json={"dream": settings["dream"], "vault": str(self.root / "nope")})
-        self.assertEqual(missing.status_code, 400)
-        vault = self.root / "vault"
-        vault.mkdir()
+        renamed = {**settings["dream"], "tools": ["vault"]}  # the dream tool group is now `folders`
+        self.assertEqual(self.client.put(f"{self.base}/dream/settings", json={"dream": renamed}).status_code, 422)
         body = {
             "dream": {**settings["dream"], "enabled": True, "daily_at": "04:00", "notify_telegram": True},
-            "vault": str(vault), "memory_limits": {"memory_chars": 3000, "user_chars": 1000},
+            "memory_limits": {"memory_chars": 3000, "user_chars": 1000},
         }
         saved = self.client.put(f"{self.base}/dream/settings", json=body)
         self.assertEqual(saved.status_code, 200, saved.text)
         stored = yaml.safe_load((self.config_dir / "ana" / "agents" / "aria.yaml").read_text(encoding="utf-8"))
         self.assertEqual(stored["dream"]["daily_at"], "04:00")
-        self.assertEqual(stored["vault"], str(vault))
+        self.assertNotIn("vault", stored)
         self.assertEqual(stored["memory_limits"]["memory_chars"], 3000)
         status = self.client.get(f"{self.base}/dream/status").json()
         self.assertEqual(status["schedule"]["daily_at"], "04:00")
@@ -171,7 +172,7 @@ class DreamApiTests(unittest.TestCase):
     def test_max_minutes_is_saved_through_the_settings_api(self) -> None:
         settings = self.client.get(f"{self.base}/dream/settings").json()
         self.assertEqual(settings["dream"]["max_minutes"], 5)
-        body = {"dream": {**settings["dream"], "max_minutes": 12}, "vault": None, "memory_limits": settings["memory_limits"]}
+        body = {"dream": {**settings["dream"], "max_minutes": 12}, "memory_limits": settings["memory_limits"]}
         self.assertEqual(self.client.put(f"{self.base}/dream/settings", json=body).json()["dream"]["max_minutes"], 12)
         body["dream"]["max_minutes"] = 0
         self.assertEqual(self.client.put(f"{self.base}/dream/settings", json=body).status_code, 422)

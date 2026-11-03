@@ -7,6 +7,7 @@ from time import perf_counter
 from typing import TYPE_CHECKING, Optional
 
 from src.config.settings import ASSOC
+from src.core.chunking import excerpt
 from src.providers.cancellation import CancellationToken, GenerationCancelled
 from src.providers.openrouter import OpenRouterProvider
 from src.providers.provider import LLMProvider
@@ -31,16 +32,19 @@ _SYSTEM_PROMPT = (
     "Output only the query or NONE, nothing else."
 )
 
-_FRAGMENT_LIMIT = 200
+_FRAGMENT_LIMIT = 400
 # longest message searched as is in `question_only` mode
 _QUESTION_LIMIT = 1000
 
 
 def recall(
     agent: "Agent", user_input: str, cancellation: CancellationToken | None = None,
-    history: list[dict] | None = None,
+    history: list[dict] | None = None, chat_id: str | None = None,
 ) -> tuple[Optional[str], int]:
-    """Return a transient hint block and the number of matching memory fragments."""
+    """Return a transient hint block and the number of matching memory fragments.
+
+    Chunks of `chat_id` (the chat being answered, already in the context) are never suggested.
+    """
     started_at = perf_counter()
     if agent.config.associative_memory == "question_only":
         query = user_input.strip()[:_QUESTION_LIMIT] or None
@@ -52,23 +56,19 @@ def recall(
     if not query:
         logger.info("no lookup needed (query proposal %.0f ms)", (proposed_at - started_at) * 1000)
         return None, 0
-    # one extra result, because the message being answered may already be indexed and match itself
-    found = agent.query_memory(query, ASSOC.top_n + 1)
+    found = agent.query_memory(query, ASSOC.top_n, exclude_chat=chat_id)
     logger.info(
         "query=%r proposed in %.0f ms, memory search took %.0f ms",
         query, (proposed_at - started_at) * 1000, (perf_counter() - proposed_at) * 1000,
     )
-    hits = [
-        h for h in found
-        if h["score"] >= ASSOC.score_threshold and not _is_message(h["document"], user_input)
-    ][:ASSOC.top_n]
+    hits = [h for h in found if h["score"] >= ASSOC.score_threshold][:ASSOC.top_n]
     if cancellation is not None:
         cancellation.raise_if_cancelled()
     if not hits:
         logger.debug("query=%r -> no hits above threshold %.2f", query, ASSOC.score_threshold)
         return None, 0
     logger.info("query=%r -> %d hit(s)", query, len(hits))
-    lines = "\n".join(f"- [{h['address']}] {_fragment(h['document'])}" for h in hits)
+    lines = "\n".join(f"- [{_label(h)}] {_fragment(h.get('body', h['document']))}" for h in hits)
     suggestion = (
         "[associative memory] possibly-relevant fragments from your own memory "
         "(hints only — verify with your tools before relying on them):\n" + lines
@@ -76,17 +76,18 @@ def recall(
     return suggestion, len(hits)
 
 
-def _is_message(document: str, user_input: str) -> bool:
-    """Whether an indexed chunk is the user turn being answered."""
-    text = user_input.strip()
-    return bool(text) and document.strip().startswith(f"user: {text}")
+def _label(hit: dict) -> str:
+    """A hit's address plus its heading path or chat title, e.g. `mind_palace:pets.md > Pets > Cats`."""
+    context = hit.get("context")
+    return f"{hit['address']} > {context}" if context else hit["address"]
 
 
 class RecallJob:
     """Associative recall running in a worker thread while the main model already generates."""
 
-    def __init__(self, agent: "Agent", history: list[dict], user_input: str) -> None:
+    def __init__(self, agent: "Agent", history: list[dict], user_input: str, chat_id: str | None = None) -> None:
         self._agent = agent
+        self._chat_id = chat_id
         self._history = history
         self._user_input = user_input
         self._token = CancellationToken()
@@ -134,7 +135,9 @@ class RecallJob:
 
     def _run(self) -> None:
         try:
-            self._result = recall(self._agent, self._user_input, self._token, history=self._history)
+            self._result = recall(
+                self._agent, self._user_input, self._token, history=self._history, chat_id=self._chat_id,
+            )
         except GenerationCancelled:
             logger.debug("associative recall cancelled")
         except Exception:  # a failed lookup must never break the turn
@@ -189,6 +192,5 @@ def _propose_query(
 
 
 def _fragment(text: str, limit: int = _FRAGMENT_LIMIT) -> str:
-    """A single-line, length-capped excerpt (never a whole note)."""
-    text = " ".join(text.split())
-    return text if len(text) <= limit else text[:limit].rstrip() + "…"
+    """A single-line excerpt of at most `limit` characters, cut at a sentence end when possible."""
+    return excerpt(text, limit)

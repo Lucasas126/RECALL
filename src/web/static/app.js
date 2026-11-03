@@ -120,8 +120,13 @@ function translateInterface() {
     ["dream-tools-legend", "Dream reading tools"],
     ["dream-tools-hint", "Chats, mind palace and the agent's own files are always available."],
     ["dream-tool-web-label", "Web search (needs Tavily)"],
-    ["dream-tool-vault-label", "Vault, read-only (needs a vault folder)"], ["dream-vault-label", "Vault folder"],
-    ["dream-vault-hint", "A folder on the computer running RECALL, such as an Obsidian vault. Chats reach it with the vault tool groups; dreams only read it. Empty means no vault."],
+    ["dream-tool-folders-label", "User folders, read-only (needs a folder in the Folders tab)"],
+    ["agent-tab-folders", "Folders"],
+    ["agent-folders-note", "Folders on the computer running RECALL, such as an Obsidian vault. Each one is a source named after it (name:path/note.md). Chats reach them with the folder tool groups; dreams only read them."],
+    ["agent-folders-flags-note", "Indexed folders feed associative memory and query_memory. A read-only folder is never edited, whatever the tool groups."],
+    ["agent-folder-add", "Add folder"], ["index-title", "Memory index"], ["index-reindex", "Reindex"],
+    ["index-rebuild", "Rebuild from scratch"],
+    ["index-hint", "Reindex scans every source now, folders included, and embeds only what changed. Rebuilding embeds everything again."],
     ["dream-limits-legend", "Memory limits"], ["dream-memory-chars-label", "MEMORY.md characters"],
     ["dream-user-chars-label", "USER.md characters"], ["dream-prompt-legend", "Dream prompt"],
     ["dream-prompt-hint", "Empty uses the built-in prompt, shown as the placeholder."],
@@ -491,7 +496,7 @@ function fillAgentForm(agent) {
     }),
   );
   $("agent-tool-groups").append(Object.assign(document.createElement("p"), {
-    className: "model-note", textContent: tr("The vault groups need a vault folder, set in the Dream tab."),
+    className: "model-note", textContent: tr("The folder groups need at least one folder, set in the Folders tab."),
   }));
   $("agent-associative").value = config.associative_memory;
   $("agent-associative-execution").value = config.associative_execution;
@@ -502,10 +507,12 @@ function fillAgentForm(agent) {
   $("agent-reasoning-tokens").value = config.reasoning_tokens ?? "";
   $("agent-retained").value = config.conversation_messages_retained ?? "";
   renderAgentMcp(config.mcp ?? {});
+  renderFolders(agent.folders ?? []);
+  resetIndexStatus();
   showAgentPanel("basic");
 }
 
-const AGENT_PANELS = ["basic", "advanced", "tools", "mcp"];
+const AGENT_PANELS = ["basic", "advanced", "tools", "mcp", "folders"];
 // panels of a saved agent with their own saves, outside the agent form
 const DREAM_PANELS = ["soul", "dream", "sessions"];
 
@@ -528,7 +535,9 @@ function showAgentPanel(panel) {
   $("agent-form").hidden = !formPanel;
   document.querySelector(".agent-form-actions").hidden = !formPanel;
   if (panel !== "sessions") stopDreamPoll();
+  if (panel !== "folders") stopIndexPoll();
   if (state.agentForm.originalId) setDreamHash(agentHash(panel));
+  if (panel === "folders") loadIndexStatus();
   if (formPanel) return Promise.resolve();
   if (panel === "sessions") {
     state.dream.sessionId = null;
@@ -660,6 +669,143 @@ function agentMcpBody() {
   return selections;
 }
 
+// ---- user folders and the memory index
+
+function renderFolders(folders) {
+  $("agent-folder-list").replaceChildren(...folders.map(folderRow));
+  syncFolderEmpty();
+}
+
+function syncFolderEmpty() {
+  const list = $("agent-folder-list");
+  if (!list.querySelector(".folder-row")) {
+    list.replaceChildren(Object.assign(document.createElement("p"), { className: "model-note folder-empty", textContent: tr("No folders yet.") }));
+  }
+}
+
+function folderRow(folder) {
+  const row = document.createElement("fieldset");
+  row.className = "folder-row";
+  const field = (labelText, input, hint) => {
+    const label = document.createElement("label");
+    label.append(Object.assign(document.createElement("span"), { textContent: labelText }), input);
+    if (hint) label.append(Object.assign(document.createElement("span"), { className: "model-note", textContent: hint }));
+    return label;
+  };
+  const name = Object.assign(document.createElement("input"), {
+    className: "folder-name", value: folder.name ?? "", required: true, maxLength: 32,
+    pattern: "[a-z0-9_\\-]{1,32}", autocomplete: "off", spellcheck: false,
+  });
+  const path = Object.assign(document.createElement("input"), {
+    className: "folder-path", value: folder.path ?? "", required: true, maxLength: 1024, autocomplete: "off", spellcheck: false,
+  });
+  const flags = document.createElement("div");
+  flags.className = "folder-flags";
+  const indexed = checkboxLabel("folder-indexed", tr("Indexed"), folder.indexed ?? true);
+  const readOnly = checkboxLabel("folder-read-only", tr("Read-only"), folder.read_only ?? false);
+  const remove = Object.assign(document.createElement("button"), { type: "button", className: "folder-remove", textContent: tr("Remove") });
+  remove.addEventListener("click", () => { row.remove(); syncFolderEmpty(); });
+  flags.append(indexed.label, readOnly.label, remove);
+  row.append(
+    field(tr("Folder name"), name, tr("Lowercase letters, digits, - or _ (up to 32); not mind_palace, conversations, agent or dream.")),
+    field(tr("Folder path"), path),
+    flags,
+  );
+  return row;
+}
+
+function agentFoldersBody() {
+  return [...document.querySelectorAll("#agent-folder-list .folder-row")].map((row) => ({
+    name: row.querySelector(".folder-name").value.trim(),
+    path: row.querySelector(".folder-path").value.trim(),
+    indexed: row.querySelector(".folder-indexed").checked,
+    read_only: row.querySelector(".folder-read-only").checked,
+  }));
+}
+
+$("agent-folder-add").addEventListener("click", () => {
+  $("agent-folder-list").querySelector(".folder-empty")?.remove();
+  const row = folderRow({ name: "", path: "", indexed: true, read_only: false });
+  $("agent-folder-list").append(row);
+  row.querySelector(".folder-name").focus();
+});
+
+let indexPoll = null;
+let indexRequest = 0;
+
+function stopIndexPoll() {
+  clearTimeout(indexPoll);
+  indexPoll = null;
+}
+
+function resetIndexStatus() {
+  stopIndexPoll();
+  indexRequest += 1;
+  const saved = Boolean(state.agentForm.originalId);
+  $("index-status-text").textContent = saved ? "" : tr("Index status is available once the agent is saved.");
+  $("index-status-error").textContent = "";
+  $("index-reindex").disabled = !saved;
+  $("index-rebuild").disabled = !saved;
+}
+
+function indexStatusText(status) {
+  const parts = [tr("{chunks} chunks from {files} files and {chats} chats. Sources: {sources}.", {
+    chunks: status.chunks, files: status.files, chats: status.chats, sources: status.sources.join(", "),
+  })];
+  parts.push(status.last_reconcile ? tr("Last reconcile: {date}.", { date: formatDate(status.last_reconcile) }) : tr("Never reconciled yet."));
+  if (status.folders_reconciled_at) parts.push(tr("Folders scanned: {date}.", { date: formatDate(status.folders_reconciled_at) }));
+  if (status.rebuilding) parts.push(tr("Rebuilding…"));
+  else if (status.busy) parts.push(tr("Indexing…"));
+  return parts.join(" ");
+}
+
+async function loadIndexStatus() {
+  const agentId = state.agentForm.originalId;
+  if (!agentId) return;
+  stopIndexPoll();
+  const request = ++indexRequest;
+  const session = state.session;
+  try {
+    const status = await api(`/api/agents/${encodeURIComponent(agentId)}/index`);
+    if (request !== indexRequest || session !== state.session) return;
+    showIndexStatus(status);
+  } catch (err) {
+    if (request === indexRequest && session === state.session) $("index-status-error").textContent = err.message;
+  }
+}
+
+function showIndexStatus(status) {
+  $("index-status-text").textContent = indexStatusText(status);
+  $("index-status-error").textContent = status.error ? tr("Index error: {error}", { error: status.error }) : "";
+  stopIndexPoll();
+  if ((status.busy || status.rebuilding) && !$("agent-panel-folders").hidden) indexPoll = setTimeout(loadIndexStatus, 2000);
+}
+
+async function reindexAgent(full) {
+  const agentId = state.agentForm.originalId;
+  if (!agentId) return;
+  if (full && !confirm(tr("Rebuild the whole index? Every note and chat is embedded again, which costs embedding requests."))) return;
+  const request = ++indexRequest;
+  const session = state.session;
+  $("index-status-error").textContent = "";
+  $("index-reindex").disabled = $("index-rebuild").disabled = true;
+  try {
+    const status = await api(`/api/agents/${encodeURIComponent(agentId)}/index/reindex`, {
+      method: "POST", body: JSON.stringify({ full }),
+    });
+    if (request !== indexRequest || session !== state.session) return;
+    showIndexStatus({ ...status, busy: true });
+    $("agent-status").textContent = tr("Reindex queued.");
+  } catch (err) {
+    if (request === indexRequest && session === state.session) $("index-status-error").textContent = err.message;
+  } finally {
+    $("index-reindex").disabled = $("index-rebuild").disabled = !state.agentForm.originalId;
+  }
+}
+
+$("index-reindex").addEventListener("click", () => reindexAgent(false));
+$("index-rebuild").addEventListener("click", () => reindexAgent(true));
+
 // The id is derived from the name once, when the agent is created; it never changes from the form.
 function agentIdFromName(name) {
   const slug = name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
@@ -679,7 +825,8 @@ function agentFormBody() {
     name,
     description: $("agent-description").value.trim(),
     // edited in the Dream tab; sent back unchanged so saving the agent does not reset them
-    ...(saved ? { dream: saved.dream, vault: saved.vault, memory_limits: saved.memory_limits } : {}),
+    ...(saved ? { dream: saved.dream, memory_limits: saved.memory_limits } : {}),
+    folders: agentFoldersBody(),
     chat_config: {
       stream: $("agent-stream").checked,
       has_memory: $("agent-memory").checked,
@@ -2331,8 +2478,7 @@ function fillDreamSettings(settings) {
   $("dream-max-tokens").value = dream.max_tokens;
   $("dream-max-minutes").value = dream.max_minutes;
   $("dream-tool-web").checked = dream.tools.includes("web");
-  $("dream-tool-vault").checked = dream.tools.includes("vault");
-  $("dream-vault").value = settings.vault ?? "";
+  $("dream-tool-folders").checked = dream.tools.includes("folders");
   $("dream-memory-chars").value = settings.memory_limits.memory_chars;
   $("dream-user-chars").value = settings.memory_limits.user_chars;
   $("dream-prompt").value = dream.prompt;
@@ -2358,7 +2504,6 @@ async function loadDreamSettings() {
 
 function dreamSettingsBody() {
   const mode = dreamScheduleMode();
-  const vault = $("dream-vault").value.trim();
   return {
     dream: {
       enabled: mode !== "manual" && $("dream-enabled").checked,
@@ -2369,11 +2514,10 @@ function dreamSettingsBody() {
       max_steps: Number($("dream-max-steps").value),
       max_tokens: Number($("dream-max-tokens").value),
       max_minutes: Number($("dream-max-minutes").value),
-      tools: ["web", "vault"].filter((tool) => $(`dream-tool-${tool}`).checked),
+      tools: ["web", "folders"].filter((tool) => $(`dream-tool-${tool}`).checked),
       prompt: $("dream-prompt").value.trim() ? $("dream-prompt").value : "",
       notify_telegram: $("dream-notify").checked,
     },
-    vault: vault || null,
     memory_limits: {
       memory_chars: Number($("dream-memory-chars").value),
       user_chars: Number($("dream-user-chars").value),
@@ -2398,7 +2542,7 @@ async function saveDreamSettings(event) {
     fillDreamSettings(settings);
     // keep the agent form's copy current, so saving the agent later does not revert these fields
     const agent = state.agentConfigs.find((item) => item.id === agentId);
-    if (agent) Object.assign(agent, { dream: settings.dream, vault: settings.vault, memory_limits: settings.memory_limits });
+    if (agent) Object.assign(agent, { dream: settings.dream, memory_limits: settings.memory_limits });
     // the memory limits shown in the Soul & memory tab may have changed
     state.dream.loaded.delete("soul");
     $("dream-status-text").textContent = tr("Dream settings saved.");

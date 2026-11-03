@@ -152,7 +152,7 @@ class AgentCancellationTests(unittest.TestCase):
         self.agent.config.associative_memory = "llm"
         recall_token: list[CancellationToken] = []
 
-        def slow_recall(agent, user_input, cancellation, history=None):
+        def slow_recall(agent, user_input, cancellation, history=None, chat_id=None):
             recall_token.append(cancellation)
             deadline = time.monotonic() + 3
             while time.monotonic() < deadline:

@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Sequence
 
+from src.config.models import FolderConfig
 from src.core.sources.agent_files import AgentFilesSource
 from src.core.sources.base import Source
 from src.config.settings import DATA_DIR
 from src.core.sources.conversations import ConversationsSource
 from src.core.sources.dream import DreamStateSource
+from src.core.sources.folders import FolderSource
 from src.core.sources.mind_palace import MindPalaceSource
-from src.core.sources.vault import VaultSource
 from src.utils.logger import get_logger
 
 logger = get_logger("sources")
@@ -22,10 +24,14 @@ class SourceRegistry:
 
     @classmethod
     def for_agent(
-        cls, user_id: str, agent_id: str, *, vault: str | None = None, vault_writable: bool = False,
-        data_dir: Path | None = None,
+        cls, user_id: str, agent_id: str, *, folders: Sequence[FolderConfig] = (),
+        folders_readable: bool = False, folders_writable: bool = False, data_dir: Path | None = None,
     ) -> "SourceRegistry":
-        """Build an agent's sources; `vault` adds the user's folder as the `vault` source."""
+        """Build an agent's sources; each of `folders` becomes a source named after it.
+
+        The folders are always registered (so indexed ones feed the index); the tools can read them only
+        when `folders_readable` and write them only when `folders_writable` and the folder is not read-only.
+        """
         base = (data_dir or DATA_DIR) / user_id / agent_id
         sources: dict[str, Source] = {
             "mind_palace": MindPalaceSource(base / "mind_palace"),
@@ -33,8 +39,21 @@ class SourceRegistry:
             "agent": AgentFilesSource(base),
             "dream": DreamStateSource(base / "dream"),
         }
-        if vault is not None:
-            sources["vault"] = VaultSource(Path(vault), writable=vault_writable)
+        for folder in folders:
+            if folder.name in sources:
+                raise ValueError(f"folder name {folder.name!r} clashes with another source")
+            if not Path(folder.path).expanduser().is_dir():
+                # an unmounted drive or a moved vault must not stop the agent: skip the folder for now
+                # (saving the agent still rejects a missing path); its indexed chunks are kept
+                logger.warning(
+                    "folder %r of %s/%s not found at %s; skipped until it is available",
+                    folder.name, user_id, agent_id, folder.path,
+                )
+                continue
+            sources[folder.name] = FolderSource(
+                folder.name, Path(folder.path), readable=folders_readable or folders_writable,
+                writable=folders_writable and not folder.read_only, indexed=folder.indexed,
+            )
         logger.debug("registry for %s/%s -> %s", user_id, agent_id, list(sources))
         return cls(sources)
 
@@ -96,5 +115,6 @@ class SourceRegistry:
     def dream_state(self) -> DreamStateSource:
         return self.get("dream")
 
-    def vault(self) -> VaultSource | None:
-        return self._sources.get("vault")
+    def folders(self) -> list[FolderSource]:
+        """The user folders exposed to this agent, in configuration order."""
+        return [source for source in self._sources.values() if isinstance(source, FolderSource)]

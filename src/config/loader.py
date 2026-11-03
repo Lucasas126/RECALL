@@ -100,6 +100,6 @@ def load_agent(user_id: str, agent_id: Optional[str] = None) -> ResolvedAgent:
         associative_memory=agent.chat_config.associative_memory,
         associative_execution=agent.chat_config.associative_execution,
         dream=agent.dream,
-        vault=agent.vault,
+        folders=agent.folders,
         memory_limits=agent.memory_limits,
     )
