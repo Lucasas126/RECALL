@@ -8,6 +8,7 @@ import threading
 from collections import deque
 from contextlib import closing
 from dataclasses import dataclass, field
+from pathlib import Path
 from queue import SimpleQueue
 from time import monotonic
 from typing import Callable, Iterator, Literal, Optional
@@ -15,14 +16,20 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.agent.agent import Agent
+from src.agent.agent import Agent, embeddings_provider
+from src.agent.dream import DEFAULT_DREAM_PROMPT
 from src.config.agents import AgentStore
 from src.config.favorites import ModelFavorites
 from src.config.loader import load_agent, load_agent_config, load_user, user_models
-from src.config.models import AgentConfig, ReasoningEffort, UserConfig
-from src.agent.tool_groups import TOOL_GROUP_CATALOG
+from src.config.models import AgentConfig, DreamConfig, MemoryLimits, ReasoningEffort, ResolvedAgent, UserConfig
+from src.agent.tool_groups import DEFAULT_TOOL_GROUPS, TOOL_GROUP_CATALOG
 from src.config.preferences import UserPreferences, UserPreferencesStore
-from src.config.settings import CHAT_NAMING, CONFIG_DIR, DATA_DIR, MCP, PDF, SPEECH_TO_TEXT, VIDEO_DECOMPOSITION
+from src.config.settings import (
+    CHAT_NAMING, CONFIG_DIR, DATA_DIR, MCP, PDF, SPEECH_TO_TEXT, TAVILY, TELEGRAM_ALLOWED_USERS_ENV,
+    VIDEO_DECOMPOSITION, WEB_PUBLIC_URL,
+)
+from src.core.index import VectorIndex
+from src.core.sources.agent_files import SOUL_MAX_CHARS, AgentFilesSource, MemoryTarget
 from src.core.sources.conversations import ConversationsSource
 from src.core.sources.registry import SourceRegistry
 from src.providers.cancellation import CancellationToken, GenerationCancelled
@@ -31,10 +38,13 @@ from src.providers.catalog import list_openrouter_transcription_models
 from src.providers.mcp import McpManager
 from src.providers.openrouter import OpenRouterProvider
 from src.providers.provider import get_provider
+from src.providers.tavily import TavilyClient
+from src.providers.telegram_notify import TelegramNotifier
+from src.service.dream import DreamDependencies, DreamManager, format_local_time, parse_dream_command
 from src.utils.logger import get_logger
 from src.utils.media import VideoDecomposition, decompose_video
 from src.utils.pdf import extract_pdf_text, run_tesseract
-from src.utils.i18n import InputError, UserMessageError
+from src.utils.i18n import InputError, UserMessageError, message
 from src.web.auth import verify_password
 
 logger = get_logger("service")
@@ -114,6 +124,10 @@ class AgentBusy(ServiceError):
     pass
 
 
+class UnknownDreamSession(ServiceError):
+    """A dream session or SOUL version that does not exist."""
+
+
 class ChatAttachment(BaseModel):
     """A validated data URL attached to a user message."""
 
@@ -180,7 +194,10 @@ class ChatService:
     identity (web login, telegram id, ...). Returns plain dicts and events, never internal objects.
     """
 
-    def __init__(self, agent_factory: AgentFactory | None = None, mcp: McpManager | None = None):
+    def __init__(
+        self, agent_factory: AgentFactory | None = None, mcp: McpManager | None = None,
+        dream: DreamManager | None = None,
+    ):
         self._mcp = mcp or McpManager(MCP, CONFIG_DIR)
         self._agent_factory = agent_factory or (
             lambda user_id, agent_id, chat_id: Agent.from_config(user_id, agent_id, chat_id, self._mcp)
@@ -192,6 +209,42 @@ class ChatService:
         self._agents = AgentStore(CONFIG_DIR, DATA_DIR)
         # (model id -> (monotonic time, supported)) so opening chats does not refetch the catalog
         self._reasoning_support: dict[str, tuple[float, bool]] = {}
+        self._dream = dream or DreamManager(self._dream_dependencies())
+
+    def _dream_dependencies(self) -> DreamDependencies:
+        """Production wiring of dream sessions: real agents, providers, index, web access and Telegram."""
+        notifier = TelegramNotifier.from_env(TELEGRAM_ALLOWED_USERS_ENV)
+
+        def index(config: ResolvedAgent, sources: SourceRegistry) -> VectorIndex:
+            chat = get_provider(config.provider_name, api_key=config.api_key)
+            return VectorIndex.for_agent(
+                config.user_id, config.id, sources, embeddings_provider(config, chat), config.models.embeddings,
+            )
+
+        return DreamDependencies(
+            resolve_agent=load_agent,
+            provider=lambda config: get_provider(config.provider_name, api_key=config.api_key),
+            index=index,
+            web_client=lambda: TavilyClient.from_config(TAVILY),
+            agents=self._all_agents,
+            language=self.language,
+            notifier=notifier.send if notifier is not None else None,
+            public_url=WEB_PUBLIC_URL or None,
+        )
+
+    def _all_agents(self) -> list[tuple[str, str]]:
+        """Every (user, agent) pair configured under the config folder, for the dream scheduler."""
+        pairs: list[tuple[str, str]] = []
+        if not CONFIG_DIR.is_dir():
+            return pairs
+        for user_dir in sorted(CONFIG_DIR.iterdir()):
+            if not (user_dir / "user.yaml").is_file() or not _ID_RE.match(user_dir.name):
+                continue
+            try:
+                pairs.extend((user_dir.name, agent_id) for agent_id in load_user(user_dir.name).agents)
+            except Exception:  # one broken user file must not stop the others' schedules
+                logger.exception("dream scheduler could not read user %s", user_dir.name)
+        return pairs
 
     # ------------------------------------------------------------------ users & agents
 
@@ -227,12 +280,12 @@ class ChatService:
     def list_agent_configs(self, user_id: str) -> list[dict]:
         """Full editable configuration of every agent the user owns."""
         user = self._user(user_id)
-        return [self._agent_config(user_id, agent_id).model_dump(mode="json") for agent_id in user.agents]
+        return [self._agent_view(user_id, self._agent_config(user_id, agent_id)) for agent_id in user.agents]
 
     def list_tool_groups(self, user_id: str) -> list[dict]:
-        """Return the tool-group catalog available to the user's agents."""
+        """Return the tool-group catalog; `default` marks the groups an agent without `tool_groups` uses."""
         self._user(user_id)
-        return [dict(item) for item in TOOL_GROUP_CATALOG]
+        return [{**item, "default": item["id"] in DEFAULT_TOOL_GROUPS} for item in TOOL_GROUP_CATALOG]
 
     # ------------------------------------------------------------------ mcp connections
 
@@ -260,8 +313,13 @@ class ChatService:
         return self._mcp.disconnect(user_id, server_id)
 
     def close(self) -> None:
-        """Stop background resources such as MCP server processes."""
+        """Stop background resources such as MCP server processes and the dream scheduler."""
+        self._dream.stop()
         self._mcp.close()
+
+    def start_dream_scheduler(self, interval_seconds: float = 60.0) -> None:
+        """Run scheduled dream sessions from this process (the web and Telegram processes both may)."""
+        self._dream.start_scheduler(interval_seconds)
 
     def _check_mcp(self, config: AgentConfig) -> None:
         for server_id in config.chat_config.mcp:
@@ -269,17 +327,25 @@ class ChatService:
 
     def get_agent(self, user_id: str, agent_id: str) -> dict:
         self._owned_agent(user_id, agent_id)
-        return self._agent_config(user_id, agent_id).model_dump(mode="json")
+        return self._agent_view(user_id, self._agent_config(user_id, agent_id))
+
+    def _agent_view(self, user_id: str, config: AgentConfig) -> dict:
+        """An agent's config as the API shows it (the personality is SOUL.md, served by the soul routes)."""
+        return config.model_dump(mode="json")
 
     def create_agent(self, user_id: str, config: AgentConfig) -> dict:
+        """Create an agent; its personality is written afterwards to SOUL.md through `update_soul`."""
         self._user(user_id)
         self._check_mcp(config)
-        return self._agents.create(user_id, config).model_dump(mode="json")
+        self._check_vault(config.vault)
+        created = self._agents.create(user_id, config)
+        return self._agent_view(user_id, created)
 
     def update_agent(self, user_id: str, agent_id: str, config: AgentConfig) -> dict:
         """Save an idle agent's configuration; a changed id also moves its data folder and preference."""
         self._owned_agent(user_id, agent_id)
         self._check_mcp(config)
+        self._check_vault(config.vault)
         slot = self._slot(user_id, agent_id)
         with slot.state:
             if slot.active or slot.pending:
@@ -290,7 +356,7 @@ class ChatService:
         if updated.id != agent_id:
             self._forget_slot(user_id, agent_id)
             self._replace_preferred_agent(user_id, agent_id, updated.id)
-        return updated.model_dump(mode="json")
+        return self._agent_view(user_id, updated)
 
     def delete_agent(self, user_id: str, agent_id: str) -> None:
         """Remove an idle agent's configuration; its data folder is kept on disk."""
@@ -877,6 +943,197 @@ class ChatService:
             logger.exception("chat naming failed for %s/%s/%s; keeping the first-message title", user_id, agent_id, chat_id)
             return
         logger.info("named chat %s/%s/%s: %s", user_id, agent_id, chat_id, title)
+
+    # ------------------------------------------------------------------ dream mode and own files
+
+    def dream_command(self, user_id: str, agent_id: str, text: str) -> str | None:
+        """Answer `/dream`, `/dream start` or `/dream cancel` for the agent; None when `text` is not one."""
+        command = parse_dream_command(text)
+        if command is None:
+            return None
+        self._owned_agent(user_id, agent_id)
+        language = self.language(user_id)
+        if command == "invalid":
+            return message(language, "Unknown /dream option. Use /dream for the status, /dream start to start a session or /dream cancel to stop the running one.")
+        if command == "start":
+            result = self._dream.start(user_id, agent_id, trigger="command")
+            if result["status"] == "already_running":
+                return message(language, "A dream session is already running for this agent.")
+            if result["status"] == "started_nothing_pending":
+                return message(language, "Nothing is pending; starting a dream session anyway.")
+            return message(language, "Dream session started.")
+        if command == "cancel":
+            if self._dream.cancel(user_id, agent_id)["status"] == "not_running":
+                return message(language, "No dream session is running for this agent.")
+            return message(
+                language, "Cancelling the dream session: a running tool call finishes first, then the session stops.",
+            )
+        return self._dream_status_text(language, self._dream.status(user_id, agent_id))
+
+    @staticmethod
+    def _dream_status_text(language: str, status: dict) -> str:
+        labels = {
+            "completed": message(language, "completed"),
+            "budget_exhausted": message(language, "out of budget"),
+            "failed": message(language, "failed"),
+            "cancelled": message(language, "cancelled"),
+            "timed_out": message(language, "timed out"),
+        }
+        lines = []
+        if status["running"] and status["last_started_at"]:
+            lines.append(message(
+                language, "A dream session is running (started {when}).",
+                when=format_local_time(status["last_started_at"]),
+            ))
+        last = status["last_session"]
+        if last is None:
+            lines.append(message(language, "No dream sessions yet."))
+        else:
+            lines.append(message(
+                language, "Last dream session: {when} ({status}).",
+                when=format_local_time(last["started_at"]), status=labels.get(last["status"], last["status"]),
+            ))
+            summary = " ".join((last.get("summary") or "").split())
+            if summary:
+                lines.append(summary if len(summary) <= 300 else summary[:299] + "…")
+        schedule = status["schedule"]
+        if schedule["every_hours"] is None and schedule["daily_at"] is None:
+            lines.append(message(language, "Schedule: none (manual only)."))
+        elif not schedule["enabled"]:
+            lines.append(message(language, "Schedule: off (dream mode is disabled)."))
+        elif schedule["every_hours"] is not None:
+            lines.append(message(
+                language, "Schedule: every {hours} h; next run {next}.",
+                hours=schedule["every_hours"], next=format_local_time(schedule["next_run"]),
+            ))
+        else:
+            lines.append(message(
+                language, "Schedule: daily at {time}; next run {next}.",
+                time=schedule["daily_at"], next=format_local_time(schedule["next_run"]),
+            ))
+        lines.append(message(language, "Pending chats: {count}.", count=status["pending_chats"]))
+        if status["running"]:
+            lines.append(message(language, "Use /dream cancel to stop the running session."))
+        else:
+            lines.append(message(language, "Use /dream start to start a new session."))
+        return "\n".join(lines)
+
+    def dream_status(self, user_id: str, agent_id: str) -> dict:
+        self._owned_agent(user_id, agent_id)
+        return self._dream.status(user_id, agent_id)
+
+    def start_dream(self, user_id: str, agent_id: str) -> dict:
+        """Start a dream session in the background; returns at once with its status and id."""
+        self._owned_agent(user_id, agent_id)
+        return self._dream.start(user_id, agent_id, trigger="web")
+
+    def cancel_dream(self, user_id: str, agent_id: str) -> dict:
+        """Ask the agent's running dream session to stop safely; returns at once (`cancelling | not_running`)."""
+        self._owned_agent(user_id, agent_id)
+        return self._dream.cancel(user_id, agent_id)
+
+    def list_dream_sessions(self, user_id: str, agent_id: str) -> list[dict]:
+        self._owned_agent(user_id, agent_id)
+        return self._dream.sessions(user_id, agent_id)
+
+    def get_dream_session(self, user_id: str, agent_id: str, session_id: str) -> dict:
+        self._owned_agent(user_id, agent_id)
+        try:
+            return self._dream.session(user_id, agent_id, session_id)
+        except FileNotFoundError as exc:
+            raise UnknownDreamSession("unknown dream session: {session_id}", session_id=session_id) from exc
+
+    def get_dream_settings(self, user_id: str, agent_id: str) -> dict:
+        self._owned_agent(user_id, agent_id)
+        config = self._agent_config(user_id, agent_id)
+        return {
+            "dream": config.dream.model_dump(mode="json"),
+            "vault": config.vault,
+            "memory_limits": config.memory_limits.model_dump(mode="json"),
+            "default_prompt": DEFAULT_DREAM_PROMPT,
+        }
+
+    def update_dream_settings(
+        self, user_id: str, agent_id: str, dream: DreamConfig, vault: str | None, memory_limits: MemoryLimits,
+    ) -> dict:
+        """Save the dream block, vault and memory limits; idle cached chats pick them up when rebuilt."""
+        self._owned_agent(user_id, agent_id)
+        self._check_vault(vault)
+        slot = self._slot(user_id, agent_id)
+        with slot.lock:
+            config = self._agent_config(user_id, agent_id)
+            updated = config.model_copy(update={"dream": dream, "vault": vault, "memory_limits": memory_limits})
+            self._agents.update(user_id, agent_id, AgentConfig.model_validate(updated.model_dump()))
+            with slot.state:
+                for chat_id in [chat for chat in slot.agents if not self._chat_busy(slot, chat)]:
+                    slot.agents.pop(chat_id, None)
+        return self.get_dream_settings(user_id, agent_id)
+
+    def get_soul(self, user_id: str, agent_id: str) -> dict:
+        self._owned_agent(user_id, agent_id)
+        content = self._agent_files(user_id, agent_id).soul_text()
+        return {"content": content, "chars": len(content), "max_chars": SOUL_MAX_CHARS}
+
+    def update_soul(self, user_id: str, agent_id: str, content: str) -> dict:
+        """Replace SOUL.md (the previous version goes to the history); applies to new chats."""
+        self._owned_agent(user_id, agent_id)
+        self._agent_files(user_id, agent_id).write_soul(content)
+        return self.get_soul(user_id, agent_id)
+
+    def soul_history(self, user_id: str, agent_id: str) -> list[dict]:
+        self._owned_agent(user_id, agent_id)
+        return self._agent_files(user_id, agent_id).soul_history()
+
+    def get_soul_version(self, user_id: str, agent_id: str, version: str) -> dict:
+        self._owned_agent(user_id, agent_id)
+        try:
+            content = self._agent_files(user_id, agent_id).soul_version(version)
+        except FileNotFoundError as exc:
+            raise UnknownDreamSession("unknown SOUL version: {version}", version=version) from exc
+        return {"version": version, "content": content}
+
+    def restore_soul(self, user_id: str, agent_id: str, version: str) -> dict:
+        """Make a saved SOUL version current; the replaced one is saved to the history first."""
+        self._owned_agent(user_id, agent_id)
+        try:
+            self._agent_files(user_id, agent_id).restore_soul(version)
+        except FileNotFoundError as exc:
+            raise UnknownDreamSession("unknown SOUL version: {version}", version=version) from exc
+        return self.get_soul(user_id, agent_id)
+
+    def get_memory(self, user_id: str, agent_id: str, target: MemoryTarget) -> dict:
+        self._owned_agent(user_id, agent_id)
+        limits = self._agent_config(user_id, agent_id).memory_limits
+        files = self._agent_files(user_id, agent_id)
+        content = files.memory_text(target)
+        return {
+            "target": target, "content": content, "chars": len(content),
+            "limit": limits.memory_chars if target == "memory" else limits.user_chars,
+            "entries": files.memory_entries(target),
+        }
+
+    def update_memory(self, user_id: str, agent_id: str, target: MemoryTarget, content: str) -> dict:
+        """Replace MEMORY.md or USER.md; entries are separated by a line holding only `§`."""
+        self._owned_agent(user_id, agent_id)
+        limits = self._agent_config(user_id, agent_id).memory_limits
+        limit = limits.memory_chars if target == "memory" else limits.user_chars
+        if len(content) > limit:
+            raise InputError(
+                "the {target} memory cannot exceed {limit} characters; shorten it or raise memory_limits",
+                target=target, limit=limit,
+            )
+        files = self._agent_files(user_id, agent_id)
+        with files.memory_lock():
+            files.write_memory_text(target, content)
+        return self.get_memory(user_id, agent_id, target)
+
+    @staticmethod
+    def _check_vault(vault: str | None) -> None:
+        if vault is not None and not Path(vault).expanduser().is_dir():
+            raise InputError("vault folder not found: {path}; fix `vault` in the agent configuration", path=vault)
+
+    def _agent_files(self, user_id: str, agent_id: str) -> AgentFilesSource:
+        return SourceRegistry.for_agent(user_id, agent_id).agent_files()
 
     # ------------------------------------------------------------------ internals
 

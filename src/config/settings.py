@@ -50,6 +50,19 @@ WEB_HOST = os.environ.get("RECALL_WEB_HOST") or _web["host"]
 WEB_PORT = _web["port"]                          # port the web ui listens on
 WEB_SESSION_SECRET_ENV = _web["session_secret_env"]
 
+
+def _public_url(value: str | None) -> str:
+    """The web ui's public base address without a trailing slash; empty when not configured."""
+    url = (value or "").strip().rstrip("/")
+    if url and not url.lower().startswith(("http://", "https://")):
+        raise ValueError(f"web.public_url / RECALL_PUBLIC_URL must start with http:// or https://, got {url!r}")
+    return url
+
+
+# base address of the web ui as users open it (e.g. http://<server-ip>:8000), used for links in Telegram
+# dream notifications; empty = text-only notifications. RECALL_PUBLIC_URL overrides it.
+WEB_PUBLIC_URL = _public_url(os.environ.get("RECALL_PUBLIC_URL") or _web.get("public_url"))
+
 # ------------------------------------------------------------------ telegram
 TELEGRAM_ALLOWED_USERS_ENV = _telegram["allowed_users_env"]
 

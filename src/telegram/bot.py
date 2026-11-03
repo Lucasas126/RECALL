@@ -36,6 +36,7 @@ from src.config.models import ReasoningEffort
 from src.config.preferences import PreferencesError, UserPreferences
 from src.config.settings import TELEGRAM_ALLOWED_USERS_ENV
 from src.providers.catalog import CatalogUnavailable
+from src.providers.telegram_notify import parse_allowed_users
 from src.service.chat import ChatEvent, ChatService, ServiceError
 from src.utils.logger import get_logger
 from src.utils.i18n import InputError, error_message, message
@@ -83,22 +84,9 @@ class _Panel:
 
 def load_allowed_users() -> dict[int, str]:
     """Load Telegram IDs mapped to existing RECALL user IDs from the environment."""
-    raw = os.getenv(TELEGRAM_ALLOWED_USERS_ENV, "")
-    allowed: dict[int, str] = {}
-    for entry in raw.split(","):
-        entry = entry.strip()
-        if not entry:
-            continue
-        try:
-            telegram_id, user_id = (part.strip() for part in entry.split("=", 1))
-            parsed_id = int(telegram_id)
-        except (ValueError, TypeError):
-            logger.warning("Ignoring invalid Telegram user mapping: %r", entry)
-            continue
-        if not user_id:
-            logger.warning("Ignoring Telegram mapping without a RECALL user ID: %r", entry)
-            continue
-        allowed[parsed_id] = user_id
+    allowed, invalid = parse_allowed_users(os.getenv(TELEGRAM_ALLOWED_USERS_ENV, ""))
+    for entry in invalid:
+        logger.warning("Ignoring invalid Telegram user mapping: %r", entry)
     return allowed
 
 
@@ -146,6 +134,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/selectmodel — Browse models, prices, and pages\n"
         "/model — Show the model selected for the current chat\n"
         "/stt — Show the default speech-to-text model (change it in /settings)\n"
+        "/dream — Last dream session, schedule and pending chats; /dream start starts one, /dream cancel stops it\n"
         "/help — Show this help\n\n"
         "You can send text, images, audio, voice messages, and video directly."
     )
@@ -726,6 +715,22 @@ async def show_agent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     )
 
 
+async def dream_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """`/dream` shows the dream status; `/dream start` starts a session and `/dream cancel` stops it, without waiting."""
+    state: TelegramBotState = context.application.bot_data["state"]
+    session = _session(update, state)
+    if session is None:
+        await _unauthorized(update)
+        return
+    text = " ".join(["/dream", *(context.args or [])])
+    try:
+        reply = await asyncio.to_thread(state.service.dream_command, session.user_id, session.agent_id, text)
+    except (ServiceError, ValueError, OSError, RuntimeError) as exc:
+        logger.warning("Telegram /dream failed: %s", exc)
+        reply = _msg(session, "Generation failed: {error}", error=error_message(session.language, exc))
+    await update.effective_message.reply_text(reply or "")
+
+
 async def _download_attachment(message, bot) -> dict:
     source = None
     modality = None
@@ -1058,9 +1063,16 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
             )
 
 
-def build_application(token: str, service: ChatService | None = None) -> Application:
-    """Build the basic Telegram application with its channel-local state."""
+def build_application(
+    token: str, service: ChatService | None = None, *, dream_scheduler: bool | None = None,
+) -> Application:
+    """Build the basic Telegram application with its channel-local state.
+
+    The dream scheduler runs while the bot is up; by default only when the bot builds its own service.
+    """
     allowed = load_allowed_users()
+    if dream_scheduler is None:
+        dream_scheduler = service is None
     state = TelegramBotState(service or ChatService())
     for telegram_id, user_id in allowed.items():
         try:
@@ -1084,10 +1096,13 @@ def build_application(token: str, service: ChatService | None = None) -> Applica
         BotCommand("selectmodel", "Browse models and prices"),
         BotCommand("model", "Show the current model"),
         BotCommand("stt", "Show the default STT model"),
+        BotCommand("dream", "Dream status; /dream start or /dream cancel"),
         BotCommand("help", "Show available commands"),
     ]
     async def set_commands(application: Application) -> None:
         await application.bot.set_my_commands(application.bot_data["commands"])
+        if dream_scheduler:
+            state.service.start_dream_scheduler()
 
     application.post_init = set_commands
 
@@ -1105,6 +1120,7 @@ def build_application(token: str, service: ChatService | None = None) -> Applica
     application.add_handler(CommandHandler("stt", show_stt))
     application.add_handler(CommandHandler("selectagent", select_agent))
     application.add_handler(CommandHandler("agent", show_agent))
+    application.add_handler(CommandHandler("dream", dream_command))
     application.add_handler(
         MessageHandler(filters.PHOTO | filters.VIDEO | filters.AUDIO | filters.VOICE | filters.Document.ALL, media_message)
     )
