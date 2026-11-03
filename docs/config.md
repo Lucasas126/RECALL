@@ -53,6 +53,12 @@ signing secret through the environment variable named by `web.session_secret_env
 (default: `RECALL_SESSION_SECRET`) before starting `web.py`. Use a long random
 value and keep it outside YAML and source control. Logging out clears the session.
 
+The web UI binds to `web.host`/`web.port` in `settings.yaml` (default
+`127.0.0.1:8000`). The `RECALL_WEB_HOST` environment variable, when set and not
+empty, overrides `web.host`; it is read from the process environment when the
+settings load, not from `.env`. The Docker image sets it to `0.0.0.0` (see
+[deployment](deployment.md)).
+
 ### Telegram access
 
 The Telegram channel maps approved Telegram user IDs to existing RECALL users

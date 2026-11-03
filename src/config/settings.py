@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import yaml
@@ -44,7 +45,8 @@ INDEX_CHUNK_WORDS = _index["chunk_words"]        # words per chunk for non-jsonl
 AGENT_MAX_TOOL_HOPS = _agent["max_tool_hops"]    # max tool round-trips per turn
 
 # ------------------------------------------------------------------ web
-WEB_HOST = _web["host"]                          # interface the web ui binds to
+# interface the web ui binds to; RECALL_WEB_HOST overrides it (the Docker image sets 0.0.0.0)
+WEB_HOST = os.environ.get("RECALL_WEB_HOST") or _web["host"]
 WEB_PORT = _web["port"]                          # port the web ui listens on
 WEB_SESSION_SECRET_ENV = _web["session_secret_env"]
 
