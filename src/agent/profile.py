@@ -1,0 +1,89 @@
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+
+from src.config.models import MemoryLimits
+from src.core.sources.agent_files import SkillInfo, join_memory
+from src.core.sources.registry import SourceRegistry
+
+QUESTIONS_FILE = "questions.md"
+MAX_PROMPT_QUESTIONS = 3
+_QUESTION_RE = re.compile(r"^[-*]\s+(?!\[[xX]\])(?:\[ \]\s+)?(.+\S)\s*$")
+
+
+@dataclass(frozen=True)
+class AgentProfile:
+    """Snapshot of the agent's own files taken when a chat (or dream) builds its system prompt."""
+
+    soul: str = ""
+    memory: list[str] = field(default_factory=list)
+    user: list[str] = field(default_factory=list)
+    skills: list[SkillInfo] = field(default_factory=list)
+    questions: list[str] = field(default_factory=list)
+    limits: MemoryLimits = field(default_factory=MemoryLimits)
+
+
+def open_questions(text: str, limit: int = MAX_PROMPT_QUESTIONS) -> list[str]:
+    """Open top-level list items of `questions.md`; items checked as `- [x]` count as answered."""
+    found = []
+    for line in text.splitlines():
+        match = _QUESTION_RE.match(line)
+        if match:
+            found.append(match.group(1))
+            if len(found) >= limit:
+                break
+    return found
+
+
+def load_profile(sources: SourceRegistry, limits: MemoryLimits) -> AgentProfile:
+    """Read SOUL, memories, skill index and open questions; a missing SOUL.md is an empty personality."""
+    files = sources.agent_files()
+    palace = sources.mind_palace()
+    questions = palace.read(QUESTIONS_FILE) if palace.exists(QUESTIONS_FILE) else ""
+    return AgentProfile(
+        soul=files.soul_text(),
+        memory=files.memory_entries("memory"),
+        user=files.memory_entries("user"),
+        skills=files.skills(),
+        questions=open_questions(questions),
+        limits=limits,
+    )
+
+
+def profile_blocks(profile: AgentProfile) -> list[str]:
+    """System-prompt blocks after SOUL: memories, skills index and open questions (empty ones are left out)."""
+    blocks = []
+    if profile.memory:
+        text = join_memory(profile.memory)
+        blocks.append(
+            f"## Your memory ({len(text)}/{profile.limits.memory_chars} chars)\n\n"
+            f"Your own durable notes, kept with the `memory` tool (target `memory`).\n\n{text}"
+        )
+    if profile.user:
+        text = join_memory(profile.user)
+        blocks.append(
+            f"## About the user ({len(text)}/{profile.limits.user_chars} chars)\n\n"
+            f"What you know about the user, kept with the `memory` tool (target `user`).\n\n{text}"
+        )
+    if profile.skills:
+        index = "\n".join(f"- {skill.name}: {skill.description}" for skill in profile.skills)
+        blocks.append(
+            "## Skills\n\nProcedures you wrote for yourself. When a task matches one, load it with "
+            f"`skill_view(name)` before acting and follow it.\n\n{index}"
+        )
+    if profile.questions:
+        items = "\n".join(f"- {question}" for question in profile.questions)
+        blocks.append(
+            "## Questions you want to ask the user\n\n"
+            "Ask at most one, and only when it fits naturally in the conversation; never interrupt a task "
+            "for it. When the user answers, remove or annotate the question in `mind_palace:questions.md` "
+            f"(if you can edit it) and save what you learned.\n\n{items}"
+        )
+    return blocks
+
+
+def system_prompt(profile: AgentProfile, extra_blocks: list[str] | None = None) -> str:
+    """SOUL first, then the profile blocks, then channel-specific blocks such as MCP notes."""
+    parts = [profile.soul.strip(), *profile_blocks(profile), *(extra_blocks or [])]
+    return "\n\n".join(part for part in parts if part)

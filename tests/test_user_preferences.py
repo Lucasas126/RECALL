@@ -197,7 +197,7 @@ class UserPreferencesWebTests(unittest.TestCase):
         self.addCleanup(user_patch.stop)
         agent_patch = patch(
             "src.service.chat.load_agent_config",
-            side_effect=lambda user, agent: AgentConfig(id=agent, name=agent, personality_prompt="Test"),
+            side_effect=lambda user, agent: AgentConfig(id=agent, name=agent),
         )
         self.load_agent_config = agent_patch.start()
         self.addCleanup(agent_patch.stop)
@@ -273,7 +273,7 @@ class UserPreferencesWebTests(unittest.TestCase):
         self.users["user-one"].agents = ["agent-a"]
         def load_agent(user: str, agent: str) -> AgentConfig:
             if agent == "agent-a":
-                return AgentConfig(id=agent, name=agent, personality_prompt="Test")
+                return AgentConfig(id=agent, name=agent)
             raise FileNotFoundError("missing config")
 
         self.load_agent_config.side_effect = load_agent

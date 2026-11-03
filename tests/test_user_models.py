@@ -180,7 +180,7 @@ class UserModelDefaultsTests(models_tests.ModelFixture):
 class AgentModelSchemaTests(unittest.TestCase):
     def test_agent_configuration_no_longer_accepts_models(self) -> None:
         with self.assertRaises(ValueError):
-            AgentConfig(id="aria", name="Aria", personality_prompt="Hello", models=ModelsConfig())
+            AgentConfig(id="aria", name="Aria", models=ModelsConfig())
 
 if __name__ == "__main__":
     unittest.main()

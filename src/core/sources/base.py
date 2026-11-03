@@ -55,6 +55,8 @@ class Source:
 
     def list(self, subpath: str = "") -> list[str]:
         """List the immediate entries under *subpath* (folders end with '/')."""
+        if not self.readable:
+            raise PermissionError(f"source '{self.name}' is not readable")
         base = self.resolve(subpath)
         if not base.is_dir():
             return []

@@ -32,7 +32,7 @@ class ParallelRecallTests(unittest.TestCase):
         self.provider = Mock(spec=LLMProvider)
         self.provider.context_window.return_value = 10000
         config = ResolvedAgent(
-            user_id="test-user", id="test-agent", name="Test", personality_prompt="Test prompt",
+            user_id="test-user", id="test-agent", name="Test",
             models=ModelsConfig(), provider_name="ollama", api_key="",
             embeddings_provider_name="ollama", embeddings_api_key="",
             tools=False, associative_memory="llm",
@@ -369,7 +369,7 @@ class ParallelRecallTests(unittest.TestCase):
 
     def test_boolean_values_keep_working_as_modes(self) -> None:
         fields = dict(
-            user_id="u", id="a", name="A", personality_prompt="P", models=ModelsConfig(),
+            user_id="u", id="a", name="A", models=ModelsConfig(),
             provider_name="ollama", api_key="", embeddings_provider_name="ollama", embeddings_api_key="",
         )
         self.assertEqual(ResolvedAgent(**fields, associative_memory=True).associative_memory, "llm")

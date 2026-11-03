@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Annotated, Literal, Optional, Union
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from src.agent.tool_groups import validate_tool_groups
 ReasoningEffort = Literal["minimal", "low", "medium", "high", "xhigh", "max"]
@@ -237,6 +237,51 @@ class ChatConfig(BaseModel):
         return None if value is None else validate_tool_groups(value)
 
 
+DreamToolGroup = Literal["web", "vault"]
+# local wall-clock time of day, 24-hour HH:MM
+_DAILY_AT = r"^(?:[01]\d|2[0-3]):[0-5]\d$"
+
+
+class DreamConfig(BaseModel):
+    """An agent's dream mode: schedule, model, limits and optional read tools of its background sessions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(default=False, strict=True)  # runs the schedule; manual sessions work either way
+    every_hours: Optional[int] = Field(default=None, ge=1, le=720, strict=True)
+    daily_at: Optional[str] = Field(default=None, pattern=_DAILY_AT)
+    model: Optional[str] = Field(default=None, strict=True, min_length=1, max_length=256)  # None = user's chat model
+    reasoning_effort: Optional[ReasoningEffort] = "medium"  # None sends no reasoning request
+    max_steps: int = Field(default=60, ge=1, le=500, strict=True)
+    max_tokens: int = Field(default=500_000, ge=1_000, le=10_000_000, strict=True)  # input + output per session
+    max_minutes: int = Field(default=5, ge=1, le=120, strict=True)  # wall-clock limit; then the session is force-closed
+    tools: list[DreamToolGroup] = Field(default_factory=lambda: ["web", "vault"])
+    prompt: str = Field(default="", max_length=20000)  # empty = built-in default
+    notify_telegram: bool = Field(default=False, strict=True)
+
+    @field_validator("tools")
+    @classmethod
+    def _validate_tools(cls, value: list[str]) -> list[str]:
+        if len(set(value)) != len(value):
+            raise ValueError("dream tool groups must not contain duplicates")
+        return value
+
+    @model_validator(mode="after")
+    def _one_schedule(self) -> "DreamConfig":
+        if self.every_hours is not None and self.daily_at is not None:
+            raise ValueError("set either dream.every_hours or dream.daily_at, not both")
+        return self
+
+
+class MemoryLimits(BaseModel):
+    """Character limits of the memory files injected in every system prompt."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    memory_chars: int = Field(default=2200, ge=100, le=50_000, strict=True)
+    user_chars: int = Field(default=1400, ge=100, le=50_000, strict=True)
+
+
 class AgentConfig(BaseModel):
     """One agent's own configuration; `id` identifies the agent and its data folder."""
 
@@ -245,8 +290,10 @@ class AgentConfig(BaseModel):
     id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
     name: str = Field(min_length=1, max_length=100)
     description: str = Field(default="", max_length=500)
-    personality_prompt: str = Field(min_length=1, max_length=20000)
     chat_config: ChatConfig = ChatConfig()
+    dream: DreamConfig = Field(default_factory=DreamConfig)
+    vault: Optional[str] = Field(default=None, min_length=1, max_length=1024)  # folder exposed as the `vault` source
+    memory_limits: MemoryLimits = Field(default_factory=MemoryLimits)
 
 
 class ResolvedAgent(BaseModel):
@@ -256,7 +303,6 @@ class ResolvedAgent(BaseModel):
     language: str = "en"
     id: str
     name: str
-    personality_prompt: str
     models: ModelsConfig
     provider_name: str
     api_key: str
@@ -276,3 +322,6 @@ class ResolvedAgent(BaseModel):
     mcp: dict[str, AgentMcpConfig] = Field(default_factory=dict)
     associative_memory: AssociativeMode = "llm"
     associative_execution: AssociativeExecution = "parallel"
+    dream: DreamConfig = Field(default_factory=DreamConfig)
+    vault: Optional[str] = None
+    memory_limits: MemoryLimits = Field(default_factory=MemoryLimits)

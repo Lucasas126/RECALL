@@ -80,7 +80,6 @@ def load_agent(user_id: str, agent_id: Optional[str] = None) -> ResolvedAgent:
         language=user.language,
         id=agent.id,
         name=agent.name,
-        personality_prompt=agent.personality_prompt,
         models=load_user_models(user_id),
         provider_name=user.provider.name,
         api_key=api_key,
@@ -100,4 +99,7 @@ def load_agent(user_id: str, agent_id: Optional[str] = None) -> ResolvedAgent:
         mcp=agent.chat_config.mcp,
         associative_memory=agent.chat_config.associative_memory,
         associative_execution=agent.chat_config.associative_execution,
+        dream=agent.dream,
+        vault=agent.vault,
+        memory_limits=agent.memory_limits,
     )

@@ -11,7 +11,8 @@ import src.providers.openrouter  # noqa: F401  (registers the openrouter provide
 import src.providers.ollama  # noqa: F401  (registers the ollama provider)
 from src.agent import usage
 from src.agent import associative
-from src.agent.tools import build_tools
+from src.agent.profile import AgentProfile, load_profile, system_prompt
+from src.agent.tools import build_tools, chat_vault_options
 from src.agent.toolsets.mcp import build_mcp_tools
 from src.config.loader import load_agent
 from src.config.models import ModelsConfig, ResolvedAgent
@@ -89,20 +90,30 @@ def _dedupe_tool_calls(tool_calls: list[dict]) -> list[dict]:
     return out
 
 
+def embeddings_provider(config: ResolvedAgent, chat_provider: LLMProvider) -> LLMProvider:
+    """The provider used for embeddings, reusing the chat provider when identical."""
+    if config.embeddings_provider_name == config.provider_name and config.embeddings_api_key == config.api_key:
+        return chat_provider
+    return get_provider(config.embeddings_provider_name, api_key=config.embeddings_api_key)
+
+
 class Agent:
     """Orchestration entry point: wraps an agent's config, provider and conversation memory."""
 
     def __init__(
         self, config: ResolvedAgent, provider: LLMProvider, chat_id: Optional[str] = None,
-        mcp: McpManager | None = None,
+        mcp: McpManager | None = None, *, sources: SourceRegistry | None = None,
+        profile: AgentProfile | None = None,
     ):
         self.config = config.model_copy(deep=True)
         self._default_chat_model = config.models.chat
         self._default_reasoning_effort = config.reasoning_effort
         self.provider = provider
         self._mcp = mcp
-        # per-agent access to the data plane (mind palace, conversations, ...)
-        self.sources = SourceRegistry.for_agent(config.user_id, config.id)
+        # per-agent access to the data plane (mind palace, conversations, own files, vault)
+        self.sources = sources or SourceRegistry.for_agent(config.user_id, config.id, **chat_vault_options(config))
+        # SOUL, memories, skills index and questions, frozen for this chat's lifetime
+        self.profile = profile or AgentProfile(limits=config.memory_limits)
         # semantic index over the indexed sources; kept in sync as memory changes
         self.index = VectorIndex.for_agent(
             config.user_id, config.id, self.sources,
@@ -112,8 +123,9 @@ class Agent:
         self._base_tool_specs, self._base_tool_handlers = (
             build_tools(
                 self, TavilyClient.from_config(TAVILY), config.tool_groups, config.allow, config.deny,
+                skill_view=bool(self.profile.skills),
             )
-            if config.tools and config.tool_groups else ([], {})
+            if config.tools and (config.tool_groups or self.profile.skills) else ([], {})
         )
         self._tool_specs, self._tool_handlers = list(self._base_tool_specs), dict(self._base_tool_handlers)
         # MCP notes appended to the system prompt; refreshed with the MCP tools at each turn
@@ -199,11 +211,13 @@ class Agent:
     ) -> "Agent":
         config = load_agent(user_id, agent_id)
         provider = get_provider(config.provider_name, api_key=config.api_key)
+        sources = SourceRegistry.for_agent(config.user_id, config.id, **chat_vault_options(config))
+        profile = load_profile(sources, config.memory_limits)
         logger.debug(
             "loaded agent user=%s agent=%s provider=%s model=%s",
             config.user_id, config.id, config.provider_name, config.models.chat,
         )
-        return cls(config, provider, chat_id, mcp)
+        return cls(config, provider, chat_id, mcp, sources=sources, profile=profile)
 
     @property
     def name(self) -> str:
@@ -218,13 +232,13 @@ class Agent:
         return self._associative_enabled() and self.config.associative_execution == "parallel"
 
     def _system_prompt(self) -> str:
-        prompt = self.config.personality_prompt
+        """SOUL and profile blocks, then the associative-memory notice and MCP notes."""
+        blocks = []
         if self._associative_parallel():
-            prompt = f"{prompt}\n\n{_ASSOC_NOTICE}"
-        if not self._mcp_notes:
-            return prompt
-        notes = "\n\n".join(self._mcp_notes)
-        return f"{prompt}\n\n## Connected services (MCP)\n\n{notes}"
+            blocks.append(_ASSOC_NOTICE)
+        if self._mcp_notes:
+            blocks.append("## Connected services (MCP)\n\n" + "\n\n".join(self._mcp_notes))
+        return system_prompt(self.profile, blocks)
 
     def _refresh_mcp_tools(self) -> None:
         """Rebuild this turn's MCP tools, so connecting or disconnecting a service applies at once."""
@@ -237,15 +251,7 @@ class Agent:
         self.messages[0] = {"role": "system", "content": self._system_prompt()}
 
     def _embeddings_provider(self) -> LLMProvider:
-        """The provider used for embeddings, reusing the chat provider when identical."""
-        if (
-            self.config.embeddings_provider_name == self.config.provider_name
-            and self.config.embeddings_api_key == self.config.api_key
-        ):
-            return self.provider
-        return get_provider(
-            self.config.embeddings_provider_name, api_key=self.config.embeddings_api_key
-        )
+        return embeddings_provider(self.config, self.provider)
 
     def query_memory(self, query: str, top_k: int = 5) -> list[dict]:
         """Semantic recall over the agent's indexed memory (exposed to the model as a tool)."""

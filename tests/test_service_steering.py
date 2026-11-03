@@ -49,7 +49,7 @@ class SteeringFixture(unittest.TestCase):
         agent_patch = patch(
             "src.service.chat.load_agent_config",
             side_effect=lambda user, agent: AgentConfig(
-                id=agent, name=agent, personality_prompt="Test prompt",
+                id=agent, name=agent,
             ),
         )
         for patcher in (registry_patch, user_patch, index_patch, agent_patch):
@@ -90,7 +90,7 @@ class SteeringFixture(unittest.TestCase):
 
     def _factory(self, user: str, agent: str, chat_id: str | None) -> Agent:
         config = ResolvedAgent(
-            user_id=user, id=agent, name="Test", personality_prompt="Test prompt",
+            user_id=user, id=agent, name="Test",
             models=ModelsConfig(), provider_name="ollama", api_key="",
             embeddings_provider_name="ollama", embeddings_api_key="",
             tools=False, associative_memory=self.associative_memory, has_memory=self.memory,
