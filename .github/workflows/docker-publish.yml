@@ -1,0 +1,112 @@
+name: Build & push image
+
+# The server follows the `latest` tag through Watchtower, so `latest` must only
+# move when a GitHub Release is published. Pull requests and pushes to main
+# build the image as a check but never push it. See docs/deployment.md.
+on:
+  release:
+    types: [published]
+  pull_request:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".python-version"
+      - ".github/workflows/docker-publish.yml"
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".python-version"
+      - ".github/workflows/docker-publish.yml"
+  workflow_dispatch:
+    # Run it on a release tag (e.g. v0.2.0) to rebuild that release's image.
+    inputs:
+      latest:
+        description: "Also move `latest` (only when run on a vX.Y.Z tag); the server updates"
+        type: boolean
+        default: false
+
+concurrency:
+  group: image-${{ github.ref }}
+  # Never cancel a release build halfway; checks can be superseded.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+
+env:
+  REGISTRY: ghcr.io
+  # Publish on releases and manual runs; only build on PRs / pushes to main.
+  PUSH: ${{ github.event_name == 'release' || github.event_name == 'workflow_dispatch' }}
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check release tag matches pyproject version
+        if: github.event_name == 'release'
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          if [ "${TAG#v}" != "$version" ]; then
+            echo "::error::Release tag $TAG does not match pyproject.toml version $version"
+            exit 1
+          fi
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: env.PUSH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # metadata-action lowercases the image reference automatically, so
+          # mixed-case owner logins (e.g. "MyUser") are normalised here.
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/recall
+          # `latest` is controlled explicitly below, never implied.
+          flavor: |
+            latest=false
+          tags: |
+            # Release tag v1.2.3 → image tags 1.2.3, 1.2, 1. Pre-release tags
+            # (v1.3.0-rc.1) only get their full version.
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            # The tag the server follows: published releases not marked as
+            # pre-release, or a manual run on a version tag that opts in.
+            type=raw,value=latest,enable=${{ (github.event_name == 'release' && !github.event.release.prerelease) || (github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v') && inputs.latest) }}
+            # Immutable per-commit tag, handy for pinning or rolling back.
+            type=sha,format=short
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          # amd64 only keeps the build fast. Add linux/arm64 if the server ever
+          # runs on ARM (e.g. Raspberry Pi based Proxmox).
+          platforms: linux/amd64
+          push: ${{ env.PUSH == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
