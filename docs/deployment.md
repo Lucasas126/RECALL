@@ -150,6 +150,11 @@ host.
   and `OLLAMA_HOST`. To reach Ollama on the Docker host via
   `host.docker.internal`, add `extra_hosts: ["host.docker.internal:host-gateway"]`
   to the RECALL services.
+- Optional `RECALL_PUBLIC_URL`, the address you open the web UI at (for
+  example `http://<server-ip>:8000`), so Telegram dream notifications link to
+  the session ([web.public_url](config.md#web-authentication)). Set it in `.env`
+  (a commented placeholder is in `.env.deploy.example`); without it the
+  notification is text-only.
 - Deploy-only values read by Compose: `GHCR_OWNER` (lowercase), `RECALL_TAG`,
   `RECALL_PORT`, `RECALL_*_DIR`, `TZ`.
 

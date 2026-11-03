@@ -5,8 +5,10 @@ tools that the agent should be able to see, the description for the agent, and t
 The tool specifications and handlers are assembled by `src/agent/tools.py`.
 Implementations are grouped under `src/agent/toolsets/`: `memory.py` contains
 memory search, listing and reading; `tags.py` contains tag lookup;
-`editing.py` contains memory mutations; and `web.py` contains public web
-search and retrieval. Shared source checks are in `common.py`.
+`editing.py` contains memory mutations; `web.py` contains public web
+search and retrieval; `self_files.py` contains the tools that edit the agent's
+own files; `vault.py` contains the vault tools; and `dream.py` contains the
+review-queue tools of dream sessions. Shared source checks are in `common.py`.
 
 ## Tool-group catalog
 
@@ -16,6 +18,20 @@ The web **Agents** tab configures these groups for each agent:
   and `find_notes_by_tag`.
 - `memory_edit`: `write`, `append`, `edit`, `move`, and `delete`.
 - `web`: `web_search` and `web_retrieve`.
+- `self`: `memory` (add/patch/remove entries of `MEMORY.md` or `USER.md`, single
+  or as an atomic `operations` batch, with the character limit checked on the
+  final result), `skill_view`, `skill_manage` (create, edit, patch, delete,
+  write_file, remove_file) and `soul_edit` (replace or patch `SOUL.md`, saving
+  the previous version). Changes apply to new chats.
+- `vault_read`: `vault_list`, `vault_read` and `vault_search` over the agent's
+  `vault` folder.
+- `vault_edit`: the read tools plus `vault_write`, `vault_append`, `vault_edit`,
+  `vault_move` and `vault_delete`.
+
+Without `tool_groups`, agents get `memory_read`, `memory_edit`, `web` and
+`self`. `skill_view` is added whenever the agent has skills, even without
+`self`. The vault groups need `vault` set in the agent config; the vault
+becomes a `vault:` source, writable only with `vault_edit`.
 
 The catalog is available through `GET /api/tool-groups`. Groups are an
 agent-level selection and do not bypass source isolation or the effective mode
@@ -144,7 +160,10 @@ in recall mode the subagent keeps only search/read tools — it can look things 
 - exposed: list_memories, read, search, query_memory, list_tags, find_notes_by_tag, web_search, web_retrieve
 - hidden: write, append, edit, move, delete (and recall_mode itself)
 
-## dream mode toolset (planned)
-in dream mode all tools are available except for recall_mode itself.
-- exposed: list_memories, read, search, query_memory, list_tags, find_notes_by_tag, write, append, edit, move, delete, web_search, web_retrieve
-- hidden: recall_mode
+## dream mode toolset
+
+dream sessions get the review-queue tools (`dream_pending`, `dream_read_chat`,
+`dream_mark_reviewed`), the memory read tools, the edit tools (writes succeed
+only in `mind_palace`), the `self` tools, and optionally `vault_list`,
+`vault_read`, `vault_search` (read-only) and the web tools, per `dream.tools`.
+No MCP tools. See [dream mode](dream.md#dream-toolset).

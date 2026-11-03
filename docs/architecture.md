@@ -5,7 +5,7 @@
 recall has two very different kinds of functionality:
 
 - **stateless i/o**: read/write the mind palace, read/write the user's obsidian vault, search the internet. these are clean request/response operations.
-- **stateful orchestration**: associative memory, recall mode, dream/sleep mode. these are not tools you can hang off the side — they are part of the agent's structure, run over time, and also read/write the same data as the i/o operations.
+- **stateful orchestration**: associative memory, recall mode, dream mode. these are not tools you can hang off the side — they are part of the agent's structure, run over time, and also read/write the same data as the i/o operations.
 
 if we bury the memory logic inside the agent graph, it can't be reused or exposed. if we treat everything as an isolated tool, the cognitive modes (recall/dream) don't fit, because they need context control and background execution.
 
@@ -16,20 +16,20 @@ separate the system into layers where **data lives in its own plane** and everyt
 ```
 L4  clients / orchestration   recall agent (langgraph + telegram), external clients
 L3  external adapter (future) exposes L1/L2 to external clients
-L2  capabilities (internal)   associative memory, recall mode, dream/sleep mode
+L2  capabilities (internal)   associative memory, recall mode, dream mode
 L1  data / sources plane      mind palace, conversations, obsidian (+overlay), vector index
 ```
 
 - **L1 — data/sources plane (core)**: the actual data and how to access it. a `SourceRegistry` gives unified, typed access (`mind_palace()`, `obsidian()`, `vector()`). depends on nothing above.
 - **L2 — capabilities**: the cognitive modes. each one receives the sources it needs by injection (dependency injection), never via a global. reads/writes L1 directly.
 - **L3 — external adapter (future)**: a thin adapter that could expose L1 and selected L2 capabilities to external clients. It imports L1 and L2, never the reverse.
-- **L4 — orchestration**: the recall agent itself, plus background schedulers for dream/sleep. accesses L1 and L2 directly.
+- **L4 — orchestration**: the recall agent itself, plus the background scheduler for dream mode ([dream.md](dream.md)). accesses L1 and L2 directly.
 
 ## resources vs tools
 
 - **resources** = read-only views: mind palace snapshot, recent conversations, obsidian notes.
 - **tools** = mutations or reasoning: `remember`, `obsidian_write`, `associative_search`, `deep_recall`, `consolidate`.
-- dream/sleep are **not** tools — they are background daemons in L2 that write to L1. at most, expose a manual `consolidate()` trigger.
+- dream mode is **not** a tool — it is a background session that writes to L1, triggered by its schedule, `/dream start` or the web API.
 
 ## channels and the chat service
 
@@ -79,10 +79,12 @@ Status: implemented.
   card; the chat model and reasoning effort are compact chips inside it, next to the attach and
   send icons. Buttons use inline SVG line icons with an `aria-label`.
 - settings and agent editor: Settings > Connections is a collapsed disclosure showing how many
-  services are connected (it only polls for sign-in while open). The agent editor has four tabs:
-  Basic (name, description, system prompt), Advanced (streaming, memory, reasoning and
-  associative-memory options, retained messages), Tools (Use tools and the tool groups) and MCP.
-  Save and Delete stay visible under every tab, and a rejected field opens the tab that holds it.
+  services are connected (it only polls for sign-in while open). The agent editor has four form
+  tabs: Basic (name, description and, for a new agent, its personality), Advanced (streaming,
+  memory, reasoning and associative-memory options, retained messages), Tools (Use tools and the
+  tool groups) and MCP. Save and Delete stay visible under those tabs, and a rejected field opens
+  the tab that holds it. A saved agent also has the [dream mode](./dream.md#web-ui) tabs Soul &
+  memory, Dream and Dream sessions, each with its own save actions.
 - reasoning blocks: trailing newlines from the model are trimmed so no empty line shows under an
   expanded block.
 

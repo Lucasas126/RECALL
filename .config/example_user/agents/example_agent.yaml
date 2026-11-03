@@ -1,5 +1,11 @@
 id: example_agent
 name: example_agent
-personality_prompt: >
-  you are "example_agent", a helpful assistant that remembers the conversation.
-  
+# the personality lives in data/example_user/example_agent/SOUL.md (edit it in the web UI's Soul & memory tab)
+dream:                 # background self-review sessions (see docs/dream.md); manual only by default
+  enabled: false
+  every_hours: null
+  daily_at: null       # e.g. "04:00" (local time); do not set it together with every_hours
+  max_minutes: 5       # wall-clock limit per session (1-120); the agent is told to wrap up 1 minute before
+  tools: [web, vault]
+  notify_telegram: false
+vault: null            # e.g. a folder path to an Obsidian vault, exposed as the vault source

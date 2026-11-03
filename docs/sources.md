@@ -8,12 +8,18 @@ the data plane (L1) is a set of **sources**: named, typed locations the agent ca
 |---|---|---|---|---|
 | `mind_palace` | the agent | read/write | yes | none |
 | `conversations` | the system | read (append-only) | yes | none |
+| `agent` | the agent | read (writes through its methods) | no | none |
+| `dream` | the system | none for tools | no | none |
+| `vault` | the user | read, or read/write with `vault_edit` | no | none (overlay planned) |
 | `obsidian` | the user | read/write | yes | safe or auto |
 | `user_folder` | the user | read-only | yes | none |
 
 - **mind_palace**: the agent's private space. obsidian-like structure (folders, frontmatter, tags). the user does not normally read it.
 - **conversations**: chats with the user, written by the system, never edited by the agent. stored as one JSONL file per chat, `conversations:<chat_id>.jsonl` (one turn per line, timestamped). a chat title is derived from its first user message. assistant turns may carry `reasoning` and `actions` (the tool calls of that turn, with truncated results) for display. the agent can read and search all of its chats. chats are created, appended to and deleted through `ConversationsSource` methods (`create`, `append`, `delete_chat`), not through the generic write/delete. chat ids match `[A-Za-z0-9_-]{1,64}`; new ids look like `20261030-114140-3ad2f3`. older per-day files (`2026-08-31.jsonl`) are valid chats whose id is the day.
-- **obsidian**: the user's vault, bound per agent (see agents.md). accessed through the safe/auto overlay (see overlay.md).
+- **agent**: the agent's own files, rooted at `data/<user_id>/<agent_id>/` but limited to `SOUL.md`, `soul_history/`, `memories/` and `skills/` (`AgentFilesSource`). tools read it as `agent:SOUL.md`, `agent:skills/<name>/SKILL.md`, ...; changes go through the `self` tools and the web API, which keep the SOUL history, memory limits and skill frontmatter valid.
+- **dream**: dream mode bookkeeping in `dream/` (`review_state.json`, `sessions/`, `.lock`), used by the dream runner and the service only (`DreamStateSource`); listing or reading it through tools is refused.
+- **vault**: a folder set with `vault:` in the agent config, registered only when a vault tool group is enabled (chats) or `dream.tools` includes `vault` (dreams, always read-only). the folder must exist; hidden entries are skipped. see [dream mode](dream.md#vault).
+- **obsidian**: the user's vault, bound per agent (see agents.md). accessed through the safe/auto overlay (see overlay.md). planned; the simple `vault` source above is implemented.
 - **user_folder**: extra reference material the user drops in. read-only.
 
 Cancelled agent generations append an assistant turn with `interrupted: true`,
@@ -81,6 +87,6 @@ sources marked `indexed: true` feed the shared vector index. each chunk carries 
 
 ## status
 
-implemented: the `SourceRegistry` (address resolution `source:path` + traversal guard), the `mind_palace` and `conversations` sources, and read/write/list/delete over them. source roots are derived by convention as `data/<user_id>/<agent_id>/<source>` (per-agent source config is planned).
+implemented: the `SourceRegistry` (address resolution `source:path` + traversal guard), the `mind_palace`, `conversations`, `agent`, `dream` and `vault` sources, and read/write/list/delete over them. `list_memories` without a source lists only readable sources. source roots are derived by convention as `data/<user_id>/<agent_id>/<source>` (per-agent source config is planned).
 
 planned: the `obsidian` source + safe/auto overlay, the `user_folder` source, and the vector index (`query_memory`, tags) described above.

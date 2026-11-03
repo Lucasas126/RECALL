@@ -59,6 +59,19 @@ empty, overrides `web.host`; it is read from the process environment when the
 settings load, not from `.env`. The Docker image sets it to `0.0.0.0` (see
 [deployment](deployment.md)).
 
+`web.public_url` (default empty) is the address users open the web UI at, for
+example `http://<server-ip>:8000`. When set, Telegram [dream
+notifications](dream.md#telegram-notification) include a link to the session
+(`<public_url>/#agents/<agent_id>/dreams/<session_id>`); when empty they stay
+text-only. The `RECALL_PUBLIC_URL` environment variable, when set and not empty,
+overrides it; like `RECALL_WEB_HOST` it is read from the process environment, not
+from `.env` (Docker Compose passes `.env` to the containers' environment, so
+there it works). A trailing `/` is dropped; a value that does not start with
+`http://` or `https://` stops startup with an error. The link is sent as a
+Telegram `text_link` so it is clickable; Telegram accepts IP addresses and
+domains but rejects `localhost`, in which case the message falls back to plain
+text (copy the address by hand). Use the server's LAN IP, not `localhost`.
+
 ### Telegram access
 
 The Telegram channel maps approved Telegram user IDs to existing RECALL users
@@ -69,7 +82,8 @@ ignored completely. The bot token remains in `TELEGRAM_BOT_TOKEN`.
 
 Telegram provides `/help`,
 `/settings`, `/newchat`, `/selectmodel`, `/selectagent`, `/agent`, `/model`,
-and `/stt`. Telegram's native command menu is populated at startup, and
+`/stt` and `/dream` (status of the active agent's [dream mode](dream.md#commands);
+`/dream start` starts a session and `/dream cancel` stops it). Telegram's native command menu is populated at startup, and
 `/help` prints the same command list in the chat.
 Operational notices and errors use the user's saved English/Spanish preference;
 the native command descriptions and `/help` text remain English.
@@ -727,7 +741,7 @@ sliding window. It applies to every provider, not only OpenRouter. Small windows
 
 What still invalidates the cache, by design:
 
-- Changing the agent's tools, personality prompt or model. Tools come before the
+- Changing the agent's tools, personality (`SOUL.md`, read when a chat starts) or model. Tools come before the
   system prompt in the cached prefix, so a change in the tool list (an MCP server
   connecting, going down or being disabled) also invalidates the system prompt. That
   is why MCP notes live in the system prompt and are not split into a separate block.
@@ -805,9 +819,11 @@ chat events and history display as memory actions. The complete result enters
 the active context, while the action preview stored with the turn is truncated
 to 500 characters.
 
-The shared tool-group catalog is returned by `GET /api/tool-groups` and is
-selectable in the web **Agents** tab. Agent YAML stores the selection as
-`chat_config.tool_groups`; omitting it preserves the default all-groups behavior.
+The shared tool-group catalog is returned by `GET /api/tool-groups` (each group
+with `id`, `name`, `description` and `default`) and is selectable in the web
+**Agents** tab. Agent YAML stores the selection as `chat_config.tool_groups`;
+omitting it selects the groups marked `default`: every group except the vault
+ones, which are always an explicit choice.
 Existing `allow` and `deny` lists remain supported as an additional per-tool
 filter.
 
@@ -841,8 +857,6 @@ models:
 id: aria
 name: Aria
 description: Helps with notes and planning  # optional; shown in the web agent list, not sent to the model
-personality_prompt: >
-  you are aria, a helpful assistant...
 chat_config:
   stream: true                        # stream tokens as they arrive
   has_memory: true                   # keep conversation history in context
@@ -851,10 +865,32 @@ chat_config:
   keep_reasoning_in_memory: false    # store the thinking in context/history
   conversation_messages_retained: 20 # at most N messages kept in context; cuts go below N (see prompt caching)
   tools: true                       # enable the selected tool groups
-  tool_groups: [memory_read, memory_edit]  # memory_read, memory_edit, web
+  tool_groups: [memory_read, memory_edit, self]  # memory_read, memory_edit, web, self, vault_read, vault_edit
   mcp:                               # MCP servers enabled for this agent (see mcp.md)
     google_calendar: {tools: null, read_only: false, instructions: ""}
+dream:                               # background self-review sessions (see dream.md)
+  enabled: false                     # runs the schedule; /dream start works either way
+  every_hours: null                  # run every N hours, or
+  daily_at: "04:00"                  # once a day at this local time; setting both is invalid
+  model: null                        # null = the user's chat model
+  reasoning_effort: medium
+  max_steps: 60                      # model calls per session
+  max_tokens: 500000                 # input + output tokens per session
+  max_minutes: 5                     # wall-clock limit (1-120); wrap-up warning 1 minute before
+  tools: [web, vault]                # optional read groups for dreams
+  prompt: ""                         # empty = built-in default
+  notify_telegram: false
+vault: null                          # folder exposed as the `vault` source (e.g. an Obsidian vault)
+memory_limits:                       # chars of MEMORY.md / USER.md, injected in every prompt
+  memory_chars: 2200
+  user_chars: 1400
 ```
+
+the agent's personality lives only in `data/<user_id>/<agent_id>/SOUL.md` (a
+missing file is an empty personality; the agent YAML has no personality field),
+with its memories and skills next to it; see [dream mode](dream.md#per-agent-files) for the
+layout and the prompt assembly. when `tool_groups` is omitted, the default is
+`[memory_read, memory_edit, web, self]`; vault groups are always explicit.
 
 ## loading
 
@@ -868,7 +904,7 @@ messages.
 
 ## managing agents
 
-the web **Agents** tab lists the user's agents in the sidebar (name and description) and edits the name, `description`, `personality_prompt` and all `chat_config` options (associative memory is a mode selector plus a timing selector, the latter disabled while the mode is off). a new agent's `id` is derived from its name (lowercase, accents removed, non-alphanumeric characters replaced by `-`) and is not editable from the form. the same operations are available as routes:
+the web **Agents** tab lists the user's agents in the sidebar (name and description) and edits the name, `description` and all `chat_config` options (associative memory is a mode selector plus a timing selector, the latter disabled while the mode is off). a new agent's `id` is derived from its name (lowercase, accents removed, non-alphanumeric characters replaced by `-`) and is not editable from the form. the same operations are available as routes:
 
 | method | route | result |
 | --- | --- | --- |
@@ -883,9 +919,12 @@ the web **Agents** tab lists the user's agents in the sidebar (name and descript
 | `PUT` | `/api/agents/<agent_id>` | replaces the agent; the body `id` may differ, which renames it |
 | `DELETE` | `/api/agents/<agent_id>` | removes the agent from `user.yaml` and deletes its file (`204`) |
 
+dream settings, SOUL (with history), memories and dream sessions have their own
+routes, listed in [dream mode](dream.md#web-api).
+
 rules:
 
-- ids match `[A-Za-z0-9_-]{1,64}`; `name` has 1–100 characters, `description` 0–500 (optional, empty by default) and `personality_prompt` 1–20000.
+- ids match `[A-Za-z0-9_-]{1,64}`; `name` has 1–100 characters and `description` 0–500 (optional, empty by default). the agent body has no personality field (an unknown field such as `personality_prompt` is a `422`): the personality is `SOUL.md`, read and written through `/api/agents/<agent_id>/soul`. the form's personality field for a new agent is sent there right after the agent is created.
 - ids are unique per user. a duplicate id, or an existing file name, returns `409`.
 - changing the `id` through `PUT` (the web form never does) moves `data/<user_id>/<old_id>` to `data/<user_id>/<new_id>` and updates the user's preferred agent. if the agent file was named after its old id, it is renamed after the new one; otherwise it keeps its name. if the data folder cannot be moved (for example, another process is using it), the change is rolled back.
 - deleting keeps `data/<user_id>/<agent_id>` on disk, so creating an agent later with the same id reuses that memory. if the deleted agent was the preferred one, the preference falls back to the user's first agent.

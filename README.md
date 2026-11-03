@@ -5,9 +5,8 @@ initially, it will only use telegram to talk to the user/terminal for local deve
 for the backend, I was thinking of using langgraph/langchain
 main ideas:
 - mind palace: it's basically a folder where an agent can have its memories, notes and personal recollections, it's their property and the user can't normally access it
-- sleep mode: a process that runs every x hours during which the agent reviews the latest conversations it has had with the user, and performs pending tasks or creates its personal notes in its mind palace
 - recall mode: the agent can enter its mind palace, with the intention of retrieving specific memories or pieces of information, but with a context trimmed to the last messages (to avoid saturating its context). To exit, it returns only the necessary information, removing from its context the entire process it needed to extract it.
-- dream mode: an async process that happens every x hours during which the agent can explore its mind palace, reviews the latest conversations with the user, explores hypothetical scenarios, and consolidates its knowledge in the mind palace
+- dream mode: background sessions (scheduled or started with `/dream start`) in which the agent reviews its recent conversations and curates its own files: `SOUL.md` personality, memories, skills, mind palace and journal; see [docs/dream.md](docs/dream.md)
 - associative memory: with all user messages, a subprocess is launched that:
     - asks a subagent to summarize the query in 3-5 simple words
     - those words are vectorized and searched within a vector database for related information

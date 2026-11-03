@@ -6,10 +6,10 @@ the platform hosts **many agents**, each belonging to a user. agents differ in p
 
 an agent instance is defined by:
 
-- **identity**: id, name, personality / system prompt.
+- **identity**: id, name, and its own files: `SOUL.md` (personality), memories and skills (see [dream mode](dream.md#per-agent-files)).
 - **data scope**: its own mind palace, its bound obsidian vault(s), its conversations, its user folders.
 - **tool policy**: which tools it is allowed to use.
-- **config**: chat behavior, overlay mode per vault, mode cadences (dream/sleep).
+- **config**: chat behavior, its vault folder, dream mode (schedule, model, limits).
 
 Model IDs belong to the user, not the agent. The user's LLM/STT defaults apply
 unless a chat has an explicit override; embeddings also use the user
@@ -30,10 +30,10 @@ isolation is enforced in one place: the per-agent `SourceRegistry` (path resolut
 ## tool separation
 
 - each agent has a **tool-group policy**: a selection from the shared tool-group catalog.
-- the available groups are memory read-only, memory read and edit, and web search.
+- the available groups are memory read-only, memory read and edit, web search, self (edit its own SOUL, memories and skills), vault read-only and vault read and edit.
 - each agent also chooses which shared **MCP servers** it uses (for example Google Calendar), optionally read-only, with a tool selection and extra instructions. The tools act on the agent's user's own connected account; see [MCP servers](mcp.md).
 - legacy `allow`/`deny` tool lists are still accepted as an additional per-tool filter.
-- **modes** (recall/dream) further restrict the active set on top of the policy.
+- dream sessions use their own toolset (see [dream mode](dream.md#dream-toolset)); recall mode (planned) would restrict the set further.
 
 the effective toolset at any moment is:
 
@@ -53,8 +53,6 @@ users create, edit and delete agents from the web **Agents** tab, which lists th
 ```yaml
 id: aria
 name: Aria
-personality_prompt: >
-  you are aria, a curious and tidy assistant...
 sources:
   mind_palace:
     root: ./data/user-a/aria/mind_palace
@@ -67,11 +65,12 @@ sources:
     resource: folders.refs
 chat_config:
   tools: true
-  tool_groups: [memory_read, memory_edit]
-modes:
-  dream: { every_hours: 6 }
-  sleep: { every_hours: 3 }
+  tool_groups: [memory_read, memory_edit, self]
+dream: { enabled: true, every_hours: 6 }
 ```
+
+the `sources` block is a sketch; today source roots follow the
+`data/<user_id>/<agent_id>/<source>` convention and only `vault` is configurable.
 
 ## resolution order for a tool call
 
