@@ -18,10 +18,26 @@ TOOL_GROUP_CATALOG: Final[tuple[dict[str, str], ...]] = (
         "name": "Web search",
         "description": "Search and retrieve public web pages.",
     },
+    {
+        "id": "self",
+        "name": "Self-improvement",
+        "description": "Edit the agent's own SOUL.md, memories and skills.",
+    },
+    {
+        "id": "vault_read",
+        "name": "Vault read-only",
+        "description": "List, read and search the agent's vault folder.",
+    },
+    {
+        "id": "vault_edit",
+        "name": "Vault read and edit",
+        "description": "Create, edit, move and delete files in the agent's vault folder.",
+    },
 )
 
 TOOL_GROUP_IDS: Final[frozenset[str]] = frozenset(item["id"] for item in TOOL_GROUP_CATALOG)
-DEFAULT_TOOL_GROUPS: Final[tuple[str, ...]] = tuple(item["id"] for item in TOOL_GROUP_CATALOG)
+# used when an agent sets no tool_groups; vault access is always an explicit choice
+DEFAULT_TOOL_GROUPS: Final[tuple[str, ...]] = ("memory_read", "memory_edit", "web", "self")
 
 TOOL_GROUP_TOOLS: Final[dict[str, tuple[str, ...]]] = {
     "memory_read": (
@@ -29,7 +45,15 @@ TOOL_GROUP_TOOLS: Final[dict[str, tuple[str, ...]]] = {
     ),
     "memory_edit": ("write", "append", "edit", "move", "delete"),
     "web": ("web_search", "web_retrieve"),
+    "self": ("memory", "skill_view", "skill_manage", "soul_edit"),
+    "vault_read": ("vault_list", "vault_read", "vault_search"),
+    "vault_edit": (
+        "vault_list", "vault_read", "vault_search",
+        "vault_write", "vault_append", "vault_edit", "vault_move", "vault_delete",
+    ),
 }
+
+
 def validate_tool_groups(tool_groups: list[str]) -> list[str]:
     """Validate and normalize an agent's tool-group selection."""
     if len(set(tool_groups)) != len(tool_groups):
