@@ -123,7 +123,8 @@ Implementation: [src/providers/mcp.py](../src/providers/mcp.py) (`McpManager`),
 
 The catalog ships with the community
 [`@cocal/google-calendar-mcp`](https://github.com/nspady/google-calendar-mcp)
-server, run through `npx` (requires Node.js 20+ on the RECALL host). One Google
+server, run through `npx` (requires Node.js 20+ on the RECALL host; the Docker
+image does not include it, see [deployment](deployment.md#limitations)). One Google
 OAuth client is shared by the framework; each user signs in with their own Google
 account and gets their own token file.
 

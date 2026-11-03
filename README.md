@@ -27,3 +27,9 @@ main ideas:
 Scanned PDF pages need the Tesseract OCR program installed on the machine that runs RECALL.
 Windows: `winget install --id UB-Mannheim.TesseractOCR -e`. For macOS, Linux and the rest of the setup,
 see [docs/config.md](docs/config.md#tesseract-ocr).
+
+## Docker deployment
+
+A Docker image (web UI + Telegram bot, with Tesseract and ffmpeg included) is published to GHCR when a
+GitHub Release is published, and a Compose file with Watchtower keeps a home server on the latest release.
+See [docs/deployment.md](docs/deployment.md).
