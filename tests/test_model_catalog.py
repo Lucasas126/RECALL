@@ -11,6 +11,7 @@ from src.providers.catalog import CatalogUnavailable, OpenRouterModel, list_open
 from src.service.chat import ChatService
 from src.web.app import create_app
 from auth_helpers import TEST_PASSWORD_HASH, login
+from provider_helpers import isolate_providers
 
 
 def _model(model_id: str, name: str, output: str = "text") -> dict:
@@ -195,6 +196,7 @@ class ModelCatalogTests(unittest.TestCase):
 
 class ModelCatalogWebTests(unittest.TestCase):
     def setUp(self) -> None:
+        isolate_providers(self)
         self.user = UserConfig(
             id="test-user", name="Test", provider=ProviderConfig(name="openrouter"),
             password_hash=TEST_PASSWORD_HASH, agents=[],
@@ -208,7 +210,7 @@ class ModelCatalogWebTests(unittest.TestCase):
         self.addCleanup(user_patch.stop)
         login(self.client, self.user.id)
         self.load_user.reset_mock()
-        catalog_patch = patch("src.service.chat.list_openrouter_models", return_value=[
+        catalog_patch = patch("src.service.providers.list_openrouter_models", return_value=[
             OpenRouterModel(id="vendor/alpha", name="Alpha", description="Test", zdr_providers=["Private"]),
         ])
         self.catalog = catalog_patch.start()
@@ -222,6 +224,7 @@ class ModelCatalogWebTests(unittest.TestCase):
             "pricing": {"prompt": None, "completion": None},
             "input_modalities": [],
             "parameter_routes": [],
+            "provider": "openrouter", "provider_label": "OpenRouter", "main_provider": True, "zdr_applies": True,
         }])
         self.catalog.assert_called_once_with("alpha", zdr=True)
         self.load_user.assert_called_with("test-user")
@@ -248,12 +251,18 @@ class ModelCatalogWebTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/models").status_code, 401)
         self.catalog.assert_not_called()
 
-    def test_non_openrouter_user_gets_explicit_error(self) -> None:
+    def test_ollama_main_lists_local_models_without_openrouter(self) -> None:
         self.user.provider.name = "ollama"
-        response = self.client.get("/api/models")
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("only available for the OpenRouter", response.json()["detail"])
+        isolate_providers(self, openrouter_key=None, ollama=["llama3:8b", "qwen3"])
+        response = self.client.get("/api/models/catalog", params={"provider": "ollama", "q": "llama"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([(m["id"], m["provider"]) for m in response.json()["models"]], [("llama3:8b", "ollama")])
         self.catalog.assert_not_called()
+        # speech-to-text is OpenRouter only, and its key variable is not set: the error says what to fix
+        response = self.client.get("/api/speech-to-text/models")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Provider not available: OpenRouter", response.json()["detail"])
+        self.assertIn("OPENROUTER_API_KEY", response.json()["detail"])
 
     def test_upstream_failure_is_502_not_a_success_shaped_empty_list(self) -> None:
         self.catalog.side_effect = CatalogUnavailable("OpenRouter catalog unavailable; retry later.")

@@ -16,12 +16,13 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.agent.agent import Agent, embeddings_provider
+from src.agent.agent import Agent, embeddings_provider, main_provider, model_provider
 from src.agent.tools import chat_folder_options
 from src.agent.dream import DEFAULT_DREAM_PROMPT
 from src.config.agents import AgentStore
 from src.config.favorites import ModelFavorites
 from src.config.loader import load_agent, load_agent_config, load_user, user_models
+from src.config.model_refs import CLAUDE_SUBSCRIPTION, OPENROUTER, PROVIDERS, is_claude_subscription, model_name, provider_of
 from src.config.models import (
     AgentConfig, DreamConfig, FolderConfig, MemoryLimits, ReasoningEffort, ResolvedAgent, UserConfig,
 )
@@ -39,10 +40,14 @@ from src.providers.cancellation import CancellationToken, GenerationCancelled
 from src.providers.catalog import CatalogUnavailable, list_openrouter_models
 from src.providers.catalog import list_openrouter_transcription_models
 from src.providers.mcp import McpManager
+from src.providers.ollama import OllamaUnavailable
 from src.providers.openrouter import OpenRouterProvider
+from src.providers.claude_subscription import claude_subscription_provider
 from src.providers.provider import get_provider
 from src.providers.tavily import TavilyClient
 from src.providers.telegram_notify import TelegramNotifier
+from src.service import providers as provider_settings
+from src.service.providers import CatalogCapability, ProviderAvailability
 from src.service.dream import DreamDependencies, DreamManager, format_local_time, parse_dream_command
 from src.utils.logger import get_logger
 from src.utils.media import VideoDecomposition, decompose_video
@@ -214,12 +219,13 @@ class ChatService:
         self._agents = AgentStore(CONFIG_DIR, DATA_DIR)
         # (model id -> (monotonic time, supported)) so opening chats does not refetch the catalog
         self._reasoning_support: dict[str, tuple[float, bool]] = {}
+        self._availability = ProviderAvailability()
         self._dream = dream or DreamManager(self._dream_dependencies())
 
     @staticmethod
     def _build_index(config: ResolvedAgent, sources: SourceRegistry) -> VectorIndex:
         """The agent's vector index with its configured embeddings provider and model."""
-        chat = get_provider(config.provider_name, api_key=config.api_key)
+        chat = main_provider(config)
         return VectorIndex.for_agent(
             config.user_id, config.id, sources, embeddings_provider(config, chat), config.models.embeddings,
         )
@@ -230,7 +236,7 @@ class ChatService:
 
         return DreamDependencies(
             resolve_agent=load_agent,
-            provider=lambda config: get_provider(config.provider_name, api_key=config.api_key),
+            provider=lambda config: model_provider(config, config.dream.model or config.models.chat),
             index=lambda config, sources: self._index_factory(config, sources),
             web_client=lambda: TavilyClient.from_config(TAVILY),
             agents=self._all_agents,
@@ -405,14 +411,13 @@ class ChatService:
     def update_preferences(self, user_id: str, changes: UserPreferences) -> dict:
         """Persist explicit changes without modifying any open chat or running agent."""
         user = self._user(user_id)
+        updates = {}
         if changes.default_llm_model is not None:
-            models = self.list_models(user_id, changes.default_llm_model, zdr=True)
-            if not any(model["id"] == changes.default_llm_model for model in models):
-                raise InputError("model is not available in the OpenRouter chat catalog with the selected ZDR filter")
+            updates["default_llm_model"] = self._check_model(user, changes.default_llm_model, "chat", zdr=True)
         if changes.default_stt_model is not None:
-            models = self.list_transcription_models(user_id, changes.default_stt_model, zdr=SPEECH_TO_TEXT.zdr)
-            if not any(model["id"] == changes.default_stt_model for model in models):
-                raise InputError("The speech-to-text model is not available with the required routing policy.")
+            updates["default_stt_model"] = self._check_model(user, changes.default_stt_model, "stt", zdr=SPEECH_TO_TEXT.zdr)
+        if updates:
+            changes = changes.model_copy(update=updates)
         saved = self._preferences.update(
             user_id, changes, validate=lambda preferences: self._resolve_preferences(user, preferences),
         )
@@ -441,22 +446,59 @@ class ChatService:
             "default_stt_model": resolved.default_stt_model or user.models.stt,
         })
 
-    def list_models(self, user_id: str, query: str = "", *, zdr: bool = True) -> list[dict]:
-        """List searchable chat models for an OpenRouter user, requiring ZDR by default."""
+    def provider_status(self, user_id: str, capability: CatalogCapability = "chat") -> dict:
+        """Which providers can serve `capability` for this user right now, and why not when they cannot.
+
+        Read-only and secret-free: variable names and hosts, never values. Slow checks are cached briefly.
+        """
         user = self._user(user_id)
-        if user.provider.name != "openrouter":
-            raise InputError("model browsing is only available for the OpenRouter chat provider")
-        return [model.model_dump() for model in list_openrouter_models(query, zdr=zdr)]
+        return {"main": user.provider.name, "providers": self._availability.rows(user, capability)}
+
+    def model_catalog(
+        self, user_id: str, query: str = "", *, zdr: bool = True, capability: CatalogCapability = "chat",
+        provider: str | None = None,
+    ) -> dict:
+        """The models of one provider (the model picker lists a single provider at a time).
+
+        Without `provider`, speech-to-text uses OpenRouter and chat models merge every available provider
+        (Telegram's single list). `zdr` filters OpenRouter rows only; Claude subscription rows are always
+        listed and marked not ZDR, Ollama rows are local.
+        """
+        user = self._user(user_id)
+        if provider is None and capability == "stt":
+            provider = OPENROUTER
+        if provider is not None:
+            if provider not in PROVIDERS:
+                raise InputError("{provider} cannot serve this kind of model.", provider=provider)
+            self._availability.require(user, provider, capability)
+            return {"models": provider_settings.provider_rows(user, provider, query, zdr=zdr, capability=capability)}
+        rows: list[dict] = []
+        failures: list[Exception] = []
+        for status in self._availability.rows(user, capability):
+            if not status["available"]:
+                continue
+            try:
+                rows += provider_settings.provider_rows(user, status["id"], query, zdr=zdr, capability=capability)
+            except (CatalogUnavailable, OllamaUnavailable) as exc:
+                failures.append(exc)
+        if failures and not rows:
+            raise failures[0]
+        return {"models": rows}
+
+    def _check_model(self, user: UserConfig, model: str, capability: CatalogCapability, *, zdr: bool) -> str:
+        """The canonical reference of `model` after checking its provider is usable and offers it."""
+        provider, canonical = provider_settings.canonical_reference(user, model)
+        rows = self.model_catalog(user.id, canonical, zdr=zdr, capability=capability, provider=provider)["models"]
+        provider_settings.require_listed(provider, canonical, capability, rows)
+        return canonical
+
+    def list_models(self, user_id: str, query: str = "", *, zdr: bool = True) -> list[dict]:
+        """Chat models of the providers available to the user; `zdr` filters the OpenRouter ones."""
+        return self.model_catalog(user_id, query, zdr=zdr)["models"]
 
     def list_transcription_models(self, user_id: str, query: str = "", *, zdr: bool = True) -> list[dict]:
-        """List OpenRouter speech-to-text models for the current user."""
-        user = self._user(user_id)
-        if user.provider.name != "openrouter":
-            raise InputError("speech-to-text model browsing requires the OpenRouter chat provider")
-        return [
-            model.model_dump()
-            for model in list_openrouter_transcription_models(query, zdr=zdr)
-        ]
+        """Speech-to-text models (OpenRouter only) for the current user."""
+        return self.model_catalog(user_id, query, zdr=zdr, capability="stt")["models"]
 
     def list_favorite_models(self, user_id: str) -> list[str]:
         """Return saved OpenRouter IDs, including favorites no longer in the ZDR catalog."""
@@ -465,9 +507,7 @@ class ChatService:
 
     def add_favorite_model(self, user_id: str, model_id: str, *, zdr: bool = True) -> list[str]:
         """Save a model after checking availability under the explicit catalog filter."""
-        models = self.list_models(user_id, model_id, zdr=zdr)
-        if not any(model["id"] == model_id for model in models):
-            raise InputError("model is not available in the OpenRouter chat catalog with the selected ZDR filter")
+        model_id = self._check_model(self._user(user_id), model_id, "chat", zdr=zdr)
         return self._favorites.update(user_id, model_id, favorite=True)
 
     def remove_favorite_model(self, user_id: str, model_id: str) -> list[str]:
@@ -530,10 +570,12 @@ class ChatService:
             raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
         user = self._user(user_id)
         defaults = user_models(user, self._preferences)
-        model = selection.model_dump() if selection is not None else {
-            "provider": user.provider.name,
-            "id": defaults.chat,
-            "zdr": True,
+        effective = selection.id if selection is not None else defaults.chat
+        provider = provider_of(effective, user.provider.name)
+        model = {
+            "provider": provider,
+            "id": effective,
+            "zdr": selection.zdr if selection is not None else provider != CLAUDE_SUBSCRIPTION,
         }
         agent_config = self._agent_config(user_id, agent_id).chat_config
         effort = self._reasoning_effort_override(conversations, chat_id)
@@ -557,8 +599,12 @@ class ChatService:
 
     def _reasoning_effort_supported(self, user: UserConfig, model_id: str) -> bool | None:
         """Whether the model advertises reasoning; None when the catalog cannot say."""
-        if user.provider.name != "openrouter":
+        provider = provider_of(model_id, user.provider.name)
+        if provider == CLAUDE_SUBSCRIPTION:
+            return True
+        if provider != OPENROUTER:
             return False
+        model_id = model_name(model_id)
         cached = self._reasoning_support.get(model_id)
         if cached is not None and monotonic() - cached[0] < _REASONING_SUPPORT_TTL_SECONDS:
             return cached[1]
@@ -606,10 +652,9 @@ class ChatService:
         """Persist an idle chat's model and routing policy without changing other chats."""
         conversations = self._conversations(user_id, agent_id)
         self._load(conversations, chat_id)
+        main = self._user(user_id).provider.name
         if model_id is not None:
-            models = self.list_models(user_id, model_id, zdr=zdr)
-            if not any(model["id"] == model_id for model in models):
-                raise InputError("model is not available in the OpenRouter chat catalog with the selected ZDR filter")
+            model_id = self._check_model(self._user(user_id), model_id, "chat", zdr=zdr)
         slot = self._slot(user_id, agent_id)
         with slot.state:
             if self._chat_busy(slot, chat_id):
@@ -619,7 +664,7 @@ class ChatService:
                     if model_id is None:
                         conversations.clear_model(chat_id)
                     else:
-                        conversations.set_model(chat_id, model_id, zdr=zdr)
+                        conversations.set_model(chat_id, model_id, zdr=zdr, main=main)
                 except FileNotFoundError as exc:
                     raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
                 # an effort the new model does not support would be sent to it; drop it
@@ -734,7 +779,7 @@ class ChatService:
             raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
         resolved = load_agent(user_id, agent_id)
         chat_model = selection.id if selection else user_models(self._user(user_id), self._preferences).chat
-        supported = get_provider(resolved.provider_name, api_key=resolved.api_key).supported_modalities(chat_model)
+        supported = model_provider(resolved, chat_model).supported_modalities(chat_model)
         if "video" in supported or "image" not in supported:
             return text, attachments, None
 
@@ -804,9 +849,13 @@ class ChatService:
         self._require_chat(self._conversations(user_id, agent_id), chat_id)
         resolved = load_agent(user_id, agent_id)
         transcription_model = user_models(self._user(user_id), self._preferences).stt
-        if resolved.provider_name != "openrouter":
-            raise InputError("audio messages require an OpenRouter chat provider for speech-to-text")
-        transcriber = OpenRouterProvider(api_key=resolved.api_key)
+        if provider_of(transcription_model, resolved.provider_name) != OPENROUTER:
+            raise InputError("audio messages require an OpenRouter speech-to-text model")
+        api_key = resolved.api_key if resolved.provider_name == OPENROUTER else os.environ.get(resolved.openrouter.api_key, "").strip()
+        if not api_key:
+            raise provider_settings.unavailable(
+                {"id": OPENROUTER, "reason": "no_api_key", "detail": resolved.openrouter.api_key})
+        transcriber = OpenRouterProvider(api_key=api_key)
         transcripts = []
         remaining = []
         for attachment in attachments:
@@ -937,18 +986,23 @@ class ChatService:
         turns = [t for t in self._load(conversations, chat_id) if t.get("role") in ("user", "assistant")]
         if len(turns) < CHAT_NAMING.min_messages:
             return
-        api_key = os.environ.get(CHAT_NAMING.api_key, "").strip()
-        if not api_key:
-            logger.warning("chat naming skipped: env var %s is not set", CHAT_NAMING.api_key)
-            return
         messages = [
             {"role": "system", "content": _NAMING_PROMPT},
             {"role": "user", "content": _naming_transcript(turns)},
         ]
         try:
-            reply = OpenRouterProvider(api_key=api_key).invoke_sync(
-                messages, model=CHAT_NAMING.model, api_key=api_key, zdr=CHAT_NAMING.zdr,
-            )
+            if is_claude_subscription(CHAT_NAMING.model):
+                # runs with the requesting user's own Claude login, never another user's
+                provider = claude_subscription_provider(self._user(user_id).claude_subscription, purpose="chat_naming.model")
+                reply = provider.invoke(messages, CHAT_NAMING.model, stream=False, zdr=CHAT_NAMING.zdr)
+            else:
+                api_key = os.environ.get(CHAT_NAMING.api_key, "").strip()
+                if not api_key:
+                    logger.warning("chat naming skipped: env var %s is not set", CHAT_NAMING.api_key)
+                    return
+                reply = OpenRouterProvider(api_key=api_key).invoke_sync(
+                    messages, model=CHAT_NAMING.model, api_key=api_key, zdr=CHAT_NAMING.zdr,
+                )
             title = conversations.set_generated_title(chat_id, reply["response"] or "")
         except Exception:
             logger.exception("chat naming failed for %s/%s/%s; keeping the first-message title", user_id, agent_id, chat_id)
@@ -1067,7 +1121,10 @@ class ChatService:
         self, user_id: str, agent_id: str, dream: DreamConfig, memory_limits: MemoryLimits,
     ) -> dict:
         """Save the dream block and memory limits; idle cached chats pick them up when rebuilt."""
-        self._owned_agent(user_id, agent_id)
+        user = self._owned_agent(user_id, agent_id)
+        if dream.model is not None and dream.model != self._agent_config(user_id, agent_id).dream.model:
+            provider, _ = provider_settings.canonical_reference(user, dream.model)
+            self._availability.require(user, provider, "chat")
         slot = self._slot(user_id, agent_id)
         with slot.lock:
             config = self._agent_config(user_id, agent_id)

@@ -107,6 +107,12 @@ main { display: flex; flex-direction: column; min-width: 0; height: 100vh; heigh
 .model-choice strong, .model-choice small { display: block; overflow-wrap: anywhere; }
 .model-choice small { color: var(--muted); }
 .model-choice[aria-pressed="true"] { border-color: var(--accent); }
+.provider-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.provider-tabs[hidden] { display: none; }
+.provider-tab { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left; }
+.provider-tab small { color: var(--muted); font-size: .8em; }
+.provider-tab[aria-selected="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.provider-tab:disabled small { color: var(--warn); }
 .model-star { align-self: flex-start; font-size: 1.2em; }
 .model-star[aria-pressed="true"] { color: var(--warn); }
 .chat-view { display: contents; }

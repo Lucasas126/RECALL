@@ -36,6 +36,7 @@ from src.config.models import ReasoningEffort
 from src.config.preferences import PreferencesError, UserPreferences
 from src.config.settings import TELEGRAM_ALLOWED_USERS_ENV
 from src.providers.catalog import CatalogUnavailable
+from src.providers.ollama import is_ollama_cloud
 from src.providers.telegram_notify import parse_allowed_users
 from src.service.chat import ChatEvent, ChatService, ServiceError
 from src.utils.logger import get_logger
@@ -131,7 +132,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/newchat — Start a new chat for the current agent\n"
         "/selectagent — Choose the active agent\n"
         "/agent — Show the active agent\n"
-        "/selectmodel — Browse models, prices, and pages\n"
+        "/selectmodel — Choose among your favorite models (star them in the web UI)\n"
         "/model — Show the model selected for the current chat\n"
         "/stt — Show the default speech-to-text model (change it in /settings)\n"
         "/dream — Last dream session, schedule and pending chats; /dream start starts one, /dream cancel stops it\n"
@@ -140,6 +141,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
+_NO_FAVORITES = "You have no favorite models yet. Star the models you want in the web UI (model selector), then try again."
 _SETTINGS_VIEWS = frozenset({"main", "agents", "llm", "stt", "chat_effort"})
 _CHAT_VIEWS = frozenset({"chat_llm"})
 _EFFORT_LEVELS = get_args(ReasoningEffort)
@@ -149,14 +151,53 @@ def _panel_button(panel: _Panel, text: str, action: str) -> InlineKeyboardButton
     return InlineKeyboardButton(text, callback_data=f"{_PANEL_CALLBACK}:{panel.token}:{action}")
 
 
+# short provider names for the Telegram buttons and confirmations (models with the same name can come
+# from different providers, so every line says which one serves it)
+_PROVIDER_TAGS = {"openrouter": "OpenRouter", "ollama": "Ollama", "claude_subscription": "Claude"}
+
+
+def _provider_tag(provider: object) -> str:
+    """The short name of a provider id; a model without one is an OpenRouter model (the original catalog)."""
+    name = provider if isinstance(provider, str) and provider else "openrouter"
+    return _PROVIDER_TAGS.get(name, name)
+
+
+def _with_provider(provider: str | None, model_id: str) -> str:
+    """`Provider · model id` for confirmations."""
+    return f"{_provider_tag(provider)} · {model_id}"
+
+
 def _llm_label(model: dict[str, Any], index: int, current: str | None, favorites: set[str]) -> str:
+    head = f"{'✅ ' if model['id'] == current else ''}{'⭐ ' if model['id'] in favorites else ''}"
+    provider = model.get("provider")
+    tag = _provider_tag(provider)
+    if provider == "claude_subscription":  # no per-token price; never ZDR
+        return f"{head}🧪 {index}. {tag} · {model['name'][:22]} | plan, no ZDR"
+    if provider == "ollama":
+        return f"{head}{'🏠' if model.get('local', True) else '☁️'} {index}. {tag} · {model['name'][:22]} | {'local' if model.get('local', True) else 'cloud'}"
     return (
-        f"{'✅ ' if model['id'] == current else ''}"
-        f"{'⭐ ' if model['id'] in favorites else ''}"
-        f"{index}. {model['name'][:28]} | "
+        f"{head}{index}. {tag} · {model['name'][:22]} | "
         f"${model['pricing'].get('prompt') or 'n/d'} in / "
         f"${model['pricing'].get('completion') or 'n/d'} out"
     )
+
+
+def _favorite_models(service: ChatService, user_id: str) -> tuple[list[dict[str, Any]], set[str]]:
+    """The Telegram selector offers only the user's favorite models (no search); favorites come from the web UI."""
+    favorites = set(service.list_favorite_models(user_id))
+    models = [model for model in service.list_models(user_id, "", zdr=True) if model["id"] in favorites]
+    return _sort_models(models, favorites), favorites
+
+
+def _zdr_line(session: TelegramSession, provider: str | None, zdr: bool, model_id: str = "") -> str:
+    """The data-retention line of a chat model: never 'enabled' for Claude subscription or Ollama models."""
+    if provider == "claude_subscription":
+        return _msg(session, "Not ZDR (Claude subscription, experimental)")
+    if provider == "ollama" and is_ollama_cloud(model_id):
+        return _msg(session, "Not ZDR (Ollama cloud model)")
+    if provider == "ollama":
+        return _msg(session, "ZDR: not applicable (local Ollama model)")
+    return _msg(session, "ZDR: {policy}", policy=_msg(session, "enabled" if zdr else "disabled"))
 
 
 def _stt_label(model: dict[str, Any], index: int, current: str | None) -> str:
@@ -287,7 +328,9 @@ def _panel_view(
     if panel.view in ("llm", "chat_llm"):
         rows, pages = _paged_rows(session, panel, lambda model, index: _llm_label(model, index, current, panel.favorites))
         name = next((model["name"] for model in panel.items if model["id"] == current), current)
-        body = _msg(session, "Current model: {model}\n\nPage {page}/{pages}. {count} models available.\nChoose another model. Prices are USD per 1 million tokens (input / output). ZDR enabled:",
+        mixed = any(model.get("provider", "openrouter") != "openrouter" for model in panel.items)
+        body = _msg(session, "Current model: {model}\n\nPage {page}/{pages}. {count} models available.\nChoose another model. Prices are USD per 1 million tokens (input / output). OpenRouter models: ZDR only. 🧪 Claude subscription: experimental, not ZDR. 🏠 Ollama: local:"
+                    if mixed else "Current model: {model}\n\nPage {page}/{pages}. {count} models available.\nChoose another model. Prices are USD per 1 million tokens (input / output). ZDR enabled:",
                     model=name, page=panel.page + 1, pages=pages, count=len(panel.items))
     else:
         rows, pages = _paged_rows(session, panel, lambda model, index: _stt_label(model, index, current))
@@ -321,8 +364,9 @@ def _apply_panel_action(
     elif kind == "agents" and panel.view == "main":
         panel.view, panel.items, panel.page = "agents", service.list_agents(session.user_id), 0
     elif kind == "llm" and panel.view == "main":
-        favorites = set(service.list_favorite_models(session.user_id))
-        models = _sort_models(service.list_models(session.user_id, "", zdr=True), favorites)
+        models, favorites = _favorite_models(service, session.user_id)
+        if not models:
+            return _msg(session, _NO_FAVORITES)
         panel.view, panel.items, panel.favorites, panel.page = "llm", models, favorites, 0
     elif kind == "stt" and panel.view == "main":
         models = service.list_transcription_models(session.user_id, "", zdr=True)
@@ -355,9 +399,9 @@ def _apply_panel_action(
             return _msg(session, "✅ Agent selected: {agent_id}\nUse /newchat to create a chat for this agent.",
                         agent_id=selected)
         elif panel.view == "chat_llm":
-            service.set_chat_model(session.user_id, panel.agent_id, panel.target_chat, selected, zdr=True)
-            return _msg(session, "✅ Model selected\n\n{model_id}\n\nThis selection applies to the current chat.\nZDR: enabled",
-                        model_id=selected)
+            chosen = service.set_chat_model(session.user_id, panel.agent_id, panel.target_chat, selected, zdr=True)
+            return _msg(session, "✅ Model selected\n\n{model_id}\n\nThis selection applies to the current chat.\n{zdr}",
+                        model_id=_with_provider(panel.items[int(argument)].get("provider") or chosen.get("provider"), selected), zdr=_zdr_line(session, chosen.get("provider"), chosen.get("zdr", True), selected))
         panel.view, panel.items, panel.page = "main", [], 0
     else:
         raise InputError("Unknown menu option. Run the command again.")
@@ -473,9 +517,10 @@ async def select_model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     panel = _new_panel(update, "chat_llm", session)
     try:
-        panel.favorites = set(state.service.list_favorite_models(session.user_id))
-        query = " ".join(context.args or []).strip()
-        panel.items = _sort_models(state.service.list_models(session.user_id, query, zdr=True), panel.favorites)
+        panel.items, panel.favorites = _favorite_models(state.service, session.user_id)
+        if not panel.items:
+            await update.effective_message.reply_text(_msg(session, _NO_FAVORITES))
+            return
         text, markup = _panel_view(state.service, session, panel)
     except FavoritesError as exc:
         logger.warning("Could not load Telegram model favorites: %s", exc)
@@ -679,8 +724,8 @@ async def show_model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
     model = chat["model"]
     await update.effective_message.reply_text(
-        _msg(session, "Current chat model:\n{model_id}\n\nZDR: {policy}",
-             model_id=model["id"], policy=_msg(session, "enabled" if model.get("zdr", True) else "disabled"))
+        _msg(session, "Current chat model:\n{model_id}\n\n{zdr}",
+             model_id=_with_provider(model.get("provider"), model["id"]), zdr=_zdr_line(session, model.get("provider"), model.get("zdr", True), model["id"]))
         + "\n" + _msg(session, "User default" if chat["model_override"] is None else "Chat override"),
     )
 
@@ -1093,7 +1138,7 @@ def build_application(
         BotCommand("newchat", "Start a new chat"),
         BotCommand("selectagent", "Choose the active agent"),
         BotCommand("agent", "Show the active agent"),
-        BotCommand("selectmodel", "Browse models and prices"),
+        BotCommand("selectmodel", "Choose a favorite model"),
         BotCommand("model", "Show the current model"),
         BotCommand("stt", "Show the default STT model"),
         BotCommand("dream", "Dream status; /dream start or /dream cancel"),

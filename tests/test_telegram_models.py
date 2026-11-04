@@ -5,7 +5,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 from src.config.favorites import FavoritesError
-from src.telegram.bot import TelegramBotState, TelegramSession, _sort_models, select_model
+from src.telegram.bot import (
+    TelegramBotState, TelegramSession, _apply_panel_action, _llm_label, _Panel, _sort_models, _zdr_line, select_model,
+    show_model,
+)
 
 
 class FavoriteSortingTests(unittest.TestCase):
@@ -34,6 +37,45 @@ class FavoriteSortingTests(unittest.TestCase):
         ])
 
 
+class TelegramZdrTextTests(unittest.IsolatedAsyncioTestCase):
+    def test_claude_and_local_models_never_claim_zdr(self) -> None:
+        english, spanish = TelegramSession("u", "a"), TelegramSession("u", "a", language="es")
+        self.assertEqual(_zdr_line(english, "claude_subscription", True), "Not ZDR (Claude subscription, experimental)")
+        self.assertEqual(_zdr_line(spanish, "claude_subscription", True), "Sin ZDR (suscripción de Claude, experimental)")
+        self.assertEqual(_zdr_line(english, "ollama", True, "llama3:8b"), "ZDR: not applicable (local Ollama model)")
+        self.assertEqual(_zdr_line(spanish, "ollama", True, "ollama:glm-4.7:cloud"), "Sin ZDR (modelo en la nube de Ollama)")
+        self.assertEqual(_zdr_line(english, "openrouter", True), "ZDR: enabled")
+        self.assertEqual(_zdr_line(spanish, "openrouter", False), "ZDR: desactivado")
+        claude = {"id": "claude_subscription:opus", "name": "Claude Opus 5.5 (Claude subscription, experimental)",
+                  "pricing": {"prompt": None, "completion": None}, "provider": "claude_subscription"}
+        self.assertIn("no ZDR", _llm_label(claude, 1, None, set()))
+        self.assertNotIn("$", _llm_label(claude, 1, None, set()))
+
+    def test_selecting_a_claude_model_reports_not_zdr(self) -> None:
+        service = Mock()
+        service.set_chat_model.return_value = {"provider": "claude_subscription", "id": "claude_subscription:opus", "zdr": False}
+        session = TelegramSession("u", "a", "c", language="es")
+        panel = _Panel(token="t", chat_id=1, view="chat_llm", agent_id="a", target_chat="c",
+                       items=[{"id": "claude_subscription:opus", "name": "Opus"}])
+        text = _apply_panel_action(service, session, panel, "pick:0")
+        self.assertIn("Sin ZDR (suscripción de Claude, experimental)", text)
+        self.assertIn("Claude · claude_subscription:opus", text)
+        self.assertNotIn("ZDR: activado", text)
+
+    async def test_current_model_command_reports_not_zdr(self) -> None:
+        service = Mock()
+        service.get_chat.return_value = {"model": {"provider": "claude_subscription", "id": "claude_subscription:sonnet",
+                                                   "zdr": False}, "model_override": {"id": "claude_subscription:sonnet"}}
+        state = TelegramBotState(service, {123: TelegramSession("u", "a", "c")})
+        reply = AsyncMock()
+        update = SimpleNamespace(effective_user=SimpleNamespace(id=123), effective_chat=SimpleNamespace(id=456),
+                                 effective_message=SimpleNamespace(reply_text=reply))
+        context = SimpleNamespace(application=SimpleNamespace(bot_data={"state": state}), user_data={}, args=[])
+        await show_model(update, context)
+        self.assertIn("Not ZDR (Claude subscription, experimental)", reply.await_args.args[0])
+        self.assertNotIn("ZDR: enabled", reply.await_args.args[0])
+
+
 class TelegramFavoritePickerTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.service = Mock()
@@ -54,28 +96,44 @@ class TelegramFavoritePickerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.context.bot.delete_message = AsyncMock()
 
-    async def test_favorites_are_first_marked_and_counted_in_normal_pagination(self) -> None:
+    async def test_only_favorites_are_offered_and_each_line_names_its_provider(self) -> None:
         await select_model(self.update, self.context)
         ids = [model["id"] for model in self.context.user_data["panel"].items]
-        self.assertEqual(ids[:2], ["vendor/10", "vendor/11"])
-        self.assertNotIn("vendor/retired", ids)
-        self.assertEqual(len(ids), 12)
+        self.assertEqual(ids, ["vendor/10", "vendor/11"])  # no search, no other models, retired favorites skipped
         call = self.update.effective_message.reply_text.await_args
         keyboard = call.kwargs["reply_markup"].inline_keyboard
         self.assertEqual(keyboard[0][0].text, "Use user default")
-        self.assertIn("⭐", keyboard[1][0].text)
-        self.assertIn("⭐", keyboard[2][0].text)
-        self.assertNotIn("⭐", keyboard[3][0].text)
-        self.assertIn("Page 1/2", call.args[0])
+        for row in keyboard[1:3]:
+            self.assertIn("⭐", row[0].text)
+            self.assertIn("OpenRouter · ", row[0].text)
+        self.assertIn("Page 1/1", call.args[0])
         self.service.list_models.assert_called_once_with("test-user", "", zdr=True)
-        self.service.list_favorite_models.assert_called_once_with("test-user")
 
-    async def test_search_does_not_reintroduce_favorites_absent_from_results(self) -> None:
+    async def test_query_arguments_are_ignored(self) -> None:
         self.context.args = ["Model", "0"]
-        self.service.list_models.return_value = [self.models[0]]
         await select_model(self.update, self.context)
-        self.assertEqual([model["id"] for model in self.context.user_data["panel"].items], ["vendor/0"])
-        self.service.list_models.assert_called_once_with("test-user", "Model 0", zdr=True)
+        self.assertEqual([model["id"] for model in self.context.user_data["panel"].items], ["vendor/10", "vendor/11"])
+        self.service.list_models.assert_called_once_with("test-user", "", zdr=True)
+
+    async def test_same_model_name_from_two_providers_is_told_apart(self) -> None:
+        self.service.list_favorite_models.return_value = ["anthropic/claude-haiku-5.5", "claude_subscription:haiku"]
+        self.service.list_models.return_value = [
+            {"id": "anthropic/claude-haiku-5.5", "name": "Claude Haiku 5.5", "provider": "openrouter",
+             "pricing": {"prompt": "1", "completion": "5"}},
+            {"id": "claude_subscription:haiku", "name": "Claude Haiku 5.5", "provider": "claude_subscription",
+             "pricing": {"prompt": None, "completion": None}},
+        ]
+        await select_model(self.update, self.context)
+        keyboard = self.update.effective_message.reply_text.await_args.kwargs["reply_markup"].inline_keyboard
+        labels = [row[0].text for row in keyboard[1:3]]
+        self.assertTrue(any("OpenRouter · Claude Haiku" in label for label in labels))
+        self.assertTrue(any("Claude · Claude Haiku" in label and "no ZDR" in label for label in labels))
+
+    async def test_no_favorites_explains_how_to_add_them(self) -> None:
+        self.service.list_favorite_models.return_value = []
+        await select_model(self.update, self.context)
+        self.assertNotIn("panel", self.context.user_data)
+        self.assertIn("favorite", self.update.effective_message.reply_text.await_args.args[0])
 
     async def test_failed_favorites_read_is_reported_instead_of_falling_back_to_price_only(self) -> None:
         self.service.list_favorite_models.side_effect = FavoritesError(

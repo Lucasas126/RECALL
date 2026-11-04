@@ -234,6 +234,17 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     def list_models(q: str = "", zdr: bool = True, user_id: str = Depends(current_user)):
         return service.list_models(user_id, q, zdr=zdr)
 
+    @app.get("/api/models/catalog")
+    def model_catalog(
+        q: str = "", zdr: bool = True, capability: Literal["chat", "stt"] = "chat", provider: str | None = None,
+        user_id: str = Depends(current_user),
+    ):
+        return service.model_catalog(user_id, q, zdr=zdr, capability=capability, provider=provider)
+
+    @app.get("/api/providers/status")
+    def provider_status(capability: Literal["chat", "stt"] = "chat", user_id: str = Depends(current_user)):
+        return service.provider_status(user_id, capability)
+
     @app.get("/api/speech-to-text/models")
     def list_speech_to_text_models(
         q: str = "", zdr: bool = True, user_id: str = Depends(current_user),

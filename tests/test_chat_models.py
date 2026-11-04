@@ -18,6 +18,7 @@ from src.service.chat import AgentBusy, ChatService, UnknownAgent, UnknownChat
 from src.utils.i18n import InputError
 from src.web.app import create_app
 from auth_helpers import login
+from provider_helpers import isolate_providers
 
 
 class ConversationModelTests(unittest.TestCase):
@@ -99,6 +100,7 @@ class ModelFixture(steering.SteeringFixture):
         self.used_models: dict[tuple[str, str], list[str]] = {}
         self.used_policies: dict[tuple[str, str], list[bool]] = {}
         super().setUp()
+        isolate_providers(self)
         preferences = self.root / "preferences"
         for user in ("user-one", "user-two"):
             (preferences / user).mkdir(parents=True)
@@ -124,13 +126,17 @@ class ModelFixture(steering.SteeringFixture):
             ),
         ]
         catalog_patch = patch(
-            "src.service.chat.list_openrouter_models",
+            "src.service.providers.list_openrouter_models",
             side_effect=lambda query="", *, zdr=True: [
                 model for model in self.catalog_models if not zdr or model.zdr_providers
             ],
         )
         self.catalog = catalog_patch.start()
         self.addCleanup(catalog_patch.stop)
+        # reasoning-effort support reads the same catalog from the chat service
+        support_patch = patch("src.service.chat.list_openrouter_models", new=self.catalog)
+        support_patch.start()
+        self.addCleanup(support_patch.stop)
 
     def _user(self, user_id: str) -> UserConfig:
         user = super()._user(user_id)

@@ -422,10 +422,11 @@
 
   <dialog id="model-dialog" aria-labelledby="model-title">
     <div class="model-heading">
-      <h2 id="model-title">OpenRouter models</h2>
+      <h2 id="model-title">Models</h2>
       <button id="model-close" type="button" class="icon-btn" title="Close" aria-label="Close model selector"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
     </div>
     <p id="model-subtitle" class="model-subtitle">Choose a model for this chat.</p>
+    <div id="model-providers" class="provider-tabs" role="tablist"></div>
     <button id="model-inherit" type="button">Use user default</button>
     <div class="model-toolbar">
       <input id="model-search" type="search" placeholder="Search by model name or ID" aria-label="Search models">
@@ -435,7 +436,7 @@
     </div>
     <div class="model-options">
       <label id="model-zdr-label" class="model-filter" title="Resets to checked each time you open the selector">
-        <input id="model-zdr" type="checkbox" checked> ZDR only
+        <input id="model-zdr" type="checkbox" checked> <span id="model-zdr-text">ZDR only (OpenRouter)</span>
       </label>
       <label class="model-sort-label" for="model-sort">Sort
         <select id="model-sort">

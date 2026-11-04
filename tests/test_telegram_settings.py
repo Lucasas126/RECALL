@@ -36,10 +36,11 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
             "model": {"id": "llm/base", "zdr": True}, "model_override": None,
             "stt_model": "stt/base", "stt_model_override": None,
         }
-        self.service.list_favorite_models.return_value = ["llm/favorite"]
+        self.service.list_favorite_models.return_value = ["llm/favorite", "llm/second"]
         self.service.list_models.return_value = [
             {"id": "llm/cheap", "name": "Cheap", "pricing": {"prompt": "0", "completion": "0"}},
             {"id": "llm/favorite", "name": "Favorite", "pricing": {"prompt": "2", "completion": "3"}},
+            {"id": "llm/second", "name": "Second", "pricing": {"prompt": "5", "completion": "6"}},
         ]
         self.service.list_transcription_models.return_value = [
             {"id": "stt/new", "name": "New STT", "pricing_prompt": "0.1"},
@@ -131,7 +132,8 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
         await self.open_panel()
         await self.press("llm")
         labels = [button.text for row in self.markup.inline_keyboard for button in row]
-        self.assertTrue(labels[0].startswith("⭐ 1. Favorite"))
+        self.assertTrue(labels[0].startswith("⭐ 1. OpenRouter · Favorite"))
+        self.assertNotIn("Cheap", " ".join(labels))  # only favorites are offered
         self.assertNotIn("Use user default", labels)
         await self.press(self.action("Favorite"))
         self.assertEqual(self.preferences["default_llm_model"], "llm/favorite")
@@ -251,16 +253,17 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(self.markup, InlineKeyboardMarkup)
         labels = [button.text for row in self.markup.inline_keyboard for button in row]
         self.assertEqual(labels[0], "Use user default")
-        self.assertTrue(labels[1].startswith("⭐ 1. Favorite"))
+        self.assertTrue(labels[1].startswith("⭐ 1. OpenRouter · Favorite"))
+        self.assertNotIn("Cheap", " ".join(labels))
         self.assertEqual(labels[-1], "Close")
         self.assertIn("User default", self.text)
-        query = await self.press(self.action("Cheap"))
+        query = await self.press(self.action("Second"))
         self.service.set_chat_model.assert_called_once_with(
-            "test-user", "agent-a", "current-chat", "llm/cheap", zdr=True,
+            "test-user", "agent-a", "current-chat", "llm/second", zdr=True,
         )
         query.edit_message_text.assert_awaited_once()
         self.assertIsNone(query.edit_message_text.await_args.kwargs["reply_markup"])
-        self.assertIn("llm/cheap", self.text)
+        self.assertIn("OpenRouter · llm/second", self.text)
         self.assertNotIn("panel", self.context.user_data)
         self.service.update_preferences.assert_not_called()
         self.assertEqual(self.update.effective_message.reply_text.await_count, 2)

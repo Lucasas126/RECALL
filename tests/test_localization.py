@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import test_service_steering as steering
 import test_user_preferences as preferences_tests
+from provider_helpers import isolate_providers
 
 from src.config.preferences import UserPreferences
 from src.utils.i18n import InputError, UserMessageError, error_message, messages
@@ -40,7 +41,7 @@ class LocalizationCatalogTests(unittest.TestCase):
         for relative in (
             "src/telegram/bot.py", "src/service/chat.py", "src/config/preferences.py",
             "src/config/favorites.py", "src/providers/catalog.py", "src/core/sources/conversations.py",
-            "src/providers/mcp.py",
+            "src/providers/mcp.py", "src/service/providers.py",
         ):
             path = root.joinpath(*relative.split("/"))
             for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
@@ -86,9 +87,11 @@ class LocalizationWebTests(unittest.TestCase):
 
     def test_service_input_errors_are_localized_without_changing_http_status(self) -> None:
         self.users["user-one"].provider.name = "ollama"
-        response = self.client.get("/api/models")
+        isolate_providers(self, openrouter_key=None)
+        response = self.client.get("/api/speech-to-text/models")
         self.assertEqual(response.status_code, 400)
-        self.assertIn("solo está disponible con OpenRouter", response.json()["detail"])
+        self.assertIn("Proveedor no disponible: OpenRouter", response.json()["detail"])
+        self.assertIn("no está definida", response.json()["detail"])
 
     def test_error_language_remains_available_if_saved_agent_was_removed(self) -> None:
         self.client.patch("/api/preferences", json={"agent_id": "agent-b", "language": "es"})

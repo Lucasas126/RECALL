@@ -14,6 +14,7 @@ from src.providers.catalog import CatalogUnavailable, OpenRouterModel
 from src.service.chat import ChatService
 from src.web.app import create_app
 from auth_helpers import TEST_PASSWORD_HASH, login
+from provider_helpers import isolate_providers
 
 
 class ModelFavoritesStorageTests(unittest.TestCase):
@@ -93,6 +94,7 @@ class ModelFavoritesStorageTests(unittest.TestCase):
 
 class ModelFavoritesWebTests(unittest.TestCase):
     def setUp(self) -> None:
+        isolate_providers(self)
         directory = TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
@@ -121,7 +123,7 @@ class ModelFavoritesWebTests(unittest.TestCase):
         self.addCleanup(self.client.__exit__, None, None, None)
         login(self.client, "user-one")
         self.url = "/api/models/favorites"
-        catalog_patch = patch("src.service.chat.list_openrouter_models", return_value=[
+        catalog_patch = patch("src.service.providers.list_openrouter_models", return_value=[
             OpenRouterModel(
                 id="vendor/model:free", name="Model", description="Test", zdr_providers=["Private"],
             ),
