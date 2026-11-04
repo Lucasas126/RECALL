@@ -500,7 +500,23 @@ Defaults are independent of agent selection. Embeddings remain a user YAML
 setting, not an editable inference preference.
 
 New chats have no LLM selection: `model_override` is null. Effective LLM
-models resolve as **explicit chat override > current user default**. The STT
+models resolve as **explicit chat override > agent default model > current user
+default**. An agent sets its default with the optional `chat_config.model` key of
+its YAML (a full reference such as `claude_subscription:sonnet` or
+`anthropic/claude-haiku-5.5`; unset follows the user default, which is what every
+existing agent does). It applies to new chats and to old chats without a
+selection; a chat's own selection keeps winning. The picker entry that clears a
+chat selection reads **Use agent default** when the agent has one, else **Use
+user default** (web and Telegram). The agent default is edited in the web UI
+(Agents > Advanced > Default model, same picker with provider tabs; **Clear**
+follows the user default), not in Telegram. Saving validates it like a chat model
+(provider usable, model offered, ZDR catalog filter) and rewrites the agent file
+through the agent store, which keeps all other keys but not YAML comments.
+With `require_zdr` a `claude_subscription:` agent default is refused (it has no
+ZDR and an agent default has no `zdr` override): saving fails, and a file edited
+by hand fails the replies of chats that inherit it with a clear message. A retired
+model behaves as a retired user default. Dream with no `dream.model` follows the
+agent default; chat naming and associative memory keep their own models. The STT
 model has no per-chat override; it is always the current user default.
 Changing a default affects subsequent requests in every inheriting chat,
 including existing chats, without changing chats with explicit overrides or
@@ -511,7 +527,9 @@ defaults. Agent YAML has no `models` block and rejects one.
 
 `GET /api/agents/<agent_id>/chats/<chat_id>` includes the effective `model`,
 the user's `stt_model` default (read-only here), and a nullable `model_override`.
-Its `/models` GET endpoint returns only those model fields and the reasoning
+Its `/models` GET endpoint returns only those model fields (plus
+`model_source`: `chat` | `agent` | `user`, the level the effective model comes
+from, `agent_default_model` and `user_default_model`) and the reasoning
 effort state, without loading conversation history or initializing an agent.
 The chat `/model` PUT endpoint accepts `{"model_id": null}` to clear an override
 without changing user defaults. Changing it requires an idle agent. Audio requests

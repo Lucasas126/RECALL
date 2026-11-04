@@ -64,10 +64,18 @@ sources:
   user_folder:
     resource: folders.refs
 chat_config:
+  model: claude_subscription:sonnet   # optional default chat model of this agent (see below)
   tools: true
   tool_groups: [memory_read, memory_edit, self]
 dream: { enabled: true, every_hours: 6 }
 ```
+
+**default model.** `chat_config.model` (optional, with its provider, e.g.
+`claude_subscription:sonnet` or `anthropic/claude-haiku-5.5`) is the model of the
+agent's chats that have no model of their own. Precedence: model chosen in the
+chat > agent `chat_config.model` > user default. Unset = the user default. Set or
+clear it in the web UI (Agents > Advanced); details in
+[config.md](config.md#user-model-defaults-and-chat-overrides).
 
 the `sources` block is a sketch; today source roots follow the
 `data/<user_id>/<agent_id>/<source>` convention and only the user `folders:` list is configurable.

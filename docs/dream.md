@@ -265,7 +265,7 @@ form (`src/web/static`):
 - **Dream**: schedule (manual only, every N hours or daily at HH:MM, plus the
   enabled switch), model (free text or the model picker, whose provider tabs
   list OpenRouter, Ollama and Claude subscription models; empty = the
-  user's chat model; a `claude_subscription:<model>` reference uses the user's own
+  agent's default chat model, else the user's; a `claude_subscription:<model>` reference uses the user's own
   Claude login, see [claude subscription](claude-subscription.md)), reasoning effort, `max_steps`, `max_tokens`, `max_minutes`, dream read
   tools, memory limits, the dream prompt (the default prompt is
   the placeholder; it can be copied for editing or reset to empty) and the
@@ -299,7 +299,7 @@ dream:
   every_hours: null          # run every N hours, or
   daily_at: "04:00"          # run once a day at this local time (HH:MM)
                              # both null = manual only; both set = invalid
-  model: null                # null = the user's chat model
+  model: null                # null = the agent's default chat model, else the user's
   reasoning_effort: medium
   max_steps: 60
   max_tokens: 500000         # total input+output for the session

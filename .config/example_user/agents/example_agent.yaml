@@ -1,5 +1,9 @@
 id: example_agent
 name: example_agent
+chat_config:
+  # model: claude_subscription:sonnet  # optional default chat model of this agent (provider:model or an id of the
+  #                                    # main provider); unset follows the user's default. A model chosen in a chat wins.
+  stream: true
 # the personality lives in data/example_user/example_agent/SOUL.md (edit it in the web UI's Soul & memory tab)
 dream:                 # background self-review sessions (see docs/dream.md); manual only by default
   enabled: false
