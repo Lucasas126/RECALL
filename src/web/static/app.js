@@ -1504,10 +1504,9 @@ function updateModelControls() {
   $("model-picker").title = "Choose a model and routing policy for this chat";
   $("model-picker").disabled = !state.user || !state.chatId || state.busy || state.modelBusy;
   const parts = [modelPolicy(state.model)];
-  // a hint only while the chat inherits its model; a chat's own choice needs none
-  if (state.model && (state.modelSource === "agent" || state.modelSource === "user")) {
-    parts.push(tr(state.modelSource === "agent" ? "Agent default" : "User default"));
-  }
+  // where the effective model comes from: the chat's own selection, the agent's default or the user's default
+  const sourceHint = { chat: "Chat override", agent: "Agent default", user: "User default" }[state.modelSource];
+  if (state.model && sourceHint) parts.push(tr(sourceHint));
   $("model-policy").textContent = parts.filter(Boolean).join(" · ");
   updateReasoningEffortControls();
   $("model-policy").classList.toggle("privacy-warning", openrouter && Boolean(state.model.require_zdr) && !state.model.zdr);

@@ -548,7 +548,7 @@ overrides can still select the other policy.
 
 Telegram `/selectmodel` and the web composer's chat model selector change only
 the current chat. The STT default is changed only in **Settings** (web or Telegram). **Use user default** clears the
-corresponding override. Selectors distinguish **User default** from **Chat
+corresponding override. Selectors distinguish **User default**, **Agent default** and **Chat
 override** and show the effective model. Web settings changes from Telegram
 refresh at the existing preference-refresh points without overwriting explicit
 chat selections. With an open chat, the web also reads current model metadata
