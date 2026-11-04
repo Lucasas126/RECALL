@@ -18,6 +18,8 @@ _SPANISH = {
     "Provider not available: {provider}. Claude Code is not logged in; run `claude auth login` on the computer running RECALL.": "Proveedor no disponible: {provider}. Claude Code no tiene la sesión iniciada; ejecuta `claude auth login` en el ordenador que ejecuta RECALL.",
     "Provider not available: {provider}. Claude Code did not report its login state; run `claude auth status`.": "Proveedor no disponible: {provider}. Claude Code no ha indicado su estado de sesión; ejecuta `claude auth status`.",
     "Provider": "Proveedor",
+    "Any": "Todos",
+    "Models of every available provider": "Modelos de todos los proveedores disponibles",
     "API key variable not set": "Variable de la clave de API sin definir",
     "Ollama not reachable": "Ollama no accesible",
     "Claude Code not installed": "Claude Code no instalado",

@@ -256,6 +256,37 @@ class ProvidersApiTests(unittest.TestCase):
             self.assertIn("cannot serve this kind of model", refused.json()["detail"])
         self.assertEqual(self.client.get("/api/models/catalog", params={"provider": "nope"}).status_code, 400)
 
+    def test_catalog_without_provider_merges_the_available_ones_for_the_any_tab(self) -> None:
+        self.mocks["claude"].return_value = CLAUDE_LOGGED_IN
+        self.service._availability.forget()
+
+        def merged(**params) -> list[tuple[str, str]]:
+            response = self.client.get("/api/models/catalog", params=params)
+            self.assertEqual(response.status_code, 200, response.text)
+            for row in response.json()["models"]:
+                self.assertTrue(row["provider_label"])
+            return [(m["id"], m["provider"]) for m in response.json()["models"]]
+
+        everything = [("vendor/alpha", "openrouter"), ("vendor/open", "openrouter"), ("ollama:llama3:8b", "ollama"),
+                      ("claude_subscription:haiku", "claude_subscription"),
+                      ("claude_subscription:sonnet", "claude_subscription"), ("claude_subscription:opus", "claude_subscription")]
+        self.assertEqual(merged(), everything)
+        # ZDR narrows the OpenRouter rows only; Ollama and Claude rows stay
+        self.assertEqual(merged(zdr="true"), everything[:1] + everything[2:])
+        self.assertEqual(merged(q="opus"), [("claude_subscription:opus", "claude_subscription")])
+
+    def test_any_skips_unavailable_providers_and_survives_one_failing_catalog(self) -> None:
+        # Claude is logged out: skipped without an error
+        self.service._availability.forget()
+        response = self.client.get("/api/models/catalog")
+        self.assertEqual({m["provider"] for m in response.json()["models"]}, {"openrouter", "ollama"})
+        # Ollama answered the availability check, then its listing fails: the other providers still show
+        self.client.get("/api/providers/status")
+        self.mocks["ollama"].side_effect = OllamaUnavailable("down")
+        response = self.client.get("/api/models/catalog")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual({m["provider"] for m in response.json()["models"]}, {"openrouter"})
+
     def test_an_unavailable_provider_is_refused_with_what_to_fix(self) -> None:
         response = self.client.get("/api/models/catalog", params={"provider": "claude_subscription"})
         self.assertEqual(response.status_code, 400)

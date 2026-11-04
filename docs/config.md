@@ -66,9 +66,17 @@ There is no per-user "enable a provider" setting. The **model picker** (chat,
 Settings → default LLM/STT, Dream tab) has a provider switcher at its top, one tab
 per provider able to serve that kind of model: OpenRouter, Ollama and the
 experimental Claude subscription for chat and dream models; OpenRouter only for
-speech-to-text. A tab lists only that provider's models. The picker opens on the
-provider of the currently selected model, else the last one the user used (kept in
-the browser, per user), else the main provider. Embeddings always use the main
+speech-to-text. For chat and dream models a first **Any** tab (usable when at
+least one provider is) lists the models of every available provider together,
+each row tagged with its provider; unavailable providers are left out, and if
+one provider's catalog fails while others answer, the others still show. Choosing
+a row in Any is the same as choosing it in its own tab (the stored reference is
+`<provider>:<model>`), favorites show all providers' favorites, and the ZDR
+checkbox filters the OpenRouter rows only. A provider tab lists only that
+provider's models. The picker opens on **Any** if that was the last tab the user
+chose (kept in the browser, per user); otherwise on the provider of the currently
+selected model, else the last provider used, else the main provider. Switching
+tab never changes the *favorites only* filter. Embeddings always use the main
 provider (no picker).
 
 A provider is **available** when the server can use it, checked on the server:

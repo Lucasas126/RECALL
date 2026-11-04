@@ -106,6 +106,7 @@ main { display: flex; flex-direction: column; min-width: 0; height: 100vh; heigh
 .model-choice { flex: 1; min-width: 0; text-align: left; }
 .model-choice strong, .model-choice small { display: block; overflow-wrap: anywhere; }
 .model-choice small { color: var(--muted); }
+.model-choice small.model-provider-tag { color: var(--accent); font-weight: 600; }
 .model-choice[aria-pressed="true"] { border-color: var(--accent); }
 .provider-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
 .provider-tabs[hidden] { display: none; }

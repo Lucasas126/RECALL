@@ -1103,18 +1103,36 @@ function currentModelReference() {
   }
 }
 
-// the provider of the model selected now, else the last one used, else the main one, among usable providers
-function initialProvider(rows) {
-  const usable = new Set(rows.filter((row) => row.available).map((row) => row.id));
-  let remembered = null;
-  try { remembered = localStorage.getItem(providerMemoryKey()); } catch { /* storage may be blocked */ }
-  return [providerOfReference(currentModelReference()), remembered, state.user?.provider, ...rows.map((row) => row.id)]
-    .find((id) => usable.has(id)) ?? null;
+// "Any" is the picker's first tab: the models of every available provider together (chat models only)
+const ANY_PROVIDER = "any";
+
+function withAnyProvider(rows) {
+  return [{ id: ANY_PROVIDER, label: "Any", available: rows.some((row) => row.available) }, ...rows];
 }
 
-// ZDR is optional: the user's setting is the default and the checkbox overrides it for OpenRouter only
+// Opens on Any when the user last chose it; else on the provider of the model selected now, else the last
+// one used, else the main one, else the first usable one. Any is never a fallback for a real provider.
+function pickInitialProvider(rows, selected, remembered, main) {
+  const usable = new Set(rows.filter((row) => row.available).map((row) => row.id));
+  if (remembered === ANY_PROVIDER && usable.has(ANY_PROVIDER)) return ANY_PROVIDER;
+  return [selected, remembered, main, ...rows.map((row) => row.id)]
+    .find((id) => id !== ANY_PROVIDER && usable.has(id)) ?? null;
+}
+
+function initialProvider(rows) {
+  let remembered = null;
+  try { remembered = localStorage.getItem(providerMemoryKey()); } catch { /* storage may be blocked */ }
+  return pickInitialProvider(rows, providerOfReference(currentModelReference()), remembered, state.user?.provider);
+}
+
+// the OpenRouter checkbox decides for OpenRouter rows (and for Any, which contains them); other providers
+// follow the user's setting, which does not filter their rows
+function zdrFor(provider) {
+  return provider === "openrouter" || provider === ANY_PROVIDER ? $("model-zdr").checked : Boolean(state.user?.require_zdr);
+}
+
 function modelZdr() {
-  return state.modelProvider === "openrouter" ? $("model-zdr").checked : Boolean(state.user?.require_zdr);
+  return zdrFor(state.modelProvider);
 }
 
 function renderProviderTabs() {
@@ -1138,7 +1156,9 @@ function renderProviderTabs() {
       tab.setAttribute("role", "tab");
       tab.disabled = !row.available;
       tab.title = row.detail ?? "";
-      tab.append(Object.assign(document.createElement("strong"), { textContent: row.label }));
+      const any = row.id === ANY_PROVIDER;
+      if (any) tab.title = tr("Models of every available provider");
+      tab.append(Object.assign(document.createElement("strong"), { textContent: any ? tr("Any") : row.label }));
       const experimental = tr(state.user?.require_zdr ? "experimental, not ZDR" : "experimental");
       const note = row.available ? (row.experimental ? experimental : "") : providerReason(row);
       if (note) tab.append(Object.assign(document.createElement("small"), { textContent: note }));
@@ -1153,11 +1173,11 @@ function chooseProvider(id) {
   if (state.modelBusy || state.modelLoading || id === state.modelProvider) return;
   state.modelProvider = id;
   rememberProvider(id);
-  state.modelFavoritesOnly = !state.modelTarget.endsWith("-stt") && favoritesOf(id).length > 0;
   refreshModels();
 }
 
 function favoritesOf(provider) {
+  if (provider === ANY_PROVIDER) return state.modelFavorites;
   return state.modelFavorites.filter((id) => providerOfReference(id) === provider);
 }
 
@@ -1480,7 +1500,7 @@ function updateModelControls() {
   $("model-policy").classList.toggle("privacy-warning", openrouter && Boolean(state.model.require_zdr) && !state.model.zdr);
   $("model-refresh").disabled = state.modelLoading || state.modelBusy;
   $("model-close").disabled = state.modelBusy;
-  const zdrApplies = state.modelProvider === "openrouter";
+  const zdrApplies = state.modelProvider === "openrouter" || state.modelProvider === ANY_PROVIDER;
   $("model-zdr-label").hidden = !zdrApplies;
   $("model-zdr").disabled = state.modelBusy || state.modelLoading || state.modelTarget !== "chat-llm";
   const dreamTarget = state.modelTarget === "dream-llm";
@@ -1588,7 +1608,7 @@ function renderModelList() {
   const availableIds = new Set(state.modelCatalog.map((model) => model.id));
   const models = new Map(state.modelCatalog.map((model) => [model.id, model]));
   for (const id of saved) {
-    if (!models.has(id)) models.set(id, { id, name: id, zdr_providers: [] });
+    if (!models.has(id)) models.set(id, { id, name: id, zdr_providers: [], provider: providerOfReference(id) });
   }
   const query = $("model-search").value.trim().toLocaleLowerCase();
   const capabilities = {
@@ -1602,7 +1622,7 @@ function renderModelList() {
     && (!query || model.id.toLocaleLowerCase().includes(query) || model.name.toLocaleLowerCase().includes(query))
   ).sort((a, b) => compareModels(a, b, $("model-sort").value, saved));
   const zdrInPlay = Boolean(state.user?.require_zdr) || $("model-zdr").checked;
-  const routes = state.modelProvider === "openrouter" && zdrInPlay
+  const routes = (state.modelProvider === "openrouter" || state.modelProvider === ANY_PROVIDER) && zdrInPlay
     ? ` - ${tr($("model-zdr").checked ? "ZDR only" : "all routes allowed")}` : "";
   $("model-status").textContent = matches.length
     ? `${matches.length} ${tr(matches.length === 1 ? "model" : "models")}${routes}`
@@ -1620,12 +1640,13 @@ function renderModelList() {
     else if (state.modelTarget.startsWith("default-")) {
       selected = state.settingsModelDraft?.[stt ? "default_stt_model" : "default_llm_model"];
     }
-    // the routing toggle only applies to OpenRouter rows
-    const subscription = state.modelProvider === "claude_subscription";
-    const local = state.modelProvider === "ollama";
+    // each row follows its own provider (the Any tab mixes them); the routing toggle only applies to OpenRouter rows
+    const provider = model.provider ?? state.modelProvider;
+    const subscription = provider === "claude_subscription";
+    const local = provider === "ollama";
     const cloud = local && model.local === false;
     choose.setAttribute("aria-pressed", String(
-      model.id === selected && (state.modelProvider !== "openrouter" || state.modelTarget !== "chat-llm"
+      model.id === selected && (provider !== "openrouter" || state.modelTarget !== "chat-llm"
         || Boolean(state.model?.zdr) === $("model-zdr").checked)
     ));
     const name = document.createElement("strong");
@@ -1645,8 +1666,14 @@ function renderModelList() {
       : local ? tr("Local model; no per-token price.")
       : `USD / 1M tokens: input ${tokenPrice(model.pricing?.prompt)}`
         + (stt ? "" : ` | output ${tokenPrice(model.pricing?.completion)}`);
-    choose.append(name, id, pricing, providers);
-    choose.addEventListener("click", () => selectModel(model.id));
+    choose.append(name);
+    if (state.modelProvider === ANY_PROVIDER) {
+      choose.append(Object.assign(document.createElement("small"), {
+        className: "model-provider-tag", textContent: model.provider_label ?? providerName(provider),
+      }));
+    }
+    choose.append(id, pricing, providers);
+    choose.addEventListener("click", () => selectModel(model.id, provider));
     const star = document.createElement("button");
     star.type = "button";
     star.className = "model-star";
@@ -1656,7 +1683,7 @@ function renderModelList() {
     star.setAttribute("aria-pressed", String(saved.has(model.id)));
     star.title = label;
     star.disabled = state.modelBusy || state.busy;
-    star.addEventListener("click", () => toggleFavorite(model.id));
+    star.addEventListener("click", () => toggleFavorite(model.id, provider));
     row.append(choose);
     if (!stt) row.append(star);
     list.append(row);
@@ -1678,8 +1705,8 @@ async function refreshModels(initial = false, recheck = initial) {
     ]);
     if (session !== state.session || request !== state.modelRequest) return;
     if (status) {
-      state.modelProviders = status.providers;
-      state.modelProvider = initialProvider(status.providers);
+      state.modelProviders = stt ? status.providers : withAnyProvider(status.providers);
+      state.modelProvider = initialProvider(state.modelProviders);
     } else if (state.modelProvider && !state.modelProviders?.some((row) => row.id === state.modelProvider && row.available)) {
       state.modelProvider = initialProvider(state.modelProviders ?? []);
     }
@@ -1692,7 +1719,7 @@ async function refreshModels(initial = false, recheck = initial) {
     const zdr = modelZdr();
     renderProviderTabs();
     const catalog = await api(
-      `/api/models/catalog?capability=${stt ? "stt" : "chat"}&provider=${provider}${stt ? "" : `&zdr=${zdr}`}`,  // speech-to-text follows the server's policy
+      `/api/models/catalog?capability=${stt ? "stt" : "chat"}${provider === ANY_PROVIDER ? "" : `&provider=${provider}`}${stt ? "" : `&zdr=${zdr}`}`,  // speech-to-text follows the server's policy
     );
     if (session !== state.session || request !== state.modelRequest) return;
     state.modelCatalog = stt ? catalog.models.map((model) => ({
@@ -1714,11 +1741,11 @@ async function refreshModels(initial = false, recheck = initial) {
   }
 }
 
-async function toggleFavorite(modelId) {
+async function toggleFavorite(modelId, provider = state.modelProvider) {
   if (state.modelBusy || state.busy || state.modelLoading) return;
   const session = state.session;
   const saved = state.modelFavorites.includes(modelId);
-  const zdr = modelZdr();
+  const zdr = zdrFor(provider);
   state.modelBusy = true;
   $("model-error").textContent = "";
   updateBusy();
@@ -1738,7 +1765,7 @@ async function toggleFavorite(modelId) {
   }
 }
 
-async function selectModel(modelId) {
+async function selectModel(modelId, provider = state.modelProvider) {
   const target = state.modelTarget;
   const defaultSelection = target.startsWith("default-");
   const stt = target.endsWith("-stt");
@@ -1761,7 +1788,7 @@ async function selectModel(modelId) {
   const session = state.session;
   const agentId = state.agentId;
   const chatId = state.chatId;
-  const zdr = modelZdr();
+  const zdr = zdrFor(provider);
   state.chatModelRevision++;
   state.modelBusy = true;
   $("model-error").textContent = "";

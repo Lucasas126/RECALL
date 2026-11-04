@@ -149,8 +149,8 @@ Rules:
   Code has no embeddings or speech-to-text, so those stay on OpenRouter (or Ollama
   for embeddings). The STT picker never lists Claude models.
 - In the web model pickers, subscription models are listed on their own
-  **Claude subscription** tab, labelled *experimental*; the ZDR checkbox
-  only applies to the OpenRouter tab. They have no per-token price; they count
+  **Claude subscription** tab (also listed, tagged, in the **Any** tab), labelled *experimental*; the ZDR checkbox
+  only applies to OpenRouter rows. They have no per-token price; they count
   against the plan limits. Telegram (no provider tabs; its list merges the
   available providers) shows them with 🧪. A user who requires ZDR also sees
   *not ZDR* labels (and Telegram reports "Not ZDR (Claude subscription,
