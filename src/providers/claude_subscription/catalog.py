@@ -76,7 +76,7 @@ def catalog_entries(query: str = "") -> list[dict]:
         rows.append({
             "id": ref,
             "name": f"{model.name} (Claude subscription, experimental)",
-            "description": "Runs through your own Claude Code login. Experimental; not zero data retention.",
+            "description": "Runs through your own Claude Code login. Experimental.",
             "zdr_providers": [],
             "pricing": {"prompt": None, "completion": None},
             "input_modalities": ["text", "image"],

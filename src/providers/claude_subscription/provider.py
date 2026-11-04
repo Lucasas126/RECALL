@@ -64,7 +64,7 @@ class ClaudeSubscriptionProvider(LLMProvider):
             "the Claude subscription provider cannot compute embeddings; keep embeddings on OpenRouter"
         )
 
-    def invoke(self, messages: list[dict], model: str, stream=True, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None, *, zdr: bool = True):
+    def invoke(self, messages: list[dict], model: str, stream=True, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None, *, zdr: bool = False):
         """Stream (kind, text) tuples then a final dict, like the other providers; `zdr` does not apply here."""
         events = self._run(messages, model, reasoning=reasoning, reasoning_effort=reasoning_effort, tools=tools, cancellation=cancellation)
         if stream:

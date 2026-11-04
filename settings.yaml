@@ -40,12 +40,12 @@ pdf:
   tesseract_cmd: null         # optional path to the tesseract executable; null uses PATH, then the default Windows folder
 
 speech_to_text:
-  zdr: true
+  # zdr: false  # optional override of the user's require_zdr (user.yaml) for transcription; unset follows it
   language: null  # optional ISO-639-1 code; null enables provider auto-detection
 
 prompt_cache:
   enabled: true                     # mark Claude prompts on OpenRouter with cache breakpoints (see docs/config.md)
-  anthropic_providers: [Amazon Bedrock]  # preferred OpenRouter routes for Claude; other ZDR routes stay as fallback
+  anthropic_providers: [Amazon Bedrock]  # preferred OpenRouter routes for Claude; other routes stay as fallback
   trim_slack_percent: 25            # when history passes conversation_messages_retained, cut this much extra; 0 trims one message at a time
 
 tavily:
@@ -59,12 +59,12 @@ associative_memory:
   score_threshold: 0.25     # minimum similarity for a fragment to be injected
   query_model: openai/gpt-4o-mini  # small OpenRouter model that proposes the search query; null uses each chat's own model
   api_key: OPENROUTER_API_KEY      # shared env var NAME for the OpenRouter key, never the secret
-  zdr: true                        # only route query requests to zero data retention providers
+  # zdr: false                     # optional override of the user's require_zdr (user.yaml) for query requests; unset follows it
 
 chat_naming:
   model: openai/gpt-4o-mini    # small OpenRouter model that names chats
   api_key: OPENROUTER_API_KEY  # shared env var NAME for the OpenRouter key, never the secret
-  zdr: true                    # only route naming requests to zero data retention providers
+  # zdr: false                 # optional override of the user's require_zdr (user.yaml) for naming requests; unset follows it
   min_messages: 5              # chats shorter than this keep the first-message title
 
 # MCP servers offered to every user; each user connects their own account in Settings,

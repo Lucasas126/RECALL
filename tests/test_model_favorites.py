@@ -155,12 +155,24 @@ class ModelFavoritesWebTests(unittest.TestCase):
         self.assertEqual(self.client.get(self.url).json(), ["vendor/model:free"])
 
     def test_non_zdr_or_inexact_model_id_cannot_be_added(self) -> None:
-        for model in ("vendor/retired", "vendor/model", "VENDOR/MODEL:FREE"):
-            with self.subTest(model=model):
-                response = self.add(model)
-                self.assertEqual(response.status_code, 400)
-                self.assertIn("ZDR", response.json()["detail"])
+        for require_zdr in (True, False):
+            self.users["user-one"].require_zdr = require_zdr
+            for model in ("vendor/retired", "vendor/model", "VENDOR/MODEL:FREE"):
+                with self.subTest(model=model, require_zdr=require_zdr):
+                    response = self.add(model)
+                    self.assertEqual(response.status_code, 400)
+                    # the ZDR filter is only mentioned while it applies
+                    self.assertEqual("ZDR" in response.json()["detail"], require_zdr)
         self.assertEqual(self.client.get(self.url).json(), [])
+
+    def test_the_catalog_check_follows_the_user_policy_unless_the_request_overrides_it(self) -> None:
+        self.add()
+        self.catalog.assert_called_with("vendor/model:free", zdr=False)
+        self.users["user-one"].require_zdr = True
+        self.add()
+        self.catalog.assert_called_with("vendor/model:free", zdr=True)
+        self.client.post(self.url, json={"model_id": "vendor/model:free", "zdr": False})
+        self.catalog.assert_called_with("vendor/model:free", zdr=False)
 
     def test_catalog_failure_does_not_change_favorites(self) -> None:
         self.add()

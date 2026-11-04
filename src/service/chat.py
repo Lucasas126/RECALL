@@ -28,6 +28,7 @@ from src.config.models import (
 )
 from src.agent.tool_groups import DEFAULT_TOOL_GROUPS, TOOL_GROUP_CATALOG
 from src.config.preferences import UserPreferences, UserPreferencesStore
+from src.config.zdr import chat_zdr, ensure_zdr_compatible, zdr_required
 from src.config.settings import (
     CHAT_NAMING, CONFIG_DIR, DATA_DIR, MCP, PDF, SPEECH_TO_TEXT, TAVILY, TELEGRAM_ALLOWED_USERS_ENV,
     VIDEO_DECOMPOSITION, WEB_PUBLIC_URL,
@@ -269,6 +270,7 @@ class ChatService:
             "name": user.name,
             "language": user.language,
             "provider": user.provider.name,
+            "require_zdr": user.require_zdr,
             "agents": self.list_agents(user_id),
         }
 
@@ -413,9 +415,9 @@ class ChatService:
         user = self._user(user_id)
         updates = {}
         if changes.default_llm_model is not None:
-            updates["default_llm_model"] = self._check_model(user, changes.default_llm_model, "chat", zdr=True)
+            updates["default_llm_model"] = self._check_model(user, changes.default_llm_model, "chat")
         if changes.default_stt_model is not None:
-            updates["default_stt_model"] = self._check_model(user, changes.default_stt_model, "stt", zdr=SPEECH_TO_TEXT.zdr)
+            updates["default_stt_model"] = self._check_model(user, changes.default_stt_model, "stt")
         if updates:
             changes = changes.model_copy(update=updates)
         saved = self._preferences.update(
@@ -455,16 +457,17 @@ class ChatService:
         return {"main": user.provider.name, "providers": self._availability.rows(user, capability)}
 
     def model_catalog(
-        self, user_id: str, query: str = "", *, zdr: bool = True, capability: CatalogCapability = "chat",
+        self, user_id: str, query: str = "", *, zdr: bool | None = None, capability: CatalogCapability = "chat",
         provider: str | None = None,
     ) -> dict:
         """The models of one provider (the model picker lists a single provider at a time).
 
         Without `provider`, speech-to-text uses OpenRouter and chat models merge every available provider
-        (Telegram's single list). `zdr` filters OpenRouter rows only; Claude subscription rows are always
-        listed and marked not ZDR, Ollama rows are local.
+        (Telegram's single list). `zdr` filters OpenRouter rows only and defaults to the user's policy (for
+        speech-to-text, `speech_to_text.zdr` first); Claude subscription and Ollama rows are never filtered.
         """
         user = self._user(user_id)
+        zdr = self._zdr(user, capability, zdr)
         if provider is None and capability == "stt":
             provider = OPENROUTER
         if provider is not None:
@@ -485,27 +488,39 @@ class ChatService:
             raise failures[0]
         return {"models": rows}
 
-    def _check_model(self, user: UserConfig, model: str, capability: CatalogCapability, *, zdr: bool) -> str:
+    @staticmethod
+    def _zdr(user: UserConfig, capability: CatalogCapability, zdr: bool | None = None) -> bool:
+        """Whether ZDR applies: the explicit request, else the feature's own setting, else the user's."""
+        if zdr is None and capability == "stt":
+            zdr = SPEECH_TO_TEXT.zdr
+        return zdr_required(user.require_zdr, zdr)
+
+    def require_zdr(self, user_id: str, capability: CatalogCapability = "chat") -> bool:
+        """Whether the user's lists and chats require ZDR by default (channels use it to show ZDR wording)."""
+        return self._zdr(self._user(user_id), capability)
+
+    def _check_model(self, user: UserConfig, model: str, capability: CatalogCapability, *, zdr: bool | None = None) -> str:
         """The canonical reference of `model` after checking its provider is usable and offers it."""
         provider, canonical = provider_settings.canonical_reference(user, model)
+        zdr = self._zdr(user, capability, zdr)
         rows = self.model_catalog(user.id, canonical, zdr=zdr, capability=capability, provider=provider)["models"]
-        provider_settings.require_listed(provider, canonical, capability, rows)
+        provider_settings.require_listed(provider, canonical, capability, rows, zdr=zdr)
         return canonical
 
-    def list_models(self, user_id: str, query: str = "", *, zdr: bool = True) -> list[dict]:
+    def list_models(self, user_id: str, query: str = "", *, zdr: bool | None = None) -> list[dict]:
         """Chat models of the providers available to the user; `zdr` filters the OpenRouter ones."""
         return self.model_catalog(user_id, query, zdr=zdr)["models"]
 
-    def list_transcription_models(self, user_id: str, query: str = "", *, zdr: bool = True) -> list[dict]:
+    def list_transcription_models(self, user_id: str, query: str = "", *, zdr: bool | None = None) -> list[dict]:
         """Speech-to-text models (OpenRouter only) for the current user."""
         return self.model_catalog(user_id, query, zdr=zdr, capability="stt")["models"]
 
     def list_favorite_models(self, user_id: str) -> list[str]:
-        """Return saved OpenRouter IDs, including favorites no longer in the ZDR catalog."""
+        """Return saved OpenRouter IDs, including favorites no longer in the catalog."""
         self._user(user_id)
         return self._favorites.list(user_id)
 
-    def add_favorite_model(self, user_id: str, model_id: str, *, zdr: bool = True) -> list[str]:
+    def add_favorite_model(self, user_id: str, model_id: str, *, zdr: bool | None = None) -> list[str]:
         """Save a model after checking availability under the explicit catalog filter."""
         model_id = self._check_model(self._user(user_id), model_id, "chat", zdr=zdr)
         return self._favorites.update(user_id, model_id, favorite=True)
@@ -575,13 +590,14 @@ class ChatService:
         model = {
             "provider": provider,
             "id": effective,
-            "zdr": selection.zdr if selection is not None else provider != CLAUDE_SUBSCRIPTION,
+            "zdr": chat_zdr(user.require_zdr, effective, selection.zdr if selection is not None else None),
+            "require_zdr": user.require_zdr,
         }
         agent_config = self._agent_config(user_id, agent_id).chat_config
         effort = self._reasoning_effort_override(conversations, chat_id)
         return {
             "model": model,
-            "model_override": selection.model_dump() if selection else None,
+            "model_override": selection.model_dump(exclude_none=True) if selection else None,
             "stt_model": defaults.stt,
             "reasoning_effort": {
                 "override": effort,
@@ -647,14 +663,22 @@ class ChatService:
         return self.get_chat_models(user_id, agent_id, chat_id)
 
     def set_chat_model(
-        self, user_id: str, agent_id: str, chat_id: str, model_id: str | None, *, zdr: bool = True,
+        self, user_id: str, agent_id: str, chat_id: str, model_id: str | None, *, zdr: bool | None = None,
     ) -> dict:
-        """Persist an idle chat's model and routing policy without changing other chats."""
+        """Persist an idle chat's model and routing policy without changing other chats.
+
+        `zdr` is the policy the model was picked under (None: the user's). Only a policy that differs from the
+        user's setting is stored, so other chats keep following the setting. Claude subscription models are
+        never ZDR.
+        """
         conversations = self._conversations(user_id, agent_id)
         self._load(conversations, chat_id)
-        main = self._user(user_id).provider.name
+        user = self._user(user_id)
+        main = user.provider.name
         if model_id is not None:
-            model_id = self._check_model(self._user(user_id), model_id, "chat", zdr=zdr)
+            model_id = self._check_model(user, model_id, "chat", zdr=zdr)
+            effective = chat_zdr(user.require_zdr, model_id, zdr)
+            stored = None if effective == user.require_zdr else effective
         slot = self._slot(user_id, agent_id)
         with slot.state:
             if self._chat_busy(slot, chat_id):
@@ -664,7 +688,7 @@ class ChatService:
                     if model_id is None:
                         conversations.clear_model(chat_id)
                     else:
-                        conversations.set_model(chat_id, model_id, zdr=zdr, main=main)
+                        conversations.set_model(chat_id, model_id, zdr=stored, main=main)
                 except FileNotFoundError as exc:
                     raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
                 # an effort the new model does not support would be sent to it; drop it
@@ -871,7 +895,7 @@ class ChatService:
                 attachment["format"],
                 model=transcription_model,
                 language=SPEECH_TO_TEXT.language,
-                zdr=SPEECH_TO_TEXT.zdr,
+                zdr=zdr_required(resolved.require_zdr, SPEECH_TO_TEXT.zdr),
             )
             if transcript:
                 transcripts.append(transcript)
@@ -991,17 +1015,20 @@ class ChatService:
             {"role": "user", "content": _naming_transcript(turns)},
         ]
         try:
+            user = self._user(user_id)
+            zdr = zdr_required(user.require_zdr, CHAT_NAMING.zdr)
             if is_claude_subscription(CHAT_NAMING.model):
+                ensure_zdr_compatible(CHAT_NAMING.model, zdr, "chat_naming")
                 # runs with the requesting user's own Claude login, never another user's
-                provider = claude_subscription_provider(self._user(user_id).claude_subscription, purpose="chat_naming.model")
-                reply = provider.invoke(messages, CHAT_NAMING.model, stream=False, zdr=CHAT_NAMING.zdr)
+                provider = claude_subscription_provider(user.claude_subscription, purpose="chat_naming.model")
+                reply = provider.invoke(messages, CHAT_NAMING.model, stream=False, zdr=zdr)
             else:
                 api_key = os.environ.get(CHAT_NAMING.api_key, "").strip()
                 if not api_key:
                     logger.warning("chat naming skipped: env var %s is not set", CHAT_NAMING.api_key)
                     return
                 reply = OpenRouterProvider(api_key=api_key).invoke_sync(
-                    messages, model=CHAT_NAMING.model, api_key=api_key, zdr=CHAT_NAMING.zdr,
+                    messages, model=CHAT_NAMING.model, api_key=api_key, zdr=zdr,
                 )
             title = conversations.set_generated_title(chat_id, reply["response"] or "")
         except Exception:

@@ -51,7 +51,7 @@ class LLMProvider(BaseModel):
         """The provider's model id for a bare id or a `<this provider>:<model>` reference."""
         return model.removeprefix(f"{self.name}:") if self.name else model
 
-    def invoke(self, messages: list[dict], model: str, stream=True, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None, *, zdr: bool = True):
+    def invoke(self, messages: list[dict], model: str, stream=True, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None, *, zdr: bool = False):
         """
         Invokes the LLM provider API with the given messages and model.
         If stream is True, it will print the response in real-time.

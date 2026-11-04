@@ -157,7 +157,7 @@ class ProvidersApiTests(unittest.TestCase):
             self.addCleanup(patcher.stop)
         self.mocks = isolate_providers(
             self, openrouter_key=SECRET, variable="OPENROUTER_TEST_KEY", claude=CLAUDE_LOGGED_OUT, ollama=["llama3:8b"])
-        openrouter = patch("src.service.providers.list_openrouter_models", side_effect=lambda q="", *, zdr=True: [
+        openrouter = patch("src.service.providers.list_openrouter_models", side_effect=lambda q="", *, zdr=False: [
             m for m in [OpenRouterModel(id="vendor/alpha", name="Alpha", description="", zdr_providers=["P"]),
                         OpenRouterModel(id="vendor/open", name="Open", description="", zdr_providers=[])]
             if (not zdr or m.zdr_providers) and q.casefold() in m.id])
@@ -234,7 +234,9 @@ class ProvidersApiTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200, response.text)
             return [(m["id"], m["provider"]) for m in response.json()["models"]]
 
-        self.assertEqual(ids(provider="openrouter"), [("vendor/alpha", "openrouter")])
+        # ZDR is not required by default: the plain catalog; asking for it narrows OpenRouter only
+        self.assertEqual(ids(provider="openrouter"), [("vendor/alpha", "openrouter"), ("vendor/open", "openrouter")])
+        self.assertEqual(ids(provider="openrouter", zdr="true"), [("vendor/alpha", "openrouter")])
         self.assertEqual(ids(provider="ollama"), [("ollama:llama3:8b", "ollama")])
         self.assertEqual(ids(provider="claude_subscription"), [
             ("claude_subscription:haiku", "claude_subscription"), ("claude_subscription:sonnet", "claude_subscription"),
@@ -242,6 +244,7 @@ class ProvidersApiTests(unittest.TestCase):
         self.assertEqual(ids(provider="claude_subscription", q="opus"), [("claude_subscription:opus", "claude_subscription")])
         # the ZDR filter narrows OpenRouter only; Claude rows are never ZDR whatever the filter says
         self.assertIn(("vendor/open", "openrouter"), ids(provider="openrouter", zdr="false"))
+        self.assertEqual(len(ids(provider="claude_subscription", zdr="true")), 3)
         claude_rows = self.client.get("/api/models/catalog", params={"provider": "claude_subscription"}).json()["models"]
         self.assertFalse(any(row["zdr_applies"] for row in claude_rows))
         # speech-to-text: OpenRouter only, with or without naming it

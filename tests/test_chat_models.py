@@ -18,7 +18,7 @@ from src.service.chat import AgentBusy, ChatService, UnknownAgent, UnknownChat
 from src.utils.i18n import InputError
 from src.web.app import create_app
 from auth_helpers import login
-from provider_helpers import isolate_providers
+from provider_helpers import CLAUDE_LOGGED_IN, isolate_providers
 
 
 class ConversationModelTests(unittest.TestCase):
@@ -68,12 +68,21 @@ class ConversationModelTests(unittest.TestCase):
         self.assertEqual(self.source.model_selection(self.chat).id, "vendor/original")
         self.assertFalse(list(self.root.glob("*.tmp")))
 
-    def test_legacy_selection_defaults_to_zdr_and_opt_out_persists(self) -> None:
+    def test_selection_without_a_flag_follows_the_user_and_a_stored_flag_persists(self) -> None:
         path = self.root / f"{self.chat}.model.json"
         path.write_text('{"provider":"openrouter","id":"vendor/model"}', encoding="utf-8")
-        self.assertTrue(self.source.model_selection(self.chat).zdr)
+        self.assertIsNone(self.source.model_selection(self.chat).zdr)
         self.source.set_model(self.chat, "vendor/model", zdr=False)
-        self.assertFalse(ConversationsSource(self.root).model_selection(self.chat).zdr)
+        self.assertIs(ConversationsSource(self.root).model_selection(self.chat).zdr, False)
+        self.source.set_model(self.chat, "vendor/model", zdr=True)
+        self.assertIs(ConversationsSource(self.root).model_selection(self.chat).zdr, True)
+        self.source.set_model(self.chat, "vendor/model")
+        self.assertNotIn("zdr", path.read_text(encoding="utf-8"))
+
+    def test_a_claude_subscription_chat_cannot_store_zdr(self) -> None:
+        self.source.set_model(self.chat, "claude_subscription:sonnet", zdr=False)
+        with self.assertRaises(ValueError):
+            self.source.set_model(self.chat, "claude_subscription:sonnet", zdr=True)
 
     def test_reasoning_effort_sidecar_is_persistent_removed_with_chat_and_validated(self) -> None:
         self.source.set_reasoning_effort(self.chat, "max")
@@ -96,6 +105,8 @@ class ConversationModelTests(unittest.TestCase):
 
 
 class ModelFixture(steering.SteeringFixture):
+    require_zdr = True  # the user's policy; the default-off mode is covered by the ...WithoutZdrTests classes
+
     def setUp(self) -> None:
         self.used_models: dict[tuple[str, str], list[str]] = {}
         self.used_policies: dict[tuple[str, str], list[bool]] = {}
@@ -127,7 +138,7 @@ class ModelFixture(steering.SteeringFixture):
         ]
         catalog_patch = patch(
             "src.service.providers.list_openrouter_models",
-            side_effect=lambda query="", *, zdr=True: [
+            side_effect=lambda query="", *, zdr=False: [
                 model for model in self.catalog_models if not zdr or model.zdr_providers
             ],
         )
@@ -142,11 +153,12 @@ class ModelFixture(steering.SteeringFixture):
         user = super()._user(user_id)
         user.provider.name = "openrouter"
         user.models.chat = "vendor/default"
+        user.require_zdr = self.require_zdr
         return user
 
     def _factory(self, user: str, agent: str, chat_id: str | None) -> Agent:
         config = ResolvedAgent(
-            user_id=user, id=agent, name=agent,
+            user_id=user, id=agent, name=agent, require_zdr=self.require_zdr,
             models=ModelsConfig(chat="vendor/default"), provider_name="openrouter", api_key="",
             embeddings_provider_name="openrouter", embeddings_api_key="", reasoning_effort="medium",
             tools=False, associative_memory=self.associative_memory, has_memory=self.memory,
@@ -175,7 +187,7 @@ class ChatModelServiceTests(ModelFixture):
         self.assertEqual(self.service.get_chat("user-one", "agent-one", self.chat)["model"]["id"], "vendor/default")
         self.service.set_chat_model("user-one", "agent-one", self.chat, "vendor/alpha")
         self.assertEqual(self.service.get_chat("user-one", "agent-one", self.chat)["model"], {
-            "provider": "openrouter", "id": "vendor/alpha", "zdr": True,
+            "provider": "openrouter", "id": "vendor/alpha", "zdr": True, "require_zdr": True,
         })
         self.assertEqual(self.agents, {})
 
@@ -318,7 +330,7 @@ class ChatModelWebTests(ModelFixture):
     def test_select_model_and_reopen_chat(self) -> None:
         response = self.client.put(self.url, json={"model_id": "vendor/alpha"})
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"provider": "openrouter", "id": "vendor/alpha", "zdr": True})
+        self.assertEqual(response.json(), {"provider": "openrouter", "id": "vendor/alpha", "zdr": True, "require_zdr": True})
         reopened = self.client.get(self.url.removesuffix("/model"))
         self.assertEqual(reopened.json()["model"], response.json())
         self.assertEqual(self.client.get("/api/me").json()["provider"], "openrouter")
@@ -352,13 +364,13 @@ class ChatModelWebTests(ModelFixture):
         self.assertEqual(response.status_code, 500)
 
     def test_opt_out_is_accepted_only_as_an_explicit_boolean(self) -> None:
-        for value in ("false", None, 0):
+        for value in ("false", 0):
             with self.subTest(value=value):
                 response = self.client.put(self.url, json={"model_id": "vendor/retaining", "zdr": value})
                 self.assertEqual(response.status_code, 422)
         response = self.client.put(self.url, json={"model_id": "vendor/retaining", "zdr": False})
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"provider": "openrouter", "id": "vendor/retaining", "zdr": False})
+        self.assertEqual(response.json(), {"provider": "openrouter", "id": "vendor/retaining", "zdr": False, "require_zdr": True})
         self.assertEqual(self.client.get(self.url.removesuffix("/model")).json()["model"], response.json())
 
     def test_http_catalog_filter_and_favorites_respect_opt_out(self) -> None:
@@ -381,6 +393,80 @@ class ChatModelWebTests(ModelFixture):
         self.assertEqual(self.client.put(url, json={"effort": "ultra"}).status_code, 422)
         self.assertEqual(self.client.put(url, json={}).status_code, 422)
         self.assertEqual(self.client.put(url, json={"effort": None}).json()["reasoning_effort"]["override"], None)
+
+
+class ChatModelWithoutZdrTests(ModelFixture):
+    """ZDR is not required (the default): nothing is filtered or stored unless a chat opts in."""
+
+    require_zdr = False
+
+    def send(self, text: str = "Question", chat: str | None = None) -> None:
+        list(self.service.send("user-one", "agent-one", chat or self.chat, text))
+
+    def sidecar(self, chat: str | None = None) -> Path:
+        return self.sources[("user-one", "agent-one")].root / f"{chat or self.chat}.model.json"
+
+    def test_chats_and_catalog_do_not_require_zdr(self) -> None:
+        self.assertEqual(self.service.get_chat_models("user-one", "agent-one", self.chat)["model"], {
+            "provider": "openrouter", "id": "vendor/default", "zdr": False, "require_zdr": False,
+        })
+        self.assertIn("vendor/retaining", {model["id"] for model in self.service.list_models("user-one")})
+        self.service.set_chat_model("user-one", "agent-one", self.chat, "vendor/retaining")
+        self.send("No ZDR")
+        self.assertEqual(self.used_policies[("user-one", "agent-one")], [False])
+        self.assertNotIn("zdr", self.sidecar().read_text(encoding="utf-8"))
+
+    def test_a_chat_can_opt_in_and_the_catalog_is_then_filtered(self) -> None:
+        with self.assertRaises(ValueError):
+            self.service.set_chat_model("user-one", "agent-one", self.chat, "vendor/retaining", zdr=True)
+        model = self.service.set_chat_model("user-one", "agent-one", self.chat, "vendor/alpha", zdr=True)
+        self.assertTrue(model["zdr"])
+        self.send("With ZDR")
+        other = self.service.create_chat("user-one", "agent-one")["id"]
+        self.send("Follows the setting", other)
+        self.assertEqual(self.used_policies[("user-one", "agent-one")], [True, False])
+
+    def test_chats_without_a_flag_follow_the_setting_and_a_stored_flag_wins(self) -> None:
+        self.send("Follows")
+        stored = self.service.create_chat("user-one", "agent-one")["id"]
+        self.service.set_chat_model("user-one", "agent-one", stored, "vendor/alpha", zdr=True)
+        self.send("Stored", stored)
+        self.assertEqual(self.used_policies[("user-one", "agent-one")], [False, True])
+        self.require_zdr = True
+        restarted = ChatService(agent_factory=self._factory)
+        self.assertTrue(restarted.get_chat_models("user-one", "agent-one", self.chat)["model"]["zdr"])
+        list(restarted.send("user-one", "agent-one", self.chat, "Now required"))
+        self.assertTrue(self.used_policies[("user-one", "agent-one")][-1])
+        # a chat that opted out under the old setting keeps its choice
+        self.service.set_chat_model("user-one", "agent-one", stored, "vendor/retaining", zdr=False)
+        self.assertIs(self.sources[("user-one", "agent-one")].model_selection(stored).zdr, False)
+
+    def test_default_models_are_validated_without_zdr(self) -> None:
+        from src.config.preferences import UserPreferences
+        saved = self.service.update_preferences("user-one", UserPreferences(default_llm_model="vendor/retaining"))
+        self.assertEqual(saved["default_llm_model"], "vendor/retaining")
+
+    def test_claude_subscription_chats_store_no_flag(self) -> None:
+        isolate_providers(self, claude=CLAUDE_LOGGED_IN)
+        model = self.service.set_chat_model("user-one", "agent-one", self.chat, "claude_subscription:sonnet")
+        self.assertEqual(model, {
+            "provider": "claude_subscription", "id": "claude_subscription:sonnet", "zdr": False, "require_zdr": False,
+        })
+        self.assertNotIn("zdr", self.sidecar().read_text(encoding="utf-8"))
+
+
+class ChatModelWithRequiredZdrTests(ModelFixture):
+    def test_claude_subscription_chat_is_stored_as_not_zdr(self) -> None:
+        isolate_providers(self, claude=CLAUDE_LOGGED_IN)
+        model = self.service.set_chat_model("user-one", "agent-one", self.chat, "claude_subscription:sonnet")
+        self.assertEqual(model["zdr"], False)
+        self.assertIs(self.sources[("user-one", "agent-one")].model_selection(self.chat).zdr, False)
+
+    def test_opting_out_stores_the_exception_and_following_the_setting_stores_nothing(self) -> None:
+        self.service.set_chat_model("user-one", "agent-one", self.chat, "vendor/alpha")
+        self.assertIsNone(self.sources[("user-one", "agent-one")].model_selection(self.chat).zdr)
+        self.service.set_chat_model("user-one", "agent-one", self.chat, "vendor/alpha", zdr=False)
+        self.assertIs(self.sources[("user-one", "agent-one")].model_selection(self.chat).zdr, False)
 
 
 class ChatListTests(ModelFixture):

@@ -22,14 +22,22 @@ class OpenRouterZdrTests(unittest.TestCase):
     def setUp(self) -> None:
         self.provider = OpenRouterProvider()
 
-    def test_sync_defaults_to_zdr_and_preserves_chat_options(self) -> None:
+    def test_sync_sends_no_provider_policy_unless_zdr_is_requested(self) -> None:
+        with patch("src.providers.openrouter.post_chat", return_value={
+            "choices": [{"message": {"content": "Answer"}}],
+        }) as post:
+            self.provider.invoke([], "vendor/model", stream=False)
+            self.provider.invoke([], "vendor/model", stream=False, zdr=False)
+        self.assertEqual([("provider" in call.args[1]) for call in post.call_args_list], [False, False])
+
+    def test_sync_with_zdr_preserves_chat_options(self) -> None:
         tools = [{"type": "function", "function": {"name": "read"}}]
         messages = [{"role": "user", "content": "Question"}]
         with patch("src.providers.openrouter.post_chat", return_value={
             "choices": [{"message": {"content": "Answer"}}],
         }) as post:
             result = self.provider.invoke(
-                messages, "vendor/model", stream=False, tools=tools, reasoning=True, reasoning_effort="low",
+                messages, "vendor/model", stream=False, tools=tools, reasoning=True, reasoning_effort="low", zdr=True,
             )
         payload = post.call_args.args[1]
         self.assertEqual(payload["provider"], {"zdr": True})
@@ -39,9 +47,14 @@ class OpenRouterZdrTests(unittest.TestCase):
         self.assertFalse(payload["stream"])
         self.assertEqual(result["response"], "Answer")
 
-    def test_stream_defaults_to_zdr(self) -> None:
+    def test_stream_sends_no_provider_policy_by_default(self) -> None:
         with patch("src.providers.openrouter.stream_chat", side_effect=lambda *_args, **_kwargs: _stream()) as stream:
-            result = list(self.provider.invoke([], "vendor/model"))
+            list(self.provider.invoke([], "vendor/model"))
+        self.assertNotIn("provider", stream.call_args.args[1])
+
+    def test_stream_with_zdr(self) -> None:
+        with patch("src.providers.openrouter.stream_chat", side_effect=lambda *_args, **_kwargs: _stream()) as stream:
+            result = list(self.provider.invoke([], "vendor/model", zdr=True))
         self.assertEqual(stream.call_args.args[1]["provider"], {"zdr": True})
         self.assertTrue(stream.call_args.args[1]["stream"])
         self.assertEqual(result[-1]["response"], "Answer")
@@ -54,7 +67,7 @@ class OpenRouterZdrTests(unittest.TestCase):
             }) as retry,
             self.assertLogs("recall.provider-openrouter", level="WARNING"),
         ):
-            result = list(self.provider.invoke([], "vendor/model"))
+            result = list(self.provider.invoke([], "vendor/model", zdr=True))
         self.assertEqual(stream.call_args.args[1]["provider"], {"zdr": True})
         self.assertEqual(retry.call_args.args[1], {**stream.call_args.args[1], "stream": False})
         self.assertEqual(result[-1]["response"], "Answer")
@@ -72,7 +85,7 @@ class OpenRouterZdrTests(unittest.TestCase):
                     patch("src.providers.openrouter.post_chat", side_effect=error) as post,
                 ):
                     with self.assertRaisesRegex(RuntimeError, "data policy"):
-                        result = self.provider.invoke([], "vendor/model", stream=streaming)
+                        result = self.provider.invoke([], "vendor/model", stream=streaming, zdr=True)
                         if streaming:
                             list(result)
                 self.assertEqual(post.call_count, 0 if streaming else 1)
@@ -97,7 +110,7 @@ class OpenRouterZdrTests(unittest.TestCase):
         self.enterContext(patch("src.agent.associative.ASSOC", AssociativeMemoryConfig(query_model=None)))
         agent = Mock(spec=Agent)
         agent.messages = [{"role": "system", "content": "Test prompt"}]
-        agent.config = Mock()
+        agent.config = Mock(require_zdr=True)
         agent.config.models.chat = "vendor/model"
         agent.zdr_required = True
         agent.provider = self.provider
@@ -105,18 +118,19 @@ class OpenRouterZdrTests(unittest.TestCase):
             self.assertIsNone(_propose_query(agent, "Question"))
         self.assertEqual(stream.call_args.args[1]["provider"], {"zdr": True})
 
-    def test_explicit_opt_out_is_per_request_and_does_not_change_default(self) -> None:
+    def test_zdr_is_per_request_and_never_sent_as_false(self) -> None:
         with patch("src.providers.openrouter.post_chat", return_value={
             "choices": [{"message": {"content": "Answer"}}],
         }) as post:
+            self.provider.invoke([], "vendor/model", stream=False, zdr=True)
             self.provider.invoke([], "vendor/model", stream=False, zdr=False)
             self.provider.invoke([], "vendor/model", stream=False)
-        self.assertEqual([call.args[1]["provider"]["zdr"] for call in post.call_args_list], [False, True])
+        self.assertEqual([call.args[1].get("provider") for call in post.call_args_list], [{"zdr": True}, None, None])
 
-    def test_stream_opt_out_and_retry_preserve_explicit_policy(self) -> None:
+    def test_stream_without_zdr_and_retry_send_no_policy(self) -> None:
         with patch("src.providers.openrouter.stream_chat", side_effect=lambda *_args, **_kwargs: _stream()) as stream:
             list(self.provider.invoke([], "vendor/model", zdr=False))
-        self.assertFalse(stream.call_args.args[1]["provider"]["zdr"])
+        self.assertNotIn("provider", stream.call_args.args[1])
         with (
             patch("src.providers.openrouter.stream_chat", side_effect=httpx.ConnectError("offline")),
             patch("src.providers.openrouter.post_chat", return_value={
@@ -125,19 +139,35 @@ class OpenRouterZdrTests(unittest.TestCase):
             self.assertLogs("recall.provider-openrouter", level="WARNING"),
         ):
             list(self.provider.invoke([], "vendor/model", zdr=False))
-        self.assertFalse(retry.call_args.args[1]["provider"]["zdr"])
+        self.assertNotIn("provider", retry.call_args.args[1])
 
-    def test_associative_query_honors_explicit_chat_opt_out(self) -> None:
+    def test_associative_query_without_zdr_sends_no_policy(self) -> None:
         self.enterContext(patch("src.agent.associative.ASSOC", AssociativeMemoryConfig(query_model=None)))
         agent = Mock(spec=Agent)
         agent.messages = [{"role": "system", "content": "Test"}]
-        agent.config = Mock()
+        agent.config = Mock(require_zdr=False)
         agent.config.models.chat = "vendor/model"
         agent.zdr_required = False
         agent.provider = self.provider
         with patch("src.providers.openrouter.stream_chat", side_effect=lambda *_args, **_kwargs: _stream("NONE")) as stream:
             self.assertIsNone(_propose_query(agent, "Question"))
-        self.assertFalse(stream.call_args.args[1]["provider"]["zdr"])
+        self.assertNotIn("provider", stream.call_args.args[1])
+
+    def test_associative_small_model_inherits_the_user_policy_unless_overridden(self) -> None:
+        for require_zdr, override, expected in ((True, None, {"zdr": True}), (False, None, None),
+                                                (True, False, None), (False, True, {"zdr": True})):
+            with self.subTest(require_zdr=require_zdr, override=override):
+                config = AssociativeMemoryConfig(query_model="vendor/small", api_key="TEST_ASSOC_KEY", zdr=override)
+                with (
+                    patch("src.agent.associative.ASSOC", config),
+                    patch.dict("os.environ", {"TEST_ASSOC_KEY": "secret"}),
+                    patch("src.providers.openrouter.stream_chat", side_effect=lambda *_args, **_kwargs: _stream("NONE")) as stream,
+                ):
+                    agent = Mock(spec=Agent)
+                    agent.messages = [{"role": "system", "content": "Test"}]
+                    agent.config = Mock(require_zdr=require_zdr)
+                    _propose_query(agent, "Question")
+                self.assertEqual(stream.call_args.args[1].get("provider"), expected)
 
     def test_associative_query_uses_configured_small_model(self) -> None:
         config = AssociativeMemoryConfig(query_model="vendor/small", api_key="TEST_ASSOC_KEY", zdr=False)
@@ -145,7 +175,7 @@ class OpenRouterZdrTests(unittest.TestCase):
         self.enterContext(patch.dict("os.environ", {"TEST_ASSOC_KEY": "secret"}))
         agent = Mock(spec=Agent)
         agent.messages = [{"role": "system", "content": "Test"}]
-        agent.config = Mock()
+        agent.config = Mock(require_zdr=True)
         agent.config.models.chat = "vendor/model"
         agent.zdr_required = True
         agent.provider = Mock()
@@ -153,7 +183,7 @@ class OpenRouterZdrTests(unittest.TestCase):
             self.assertEqual(_propose_query(agent, "Question"), "cats")
         agent.provider.invoke.assert_not_called()
         self.assertEqual(stream.call_args.args[1]["model"], "vendor/small")
-        self.assertFalse(stream.call_args.args[1]["provider"]["zdr"])
+        self.assertNotIn("provider", stream.call_args.args[1])
 
     def test_associative_query_without_api_key_raises_an_actionable_error(self) -> None:
         config = AssociativeMemoryConfig(query_model="vendor/small", api_key="TEST_ASSOC_MISSING")
@@ -161,6 +191,7 @@ class OpenRouterZdrTests(unittest.TestCase):
         self.enterContext(patch.dict("os.environ", {}, clear=False))
         agent = Mock(spec=Agent)
         agent.messages = [{"role": "system", "content": "Test"}]
+        agent.config = Mock(require_zdr=False)
         with self.assertRaisesRegex(RuntimeError, "TEST_ASSOC_MISSING"):
             _propose_query(agent, "Question")
 

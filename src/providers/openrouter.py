@@ -163,7 +163,7 @@ class OpenRouterProvider(LLMProvider):
 
     def _chat_request(self, model: str, messages: list[dict], zdr: bool) -> tuple[list[dict], dict]:
         """Messages and OpenRouter routing preferences for one chat request; Claude gets cache breakpoints."""
-        routing: dict = {"zdr": zdr}
+        routing: dict = {"zdr": True} if zdr else {}  # never sent otherwise: the account's own policy decides
         if self.prompt_cache.enabled and is_anthropic_model(model):
             messages = with_prompt_cache(messages)
             if self.prompt_cache.anthropic_providers:
@@ -179,7 +179,7 @@ class OpenRouterProvider(LLMProvider):
 
     def transcribe(
         self, audio_data: str, audio_format: str, *,
-        model: str, language: str | None = None, zdr: bool = True,
+        model: str, language: str | None = None, zdr: bool = False,
     ) -> str:
         """Transcribe base64 audio through OpenRouter's dedicated STT endpoint."""
         model = self.own_model(model)
@@ -190,8 +190,9 @@ class OpenRouterProvider(LLMProvider):
         payload = {
             "model": model,
             "input_audio": {"data": audio_data, "format": audio_format},
-            "provider": {"zdr": zdr},
         }
+        if zdr:
+            payload["provider"] = {"zdr": True}
         if language:
             payload["language"] = language.split("-", 1)[0].lower()
         response = requests.post(
@@ -207,7 +208,7 @@ class OpenRouterProvider(LLMProvider):
             raise RuntimeError("OpenRouter speech-to-text returned no transcription text")
         return text.strip()
 
-    def invoke(self, messages: list[dict], model: str, stream=True, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None, *, zdr: bool = True):
+    def invoke(self, messages: list[dict], model: str, stream=True, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None, *, zdr: bool = False):
         """
         Invokes the OpenRouter API with the given messages and model.
         If stream is True, yields (kind, text) tuples then a final dict with usage info.
@@ -219,7 +220,7 @@ class OpenRouterProvider(LLMProvider):
             return self.invoke_stream(messages, model, self.api_key, reasoning=reasoning, reasoning_tokens=reasoning_tokens, reasoning_effort=reasoning_effort, tools=tools, cancellation=cancellation, zdr=zdr)
         return self.invoke_sync(messages, model, self.api_key, reasoning=reasoning, reasoning_tokens=reasoning_tokens, reasoning_effort=reasoning_effort, tools=tools, cancellation=cancellation, zdr=zdr)
 
-    def invoke_stream(self, messages: list[dict], model: str, api_key: str, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None, *, zdr: bool = True):
+    def invoke_stream(self, messages: list[dict], model: str, api_key: str, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None, *, zdr: bool = False):
         """Streaming variant — yields (kind, text) tuples then a final dict with usage info.
 
         kind is either "reasoning" (thinking tokens) or "content" (the actual answer).
@@ -236,8 +237,9 @@ class OpenRouterProvider(LLMProvider):
             "model": model,
             "messages": messages,
             "stream": True,
-            "provider": routing,
         }
+        if routing:
+            payload["provider"] = routing
         logger.debug("openrouter streaming request; payload=%s", payload)
         if reasoning:
             payload["reasoning"] = _reasoning_payload(reasoning_effort, reasoning_tokens)
@@ -343,7 +345,7 @@ class OpenRouterProvider(LLMProvider):
             logger.error(f"Unexpected error during streaming: {e}")
             raise
 
-    def invoke_sync(self, messages: list[dict], model: str, api_key: str, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None, *, zdr: bool = True) -> dict:
+    def invoke_sync(self, messages: list[dict], model: str, api_key: str, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None, *, zdr: bool = False) -> dict:
         """Non-streaming variant — returns a dict with reasoning, response, usage and model."""
         model = self.own_model(model)
         url = "https://openrouter.ai/api/v1/chat/completions"
@@ -352,7 +354,9 @@ class OpenRouterProvider(LLMProvider):
             "Content-Type": "application/json"
         }
         messages, routing = self._chat_request(model, messages, zdr)
-        payload = {"model": model, "messages": messages, "stream": False, "provider": routing}
+        payload = {"model": model, "messages": messages, "stream": False}
+        if routing:
+            payload["provider"] = routing
         logger.debug("openrouter non-streaming request; payload=%s", payload)
         if reasoning:
             payload["reasoning"] = _reasoning_payload(reasoning_effort, reasoning_tokens)

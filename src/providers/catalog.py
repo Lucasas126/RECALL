@@ -80,8 +80,8 @@ def _price_per_million(prices: Iterable[Decimal | None]) -> str | None:
     return format((min(known) * 1_000_000).normalize(), "f") if known else None
 
 
-def list_openrouter_models(query: str = "", *, zdr: bool = True) -> list[OpenRouterModel]:
-    """Search public chat models, requiring active ZDR routes unless explicitly disabled."""
+def list_openrouter_models(query: str = "", *, zdr: bool = False) -> list[OpenRouterModel]:
+    """Search public chat models, requiring active ZDR routes only when `zdr` is set."""
     try:
         with httpx.Client(timeout=30) as client:
             models_response = client.get("https://openrouter.ai/api/v1/models")
@@ -138,9 +138,9 @@ def list_openrouter_models(query: str = "", *, zdr: bool = True) -> list[OpenRou
 
 
 def list_openrouter_transcription_models(
-    query: str = "", *, zdr: bool = True,
+    query: str = "", *, zdr: bool = False,
 ) -> list[OpenRouterTranscriptionModel]:
-    """List OpenRouter speech-to-text models, optionally requiring active ZDR routes."""
+    """List OpenRouter speech-to-text models, requiring active ZDR routes only when `zdr` is set."""
     try:
         with httpx.Client(timeout=30) as client:
             response = client.get(

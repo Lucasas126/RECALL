@@ -109,21 +109,28 @@ class PromptCacheRequestTests(unittest.TestCase):
         }) as post:
             self.provider.invoke(self.messages, "anthropic/claude-haiku-5.5", stream=False)
         payload = post.call_args.args[1]
-        self.assertEqual(payload["provider"], {"zdr": True, "order": ["Amazon Bedrock"]})
+        self.assertEqual(payload["provider"], {"order": ["Amazon Bedrock"]})
         self.assertEqual(payload["messages"][0]["content"][0]["cache_control"], BREAKPOINT)
 
-    def test_streaming_claude_alias_gets_breakpoints_and_keeps_zdr_choice(self) -> None:
+    def test_claude_requests_keep_zdr_when_required(self) -> None:
+        with patch("src.providers.openrouter.post_chat", return_value={
+            "choices": [{"message": {"content": "ok"}}],
+        }) as post:
+            self.provider.invoke(self.messages, "anthropic/claude-haiku-5.5", stream=False, zdr=True)
+        self.assertEqual(post.call_args.args[1]["provider"], {"zdr": True, "order": ["Amazon Bedrock"]})
+
+    def test_streaming_claude_alias_gets_breakpoints_and_sends_no_zdr_field_when_off(self) -> None:
         with patch("src.providers.openrouter.stream_chat", side_effect=lambda *_a, **_k: _stream()) as stream:
             list(self.provider.invoke(self.messages, "~anthropic/claude-haiku-latest", zdr=False))
         payload = stream.call_args.args[1]
-        self.assertEqual(payload["provider"], {"zdr": False, "order": ["Amazon Bedrock"]})
+        self.assertEqual(payload["provider"], {"order": ["Amazon Bedrock"]})
         self.assertEqual(payload["messages"][3]["content"][0]["cache_control"], BREAKPOINT)
 
     def test_other_models_are_sent_unchanged(self) -> None:
         with patch("src.providers.openrouter.post_chat", return_value={
             "choices": [{"message": {"content": "ok"}}],
         }) as post:
-            self.provider.invoke(self.messages, "deepseek/deepseek-chat", stream=False)
+            self.provider.invoke(self.messages, "deepseek/deepseek-chat", stream=False, zdr=True)
         payload = post.call_args.args[1]
         self.assertEqual(payload["provider"], {"zdr": True})
         self.assertEqual(payload["messages"], self.messages)
@@ -135,7 +142,7 @@ class PromptCacheRequestTests(unittest.TestCase):
         }) as post:
             provider.invoke(self.messages, "anthropic/claude-haiku-5.5", stream=False)
         payload = post.call_args.args[1]
-        self.assertEqual(payload["provider"], {"zdr": True})
+        self.assertNotIn("provider", payload)
         self.assertEqual(payload["messages"], self.messages)
 
     def test_empty_provider_list_only_adds_breakpoints(self) -> None:
@@ -143,7 +150,7 @@ class PromptCacheRequestTests(unittest.TestCase):
         with patch("src.providers.openrouter.post_chat", return_value={
             "choices": [{"message": {"content": "ok"}}],
         }) as post:
-            provider.invoke(self.messages, "anthropic/claude-haiku-5.5", stream=False)
+            provider.invoke(self.messages, "anthropic/claude-haiku-5.5", stream=False, zdr=True)
         self.assertEqual(post.call_args.args[1]["provider"], {"zdr": True})
 
 

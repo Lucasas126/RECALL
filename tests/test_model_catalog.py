@@ -66,8 +66,8 @@ class ModelCatalogTests(unittest.TestCase):
         client_patch.start()
         self.addCleanup(client_patch.stop)
 
-    def test_only_text_models_with_active_zdr_endpoints_are_returned(self) -> None:
-        models = [model.model_dump() for model in list_openrouter_models()]
+    def test_only_text_models_with_active_zdr_endpoints_are_returned_when_zdr_is_required(self) -> None:
+        models = [model.model_dump() for model in list_openrouter_models(zdr=True)]
         self.assertEqual(models, [
             {
                 "id": "vendor/alpha", "name": "Alpha", "description": "A model",
@@ -102,7 +102,11 @@ class ModelCatalogTests(unittest.TestCase):
 
     def test_empty_zdr_policy_never_returns_unrestricted_models(self) -> None:
         self.endpoints.clear()
-        self.assertEqual(list_openrouter_models(), [])
+        self.assertEqual(list_openrouter_models(zdr=True), [])
+
+    def test_catalog_is_not_filtered_by_zdr_endpoints_by_default(self) -> None:
+        self.endpoints.clear()
+        self.assertIn("vendor/alpha", [model.id for model in list_openrouter_models()])
 
     def test_upstream_http_error_never_returns_unrestricted_models(self) -> None:
         self.status = 503
@@ -138,23 +142,23 @@ class ModelCatalogTests(unittest.TestCase):
         inactive["pricing"] = {"prompt": "0", "completion": "0"}
         self.endpoints.append(inactive)
         self.models[1]["pricing"] = {"prompt": "0", "completion": "0"}
-        pricing = list_openrouter_models("alpha")[0].pricing
+        pricing = list_openrouter_models("alpha", zdr=True)[0].pricing
         self.assertEqual(pricing.model_dump(), {"prompt": "0.3", "completion": "0.2"})
-        self.assertEqual(list_openrouter_models("alpha", zdr=False)[0].pricing.model_dump(), {
+        self.assertEqual(list_openrouter_models("alpha")[0].pricing.model_dump(), {
             "prompt": "0", "completion": "0",
         })
 
     def test_price_conversion_preserves_decimal_precision_and_free_prices(self) -> None:
         self.endpoints[0]["pricing"] = {"prompt": "0.000000123456789", "completion": "0"}
-        pricing = list_openrouter_models("beta")[0].pricing
+        pricing = list_openrouter_models("beta", zdr=True)[0].pricing
         self.assertEqual(pricing.model_dump(), {"prompt": "0.123456789", "completion": "0"})
 
     def test_missing_and_dynamic_prices_are_unavailable_not_free(self) -> None:
         self.endpoints[0]["pricing"] = {"prompt": "-1"}
-        pricing = list_openrouter_models("beta")[0].pricing
+        pricing = list_openrouter_models("beta", zdr=True)[0].pricing
         self.assertEqual(pricing.model_dump(), {"prompt": None, "completion": None})
         self.endpoints[0].pop("pricing")
-        self.assertEqual(list_openrouter_models("beta")[0].pricing.model_dump(), {
+        self.assertEqual(list_openrouter_models("beta", zdr=True)[0].pricing.model_dump(), {
             "prompt": None, "completion": None,
         })
 
@@ -165,9 +169,9 @@ class ModelCatalogTests(unittest.TestCase):
                 with self.assertRaises(CatalogUnavailable):
                     list_openrouter_models()
 
-    def test_explicit_opt_out_includes_non_zdr_text_models_and_global_prices(self) -> None:
+    def test_default_includes_non_zdr_text_models_and_global_prices(self) -> None:
         self.models[2]["pricing"] = {"prompt": "0.00000004", "completion": "0.00000012"}
-        models = list_openrouter_models(zdr=False)
+        models = list_openrouter_models()
         ids = {model.id for model in models}
         self.assertIn("vendor/no-zdr", ids)
         self.assertNotIn("vendor/image", ids)
@@ -182,10 +186,10 @@ class ModelCatalogTests(unittest.TestCase):
         self.endpoints[2]["supported_parameters"] = ["reasoning_effort"]
         self.endpoints[3]["status"] = -2
         self.endpoints[3]["supported_parameters"] = ["tools", "reasoning"]
-        model = list_openrouter_models("alpha")[0]
+        model = list_openrouter_models("alpha", zdr=True)[0]
         self.assertEqual(model.input_modalities, ["text", "image"])
         self.assertEqual(model.parameter_routes, [["tools"], ["reasoning_effort"]])
-        unrestricted = list_openrouter_models("alpha", zdr=False)[0]
+        unrestricted = list_openrouter_models("alpha")[0]
         self.assertEqual(unrestricted.parameter_routes, [["tools", "reasoning"]])
 
     def test_malformed_capability_metadata_fails_explicitly(self) -> None:
@@ -226,7 +230,7 @@ class ModelCatalogWebTests(unittest.TestCase):
             "parameter_routes": [],
             "provider": "openrouter", "provider_label": "OpenRouter", "main_provider": True, "zdr_applies": True,
         }])
-        self.catalog.assert_called_once_with("alpha", zdr=True)
+        self.catalog.assert_called_once_with("alpha", zdr=False)
         self.load_user.assert_called_with("test-user")
 
     def test_login_is_required_before_catalog_lookup(self) -> None:
@@ -271,9 +275,18 @@ class ModelCatalogWebTests(unittest.TestCase):
         self.assertEqual(response.status_code, 502)
         self.assertIn("retry later", response.json()["detail"])
 
-    def test_explicit_zdr_opt_out_is_forwarded_to_catalog(self) -> None:
+    def test_explicit_zdr_choice_is_forwarded_to_catalog(self) -> None:
+        self.assertEqual(self.client.get("/api/models?zdr=true").status_code, 200)
+        self.catalog.assert_called_once_with("", zdr=True)
+        self.catalog.reset_mock()
+        self.user.require_zdr = True
         self.assertEqual(self.client.get("/api/models?zdr=false").status_code, 200)
         self.catalog.assert_called_once_with("", zdr=False)
+
+    def test_catalog_follows_the_user_zdr_policy_when_not_asked(self) -> None:
+        self.user.require_zdr = True
+        self.assertEqual(self.client.get("/api/models").status_code, 200)
+        self.catalog.assert_called_once_with("", zdr=True)
 
     def test_invalid_zdr_query_is_rejected(self) -> None:
         self.assertEqual(self.client.get("/api/models?zdr=maybe").status_code, 422)

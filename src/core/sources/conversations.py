@@ -30,7 +30,7 @@ class ChatModel(BaseModel):
 
     provider: Literal["openrouter", "ollama", "claude_subscription"] = "openrouter"
     id: str = Field(strict=True, min_length=1, max_length=256)
-    zdr: bool = Field(default=True, strict=True)
+    zdr: bool | None = Field(default=None, strict=True)  # None follows the user's require_zdr
 
     @model_validator(mode="after")
     def _provider_matches_id(self) -> "ChatModel":
@@ -38,7 +38,7 @@ class ChatModel(BaseModel):
         if (named is not None and self.provider != named) or (named is None and self.provider == CLAUDE_SUBSCRIPTION):
             raise ValueError("the chat model's provider does not match its model reference")
         if self.provider == CLAUDE_SUBSCRIPTION and self.zdr:
-            raise ValueError("Claude subscription models are not zero data retention")
+            raise ValueError("Claude subscription models cannot be used with zero data retention")
         return self
 
 
@@ -100,14 +100,15 @@ class ConversationsSource(Source):
         except (OSError, UnicodeError, ValidationError) as exc:
             raise ChatMetadataError("Could not read model selection for chat {chat_id}.", chat_id=chat_id) from exc
 
-    def set_model(self, chat_id: str, model_id: str, *, zdr: bool = True, main: str = "openrouter") -> ChatModel:
-        """Persist an override after the caller validates model availability; bare ids belong to `main`."""
+    def set_model(self, chat_id: str, model_id: str, *, zdr: bool | None = None, main: str = "openrouter") -> ChatModel:
+        """Persist an override after the caller validates model availability; bare ids belong to `main`.
+
+        `zdr` is the chat's own flag; None stores none, so the chat follows the user's setting.
+        """
         path = self._model_path(chat_id)
-        provider = provider_of(model_id, main)
-        # Claude subscription traffic has no zero-retention routing, so it is stored as such
-        selection = ChatModel(provider=provider, id=model_id, zdr=zdr and provider != CLAUDE_SUBSCRIPTION)
+        selection = ChatModel(provider=provider_of(model_id, main), id=model_id, zdr=zdr)
         try:
-            atomic_write_text(path, selection.model_dump_json() + "\n")
+            atomic_write_text(path, selection.model_dump_json(exclude_none=True) + "\n")
         except OSError as exc:
             raise ChatMetadataError("Could not save model selection for chat {chat_id}.", chat_id=chat_id) from exc
         return selection

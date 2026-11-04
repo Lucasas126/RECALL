@@ -6,9 +6,9 @@ from typing import Annotated, Literal, Optional, Union
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from src.agent.tool_groups import validate_tool_groups
+from src.config.zdr import ensure_zdr_compatible
 from src.config.model_refs import (
-    CAPABILITIES, CLAUDE_SUBSCRIPTION, MAIN_PROVIDERS, OPENROUTER, is_claude_subscription, prefix_of,
-    validate_reference,
+    CAPABILITIES, CLAUDE_SUBSCRIPTION, MAIN_PROVIDERS, OPENROUTER, prefix_of, validate_reference,
 )
 ReasoningEffort = Literal["minimal", "low", "medium", "high", "xhigh", "max"]
 
@@ -128,12 +128,12 @@ class ChatNamingConfig(BaseModel):
 
     model: str = Field(default="openai/gpt-4o-mini", strict=True, min_length=1, max_length=256)
     api_key: str = Field(default="OPENROUTER_API_KEY", pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
-    zdr: bool = Field(default=True, strict=True)
+    zdr: Optional[bool] = Field(default=None, strict=True)  # None follows the user's require_zdr
     min_messages: int = Field(default=5, ge=1, le=1000, strict=True)
 
     @model_validator(mode="after")
-    def _claude_subscription_is_not_zdr(self) -> "ChatNamingConfig":
-        _require_no_zdr(self.model, self.zdr, "chat_naming")
+    def _claude_subscription_needs_no_zdr(self) -> "ChatNamingConfig":
+        _check_model_zdr(self.model, self.zdr, "chat_naming")
         return self
 
 
@@ -159,11 +159,11 @@ class AssociativeMemoryConfig(BaseModel):
     score_threshold: float = Field(default=0.25, ge=0, le=1)
     query_model: Optional[str] = Field(default=None, strict=True, min_length=1, max_length=256)
     api_key: str = Field(default="OPENROUTER_API_KEY", pattern=_ENV_NAME)
-    zdr: bool = Field(default=True, strict=True)
+    zdr: Optional[bool] = Field(default=None, strict=True)  # None follows the user's require_zdr
 
     @model_validator(mode="after")
-    def _claude_subscription_is_not_zdr(self) -> "AssociativeMemoryConfig":
-        _require_no_zdr(self.query_model, self.zdr, "associative_memory")
+    def _claude_subscription_needs_no_zdr(self) -> "AssociativeMemoryConfig":
+        _check_model_zdr(self.query_model, self.zdr, "associative_memory")
         return self
 
 
@@ -194,7 +194,7 @@ class IndexConfig(BaseModel):
 class SpeechToTextConfig(BaseModel):
     """OpenRouter speech-to-text settings."""
 
-    zdr: bool = Field(default=True, strict=True)
+    zdr: Optional[bool] = Field(default=None, strict=True)  # None follows the user's require_zdr
     language: Optional[str] = Field(default=None, pattern=r"^[a-z]{2}(?:-[A-Z]{2})?$")
 
 
@@ -220,12 +220,11 @@ class PdfConfig(BaseModel):
     tesseract_cmd: str | None = Field(default=None, min_length=1, max_length=512)
 
 
-def _require_no_zdr(model: Optional[str], zdr: bool, section: str) -> None:
-    """A `claude_subscription:` model has no zero-retention routing, so the setting must say so explicitly."""
+def _check_model_zdr(model: Optional[str], zdr: Optional[bool], section: str) -> None:
+    """Validate the model reference; an explicit `zdr: true` cannot go with a Claude subscription model."""
     if model is not None:
         validate_reference(model)
-    if is_claude_subscription(model) and zdr:
-        raise ValueError(f"{section}: Claude subscription models are not zero data retention; set {section}.zdr: false to use {model}")
+    ensure_zdr_compatible(model, zdr, section)
 
 
 class ProviderConfig(BaseModel):
@@ -312,6 +311,8 @@ class UserConfig(BaseModel):
     name: str
     password_hash: Optional[str] = Field(default=None, min_length=1)
     language: str = Field(default="en", pattern=r"^[a-z]{2}(?:-[A-Z]{2})?$")
+    # zero data retention: the default of every ZDR-aware feature (chats, pickers, naming, memory, dream, STT)
+    require_zdr: bool = Field(default=False, strict=True)
     provider: ProviderConfig  # main provider: serves bare model ids
     embeddings_provider: Optional[ProviderConfig] = None  # falls back to `provider`
     agents: list[str]
@@ -466,6 +467,7 @@ class ResolvedAgent(BaseModel):
 
     user_id: str
     language: str = "en"
+    require_zdr: bool = False
     id: str
     name: str
     models: ModelsConfig

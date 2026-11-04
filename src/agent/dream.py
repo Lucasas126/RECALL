@@ -386,7 +386,7 @@ class DreamRunner:
                 box["result"] = self.provider.invoke(
                     messages, self.model, stream=False,
                     reasoning=dream.reasoning_effort is not None, reasoning_effort=dream.reasoning_effort,
-                    tools=specs, cancellation=token, zdr=True,
+                    tools=specs, cancellation=token, zdr=self.config.require_zdr,
                 )
             except BaseException as exc:  # handed to the runner thread
                 box["error"] = exc

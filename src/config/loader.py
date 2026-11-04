@@ -9,7 +9,8 @@ import yaml
 from src.config.agents import AgentStore
 from src.config.models import AgentConfig, ModelsConfig, ResolvedAgent, UserConfig
 from src.config.preferences import UserPreferencesStore
-from src.config.settings import CONFIG_DIR, DATA_DIR, MCP
+from src.config.settings import ASSOC, CHAT_NAMING, CONFIG_DIR, DATA_DIR, MCP
+from src.config.zdr import ensure_zdr_compatible, zdr_required
 from src.agent.tool_groups import DEFAULT_TOOL_GROUPS
 
 
@@ -22,7 +23,11 @@ def _load_yaml(path: Path) -> dict:
 
 def load_user(user_id: str) -> UserConfig:
     """Load a user's config; raises FileNotFoundError if the user does not exist."""
-    return UserConfig(**_load_yaml(CONFIG_DIR / user_id / "user.yaml"))
+    user = UserConfig(**_load_yaml(CONFIG_DIR / user_id / "user.yaml"))
+    if user.require_zdr:  # the framework-wide helper models inherit the policy; Claude subscription has no ZDR
+        ensure_zdr_compatible(CHAT_NAMING.model, zdr_required(True, CHAT_NAMING.zdr), "chat_naming")
+        ensure_zdr_compatible(ASSOC.query_model, zdr_required(True, ASSOC.zdr), "associative_memory")
+    return user
 
 
 def load_agent_config(user_id: str, agent_id: str) -> AgentConfig:
@@ -78,6 +83,7 @@ def load_agent(user_id: str, agent_id: Optional[str] = None) -> ResolvedAgent:
     return ResolvedAgent(
         user_id=user.id,
         language=user.language,
+        require_zdr=user.require_zdr,
         id=agent.id,
         name=agent.name,
         models=load_user_models(user_id),

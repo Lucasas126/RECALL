@@ -53,12 +53,12 @@ class MessageIn(BaseModel):
 
 class ModelIn(BaseModel):
     model_id: FavoriteModelId
-    zdr: bool = Field(default=True, strict=True)
+    zdr: bool | None = Field(default=None, strict=True)  # None follows the user's policy
 
 
 class ChatModelIn(BaseModel):
     model_id: FavoriteModelId | None
-    zdr: bool = Field(default=True, strict=True)
+    zdr: bool | None = Field(default=None, strict=True)
 
 
 class ChatReasoningEffortIn(BaseModel):
@@ -231,12 +231,12 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
         return service.update_preferences(user_id, body)
 
     @app.get("/api/models")
-    def list_models(q: str = "", zdr: bool = True, user_id: str = Depends(current_user)):
+    def list_models(q: str = "", zdr: bool | None = None, user_id: str = Depends(current_user)):
         return service.list_models(user_id, q, zdr=zdr)
 
     @app.get("/api/models/catalog")
     def model_catalog(
-        q: str = "", zdr: bool = True, capability: Literal["chat", "stt"] = "chat", provider: str | None = None,
+        q: str = "", zdr: bool | None = None, capability: Literal["chat", "stt"] = "chat", provider: str | None = None,
         user_id: str = Depends(current_user),
     ):
         return service.model_catalog(user_id, q, zdr=zdr, capability=capability, provider=provider)
@@ -247,7 +247,7 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
 
     @app.get("/api/speech-to-text/models")
     def list_speech_to_text_models(
-        q: str = "", zdr: bool = True, user_id: str = Depends(current_user),
+        q: str = "", zdr: bool | None = None, user_id: str = Depends(current_user),
     ):
         return service.list_transcription_models(user_id, q, zdr=zdr)
 

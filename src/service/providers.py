@@ -175,14 +175,16 @@ def canonical_reference(user: UserConfig, model: str) -> tuple[str, str]:
     return provider, reference(provider, name, user.provider.name)
 
 
-def require_listed(provider: str, canonical: str, capability: str, rows: list[dict]) -> None:
+def require_listed(provider: str, canonical: str, capability: str, rows: list[dict], *, zdr: bool) -> None:
     """Raise unless the catalog rows offer `canonical` (a reference as `reference()` builds it)."""
     if any(row["id"] == canonical for row in rows):
         return
     if provider == OPENROUTER and capability == "stt":
-        raise InputError("The speech-to-text model is not available with the required routing policy.")
+        raise InputError("The speech-to-text model is not available with the required routing policy." if zdr
+                         else "The speech-to-text model is not available in the OpenRouter catalog.")
     if provider == OPENROUTER:
-        raise InputError("model is not available in the OpenRouter chat catalog with the selected ZDR filter")
+        raise InputError("model is not available in the OpenRouter chat catalog with the selected ZDR filter" if zdr
+                         else "model is not available in the OpenRouter chat catalog")
     if provider == OLLAMA:
         raise InputError("The model {model} is not installed on the Ollama server.", model=model_name(canonical))
     raise InputError("{model} is not one of the offered Claude subscription models.", model=model_name(canonical))

@@ -9,7 +9,7 @@ from typing import Iterator, Optional, Union
 
 import src.providers.openrouter  # noqa: F401  (registers the openrouter provider)
 import src.providers.ollama  # noqa: F401  (registers the ollama provider)
-from src.config.model_refs import CLAUDE_SUBSCRIPTION, is_claude_subscription, prefix_of, provider_of
+from src.config.model_refs import CLAUDE_SUBSCRIPTION, prefix_of, provider_of
 from src.providers.routing import provider_for
 from src.agent import usage
 from src.agent import associative
@@ -19,6 +19,7 @@ from src.agent.toolsets.mcp import build_mcp_tools
 from src.config.loader import load_agent
 from src.config.models import ModelsConfig, ResolvedAgent
 from src.config.settings import AGENT_MAX_TOOL_HOPS, PROMPT_CACHE, TAVILY
+from src.config.zdr import chat_zdr
 from src.core.index import VectorIndex
 from src.core.sources.registry import SourceRegistry
 from src.utils.logger import get_logger
@@ -179,7 +180,7 @@ class Agent:
             raise FileNotFoundError(f"chat not found: {chat_id}")
         selection = conversations.model_selection(chat_id)
         model = selection.id if selection is not None else self._default_chat_model
-        self.zdr_required = selection.zdr if selection is not None else not is_claude_subscription(model)
+        self.zdr_required = chat_zdr(self.config.require_zdr, model, selection.zdr if selection is not None else None)
         if model != self.config.models.chat:
             self._max_context = None
         self._route_provider(model)
@@ -234,7 +235,7 @@ class Agent:
             self._prev_breakdown = None
         self._route_provider(model)
         self.config.models = self.config.models.model_copy(update={"chat": model, "stt": models.stt})
-        self.zdr_required = selection.zdr if selection else not is_claude_subscription(model)
+        self.zdr_required = chat_zdr(self.config.require_zdr, model, selection.zdr if selection else None)
 
     @classmethod
     def from_config(
