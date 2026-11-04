@@ -27,6 +27,17 @@ RUN uv sync --frozen --no-dev --no-install-project
 # a virtual project and there is nothing to install for the project itself.
 COPY . .
 
+# ---------- claude-cli ----------
+# Claude Code CLI for the `claude_subscription:` provider, installed into its own
+# prefix so the runtime image only copies that folder plus the `node` binary
+# (no npm, no build tools). Bump CLAUDE_CODE_VERSION on release; the models in
+# docs/user-guide/claude-subscription.md need >= 2.1.293 (Haiku 5.5).
+FROM node:22-slim AS claude-cli
+ARG CLAUDE_CODE_VERSION=2.1.316
+RUN npm install -g --prefix /opt/claude --no-audit --no-fund \
+      @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
+ && /opt/claude/bin/claude --version
+
 # ---------- runtime ----------
 FROM python:3.12-slim AS runtime
 
@@ -34,20 +45,26 @@ FROM python:3.12-slim AS runtime
 # listen on all interfaces so the published port reaches it.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PATH="/app/.venv/bin:$PATH" \
+    PATH="/app/.venv/bin:/opt/claude/bin:$PATH" \
     RECALL_WEB_HOST=0.0.0.0
 
 # System programs RECALL shells out to:
 # - tesseract-ocr (+ eng/spa data, matching pdf.ocr_languages): scanned PDF pages
 # - ffmpeg (includes ffprobe): video decomposition
 # - tzdata: log timestamps honour the TZ env var
-# Node.js/npx (Google Calendar MCP) is intentionally not included in v1.
+# npx for the Google Calendar MCP is intentionally not included (only `node`, below).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       tesseract-ocr tesseract-ocr-eng tesseract-ocr-spa \
       ffmpeg \
       tzdata \
  && rm -rf /var/lib/apt/lists/*
+
+# Claude Code CLI (+ the Node runtime it runs on) from the claude-cli stage; both
+# are root-owned and world-readable. /opt/claude/bin/claude is on PATH, which is
+# where RECALL looks for `claude` (override: RECALL_CLAUDE_COMMAND).
+COPY --from=claude-cli /usr/local/bin/node /usr/local/bin/node
+COPY --from=claude-cli /opt/claude /opt/claude
 
 # Non-root user for the runtime.
 RUN groupadd --system --gid 1000 app \
