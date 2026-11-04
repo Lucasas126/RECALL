@@ -263,8 +263,10 @@ form (`src/web/static`):
   with `PUT /api/agents/<id>/soul`. the agents API itself has no personality
   field, so saving the agent form never touches `SOUL.md`.
 - **Dream**: schedule (manual only, every N hours or daily at HH:MM, plus the
-  enabled switch), model (free text or the OpenRouter model picker; empty = the
-  user's chat model), reasoning effort, `max_steps`, `max_tokens`, `max_minutes`, dream read
+  enabled switch), model (free text or the model picker, whose provider tabs
+  list OpenRouter, Ollama and Claude subscription models; empty = the
+  user's chat model; a `claude_subscription:<model>` reference uses the user's own
+  Claude login, see [claude subscription](claude-subscription.md)), reasoning effort, `max_steps`, `max_tokens`, `max_minutes`, dream read
   tools, memory limits, the dream prompt (the default prompt is
   the placeholder; it can be copied for editing or reset to empty) and the
   Telegram notification. API validation errors are shown under the form.

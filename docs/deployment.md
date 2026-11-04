@@ -179,6 +179,9 @@ the published port (see [web authentication](config.md#web-authentication)).
   Its sign-in also redirects to `localhost` on the RECALL host, which a browser
   on another machine cannot reach. Supporting it needs Node.js in the image and
   a way to complete the OAuth flow remotely.
+- **Claude subscription provider** ([experimental](claude-subscription.md)): the
+  image has no Node.js, no Claude Code CLI and no Claude login, so
+  `claude_subscription:` models fail there. Run RECALL on the host to use it.
 - The web UI is plain HTTP and its session cookie is not marked `Secure`. Keep it
   on the LAN or a VPN, or put an HTTPS reverse proxy in front.
 - amd64 only. Add `linux/arm64` to the workflow `platforms` for ARM servers.

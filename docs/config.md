@@ -31,6 +31,102 @@ provider:
 API keys never live in YAML. Providers and model IDs belong to the user;
 agents configure behavior, not inference or embedding models.
 
+`provider` is the user's **main provider**: it serves bare model ids and
+embeddings. It is set in `user.yaml` only, not in the web UI. The other providers
+need no setup in the user's file: the model picker offers every provider the
+server can use (see [providers](#providers)).
+
+### model references
+
+A model reference is a bare model id, served by the user's main provider, or
+`<provider>:<model>`, served by another provider: `openrouter:vendor/model`,
+`ollama:llama3:8b`, `claude_subscription:sonnet`. Only the provider names
+`openrouter`, `ollama` and `claude_subscription` count as a prefix, so ids with
+their own colon (`llama3:8b`, `vendor/model:free`) stay bare ids. An explicit
+prefix for the main provider is accepted and saved in its bare form. The same
+reference works everywhere a model is chosen: `models.*` in `user.yaml`, the
+default and per-chat pickers, favorites, an agent's `dream.model` and Telegram.
+
+A bare id always means the **current** main provider; changing the main provider
+in `user.yaml` does not rewrite stored references (there is no migration step).
+The web model picker chooses the provider on the picker itself and saves the
+reference in this form: bare for the main provider's models, prefixed for the
+others.
+
+Capabilities: OpenRouter serves chat, speech-to-text and embeddings; Ollama chat
+and embeddings; the experimental Claude subscription chat only (see
+[claude subscription](claude-subscription.md) for setup, privacy flags and the
+terms caveat). `models.stt` and `models.embeddings` reject a prefix whose provider
+lacks that capability, and the main provider must be `openrouter` or `ollama`.
+
+### providers
+
+There is no per-user "enable a provider" setting. The **model picker** (chat,
+Settings → default LLM/STT, Dream tab) has a provider switcher at its top, one tab
+per provider able to serve that kind of model: OpenRouter, Ollama and the
+experimental Claude subscription for chat and dream models; OpenRouter only for
+speech-to-text. A tab lists only that provider's models. The picker opens on the
+provider of the currently selected model, else the last one the user used (kept in
+the browser, per user), else the main provider. Embeddings always use the main
+provider (no picker).
+
+A provider is **available** when the server can use it, checked on the server:
+
+| provider | available when | otherwise the tab is disabled with |
+| --- | --- | --- |
+| OpenRouter | its API key environment variable is set (never read back) | `API key variable not set` |
+| Ollama | the server answers at its host | `Ollama not reachable` |
+| Claude subscription | the `claude` CLI is found and `claude auth status` says it is logged in | `Claude Code not installed` / ``Run `claude auth login` `` |
+
+Slow checks (Ollama, Claude Code) are cached for 60 seconds per server, so opening
+the picker does not start the CLI each time; the key check is a plain lookup. The
+Claude tab is labelled *experimental, not ZDR*. The ZDR checkbox appears for
+OpenRouter only; Ollama and Claude subscription models do not use it. Telegram has
+no provider switcher: its list is the user's favorites from all available
+providers, each line tagged with its provider.
+
+Optional provider settings stay in `user.yaml`, with no web UI. All blocks are
+optional:
+
+```yaml
+provider:                 # main provider: serves bare model ids and embeddings
+  name: openrouter
+  api_key: OPENROUTER_API_KEY     # env var NAME of the main provider's key
+openrouter:               # key variable of OpenRouter when it is not the main provider
+  api_key: OPENROUTER_API_KEY     # env var NAME
+ollama:
+  host: null                      # null = OLLAMA_HOST, else http://localhost:11434 (also for a main Ollama)
+claude_subscription:      # advanced options only, see claude-subscription.md
+  claude_config_dir: null
+  command: null
+  claude_code_telemetry: false
+  timeout_seconds: 300
+```
+
+The blocks have no `enabled` key (the strict schema rejects it). A model whose
+provider is not available fails with `provider not available: <provider>: <what to
+fix>`: choosing it in a picker or the Dream tab is refused with the same message in
+the user's language, and a reply, dream or chat title that needs it later reports
+it (a missing OpenRouter key variable, or Claude Code's own "not installed" /
+"run `claude auth login`" error). RECALL never logs in to Claude from the web and
+never reads credential files; the status check only learns whether the CLI is
+logged in (the account e-mail is never passed on).
+
+API (authenticated, scoped to the session user):
+
+- `GET /api/providers/status?capability=chat|stt`: `{"main", "providers": [{"id",
+  "label", "main", "available", "reason", "detail", "experimental",
+  "zdr_applies", "capabilities"}]}`, the providers able to serve the capability.
+  `reason` is `no_api_key`, `unreachable`, `cli_missing`, `logged_out` or
+  `cli_unknown` when not available; `detail` is the variable name, host or hint,
+  never a secret value.
+- `GET /api/models/catalog?capability=chat|stt&provider=<id>&zdr=true&q=`:
+  `{"models": [...]}`, the models of that one provider. An unavailable provider
+  or one that cannot serve the capability is refused with 400 and the reason.
+  Without `provider`, speech-to-text means OpenRouter and chat merges the
+  available providers (Telegram). Each row has `provider`, `provider_label`,
+  `main_provider` and `zdr_applies`.
+
 ### web authentication
 
 Web users are preconfigured; there is no registration flow. Add an Argon2 password
@@ -97,9 +193,14 @@ bot edits the panel in place for pagination. Choosing an option saves it and
 replaces the panel with a short confirmation; **Close** only removes the
 buttons. Model choices persist for the chat that was current when the
 selector opened; if the active chat changes first, the selector expires.
-Both model selectors start with **Use user default**, and accept an optional
-search term (`/selectmodel claude`). Available user favorites appear first
-with a star; each group is ordered by input price, then output price. There
+The chat model selector starts with **Use user default**. Both model selectors
+offer **only the user's favorite models**: there is no search (a term after
+`/selectmodel` is ignored) and favorites are managed in the web UI. Every line
+names the provider that serves the model (`OpenRouter · ...`, `Ollama · ...`,
+`Claude · ...`), so the same model name from two providers can be told apart;
+the confirmation after choosing repeats it. Favorites that are retired or whose
+provider is unavailable are not shown; with no favorites the bot explains how to
+add them. Favorites are ordered by input price, then output price. There
 are ten models per page and `Previous`/`Next` navigation (localized in
 Spanish). Only the most recent panel keeps working buttons; older panels
 show an expiry alert. Failures such as a busy agent appear as callback alerts
@@ -426,7 +527,9 @@ Default changes can be saved while a reply runs; changing chat
 overrides still requires an idle agent.
 
 Status: schemas, service/API precedence, user-default controls and chat reset
-controls are implemented in Telegram and web.
+controls are implemented in Telegram and web. The default speech-to-text model
+must be an OpenRouter model; default chat models can come from any available
+provider.
 
 ### openrouter model catalog and zero data retention
 
@@ -442,8 +545,9 @@ New chats and old metadata without the flag still require ZDR. OpenRouter
 account/guardrail policies can still require ZDR even when a chat opts out.
 Ollama accepts but ignores this routing preference; embeddings are unchanged.
 
-The web backend exposes `GET /api/models?q=<name-or-id>&zdr=true` for the current user.
-It is available only when that user's chat provider is OpenRouter. It fetches
+The web backend exposes `GET /api/models?q=<name-or-id>&zdr=true` for the current user:
+the chat rows of `GET /api/models/catalog` (see [providers](#providers)), merged
+over the available providers; `zdr` filters only the OpenRouter rows. It fetches
 the public `/api/v1/models` and `/api/v1/endpoints/zdr` catalogs without sending
 credentials, conversation content or the search term to OpenRouter. Results
 contain `id`, `name`, `description`, sorted, deduplicated `zdr_providers`, and
@@ -474,8 +578,8 @@ by this integration.
 
 ### choosing a model per chat
 
-For OpenRouter users, the **Chat model** control in the web composer (above the
-message box) opens a model selector with name/ID
+The **Chat model** control in the web composer (above the message box) opens a
+model selector, grouped by provider (main provider first, each group labelled), with name/ID
 search, ZDR provider names and a Refresh button. A star beside the search
 field toggles Favorites only; its filled/highlighted state means the filter
 is active. ZDR remains visible, and capability checkboxes live in the collapsed
@@ -529,9 +633,24 @@ single model-level list when ZDR is unchecked) for these client-side filters.
 Selecting a model changes **only the current chat**, preserving its messages
 and leaving user defaults, other chats and embeddings unchanged. New chats
 inherit the user's current default without an explicit override. A selection survives browser/server restarts
-and is also honored when the CLI opens that chat. A chat with an OpenRouter
-override requires an OpenRouter chat provider; changing the user's provider
-does not silently reinterpret its model ID.
+and is also honored when the CLI opens that chat. The override stores the model
+reference; a bare id is served by the user's main provider when the chat runs (see
+[model references](#model-references)), and a chat whose provider was disabled
+fails with an error naming the setting.
+
+The **ZDR only** filter applies to OpenRouter rows. Ollama rows have no per-token
+price; they are local models except Ollama cloud models (tags ending in `cloud`),
+which run on Ollama's servers and are labelled cloud and not ZDR. With the experimental [Claude subscription](claude-subscription.md)
+enabled, `claude_subscription:haiku`, `:sonnet` and `:opus` are listed in their own
+group whatever the ZDR filter, labelled experimental and not ZDR, without per-token
+prices. Choosing one stores the chat override as
+`{"provider": "claude_subscription", "id": "claude_subscription:sonnet", "zdr": false}`
+and the composer shows "Claude subscription (experimental), not ZDR". The default
+LLM picker and the Dream tab's **Browse** use this dialog; Telegram `/selectmodel`
+and the default model in `/settings` list the user's favorites from all available
+providers instead (no search). The default STT picker lists OpenRouter only. Telegram never says
+"ZDR: enabled" for a Claude subscription model; it says "Not ZDR (Claude
+subscription, experimental)" (or the Spanish equivalent).
 
 `GET /api/agents/<agent_id>/chats/<chat_id>` includes
 `"model": {"provider": "openrouter", "id": "vendor/model", "zdr": true}` (the override or
@@ -580,9 +699,9 @@ OpenRouter favorites are stored in the ignored
 They belong to the user, not an individual agent or browser, and survive
 restarts. IDs retain insertion order; adding/removing an existing/missing
 favorite is idempotent. Telegram reads this same list every time `/selectmodel`
-opens, pins favorites present in the current ZDR/search results first and marks
-them with a star. Retired or non-ZDR favorites are not added to Telegram's
-selectable catalog. Favorite additions/removals remain web-only; the web
+opens and offers only the favorites present in the current catalog (starred, with
+their provider named). Retired or non-ZDR favorites, and those of an unavailable
+provider, are not selectable in Telegram. Favorite additions/removals remain web-only; the web
 selector can also be used from a mobile browser. The backend provides:
 
 - `GET /api/models/favorites`: saved model IDs.
@@ -674,7 +793,9 @@ associative_memory:
   zdr: true
 ```
 
-`query_model` is an OpenRouter model ID and `zdr` restricts routing to zero data
+`query_model` is an OpenRouter model ID (or a `claude_subscription:<model>`
+reference, which runs with the requesting user's own Claude login and needs
+`zdr: false`; see [claude subscription](claude-subscription.md)) and `zdr` restricts routing to zero data
 retention providers. `api_key` names the env var holding the shared OpenRouter key.
 Set `query_model: null` to propose the query with each chat's own provider, model and
 ZDR choice instead (the only option for Ollama-only setups); `question_only` uses
@@ -830,7 +951,9 @@ chat_naming:
   min_messages: 5
 ```
 
-`model` is an OpenRouter model ID, `zdr` restricts routing to zero data retention
+`model` is an OpenRouter model ID (or a `claude_subscription:<model>` reference,
+which runs with the requesting user's own Claude login and needs `zdr: false`; see
+[claude subscription](claude-subscription.md)), `zdr` restricts routing to zero data retention
 providers, and `min_messages` (1-1000) is the number of user and assistant messages
 required before a title is generated. Behavior:
 
@@ -898,8 +1021,12 @@ provider:
   name: openrouter
   api_key: OPENROUTER_LUCAS_API_KEY   # omit for local providers (ollama)
 agents: [aria]
+ollama:                              # optional additional providers (see providers)
+  enabled: false
+claude_subscription:                 # optional, experimental, off by default (see claude-subscription.md)
+  enabled: false
 models:
-  chat: openai/gpt-4o-mini
+  chat: openai/gpt-4o-mini           # or ollama:llama3:8b / claude_subscription:sonnet once enabled
   stt: openai/whisper-large-v3-turbo
   embeddings: openai/text-embedding-3-small
 ```
