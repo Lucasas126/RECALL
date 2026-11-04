@@ -72,6 +72,8 @@ function translateInterface() {
   for (const [id, text] of [
     ["settings-title", "User settings"], ["settings-save", "Save settings"],
     ["settings-thinking-label", "Show model thinking"],
+    ["settings-assoc-max-label", "Maximum associative memory matches"],
+    ["settings-assoc-max-hint", "Leave empty to use the application default. The minimum similarity is set by the application, not by you."],
     ["settings-language-label", "Alerts and errors"], ["settings-theme-label", "Theme"],
     ["settings-theme-system", "System"], ["settings-theme-light", "Light"], ["settings-theme-dark", "Dark"],
     ["settings-note", "Settings are shared with Telegram. Chats without a selected model use your current defaults."],
@@ -1029,6 +1031,7 @@ function fillSettings() {
   };
   $("settings-thinking").checked = state.preferences.show_thinking;
   $("settings-language").value = state.preferences.language;
+  $("settings-assoc-max").value = state.preferences.associative_max_matches ?? "";
   $("settings-theme").value = localStorage.getItem("theme") ?? "system";
   renderSettingsModels();
 }
@@ -1306,6 +1309,9 @@ $("settings-form").addEventListener("submit", async (e) => {
   const language = $("settings-language").value;
   if (thinking !== state.settingsOriginal.show_thinking) changes.show_thinking = thinking;
   if (language !== state.settingsOriginal.language) changes.language = language;
+  const rawMax = $("settings-assoc-max").value.trim();
+  const maxMatches = rawMax === "" ? null : Number(rawMax);
+  if (maxMatches !== (state.settingsOriginal.associative_max_matches ?? null)) changes.associative_max_matches = maxMatches;
   for (const key of ["default_llm_model", "default_stt_model"]) {
     if (state.settingsModelDraft?.[key] !== state.settingsOriginal[key]) changes[key] = state.settingsModelDraft[key];
   }

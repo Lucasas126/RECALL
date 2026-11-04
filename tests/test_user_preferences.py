@@ -37,10 +37,21 @@ class UserPreferencesStorageTests(unittest.TestCase):
         prefs = self.store.get("user-one")
         self.assertEqual(prefs.model_dump(), {
             "show_thinking": True, "language": "en", "agent_id": None,
-            "default_llm_model": None, "default_stt_model": None,
+            "default_llm_model": None, "default_stt_model": None, "associative_max_matches": None,
         })
         self.assertEqual(prefs.model_fields_set, set())
         self.assertEqual(list(self.path.parent.iterdir()), [])
+
+    def test_associative_max_matches_validation_and_legacy_files(self) -> None:
+        for good in (1, 20, None):
+            self.assertEqual(UserPreferences(associative_max_matches=good).associative_max_matches, good)
+        for bad in (0, 21, 3.5, "3", True):
+            with self.subTest(value=bad), self.assertRaises(ValueError):
+                UserPreferences.model_validate({"associative_max_matches": bad})
+        self.path.write_text('{"language": "es"}', encoding="utf-8")
+        self.assertIsNone(self.store.get("user-one").associative_max_matches)
+        self.store.update("user-one", UserPreferences(associative_max_matches=5))
+        self.assertEqual(self.store.get("user-one").associative_max_matches, 5)
 
     def test_partial_updates_are_persistent_isolated_and_not_cached(self) -> None:
         other_process = UserPreferencesStore(self.root)
@@ -137,7 +148,7 @@ class UserPreferencesStorageTests(unittest.TestCase):
             list(pool.map(update, ("language", "show_thinking", "agent_id")))
         self.assertEqual(self.store.get("user-one").model_dump(), {
             "show_thinking": False, "language": "es", "agent_id": "agent-b",
-            "default_llm_model": None, "default_stt_model": None,
+            "default_llm_model": None, "default_stt_model": None, "associative_max_matches": None,
         })
 
     def test_concurrent_process_updates_preserve_other_fields(self) -> None:
@@ -150,7 +161,7 @@ class UserPreferencesStorageTests(unittest.TestCase):
                 task.result(timeout=60)
         self.assertEqual(self.store.get("user-one").model_dump(), {
             "show_thinking": False, "language": "es", "agent_id": "agent-b",
-            "default_llm_model": None, "default_stt_model": None,
+            "default_llm_model": None, "default_stt_model": None, "associative_max_matches": None,
         })
 
     def test_user_yaml_and_favorites_are_not_rewritten(self) -> None:
@@ -216,6 +227,7 @@ class UserPreferencesWebTests(unittest.TestCase):
         self.assertEqual(response.json(), {
             "show_thinking": True, "language": "es", "agent_id": "agent-a",
             "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo",
+            "associative_max_matches": None,
         })
         self.assertFalse(self.path.exists())
         self.factory.assert_not_called()
@@ -230,6 +242,7 @@ class UserPreferencesWebTests(unittest.TestCase):
         self.assertEqual(self.client.get(self.url).json(), {
             "show_thinking": False, "language": "en", "agent_id": "agent-b",
             "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo",
+            "associative_max_matches": None,
         })
         self.assertEqual(ChatService().get_preferences("user-one"), self.client.get(self.url).json())
 
@@ -240,11 +253,29 @@ class UserPreferencesWebTests(unittest.TestCase):
         self.assertEqual(self.client.get(self.url).json(), {
             "show_thinking": False, "language": "en", "agent_id": "agent-b",
             "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo",
+            "associative_max_matches": None,
         })
         self.client.patch(self.url, json={"agent_id": "agent-a"})
         response = self.client.patch(self.url, json={"agent_id": None})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["agent_id"], "agent-b")
+
+    def test_associative_max_matches_round_trip_bounds_and_reset(self) -> None:
+        self.assertIsNone(self.client.get(self.url).json()["associative_max_matches"])
+        response = self.client.patch(self.url, json={"associative_max_matches": 7})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["associative_max_matches"], 7)
+        self.assertEqual(self.service.get_preferences("user-one")["associative_max_matches"], 7)
+        login(self.client, "user-two")
+        self.assertIsNone(self.client.get(self.url).json()["associative_max_matches"])
+        login(self.client, "user-one")
+        for bad in (0, 21, -1, 2.5, "3", True):
+            with self.subTest(value=bad):
+                self.assertEqual(self.client.patch(self.url, json={"associative_max_matches": bad}).status_code, 422)
+        self.assertEqual(self.client.get(self.url).json()["associative_max_matches"], 7)
+        response = self.client.patch(self.url, json={"associative_max_matches": None})
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["associative_max_matches"])
 
     def test_preferences_are_scoped_to_cookie_user(self) -> None:
         self.client.patch(self.url, json={"language": "en", "show_thinking": False, "agent_id": "agent-b"})
@@ -252,12 +283,14 @@ class UserPreferencesWebTests(unittest.TestCase):
         self.assertEqual(self.client.get(self.url).json(), {
             "show_thinking": True, "language": "en", "agent_id": "agent-c",
             "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo",
+            "associative_max_matches": None,
         })
         self.client.patch(self.url, json={"language": "es"})
         login(self.client, "user-one")
         self.assertEqual(self.client.get(self.url).json(), {
             "show_thinking": False, "language": "en", "agent_id": "agent-b",
             "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo",
+            "associative_max_matches": None,
         })
 
     def test_foreign_or_missing_agent_is_rejected_before_preferences_are_changed(self) -> None:
@@ -269,6 +302,7 @@ class UserPreferencesWebTests(unittest.TestCase):
                 self.assertEqual(self.service.get_preferences("user-one"), {
                     "show_thinking": True, "language": "en", "agent_id": "agent-a",
                     "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo",
+            "associative_max_matches": None,
                 })
         self.users["user-one"].agents = ["agent-a"]
         def load_agent(user: str, agent: str) -> AgentConfig:

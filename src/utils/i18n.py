@@ -176,6 +176,8 @@ _SPANISH = {
     "User settings": "Ajustes de usuario",
     "Close": "Cerrar",
     "Show model thinking": "Mostrar el thinking del modelo",
+    "Maximum associative memory matches": "Máximo de coincidencias de memoria asociativa",
+    "Leave empty to use the application default. The minimum similarity is set by the application, not by you.": "Déjalo vacío para usar el valor predeterminado de la aplicación. La similitud mínima la fija la aplicación, no tú.",
     "Alerts and errors": "Avisos y errores",
     "Save settings": "Guardar ajustes",
     "Menu": "Menú",

@@ -996,9 +996,10 @@ class ChatService:
                 slot.agents[run.chat_id] = agent
         # the agent's default model is checked (ZDR policy) only for a chat that does not choose its own
         inherits = self._conversations(user_id, agent_id).model_selection(run.chat_id) is None
-        agent.refresh_user_models(user_models(
-            self._user(user_id), self._preferences, self._agent_config(user_id, agent_id), check=inherits,
-        ))
+        agent.refresh_user_models(
+            user_models(self._user(user_id), self._preferences, self._agent_config(user_id, agent_id), check=inherits),
+            self._preferences.get(user_id).associative_max_matches,
+        )
         agent.config.language = self.language(user_id)
         try:
             result = agent.invoke(

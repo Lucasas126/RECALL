@@ -398,6 +398,10 @@
       <label class="model-filter">
         <input id="settings-thinking" type="checkbox"> <span id="settings-thinking-label">Show model thinking</span>
       </label>
+      <p><label for="settings-assoc-max"><span id="settings-assoc-max-label">Maximum associative memory matches</span></label><br>
+        <input id="settings-assoc-max" type="number" min="1" max="20" step="1" inputmode="numeric">
+        <span id="settings-assoc-max-hint" class="model-note">Leave empty to use the application default. The minimum similarity is set by the application, not by you.</span>
+      </p>
       <p><span id="settings-llm-label">Default LLM model</span><br>
         <button id="settings-llm" type="button" aria-haspopup="dialog" disabled></button>
       </p>

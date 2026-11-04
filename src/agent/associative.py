@@ -39,6 +39,11 @@ _FRAGMENT_LIMIT = 400
 _QUESTION_LIMIT = 1000
 
 
+def max_matches(agent: "Agent") -> int:
+    """The user's own cap when set, else the application default (`top_n`). The threshold is never per user."""
+    return getattr(agent, "associative_max_matches", None) or ASSOC.top_n
+
+
 def recall(
     agent: "Agent", user_input: str, cancellation: CancellationToken | None = None,
     history: list[dict] | None = None, chat_id: str | None = None,
@@ -58,12 +63,13 @@ def recall(
     if not query:
         logger.info("no lookup needed (query proposal %.0f ms)", (proposed_at - started_at) * 1000)
         return None, 0
-    found = agent.query_memory(query, ASSOC.top_n, exclude_chat=chat_id)
+    limit = max_matches(agent)
+    found = agent.query_memory(query, limit, exclude_chat=chat_id)
     logger.info(
         "query=%r proposed in %.0f ms, memory search took %.0f ms",
         query, (proposed_at - started_at) * 1000, (perf_counter() - proposed_at) * 1000,
     )
-    hits = [h for h in found if h["score"] >= ASSOC.score_threshold][:ASSOC.top_n]
+    hits = [h for h in found if h["score"] >= ASSOC.score_threshold][:limit]
     if cancellation is not None:
         cancellation.raise_if_cancelled()
     if not hits:
