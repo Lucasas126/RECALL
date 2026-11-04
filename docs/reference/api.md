@@ -79,3 +79,18 @@ New codes are set with `UserMessageError(..., code="...")` or a class-level `cod
 
 The rules these routes follow (ids, renames, deletion, locks, `409` while replies run) are in
 [managing agents](../user-guide/agents.md#managing-agents).
+
+## Editing a message
+
+`GET /api/agents/<agent_id>/chats/<chat_id>` returns each message with an `index`: its
+position among the stored turns of the chat file (tool turns count, so indexes can skip).
+
+`POST /api/agents/<agent_id>/chats/<chat_id>/messages` accepts an optional
+`"edit_index": <int>` next to `content` and `attachments`. The index must belong to a
+stored `user` turn. The service cancels and discards the chat's active and queued replies,
+removes that turn and everything after it (kept in `<chat_id>.removed.json`), drops the
+cached agent context and answers `content` as a normal message, streaming the usual SSE
+events. When `attachments` is empty the original turn's attachments are kept. An index that
+is out of range or not a user turn returns `400` with `code: "invalid_edit_target"`; a
+negative or non-integer value is a `422`; an unknown chat is `404`; a cancelled reply that
+does not stop within 30 s gives `409` (`agent_busy`). Long-term memory is not rewound.

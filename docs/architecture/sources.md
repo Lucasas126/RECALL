@@ -36,6 +36,11 @@ history, so selecting a model does not add a turn or create another chat.
 A `<chat_id>.title.json` sidecar (`{"title": "..."}`) stores the chat title once the
 chat reaches `chat_naming.min_messages` or the user renames it (`rename`); `summary` uses it
 instead of the first user message, and a generated title never replaces an existing one.
+The sidecar records `"generated": true` for generated titles so that rewinding the first
+message drops only those. `truncate_from` rewinds a chat (see
+[editing an earlier message](../user-guide/memory.md#editing-an-earlier-message)): it rewrites
+the JSONL atomically and appends the removed turns to `<chat_id>.removed.json`, which is not
+a chat file and is removed by `delete_chat`.
 Missing metadata means the current user's LLM default; sidecars without `zdr`
 follow the user's `require_zdr`, and a stored flag is per chat and persists
 across restarts. Invalid metadata is an

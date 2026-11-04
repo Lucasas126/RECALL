@@ -156,3 +156,24 @@ the former single `vault: <path>` key was removed; an agent file that still has 
 rejected with a message pointing to `folders`. move the path to
 `folders: [{name: vault, path: <path>}]` and rename the `vault_read` / `vault_edit` tool
 groups to `folders_read` / `folders_edit` and the `vault` dream tool group to `folders`.
+
+## Editing an earlier message
+
+Hover over (or, on touch screens, look at) one of your own messages in the web UI and
+press the pencil to edit it. The bubble turns into a text box with *Save and resend*
+(Ctrl/Cmd+Enter) and *Cancel* (Esc), and says how many messages after it will be removed.
+Saving rewinds the same chat to that point: the message and everything after it (replies,
+tool calls, later messages) leave the chat and the agent answers the new text from the
+earlier history. There is no fork; the chat keeps its id.
+
+- Attachments of the original message are kept and shown read-only; to change them, send a
+  new message instead. Edit buttons are disabled while a reply is streaming.
+- The removed turns are not deleted: they are appended to `<chat_id>.removed.json` next to
+  the chat file (a list of `{removed_at, turns}`), which is also deleted with the chat.
+- A generated chat title is dropped when you edit the first message (a title you chose
+  stays), and the associative-memory context of the chat is rebuilt from the kept turns.
+- Long-term memory is **not** rewound: memories the agent already wrote, Dream sessions and
+  SOUL changes made from the removed turns stay as they are, and an index of the chat is
+  refreshed with the next reconcile.
+- Only your own stored messages can be edited; `/dream` command replies are not stored and
+  have no edit button. Telegram has no edit control.
