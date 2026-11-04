@@ -334,6 +334,66 @@ class ModelsConfig(BaseModel):
         return value
 
 
+_BACKEND_NAME = r"^[a-z][a-z0-9_-]{0,31}$"
+TerminalApprovals = Literal["manual", "smart", "off"]
+
+
+class SshBackendConfig(BaseModel):
+    """A sandbox reached over SSH with the `ssh` binary; keys are file paths, never inline secrets."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["ssh"]
+    host: str = Field(min_length=1, max_length=255, pattern=r"^[A-Za-z0-9][A-Za-z0-9.:_-]*$")
+    port: int = Field(default=22, ge=1, le=65535, strict=True)
+    user: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$")
+    key_file: str = Field(min_length=1, max_length=1024)
+    known_hosts_file: str = Field(min_length=1, max_length=1024)
+
+
+class LocalBackendConfig(BaseModel):
+    """Commands run on the RECALL host itself; refused unless settings.yaml `terminal.allow_local` is true."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["local"]
+    workdir: str = Field(min_length=1, max_length=1024)
+
+
+TerminalBackendConfig = Annotated[Union[SshBackendConfig, LocalBackendConfig], Field(discriminator="type")]
+
+
+class AgentTerminalConfig(BaseModel):
+    """An agent's terminal tool group: which of the user's backends it uses and how commands are approved."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    backend: str = Field(pattern=_BACKEND_NAME)
+    workdir: str = Field(default="~/workspace", min_length=1, max_length=1024)  # a path inside the backend
+    approvals: TerminalApprovals = "manual"
+    timeout_seconds: int = Field(default=60, ge=1, le=600, strict=True)
+    max_output_chars: int = Field(default=20_000, ge=500, le=200_000, strict=True)
+    allow_in_dream: bool = Field(default=False, strict=True)  # unattended dream sessions may use the tools
+
+
+class TerminalSettings(BaseModel):
+    """Framework-wide terminal limits (settings.yaml `terminal:`)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    approval_timeout_seconds: int = Field(default=300, ge=5, le=86_400, strict=True)
+    allow_local: bool = Field(default=False, strict=True)  # trusted single-user installs only
+    default_timeout_seconds: int = Field(default=60, ge=1, le=3600, strict=True)
+    max_timeout_seconds: int = Field(default=600, ge=1, le=3600, strict=True)
+    max_output_chars: int = Field(default=20_000, ge=500, le=200_000, strict=True)
+
+    @model_validator(mode="after")
+    def _default_within_max(self) -> "TerminalSettings":
+        if self.default_timeout_seconds > self.max_timeout_seconds:
+            raise ValueError("terminal.default_timeout_seconds must not exceed max_timeout_seconds")
+        return self
+
+
 class UserConfig(BaseModel):
     id: str
     name: str
@@ -348,6 +408,10 @@ class UserConfig(BaseModel):
     openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
     claude_subscription: ClaudeSubscriptionConfig = Field(default_factory=ClaudeSubscriptionConfig)
+    # sandboxes the user's agents may run commands in, by name (see docs/user-guide/terminal.md)
+    terminal_backends: dict[Annotated[str, StringConstraints(pattern=_BACKEND_NAME)], TerminalBackendConfig] = Field(
+        default_factory=dict,
+    )
 
     def openrouter_settings(self) -> OpenRouterConfig:
         """OpenRouter settings with the key env var actually used (`provider.api_key` when it is main)."""
@@ -393,7 +457,7 @@ class ChatConfig(BaseModel):
         return None if value is None else validate_tool_groups(value)
 
 
-DreamToolGroup = Literal["web", "folders"]
+DreamToolGroup = Literal["web", "folders", "terminal"]
 # local wall-clock time of day, 24-hour HH:MM
 _DAILY_AT = r"^(?:[01]\d|2[0-3]):[0-5]\d$"
 
@@ -481,6 +545,13 @@ class AgentConfig(BaseModel):
     chat_config: ChatConfig = ChatConfig()
     dream: DreamConfig = Field(default_factory=DreamConfig)
     folders: list[FolderConfig] = Field(default_factory=list, max_length=20)  # user folders, each a source
+    terminal: Optional[AgentTerminalConfig] = None  # required by the `terminal` tool group
+
+    @model_validator(mode="after")
+    def _dream_terminal_opt_in(self) -> "AgentConfig":
+        if "terminal" in self.dream.tools and not (self.terminal and self.terminal.allow_in_dream):
+            raise ValueError("dream.tools lists 'terminal': set terminal.allow_in_dream: true on this agent too")
+        return self
 
     @model_validator(mode="before")
     @classmethod
@@ -530,6 +601,9 @@ class ResolvedAgent(BaseModel):
     associative_execution: AssociativeExecution = "parallel"
     dream: DreamConfig = Field(default_factory=DreamConfig)
     folders: list[FolderConfig] = Field(default_factory=list)
+    terminal: Optional[AgentTerminalConfig] = None
+    # the user's backend named by `terminal.backend`, resolved by the loader; None = the tools are not built
+    terminal_backend: Optional[TerminalBackendConfig] = None
     claude_subscription: ClaudeSubscriptionConfig = Field(default_factory=ClaudeSubscriptionConfig)
     openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)  # key env var already resolved for a main OpenRouter
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)

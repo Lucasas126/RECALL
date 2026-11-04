@@ -113,3 +113,11 @@ mcp:
       auth:
         args: ["-y", "@cocal/google-calendar-mcp@2.8.1", "auth"]
         credential_file: tokens.json
+
+# Terminal tool group (see docs/user-guide/terminal.md): commands run in a sandbox reached over SSH, with approvals
+terminal:
+  approval_timeout_seconds: 300  # a pending approval is denied after this long
+  allow_local: false             # accept `type: local` backends (commands run on THIS host); trusted single-user installs only
+  default_timeout_seconds: 60    # command timeout when the agent sets none
+  max_timeout_seconds: 600       # ceiling for any command timeout
+  max_output_chars: 20000        # ceiling for the output returned to the model
