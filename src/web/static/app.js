@@ -77,7 +77,7 @@ function translateInterface() {
     ["model-zdr-text", "ZDR only (OpenRouter)"],
     ["agent-label", "Agent"], ["chat-model-label", "Chat model"], ["chat-effort-text", "Reasoning effort"],
     ["model-inherit", "Use user default"],
-    ["model-scope-note", "Choosing a model for a chat sets only that chat's override. Use user default removes it. Defaults in Settings are saved with Save settings. Default LLM and STT selections require ZDR. Favorites are shared across your agents."],
+    ["model-scope-note", "Choosing a model for a chat sets only that chat's override. Use user default removes it. Defaults in Settings are saved with Save settings. Favorites are shared across your agents."],
     ["model-zdr-warning", "ZDR is not required for your next selection. Providers may retain your prompts and replies. Your OpenRouter account may still enforce ZDR."],
     ["tab-chats", "Chats"], ["tab-agents", "Agents"],
     ["agent-new-label", "New agent"], ["agents-empty", "Select an agent to edit it, or create a new one."],
@@ -112,7 +112,7 @@ function translateInterface() {
     ["dream-enabled-label", "Schedule enabled"],
     ["dream-schedule-hint", "Scheduled sessions are skipped while no chat is pending. You can always start one by hand, from the Dream sessions tab or with /dream start in a chat."],
     ["dream-model-legend", "Model and limits"], ["dream-model-label", "Model"], ["dream-model-browse", "Browse"],
-    ["dream-model-hint", "Empty uses your default chat model. Dreams always require ZDR routes."],
+    ["dream-model-hint", "Empty uses your default chat model."],
     ["dream-effort-label", "Reasoning effort"], ["dream-effort-none", "No reasoning request"],
     ["dream-max-steps-label", "Maximum steps"], ["dream-max-steps-hint", "Model calls per session (1–500)."],
     ["dream-max-tokens-label", "Maximum tokens"],
@@ -1112,9 +1112,9 @@ function initialProvider(rows) {
     .find((id) => usable.has(id)) ?? null;
 }
 
-// ZDR routing applies to OpenRouter only; other providers always send the default
+// ZDR is optional: the user's setting is the default and the checkbox overrides it for OpenRouter only
 function modelZdr() {
-  return state.modelProvider === "openrouter" ? $("model-zdr").checked : true;
+  return state.modelProvider === "openrouter" ? $("model-zdr").checked : Boolean(state.user?.require_zdr);
 }
 
 function renderProviderTabs() {
@@ -1139,7 +1139,8 @@ function renderProviderTabs() {
       tab.disabled = !row.available;
       tab.title = row.detail ?? "";
       tab.append(Object.assign(document.createElement("strong"), { textContent: row.label }));
-      const note = row.available ? (row.experimental ? tr("experimental, not ZDR") : "") : providerReason(row);
+      const experimental = tr(state.user?.require_zdr ? "experimental, not ZDR" : "experimental");
+      const note = row.available ? (row.experimental ? experimental : "") : providerReason(row);
       if (note) tab.append(Object.assign(document.createElement("small"), { textContent: note }));
       tab.addEventListener("click", () => chooseProvider(row.id));
       return tab;
@@ -1452,11 +1453,17 @@ async function deleteChat(chat) {
 
 // ------------------------------------------------------------------ models
 
+// ZDR wording appears only while it is in play: the user requires it or this chat opted in
 function modelPolicy(model) {
   if (!model) return "";
-  if (model.provider === "claude_subscription") return tr("Claude subscription, not ZDR");
-  if (model.provider === "ollama") return tr(/cloud$/.test(model.id) ? "Ollama cloud model, not ZDR" : "Local Ollama model");
-  return model.zdr !== false ? "ZDR required" : "ZDR not required";
+  const zdr = model.zdr || model.require_zdr;
+  if (model.provider === "claude_subscription") return tr(zdr ? "Claude subscription, not ZDR" : "Claude subscription");
+  if (model.provider === "ollama") {
+    if (!/cloud$/.test(model.id)) return tr("Local Ollama model");
+    return tr(zdr ? "Ollama cloud model, not ZDR" : "Ollama cloud model");
+  }
+  if (!zdr) return "";
+  return model.zdr ? "ZDR required" : "ZDR not required";
 }
 
 function updateModelControls() {
@@ -1464,14 +1471,13 @@ function updateModelControls() {
   $("model-picker").textContent = state.model?.id ?? "No chat selected";
   $("model-picker").title = "Choose a model and routing policy for this chat";
   $("model-picker").disabled = !state.user || !state.chatId || state.busy || state.modelBusy;
-  const required = state.model?.zdr !== false;
-  const claude = state.model?.provider === "claude_subscription";
-  $("model-policy").textContent = modelPolicy(state.model);
+  const parts = [modelPolicy(state.model)];
   if (state.model && state.modelOverride !== undefined) {
-    $("model-policy").textContent += ` · ${tr(state.modelOverride === null ? "User default" : "Chat override")}`;
+    parts.push(tr(state.modelOverride === null ? "User default" : "Chat override"));
   }
+  $("model-policy").textContent = parts.filter(Boolean).join(" · ");
   updateReasoningEffortControls();
-  $("model-policy").classList.toggle("privacy-warning", openrouter && !required);
+  $("model-policy").classList.toggle("privacy-warning", openrouter && Boolean(state.model.require_zdr) && !state.model.zdr);
   $("model-refresh").disabled = state.modelLoading || state.modelBusy;
   $("model-close").disabled = state.modelBusy;
   const zdrApplies = state.modelProvider === "openrouter";
@@ -1481,7 +1487,7 @@ function updateModelControls() {
   $("model-inherit").hidden = state.modelTarget.startsWith("default-");
   $("model-inherit").disabled = dreamTarget ? state.modelBusy : (!state.chatId || state.busy || state.modelBusy);
   renderSettingsModels();
-  $("model-zdr-warning").hidden = $("model-zdr").checked || !zdrApplies;
+  $("model-zdr-warning").hidden = $("model-zdr").checked || !zdrApplies || !state.user?.require_zdr;
   renderProviderTabs();
   $("model-favorites-only").setAttribute("aria-pressed", String(state.modelFavoritesOnly));
   $("model-favorites-only").title = state.modelFavoritesOnly ? "Show all models" : "Show favorites only";
@@ -1595,7 +1601,9 @@ function renderModelList() {
     && (stt || matchesCapabilities(model, capabilities))
     && (!query || model.id.toLocaleLowerCase().includes(query) || model.name.toLocaleLowerCase().includes(query))
   ).sort((a, b) => compareModels(a, b, $("model-sort").value, saved));
-  const routes = state.modelProvider === "openrouter" ? ` - ${tr($("model-zdr").checked ? "ZDR only" : "all routes allowed")}` : "";
+  const zdrInPlay = Boolean(state.user?.require_zdr) || $("model-zdr").checked;
+  const routes = state.modelProvider === "openrouter" && zdrInPlay
+    ? ` - ${tr($("model-zdr").checked ? "ZDR only" : "all routes allowed")}` : "";
   $("model-status").textContent = matches.length
     ? `${matches.length} ${tr(matches.length === 1 ? "model" : "models")}${routes}`
     : tr("No models match. Try another search or relax the filters.");
@@ -1618,7 +1626,7 @@ function renderModelList() {
     const cloud = local && model.local === false;
     choose.setAttribute("aria-pressed", String(
       model.id === selected && (state.modelProvider !== "openrouter" || state.modelTarget !== "chat-llm"
-        || (state.model?.zdr !== false) === $("model-zdr").checked)
+        || Boolean(state.model?.zdr) === $("model-zdr").checked)
     ));
     const name = document.createElement("strong");
     name.textContent = model.name;
@@ -1626,9 +1634,10 @@ function renderModelList() {
     id.textContent = model.id;
     const providers = document.createElement("small");
     providers.textContent = !available ? tr("Unavailable under the current filter")
-      : subscription ? tr("Experimental: uses your own Claude Code login. Not ZDR.")
-      : cloud ? tr("Ollama cloud model: runs on Ollama's servers. Not ZDR.")
+      : subscription ? tr(zdrInPlay ? "Experimental: uses your own Claude Code login. Not ZDR." : "Experimental: uses your own Claude Code login.")
+      : cloud ? tr(zdrInPlay ? "Ollama cloud model: runs on Ollama's servers. Not ZDR." : "Ollama cloud model: runs on Ollama's servers.")
       : local ? tr("Runs on your Ollama server.")
+      : !zdrInPlay ? ""
       : model.zdr_providers?.length ? `ZDR routes: ${model.zdr_providers.join(", ")}`
       : "No active ZDR routes";
     const pricing = document.createElement("small");
@@ -1683,7 +1692,7 @@ async function refreshModels(initial = false, recheck = initial) {
     const zdr = modelZdr();
     renderProviderTabs();
     const catalog = await api(
-      `/api/models/catalog?capability=${stt ? "stt" : "chat"}&provider=${provider}&zdr=${zdr}`,
+      `/api/models/catalog?capability=${stt ? "stt" : "chat"}&provider=${provider}${stt ? "" : `&zdr=${zdr}`}`,  // speech-to-text follows the server's policy
     );
     if (session !== state.session || request !== state.modelRequest) return;
     state.modelCatalog = stt ? catalog.models.map((model) => ({
@@ -1793,7 +1802,7 @@ function openModelPicker(target) {
   state.modelCatalogProvider = null;
   $("model-search").value = "";
   $("model-error").textContent = "";
-  $("model-zdr").checked = true;
+  $("model-zdr").checked = Boolean(state.user?.require_zdr);
   state.modelFavoritesOnly = !stt && state.modelFavorites.length > 0;
   $("model-favorites-only").hidden = stt;
   $("model-filters").hidden = stt;

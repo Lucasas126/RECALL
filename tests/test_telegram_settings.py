@@ -259,7 +259,7 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("User default", self.text)
         query = await self.press(self.action("Second"))
         self.service.set_chat_model.assert_called_once_with(
-            "test-user", "agent-a", "current-chat", "llm/second", zdr=True,
+            "test-user", "agent-a", "current-chat", "llm/second",
         )
         query.edit_message_text.assert_awaited_once()
         self.assertIsNone(query.edit_message_text.await_args.kwargs["reply_markup"])
@@ -274,7 +274,7 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
         await self.press("inherit")
         self.assertEqual(
             (self.service.set_chat_model.call_args.args, self.service.set_chat_model.call_args.kwargs),
-            (("test-user", "agent-a", "current-chat", None), {"zdr": True}),
+            (("test-user", "agent-a", "current-chat", None), {}),
         )
         self.assertIn("default", self.text)
         self.assertEqual(self.preferences, before)

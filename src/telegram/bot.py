@@ -167,12 +167,12 @@ def _with_provider(provider: str | None, model_id: str) -> str:
     return f"{_provider_tag(provider)} · {model_id}"
 
 
-def _llm_label(model: dict[str, Any], index: int, current: str | None, favorites: set[str]) -> str:
+def _llm_label(model: dict[str, Any], index: int, current: str | None, favorites: set[str], zdr: bool) -> str:
     head = f"{'✅ ' if model['id'] == current else ''}{'⭐ ' if model['id'] in favorites else ''}"
     provider = model.get("provider")
     tag = _provider_tag(provider)
     if provider == "claude_subscription":  # no per-token price; never ZDR
-        return f"{head}🧪 {index}. {tag} · {model['name'][:22]} | plan, no ZDR"
+        return f"{head}🧪 {index}. {tag} · {model['name'][:22]} | {'plan, no ZDR' if zdr else 'plan'}"
     if provider == "ollama":
         return f"{head}{'🏠' if model.get('local', True) else '☁️'} {index}. {tag} · {model['name'][:22]} | {'local' if model.get('local', True) else 'cloud'}"
     return (
@@ -185,19 +185,30 @@ def _llm_label(model: dict[str, Any], index: int, current: str | None, favorites
 def _favorite_models(service: ChatService, user_id: str) -> tuple[list[dict[str, Any]], set[str]]:
     """The Telegram selector offers only the user's favorite models (no search); favorites come from the web UI."""
     favorites = set(service.list_favorite_models(user_id))
-    models = [model for model in service.list_models(user_id, "", zdr=True) if model["id"] in favorites]
+    models = [model for model in service.list_models(user_id, "") if model["id"] in favorites]
     return _sort_models(models, favorites), favorites
 
 
-def _zdr_line(session: TelegramSession, provider: str | None, zdr: bool, model_id: str = "") -> str:
-    """The data-retention line of a chat model: never 'enabled' for Claude subscription or Ollama models."""
+def _zdr_line(session: TelegramSession, model: dict[str, Any]) -> str:
+    """The data-retention line of a chat model; empty unless ZDR is in play (required by the user or by this chat).
+
+    Never 'enabled' for Claude subscription or Ollama models.
+    """
+    if not (model.get("zdr") or model.get("require_zdr")):
+        return ""
+    provider = model.get("provider")
     if provider == "claude_subscription":
         return _msg(session, "Not ZDR (Claude subscription, experimental)")
-    if provider == "ollama" and is_ollama_cloud(model_id):
+    if provider == "ollama" and is_ollama_cloud(model["id"]):
         return _msg(session, "Not ZDR (Ollama cloud model)")
     if provider == "ollama":
         return _msg(session, "ZDR: not applicable (local Ollama model)")
-    return _msg(session, "ZDR: {policy}", policy=_msg(session, "enabled" if zdr else "disabled"))
+    return _msg(session, "ZDR: {policy}", policy=_msg(session, "enabled" if model.get("zdr") else "disabled"))
+
+
+def _lines(*parts: str) -> str:
+    """Join the non-empty parts, one per line."""
+    return "\n".join(part for part in parts if part)
 
 
 def _stt_label(model: dict[str, Any], index: int, current: str | None) -> str:
@@ -326,15 +337,23 @@ def _panel_view(
             _msg(session, "Choose the user's default STT model. This does not set a chat override.")
         )
     if panel.view in ("llm", "chat_llm"):
-        rows, pages = _paged_rows(session, panel, lambda model, index: _llm_label(model, index, current, panel.favorites))
+        zdr = service.require_zdr(session.user_id)
+        rows, pages = _paged_rows(session, panel, lambda model, index: _llm_label(model, index, current, panel.favorites, zdr))
         name = next((model["name"] for model in panel.items if model["id"] == current), current)
         mixed = any(model.get("provider", "openrouter") != "openrouter" for model in panel.items)
-        body = _msg(session, "Current model: {model}\n\nPage {page}/{pages}. {count} models available.\nChoose another model. Prices are USD per 1 million tokens (input / output). OpenRouter models: ZDR only. 🧪 Claude subscription: experimental, not ZDR. 🏠 Ollama: local:"
-                    if mixed else "Current model: {model}\n\nPage {page}/{pages}. {count} models available.\nChoose another model. Prices are USD per 1 million tokens (input / output). ZDR enabled:",
-                    model=name, page=panel.page + 1, pages=pages, count=len(panel.items))
+        if zdr:
+            template = (
+                "Current model: {model}\n\nPage {page}/{pages}. {count} models available.\nChoose another model. Prices are USD per 1 million tokens (input / output). OpenRouter models: ZDR only. 🧪 Claude subscription: experimental, not ZDR. 🏠 Ollama: local:"
+                if mixed else "Current model: {model}\n\nPage {page}/{pages}. {count} models available.\nChoose another model. Prices are USD per 1 million tokens (input / output). ZDR enabled:")
+        else:
+            template = (
+                "Current model: {model}\n\nPage {page}/{pages}. {count} models available.\nChoose another model. Prices are USD per 1 million tokens (input / output). 🧪 Claude subscription: experimental. 🏠 Ollama: local:"
+                if mixed else "Current model: {model}\n\nPage {page}/{pages}. {count} models available.\nChoose another model. Prices are USD per 1 million tokens (input / output):")
+        body = _msg(session, template, model=name, page=panel.page + 1, pages=pages, count=len(panel.items))
     else:
         rows, pages = _paged_rows(session, panel, lambda model, index: _stt_label(model, index, current))
-        body = _msg(session, "Current STT model: {model}\n\nPage {page}/{pages}. {count} ZDR models available.\nChoose a speech-to-text model. Prices are USD per 1 million input tokens:",
+        body = _msg(session, "Current STT model: {model}\n\nPage {page}/{pages}. {count} ZDR models available.\nChoose a speech-to-text model. Prices are USD per 1 million input tokens:"
+                    if service.require_zdr(session.user_id, "stt") else "Current STT model: {model}\n\nPage {page}/{pages}. {count} models available.\nChoose a speech-to-text model. Prices are USD per 1 million input tokens:",
                     model=current, page=panel.page + 1, pages=pages, count=len(panel.items))
     if panel.view in _CHAT_VIEWS:
         rows.insert(0, [_panel_button(panel, _msg(session, "Use user default"), "inherit")])
@@ -369,7 +388,7 @@ def _apply_panel_action(
             return _msg(session, _NO_FAVORITES)
         panel.view, panel.items, panel.favorites, panel.page = "llm", models, favorites, 0
     elif kind == "stt" and panel.view == "main":
-        models = service.list_transcription_models(session.user_id, "", zdr=True)
+        models = service.list_transcription_models(session.user_id, "")
         panel.view, panel.items, panel.page = "stt", models, 0
     elif kind == "effort" and panel.view == "main":
         if session.chat_id is None:
@@ -379,7 +398,7 @@ def _apply_panel_action(
     elif kind == "page" and argument.isdigit() and panel.view in ("llm", "stt", *_CHAT_VIEWS):
         panel.page = int(argument)
     elif kind == "inherit" and panel.view == "chat_llm":
-        service.set_chat_model(session.user_id, panel.agent_id, panel.target_chat, None, zdr=True)
+        service.set_chat_model(session.user_id, panel.agent_id, panel.target_chat, None)
         return _msg(session, "This chat now uses the user's default LLM model.")
     elif kind == "pick" and panel.view == "chat_effort" and argument.isdigit() and int(argument) < len(panel.items):
         item = panel.items[int(argument)]
@@ -399,9 +418,12 @@ def _apply_panel_action(
             return _msg(session, "✅ Agent selected: {agent_id}\nUse /newchat to create a chat for this agent.",
                         agent_id=selected)
         elif panel.view == "chat_llm":
-            chosen = service.set_chat_model(session.user_id, panel.agent_id, panel.target_chat, selected, zdr=True)
-            return _msg(session, "✅ Model selected\n\n{model_id}\n\nThis selection applies to the current chat.\n{zdr}",
-                        model_id=_with_provider(panel.items[int(argument)].get("provider") or chosen.get("provider"), selected), zdr=_zdr_line(session, chosen.get("provider"), chosen.get("zdr", True), selected))
+            chosen = service.set_chat_model(session.user_id, panel.agent_id, panel.target_chat, selected)
+            return _lines(
+                _msg(session, "✅ Model selected\n\n{model_id}\n\nThis selection applies to the current chat.",
+                     model_id=_with_provider(panel.items[int(argument)].get("provider") or chosen.get("provider"), selected)),
+                _zdr_line(session, chosen),
+            )
         panel.view, panel.items, panel.page = "main", [], 0
     else:
         raise InputError("Unknown menu option. Run the command again.")
@@ -723,9 +745,10 @@ async def show_model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.effective_message.reply_text(_msg(session, "I could not read the current chat model."))
         return
     model = chat["model"]
+    zdr_line = _zdr_line(session, model)
     await update.effective_message.reply_text(
-        _msg(session, "Current chat model:\n{model_id}\n\n{zdr}",
-             model_id=_with_provider(model.get("provider"), model["id"]), zdr=_zdr_line(session, model.get("provider"), model.get("zdr", True), model["id"]))
+        _msg(session, "Current chat model:\n{model_id}", model_id=_with_provider(model.get("provider"), model["id"]))
+        + ("\n\n" + zdr_line if zdr_line else "")
         + "\n" + _msg(session, "User default" if chat["model_override"] is None else "Chat override"),
     )
 
@@ -738,7 +761,8 @@ async def show_stt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     current = state.service.get_preferences(session.user_id)["default_stt_model"]
     await update.effective_message.reply_text(
-        _msg(session, "Current STT model:\n{model}\n\nZDR: enabled", model=current),
+        _msg(session, "Current STT model:\n{model}\n\nZDR: enabled" if state.service.require_zdr(session.user_id, "stt")
+             else "Current STT model:\n{model}", model=current),
     )
 
 
