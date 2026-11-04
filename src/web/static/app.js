@@ -1,6 +1,7 @@
 const $ = (id) => document.getElementById(id);
 // inline line icons (currentColor); constants only, never built from user data
 const ICONS = {
+  clock: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 7v5l3 2\"/></svg>",
   alert: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 7.5v5.5\"/><path d=\"M12 16.5h.01\"/></svg>",
   send: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M12 19V5\"/><path d=\"m5 12 7-7 7 7\"/></svg>",
   steer: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><polygon points=\"3 11 22 2 13 21 11 13 3 11\"/></svg>",
@@ -28,6 +29,7 @@ const state = {
   reasoningEffort: null,
   chatModelRevision: 0,
   settingsModelDraft: null,
+  chatInfo: null,  // summary of the open chat (disposable flag and expiry)
   preferences: null, preferencesRequest: 0, settingsBusy: false, settingsOriginal: null,
   translations: null, toolGroupCatalog: [],
   mcpServers: [], mcpTools: new Map(), connectionsPoll: null,
@@ -74,6 +76,8 @@ function translateInterface() {
     ["settings-title", "User settings"], ["settings-save", "Save settings"],
     ["settings-thinking-label", "Show model thinking"],
     ["settings-assoc-max-label", "Maximum associative memory matches"],
+    ["settings-disposable-days-label", "Days to keep disposable chats"],
+    ["settings-disposable-days-hint", "Disposable chats are deleted after this many days without activity (1–365). Leave empty to use the default of 30."],
     ["settings-assoc-max-hint", "Leave empty to use the application default. The minimum similarity is set by the application, not by you."],
     ["settings-language-label", "Alerts and errors"], ["settings-theme-label", "Theme"],
     ["settings-theme-system", "System"], ["settings-theme-light", "Light"], ["settings-theme-dark", "Dark"],
@@ -162,6 +166,8 @@ function translateInterface() {
     $(id).title = tr(text);
     $(id).setAttribute("aria-label", tr(text));
   }
+  $("new-disposable-chat").title = tr("New disposable chat");
+  $("new-disposable-chat").setAttribute("aria-label", tr("New disposable chat"));
   for (const button of document.querySelectorAll(".nav-toggle")) {
     button.title = tr("Menu");
     button.setAttribute("aria-label", tr("Menu"));
@@ -371,7 +377,7 @@ for (const button of document.querySelectorAll(".nav-toggle")) {
 $("nav-scrim").addEventListener("click", () => setNav(false));
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") setNav(false); });
 // choosing a chat or agent, or starting a new one, closes the drawer
-$("sidebar").addEventListener("click", (e) => { if (e.target.closest("#chat-list li, #agent-list button, #new-chat")) setNav(false); });
+$("sidebar").addEventListener("click", (e) => { if (e.target.closest("#chat-list li, #agent-list button, #new-chat, #new-disposable-chat")) setNav(false); });
 
 // ------------------------------------------------------------------ agents & chats
 
@@ -441,7 +447,7 @@ function showTab(tab) {
   $("chat-view").hidden = agents;
   $("agents-view").hidden = !agents;
   $("chat-list").hidden = agents;
-  $("new-chat").hidden = agents;
+  $("new-chat-row").hidden = agents;
   $("agent-list").hidden = !agents;
   $("agent-new").hidden = !agents;
   if (agents) return loadAgentConfigs();
@@ -1103,6 +1109,7 @@ function fillSettings() {
   $("settings-thinking").checked = state.preferences.show_thinking;
   $("settings-language").value = state.preferences.language;
   $("settings-assoc-max").value = state.preferences.associative_max_matches ?? "";
+  $("settings-disposable-days").value = state.preferences.disposable_retention_days ?? "";
   $("settings-theme").value = localStorage.getItem("theme") ?? "system";
   renderSettingsModels();
 }
@@ -1384,6 +1391,9 @@ $("settings-form").addEventListener("submit", async (e) => {
   const rawMax = $("settings-assoc-max").value.trim();
   const maxMatches = rawMax === "" ? null : Number(rawMax);
   if (maxMatches !== (state.settingsOriginal.associative_max_matches ?? null)) changes.associative_max_matches = maxMatches;
+  const rawDays = $("settings-disposable-days").value.trim();
+  const retentionDays = rawDays === "" ? null : Number(rawDays);
+  if (retentionDays !== (state.settingsOriginal.disposable_retention_days ?? null)) changes.disposable_retention_days = retentionDays;
   for (const key of ["default_llm_model", "default_stt_model"]) {
     if (state.settingsModelDraft?.[key] !== state.settingsOriginal[key]) changes[key] = state.settingsModelDraft[key];
   }
@@ -1439,6 +1449,13 @@ async function refreshChats() {
         e.stopPropagation();
         deleteChat(chat);
       });
+      if (chat.disposable) {
+        const badge = document.createElement("span");
+        badge.className = "chat-badge";
+        badge.innerHTML = ICONS.clock;
+        badge.title = tr("Disposable chat, deleted on {date}", { date: expiryDate(chat.expires_at) });
+        li.append(badge);
+      }
       li.append(meta);
       // empty chats are pruned, so only chats with messages can keep a title
       if (chat.turns > 0) {
@@ -1501,7 +1518,7 @@ function startRenameChat(chat, title) {
   input.select();
 }
 
-async function newChat() {
+async function newChat({ disposable = false } = {}) {
   if (state.modelBusy || state.settingsBusy || !state.user) return;
   const session = state.session;
   try {
@@ -1513,7 +1530,9 @@ async function newChat() {
     }
     if (preferences.agent_id !== state.agentId) await selectAgent(preferences.agent_id);
     const agentId = state.agentId;
-    const chat = await api(chatsUrl(), { method: "POST" });
+    const chat = await api(chatsUrl(), {
+      method: "POST", ...(disposable ? { body: JSON.stringify({ disposable: true }) } : {}),
+    });
     if (session !== state.session || agentId !== state.agentId) return;
     // creating a chat discards the previous empty one; stop requesting its state while opening the new one
     state.chatId = null;
@@ -1524,7 +1543,57 @@ async function newChat() {
   }
 }
 
-$("new-chat").addEventListener("click", newChat);
+$("new-chat").addEventListener("click", () => newChat());
+$("new-disposable-chat").addEventListener("click", () => newChat({ disposable: true }));
+
+// the date a disposable chat is deleted on, in the browser's locale
+function expiryDate(iso) {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+}
+
+// what the open chat shows about being disposable: the banner (disposable chats) or the small action (normal chats)
+function disposableView(chat) {
+  if (!chat) return { banner: null, canMakeDisposable: false };
+  if (!chat.disposable) return { banner: null, canMakeDisposable: true };
+  return {
+    banner: tr("Disposable chat: it will be deleted on {date} and nothing here will be saved to the agent's memory.", { date: expiryDate(chat.expires_at) }),
+    canMakeDisposable: false,
+  };
+}
+
+function renderDisposable() {
+  const chat = state.chatId && state.chatInfo?.id === state.chatId ? state.chatInfo : null;
+  const view = disposableView(chat);
+  $("disposable-banner").hidden = view.banner === null;
+  $("disposable-banner-text").textContent = view.banner ?? "";
+  $("disposable-convert").textContent = tr("Make it a normal chat");
+  $("chat-make-disposable").hidden = !view.canMakeDisposable;
+  $("chat-make-disposable").textContent = tr("Make it disposable");
+  $("chat-make-disposable").title = tr("Make it disposable");
+  const locked = state.busy || state.modelBusy;
+  $("disposable-convert").disabled = locked;
+  $("chat-make-disposable").disabled = locked;
+}
+
+async function setChatDisposable(disposable) {
+  if (!state.chatId || state.busy || state.modelBusy) return;
+  const session = state.session;
+  const agentId = state.agentId;
+  const chatId = state.chatId;
+  try {
+    const chat = await api(chatsUrl(`/${chatId}/disposable`), { method: "POST", body: JSON.stringify({ disposable }) });
+    if (session !== state.session || agentId !== state.agentId || chatId !== state.chatId) return;
+    state.chatInfo = chat;
+    renderDisposable();
+    await refreshChats();
+  } catch (err) {
+    if (session === state.session) addMessage("assistant").error(err);
+  }
+}
+
+$("disposable-convert").addEventListener("click", () => setChatDisposable(false));
+$("chat-make-disposable").addEventListener("click", () => setChatDisposable(true));
 
 async function openChat(chatId) {
   if (state.modelBusy) return;
@@ -1536,6 +1605,7 @@ async function openChat(chatId) {
   const data = await api(chatsUrl(`/${chatId}`));
   if (session !== state.session || agentId !== state.agentId || revision !== state.chatModelRevision || state.modelBusy) return;
   state.chatId = chatId;
+  state.chatInfo = data.chat;
   applyChatModels(data);
   const key = chatKey(agentId, chatId);
   if (isGenerating(agentId, chatId) && state.views.has(key)) {
@@ -1590,6 +1660,7 @@ function updateModelControls() {
   if (state.model && sourceHint) parts.push(tr(sourceHint));
   $("model-policy").textContent = parts.filter(Boolean).join(" · ");
   updateReasoningEffortControls();
+  renderDisposable();
   $("model-policy").classList.toggle("privacy-warning", openrouter && Boolean(state.model.require_zdr) && !state.model.zdr);
   $("model-refresh").disabled = state.modelLoading || state.modelBusy;
   $("model-close").disabled = state.modelBusy;
@@ -2002,6 +2073,7 @@ function updateBusy() {
   state.busy = isGenerating(state.agentId, state.chatId);
   $("agent-select").disabled = state.modelBusy || state.settingsBusy;
   $("new-chat").disabled = state.modelBusy || state.settingsBusy;
+  $("new-disposable-chat").disabled = state.modelBusy || state.settingsBusy;
   $("settings-open").disabled = state.settingsBusy;
   for (const button of $("chat-list").querySelectorAll(".del")) {
     button.disabled = isGenerating(button.dataset.agent, button.dataset.chat) || state.modelBusy;

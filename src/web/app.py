@@ -67,6 +67,14 @@ class ChatReasoningEffortIn(BaseModel):
     effort: ReasoningEffort | None
 
 
+class ChatCreateIn(BaseModel):
+    disposable: bool = Field(default=False, strict=True)
+
+
+class ChatDisposableIn(BaseModel):
+    disposable: bool = Field(strict=True)
+
+
 class ChatTitleIn(BaseModel):
     title: str = Field(max_length=1000)
 
@@ -316,8 +324,19 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
         return service.list_chats(user_id, agent_id, keep)
 
     @app.post("/api/agents/{agent_id}/chats", status_code=201)
-    def create_chat(agent_id: str, user_id: str = Depends(current_user)):
-        return service.create_chat(user_id, agent_id)
+    def create_chat(
+        agent_id: str, body: Optional[ChatCreateIn] = None, disposable: Optional[bool] = None,
+        user_id: str = Depends(current_user),
+    ):
+        # optional JSON body or query flag; no body keeps creating a normal chat
+        wanted = disposable if disposable is not None else (body.disposable if body is not None else False)
+        return service.create_chat(user_id, agent_id, disposable=wanted)
+
+    @app.post("/api/agents/{agent_id}/chats/{chat_id}/disposable")
+    def set_chat_disposable(
+        agent_id: str, chat_id: str, body: ChatDisposableIn, user_id: str = Depends(current_user),
+    ):
+        return service.set_chat_disposable(user_id, agent_id, chat_id, body.disposable)
 
     @app.get("/api/agents/{agent_id}/chats/{chat_id}")
     def get_chat(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):

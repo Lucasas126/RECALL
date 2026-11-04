@@ -691,9 +691,12 @@ class VectorIndex:
     # -- conversations
 
     def _reconcile_chats(self, source: Source) -> None:
+        # disposable chats are never indexed; a chat that became disposable loses its chunks below
+        disposable = _disposable_chats(source)
         scanned = {
             rel[:-len(".jsonl")]: stat
-            for rel, stat in scan_files(source.root.resolve(), {"jsonl"}).items() if "/" not in rel
+            for rel, stat in scan_files(source.root.resolve(), {"jsonl"}).items()
+            if "/" not in rel and rel[:-len(".jsonl")] not in disposable
         }
         with self._store.session() as store:
             rows = store.chat_rows()
@@ -715,6 +718,8 @@ class VectorIndex:
     def _index_chat(self, source: Source, chat_id: str) -> None:
         """Embed the exchanges appended to a chat since it was last indexed."""
         with self._store.writing():
+            if source.resolve(f"{chat_id}.disposable.json").is_file():
+                return
             path = source.resolve(f"{chat_id}.jsonl")
             try:
                 info = path.stat()
@@ -765,6 +770,12 @@ class VectorIndex:
                 store.bump()
         if documents:
             logger.debug("indexed %d new chunk(s) of chat %s", len(documents), chat_id)
+
+
+def _disposable_chats(source: Source) -> set[str]:
+    """Ids of the chats flagged disposable by their `<chat_id>.disposable.json` sidecar."""
+    suffix = ".disposable.json"
+    return {path.name[: -len(suffix)] for path in source.root.iterdir() if path.name.endswith(suffix)}
 
 
 def _upsert(store: _Store, ids: list[str], documents: list[str], vectors: list, metadatas: list[dict]) -> None:

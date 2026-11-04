@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Collection, Literal
 
@@ -17,6 +17,8 @@ from src.utils.i18n import InputError, UserMessageError
 
 _CHAT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _TITLE_CHARS = 60
+DEFAULT_DISPOSABLE_RETENTION_DAYS = 30
+_DISPOSABLE_SUFFIX = ".disposable.json"
 
 
 class ChatModel(BaseModel):
@@ -65,6 +67,14 @@ class ChatTitle(BaseModel):
 
     title: str = Field(min_length=1, max_length=_TITLE_CHARS)
     generated: bool = False  # written by the naming model (dropped when its source message is rewound)
+
+
+class ChatDisposable(BaseModel):
+    """Marks a disposable chat: not learned from, removed after a period of inactivity."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    created_at: str
 
 
 class ChatMetadataError(UserMessageError, RuntimeError):
@@ -183,10 +193,61 @@ class ConversationsSource(Source):
             raise ChatMetadataError("Could not save title for chat {chat_id}.", chat_id=chat_id) from exc
         return title
 
-    def create(self) -> str:
+    def _disposable_path(self, chat_id: str) -> Path:
+        return self.resolve(f"{chat_id}{_DISPOSABLE_SUFFIX}")
+
+    def is_disposable(self, chat_id: str) -> bool:
+        """Whether the chat is disposable (excluded from Dream and the index, removed after inactivity)."""
+        self._path(chat_id)  # validates the id
+        return self._disposable_path(chat_id).is_file()
+
+    def disposable_chats(self) -> set[str]:
+        """The ids of every disposable chat that still has its transcript."""
+        marked = {p.name[: -len(_DISPOSABLE_SUFFIX)] for p in self.root.iterdir() if p.name.endswith(_DISPOSABLE_SUFFIX)}
+        return {chat_id for chat_id in marked if _CHAT_ID_RE.match(chat_id) and self.resolve(f"{chat_id}.jsonl").is_file()}
+
+    def set_disposable(self, chat_id: str, disposable: bool) -> None:
+        """Mark or unmark a chat as disposable; marking an already disposable chat keeps its original stamp."""
+        if not self.exists_chat(chat_id):
+            raise FileNotFoundError(f"chat not found: {chat_id}")
+        path = self._disposable_path(chat_id)
+        try:
+            if not disposable:
+                path.unlink(missing_ok=True)
+            elif not path.is_file():
+                stamp = datetime.now().astimezone().isoformat(timespec="seconds")
+                atomic_write_text(path, ChatDisposable(created_at=stamp).model_dump_json() + "\n")
+        except OSError as exc:
+            raise ChatMetadataError("Could not save the disposable flag for chat {chat_id}.", chat_id=chat_id) from exc
+
+    def last_activity(self, chat_id: str) -> datetime:
+        """When the chat last changed: the modification time of its transcript."""
+        return datetime.fromtimestamp(self._path(chat_id).stat().st_mtime).astimezone()
+
+    def expires_at(self, chat_id: str, retention_days: int = DEFAULT_DISPOSABLE_RETENTION_DAYS) -> datetime:
+        """When a disposable chat is removed: its last activity plus the retention period."""
+        return self.last_activity(chat_id) + timedelta(days=retention_days)
+
+    def expired_disposable(
+        self, retention_days: int = DEFAULT_DISPOSABLE_RETENTION_DAYS, now: datetime | None = None,
+    ) -> list[str]:
+        """Disposable chats whose last activity is older than the retention period; normal chats never qualify."""
+        moment = (now or datetime.now()).astimezone()
+        expired = []
+        for chat_id in sorted(self.disposable_chats()):
+            try:
+                if self.expires_at(chat_id, retention_days) <= moment:
+                    expired.append(chat_id)
+            except FileNotFoundError:
+                continue
+        return expired
+
+    def create(self, *, disposable: bool = False) -> str:
         """Create an empty chat and return its id."""
         chat_id = f"{datetime.now():%Y%m%d-%H%M%S}-{secrets.token_hex(3)}"
         self._path(chat_id).touch(exist_ok=False)
+        if disposable:
+            self.set_disposable(chat_id, True)
         return chat_id
 
     def delete_chat(self, chat_id: str) -> None:
@@ -196,6 +257,7 @@ class ConversationsSource(Source):
         metadata = self._model_path(chat_id)
         effort = self.resolve(f"{chat_id}.effort.json")
         title = self.resolve(f"{chat_id}.title.json")
+        disposable = self._disposable_path(chat_id)
         legacy_transcription = self.resolve(f"{chat_id}.stt.json")  # per-chat STT overrides are no longer read
         removed = self._removed_path(chat_id)
         path.unlink()
@@ -203,6 +265,7 @@ class ConversationsSource(Source):
         metadata.unlink(missing_ok=True)
         effort.unlink(missing_ok=True)
         title.unlink(missing_ok=True)
+        disposable.unlink(missing_ok=True)
         legacy_transcription.unlink(missing_ok=True)
 
     def _removed_path(self, chat_id: str) -> Path:
@@ -294,8 +357,9 @@ class ConversationsSource(Source):
         files = [p for p in self.root.iterdir() if p.suffix == ".jsonl"]
         return max(files, key=lambda p: p.stat().st_mtime).stem if files else None
 
-    def summary(self, chat_id: str) -> dict:
-        """Chat metadata: title (user-chosen or generated, else first user message), turn count and last activity."""
+    def summary(self, chat_id: str, retention_days: int = DEFAULT_DISPOSABLE_RETENTION_DAYS) -> dict:
+        """Chat metadata: title (user-chosen or generated, else first user message), turn count, last activity
+        and, for a disposable chat, `disposable` and the ISO time it will be removed (`expires_at`)."""
         turns = self.load(chat_id)
         title = self.generated_title(chat_id)
         if title is None:
@@ -310,4 +374,9 @@ class ConversationsSource(Source):
         if not updated:
             mtime = self._path(chat_id).stat().st_mtime
             updated = datetime.fromtimestamp(mtime).astimezone().isoformat(timespec="seconds")
-        return {"id": chat_id, "title": title, "turns": len(turns), "updated": updated}
+        disposable = self.is_disposable(chat_id)
+        expires = self.expires_at(chat_id, retention_days).isoformat(timespec="seconds") if disposable else None
+        return {
+            "id": chat_id, "title": title, "turns": len(turns), "updated": updated,
+            "disposable": disposable, "expires_at": expires,
+        }

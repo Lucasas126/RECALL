@@ -28,7 +28,7 @@ from src.config.models import (
     AgentConfig, DreamConfig, FolderConfig, MemoryLimits, ReasoningEffort, ResolvedAgent, UserConfig,
 )
 from src.agent.tool_groups import DEFAULT_TOOL_GROUPS, TOOL_GROUP_CATALOG
-from src.config.preferences import UserPreferences, UserPreferencesStore
+from src.config.preferences import PreferencesError, UserPreferences, UserPreferencesStore
 from src.config.zdr import chat_zdr, ensure_zdr_compatible, zdr_required
 from src.config.settings import (
     CHAT_NAMING, CONFIG_DIR, DATA_DIR, MCP, PDF, SPEECH_TO_TEXT, TAVILY, TELEGRAM_ALLOWED_USERS_ENV,
@@ -36,7 +36,7 @@ from src.config.settings import (
 )
 from src.core.index import VectorIndex
 from src.core.sources.agent_files import SOUL_MAX_CHARS, AgentFilesSource, MemoryTarget
-from src.core.sources.conversations import ConversationsSource
+from src.core.sources.conversations import DEFAULT_DISPOSABLE_RETENTION_DAYS, ConversationsSource
 from src.core.sources.registry import SourceRegistry
 from src.providers.cancellation import CancellationToken, GenerationCancelled
 from src.providers.catalog import CatalogUnavailable, list_openrouter_models
@@ -67,6 +67,7 @@ _NAMING_PROMPT = (
     "in the conversation. Reply with the title only, without quotes or punctuation at the end."
 )
 _NAMING_TURN_CHARS = 1000
+_CLEANUP_INTERVAL_SECONDS = 3600  # how often the scheduler removes expired disposable chats
 
 AgentFactory = Callable[[str, str, Optional[str]], Agent]
 IndexFactory = Callable[[ResolvedAgent, SourceRegistry], VectorIndex]
@@ -230,6 +231,9 @@ class ChatService:
         self._reasoning_support: dict[str, tuple[float, bool]] = {}
         self._availability = ProviderAvailability()
         self._dream = dream or DreamManager(self._dream_dependencies())
+        self._cleanup_thread: threading.Thread | None = None
+        self._cleanup_stop = threading.Event()
+        self._last_cleanup = 0.0
 
     @staticmethod
     def _build_index(config: ResolvedAgent, sources: SourceRegistry) -> VectorIndex:
@@ -343,12 +347,27 @@ class ChatService:
 
     def close(self) -> None:
         """Stop background resources such as MCP server processes and the dream scheduler."""
+        self._cleanup_stop.set()
+        if self._cleanup_thread is not None:
+            self._cleanup_thread.join(5)
+            self._cleanup_thread = None
         self._dream.stop()
         self._mcp.close()
 
     def start_dream_scheduler(self, interval_seconds: float = 60.0) -> None:
         """Run scheduled dream sessions from this process (the web and Telegram processes both may)."""
         self._dream.start_scheduler(interval_seconds)
+        if self._cleanup_thread is None:  # hourly removal of expired disposable chats, beside the dream scheduler
+            self._cleanup_stop.clear()
+
+            def loop() -> None:
+                while True:
+                    self.cleanup_disposable_chats()
+                    if self._cleanup_stop.wait(_CLEANUP_INTERVAL_SECONDS):
+                        return
+
+            self._cleanup_thread = threading.Thread(target=loop, daemon=True, name="disposable-cleanup")
+            self._cleanup_thread.start()
 
     def _check_mcp(self, config: AgentConfig) -> None:
         for server_id in config.chat_config.mcp:
@@ -567,9 +586,11 @@ class ChatService:
         """Chat summaries, most recently active first; unused empty chats (except `keep`) are removed."""
         conversations = self._conversations(user_id, agent_id)
         slot = self._slot(user_id, agent_id)
+        self._remove_expired(user_id, agent_id)
         with slot.state:
             conversations.prune_empty(self._kept_chats(slot, keep))
-        summaries = [conversations.summary(chat_id) for chat_id in conversations.chats()]
+        days = self._retention_days(user_id)
+        summaries = [conversations.summary(chat_id, days) for chat_id in conversations.chats()]
         return sorted(summaries, key=lambda s: s["updated"], reverse=True)
 
     def list_all_chats(self, user_id: str, keep: Optional[str] = None) -> list[dict]:
@@ -580,13 +601,87 @@ class ChatService:
                 chats.append({**chat, "agent_id": agent["id"], "agent_name": agent["name"]})
         return sorted(chats, key=lambda chat: chat["updated"], reverse=True)
 
-    def create_chat(self, user_id: str, agent_id: str) -> dict:
-        """Create a chat, discarding any other unused empty ones so they never pile up."""
+    def create_chat(self, user_id: str, agent_id: str, *, disposable: bool = False) -> dict:
+        """Create a chat, discarding any other unused empty ones so they never pile up.
+
+        A disposable chat is not learned from (no Dream review, no indexing), cannot change the agent's
+        persistent state and is deleted after the user's retention period of inactivity.
+        """
         conversations = self._conversations(user_id, agent_id)
         slot = self._slot(user_id, agent_id)
         with slot.state:
             conversations.prune_empty(self._kept_chats(slot))
-            return conversations.summary(conversations.create())
+            return conversations.summary(conversations.create(disposable=disposable), self._retention_days(user_id))
+
+    def set_chat_disposable(self, user_id: str, agent_id: str, chat_id: str, disposable: bool) -> dict:
+        """Convert a chat to disposable or back to normal, in place; refused while a reply is running or queued.
+
+        Becoming disposable drops the chat's indexed chunks at once; becoming normal lets Dream review and the
+        index pick it up again from the start. The cached agent is dropped so its tools and prompt are rebuilt.
+        """
+        conversations = self._conversations(user_id, agent_id)
+        self._load(conversations, chat_id)
+        slot = self._slot(user_id, agent_id)
+        with slot.state:
+            if self._chat_busy(slot, chat_id):
+                raise AgentBusy("wait for this chat's active and queued replies before changing its type")
+            with slot.lock:
+                try:
+                    conversations.set_disposable(chat_id, disposable)
+                except FileNotFoundError as exc:
+                    raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
+                slot.agents.pop(chat_id, None)
+        try:
+            index = self._agent_index(user_id, agent_id)
+            if disposable:
+                index.forget_chat(chat_id)
+            else:
+                index.reconcile()
+        except Exception:  # the next reconcile applies the change anyway
+            logger.warning("could not update the index after changing chat %s/%s/%s", user_id, agent_id, chat_id, exc_info=True)
+        return conversations.summary(chat_id, self._retention_days(user_id))
+
+    def _retention_days(self, user_id: str) -> int:
+        """The user's disposable-chat retention in days (30 unless they chose another value)."""
+        try:
+            days = self._preferences.get(user_id).disposable_retention_days
+        except (PreferencesError, ValueError):
+            days = None
+        return days or DEFAULT_DISPOSABLE_RETENTION_DAYS
+
+    def _remove_expired(self, user_id: str, agent_id: str) -> list[str]:
+        """Delete this agent's disposable chats idle past the retention period; chats with a reply in flight stay."""
+        conversations = self._conversations(user_id, agent_id)
+        removed = []
+        for chat_id in conversations.expired_disposable(self._retention_days(user_id)):
+            try:
+                self.delete_chat(user_id, agent_id, chat_id)
+            except AgentBusy:
+                continue
+            except UnknownChat:
+                continue
+            except Exception:
+                logger.warning("could not remove expired disposable chat %s/%s/%s", user_id, agent_id, chat_id, exc_info=True)
+                continue
+            removed.append(chat_id)
+        if removed:
+            logger.info("removed %d expired disposable chat(s) of %s/%s", len(removed), user_id, agent_id)
+        return removed
+
+    def cleanup_disposable_chats(self) -> int:
+        """Remove expired disposable chats of every configured agent; failures are logged, never raised."""
+        removed = 0
+        try:
+            pairs = self._all_agents()
+        except Exception:
+            logger.warning("could not list agents for disposable chat cleanup", exc_info=True)
+            return 0
+        for user_id, agent_id in pairs:
+            try:
+                removed += len(self._remove_expired(user_id, agent_id))
+            except Exception:
+                logger.warning("disposable chat cleanup failed for %s/%s", user_id, agent_id, exc_info=True)
+        return removed
 
     def get_chat(self, user_id: str, agent_id: str, chat_id: str) -> dict:
         """A chat's summary and its user/assistant messages."""
@@ -608,7 +703,7 @@ class ChatService:
             if t.get("role") in ("user", "assistant")
         ]
         return {
-            "chat": conversations.summary(chat_id), "messages": messages,
+            "chat": conversations.summary(chat_id, self._retention_days(user_id)), "messages": messages,
             **self.get_chat_models(user_id, agent_id, chat_id),
         }
 
@@ -753,7 +848,7 @@ class ChatService:
             conversations.rename(chat_id, title)
         except FileNotFoundError as exc:
             raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
-        return conversations.summary(chat_id)
+        return conversations.summary(chat_id, self._retention_days(user_id))
 
     def delete_chat(self, user_id: str, agent_id: str, chat_id: str) -> None:
         conversations = self._conversations(user_id, agent_id)

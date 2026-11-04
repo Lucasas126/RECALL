@@ -53,6 +53,13 @@ TOOL_GROUP_TOOLS: Final[dict[str, tuple[str, ...]]] = {
     ),
 }
 
+# tools that change the agent's own persistent state (memory, SOUL, skills, notes, user folders);
+# a disposable chat neither exposes nor runs them
+DISPOSABLE_BLOCKED_TOOLS: Final[frozenset[str]] = frozenset(
+    {*TOOL_GROUP_TOOLS["memory_edit"], "memory", "skill_manage", "soul_edit"}
+    | {name for name in TOOL_GROUP_TOOLS["folders_edit"] if name not in TOOL_GROUP_TOOLS["folders_read"]}
+)
+
 
 def validate_tool_groups(tool_groups: list[str]) -> list[str]:
     """Validate and normalize an agent's tool-group selection."""

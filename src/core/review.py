@@ -4,6 +4,7 @@ from datetime import datetime
 
 from src.core.sources.conversations import ConversationsSource
 from src.core.sources.dream import DreamStateSource
+from src.utils.i18n import InputError
 
 TURN_CHARS = 4000  # longest turn text shown to a dream; longer turns are cut
 
@@ -51,6 +52,7 @@ class ReviewQueue:
     def pending(self) -> list[dict]:
         """Pending chats, oldest unreviewed turn first: id, title, turn counts and first new turn time."""
         existing = set(self._conversations.chats())
+        disposable = self._conversations.disposable_chats()
         stale = set(self._state.state()["chats"]) - existing
         if stale:
             def drop(state: dict) -> None:
@@ -60,7 +62,7 @@ class ReviewQueue:
             self._state.update_state(drop)
         marks = self.watermarks()
         items = []
-        for chat_id in existing:
+        for chat_id in existing - disposable:  # disposable chats are never learned from
             turns = self._conversations.load(chat_id)
             reviewed = min(marks.get(chat_id, 0), len(turns))
             if len(turns) <= reviewed:
@@ -84,6 +86,8 @@ class ReviewQueue:
         """
         if not self._conversations.exists_chat(chat_id):
             raise FileNotFoundError(f"chat not found: {chat_id}")
+        if self._conversations.is_disposable(chat_id):
+            raise InputError("chat {chat_id} is disposable and is not reviewed", chat_id=chat_id)
         turns = self._conversations.load(chat_id)
         reviewed = min(self.watermarks().get(chat_id, 0), len(turns))
         end = min(len(turns), reviewed + max(1, max_turns))

@@ -14,6 +14,7 @@ from src.providers.routing import provider_for
 from src.agent import usage
 from src.agent import associative
 from src.agent.profile import AgentProfile, load_profile, system_prompt
+from src.agent.tool_groups import DISPOSABLE_BLOCKED_TOOLS
 from src.agent.tools import build_tools, chat_folder_options
 from src.agent.toolsets.mcp import build_mcp_tools
 from src.config.loader import load_agent
@@ -53,6 +54,14 @@ _HIT_CUT_NOTE = (
     "Your reply above was paused at this point so this could be added. Continue it from exactly where it "
     "stopped, without repeating anything (if it stopped mid-sentence, finish that sentence directly, with "
     "no ellipsis). If the fragments contradict or fill in what you already wrote, say so and correct it."
+)
+
+
+_DISPOSABLE_NOTICE = (
+    "## Disposable chat\n\n"
+    "This is a disposable chat: nothing from it will be remembered. Your persistent memory, SOUL, skills, "
+    "notes and linked folders are read-only here, so you cannot change them. If the user wants something "
+    "remembered, tell them they can convert this chat to a normal one."
 )
 
 
@@ -154,13 +163,9 @@ class Agent:
         self.index.reconcile()  # cheap stat-only scan, queued; user folders only when their interval passed
         # addresses the tools of the current turn wrote, indexed with the turn's exchange after the reply
         self._written: set[str] = set()
-        self._base_tool_specs, self._base_tool_handlers = (
-            build_tools(
-                self, TavilyClient.from_config(TAVILY), config.tool_groups, config.allow, config.deny,
-                skill_view=bool(self.profile.skills),
-            )
-            if config.tools and (config.tool_groups or self.profile.skills) else ([], {})
-        )
+        # a disposable chat (decided by its stored flag) cannot change the agent's persistent state
+        self._disposable = chat_id is not None and self.sources.conversations().is_disposable(chat_id)
+        self._base_tool_specs, self._base_tool_handlers = self._build_base_tools()
         self._tool_specs, self._tool_handlers = list(self._base_tool_specs), dict(self._base_tool_handlers)
         # MCP notes appended to the system prompt; refreshed with the MCP tools at each turn
         self._mcp_notes: list[str] = []
@@ -171,6 +176,15 @@ class Agent:
             config.user_id, config.id, config.provider_name, config.models.chat,
         )
 
+    def _build_base_tools(self) -> tuple[list[dict], dict]:
+        config = self.config
+        if not (config.tools and (config.tool_groups or self.profile.skills)):
+            return [], {}
+        return build_tools(
+            self, TavilyClient.from_config(TAVILY), config.tool_groups, config.allow, config.deny,
+            skill_view=bool(self.profile.skills), disposable=self._disposable,
+        )
+
     def open_chat(self, chat_id: Optional[str] = None) -> str:
         """Switch to a chat (a new empty one when None), rebuilding the context from its history."""
         conversations = self.sources.conversations()
@@ -178,6 +192,11 @@ class Agent:
             chat_id = conversations.create()
         elif not conversations.exists_chat(chat_id):
             raise FileNotFoundError(f"chat not found: {chat_id}")
+        disposable = conversations.is_disposable(chat_id)
+        if disposable != self._disposable:  # another chat kind: rebuild the tools (the prompt is rebuilt below)
+            self._disposable = disposable
+            self._base_tool_specs, self._base_tool_handlers = self._build_base_tools()
+            self._tool_specs, self._tool_handlers = list(self._base_tool_specs), dict(self._base_tool_handlers)
         selection = conversations.model_selection(chat_id)
         model = selection.id if selection is not None else self._default_chat_model
         self.zdr_required = chat_zdr(self.config.require_zdr, model, selection.zdr if selection is not None else None)
@@ -273,6 +292,8 @@ class Agent:
         blocks = []
         if self._associative_parallel():
             blocks.append(_ASSOC_NOTICE)
+        if self._disposable:
+            blocks.append(_DISPOSABLE_NOTICE)
         if self._mcp_notes:
             blocks.append("## Connected services (MCP)\n\n" + "\n\n".join(self._mcp_notes))
         return system_prompt(self.profile, blocks)
@@ -674,7 +695,9 @@ class Agent:
                     args = {}
             handler = self._tool_handlers.get(name)
             failed = False
-            if handler is None:
+            if self._disposable and name in DISPOSABLE_BLOCKED_TOOLS:  # defence in depth: the specs already omit these
+                result, failed = f"error: '{name}' is not available in a disposable chat", True
+            elif handler is None:
                 result, failed = f"error: unknown tool '{name}'", True
             else:
                 try:

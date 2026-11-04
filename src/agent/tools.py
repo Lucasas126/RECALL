@@ -8,7 +8,7 @@ from src.agent.toolsets.self_files import build_self_tools
 from src.agent.toolsets.tags import build_tag_tools
 from src.agent.toolsets.folders import build_folder_tools
 from src.agent.toolsets.web import build_web_tools
-from src.agent.tool_groups import validate_tool_groups
+from src.agent.tool_groups import DISPOSABLE_BLOCKED_TOOLS, validate_tool_groups
 from src.config.models import ResolvedAgent
 from src.providers.tavily import TavilyClient
 
@@ -42,11 +42,12 @@ def build_tools(
     tool_groups: list[str] | None = None,
     allow: list[str] | None = None,
     deny: list[str] | None = None,
-    *, skill_view: bool = False,
+    *, skill_view: bool = False, disposable: bool = False,
 ) -> tuple[list[dict], dict[str, Callable[..., str]]]:
     """Build the tool specs and handlers bound to an agent.
 
     `skill_view` adds that tool even without the `self` group, so agents can always load their skills.
+    `disposable` drops every tool that writes the agent's own persistent state (read tools stay).
     """
     selected = validate_tool_groups(tool_groups or [])
     base_tools = []
@@ -60,14 +61,14 @@ def build_tools(
             func for func in self_tools if func.tool_spec["function"]["name"] == "skill_view"
         ])
     if {"folders_read", "folders_edit"} & set(selected) and agent.sources.folders():
-        base_tools.extend(build_folder_tools(agent, writable="folders_edit" in selected))
+        base_tools.extend(build_folder_tools(agent, writable="folders_edit" in selected and not disposable))
     if web_client is not None and "web" in selected:
         base_tools.extend(build_web_tools(web_client))
     tools_by_name = {
         func.tool_spec["function"]["name"]: func
         for func in base_tools
     }
-    denied = set(deny or ())
+    denied = set(deny or ()) | (DISPOSABLE_BLOCKED_TOOLS if disposable else set())
     allowed = set(allow) if allow is not None else None
     funcs = [
         tools_by_name[name] for name in _ORDER

@@ -30,7 +30,10 @@
         <button id="tab-chats" type="button" aria-pressed="true">Chats</button>
         <button id="tab-agents" type="button" aria-pressed="false">Agents</button>
       </nav>
-      <button id="new-chat" class="primary"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg> New chat</button>
+      <div id="new-chat-row">
+        <button id="new-chat" class="primary"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg> New chat</button>
+        <button id="new-disposable-chat" type="button" class="primary" title="New disposable chat" aria-label="New disposable chat"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></button>
+      </div>
       <button id="agent-new" type="button" class="primary" hidden><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg> <span id="agent-new-label">New agent</span></button>
       <ul id="chat-list"></ul>
       <ul id="agent-list" hidden></ul>
@@ -56,6 +59,11 @@
           <select id="agent-select"></select>
         </div>
       </header>
+      <div id="disposable-banner" role="status" hidden>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        <span id="disposable-banner-text"></span>
+        <button id="disposable-convert" type="button"></button>
+      </div>
       <div id="messages" role="log" aria-live="polite" aria-relevant="additions"></div>
       <details id="usage" hidden><summary></summary><pre></pre></details>
       <form id="composer">
@@ -76,6 +84,7 @@
             </select>
           </label>
           <span id="effort-policy"></span>
+          <button id="chat-make-disposable" type="button" hidden></button>
           <span id="model-policy"></span>
         </div>
         <textarea id="input" rows="2" placeholder="Write a message…" disabled></textarea>
@@ -403,6 +412,10 @@
       <p><label for="settings-assoc-max"><span id="settings-assoc-max-label">Maximum associative memory matches</span></label><br>
         <input id="settings-assoc-max" type="number" min="1" max="20" step="1" inputmode="numeric">
         <span id="settings-assoc-max-hint" class="model-note">Leave empty to use the application default. The minimum similarity is set by the application, not by you.</span>
+      </p>
+      <p><label for="settings-disposable-days"><span id="settings-disposable-days-label">Days to keep disposable chats</span></label><br>
+        <input id="settings-disposable-days" type="number" min="1" max="365" step="1" inputmode="numeric">
+        <span id="settings-disposable-days-hint" class="model-note">Disposable chats are deleted after this many days without activity (1–365). Leave empty to use the default of 30.</span>
       </p>
       <p><span id="settings-llm-label">Default LLM model</span><br>
         <button id="settings-llm" type="button" aria-haspopup="dialog" disabled></button>
