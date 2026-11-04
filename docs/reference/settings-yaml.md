@@ -183,6 +183,28 @@ input and output tokens. Prefer this line to the cost estimate when checking tha
 caching works: after the first message of a chat, `read` should be close to the
 whole previous context.
 
+## telegram orchestrator
+
+Opt-in automatic agent choice for Telegram messages that start a new chat (user-facing behaviour in
+[Telegram](../user-guide/telegram.md#telegram-orchestrator-automatic-agent-choice)):
+
+```yaml
+orchestrator:
+  enabled: false                 # default false; users can override it in Settings
+  model: typesafe/jev-1.14       # OpenRouter decision model
+  api_key: OPENROUTER_API_KEY    # env var NAME of the key, never the secret
+  # zdr: true                    # optional override of the user's require_zdr; unset follows the user
+  min_confidence: 0.6            # 0..1; below it the pick is "uncertain" and the user gets candidate buttons
+  timeout_seconds: 4             # 1..30; a slower router is ignored (preferred agent answers)
+  grace_seconds: 8               # seconds before a confident pick answers
+  uncertain_grace_seconds: 20    # seconds before the default (core or preferred) agent answers when unsure
+```
+
+`model` must be a *decision model* served by OpenRouter's alpha Decisions API (`POST /api/alpha/decisions`); others
+that share the API are `perplexity/pplx-decider-flash-v1.2`, `liquid/d1.1` and `cloudflare/clef-flash`. Unknown keys or
+out-of-range values stop the start-up. The per-user switch `orchestrator` and the `core_agent_id` live in the user's
+[preferences](user-yaml.md#preferences-api). Only the message text and the agents' ids, names and descriptions are sent.
+
 ## chat naming
 
 The root `settings.yaml` holds a framework-wide small model used to generate chat

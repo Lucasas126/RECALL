@@ -62,6 +62,41 @@ during the wait, the pending one is answered first in the new chat and the new
 one follows. A tap after that answers "This option expired.". The pending
 message, including downloaded attachments, is kept in memory only during the
 wait.
+
+### Telegram orchestrator (automatic agent choice)
+
+When the orchestrator is on, a message that starts a **new chat** (the first ever, or after the idle time) is sent
+to a fast *decision model* that reads the agents' descriptions and picks the one whose topic matches best. It never
+runs in the middle of a conversation, nor for `/newchat` or `/selectagent`, which stay manual.
+
+- **Confident pick** (confidence at least `orchestrator.min_confidence`, default 0.6): the bot creates the chat
+  with that agent and sends first `It has been a while. I chose **Agent** for this message.` with the buttons
+  **↩ Continue previous chat** (only when a previous chat exists) and **🔀 Other agent** (the full picker, as
+  before). If you do nothing, the chosen agent answers after `grace_seconds` (default 8).
+- **Unsure pick** (greetings, vague or ambiguous messages): the default agent is your **core agent** (Settings >
+  *Core agent (used when unsure)*), or your preferred agent when none is set. The bot shows buttons for the three most
+  likely agents (the default marked ⭐), then **↩ Continue previous chat** and **🔀 More agents**. Tap an agent to replay
+  the message in a new chat with it; tap the ⭐ one to answer at once; do nothing and the default answers after
+  `uncertain_grace_seconds` (default 20).
+- **First message ever**: routed and with buttons too, but without *Continue previous chat*.
+- A photo, audio or file without text (or caption) is not routed: it goes to the core agent, or to your preferred
+  one.
+- It falls back silently to the old behaviour (your preferred agent, the usual buttons) when the orchestrator is
+  off, you have fewer than two agents, the API key is missing, or the router fails, times out
+  (`timeout_seconds`, default 4) or answers with an agent you do not have. While it thinks the bot shows *typing*.
+
+**Setup.** The administrator turns it on globally with `orchestrator.enabled: true` in `settings.yaml` (see
+[settings.yaml](../reference/settings-yaml.md#telegram-orchestrator)); each user can switch it on or off with the
+checkbox *Choose the agent automatically in Telegram* in the web Settings (or `orchestrator` in
+`PATCH /api/preferences`). It only works well if every agent has a clear description: see
+[agents](agents.md#writing-agent-descriptions). To tune descriptions, run
+`python -m src.admin route-test "message text" --user <id>` to print the ranking, confidence and latency.
+
+**Privacy.** Only the message text plus the agents' ids, names and descriptions are sent to the decision model's
+provider (OpenRouter), never the chat history or attachments. With `require_zdr` (or `orchestrator.zdr`) the request
+asks for zero data retention. The text is not written to the info-level log. Agent descriptions and the first message
+of a new chat leave your machine in this request.
+
 `/selectmodel` opens the same kind of inline
 panel as `/settings`: buttons send callbacks instead of chat messages, and the
 bot edits the panel in place for pagination. Choosing an option saves it and

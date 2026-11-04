@@ -13,6 +13,8 @@ One list of ideas and planned work, with what is already done kept separate. Imp
 - **Chat compaction**: summarize the oldest messages into a running summary instead of dropping them beyond `conversation_messages_retained`.
 - **Warnings section** for configuration mismatches: a reasoning effort or token budget the selected model does not support, a tool that is unavailable, a model that is not offered. (Today the reasoning selector is disabled with an explanation when unsupported; there is no general warnings area.)
 
+- **Orchestrator follow-ups**: agents invoking other agents (agent-to-agent delegation), a default routed agent for the web UI, per-agent routing hints beyond the description, and a log of routing decisions to tune descriptions.
+
 ### tools
 
 - **File tools v2** for every source: paginated reads with line numbers and text extraction for PDF/Office files; regex content search and glob file search; `patch` (unique find-and-replace with tolerant matching, returning a diff); a stale-write guard.
@@ -37,6 +39,7 @@ One list of ideas and planned work, with what is already done kept separate. Imp
 
 ## done
 
+- Telegram orchestrator: a decision model (OpenRouter Decisions API, alpha) picks the agent for a message that starts a new chat, with override buttons ([Telegram](../user-guide/telegram.md#telegram-orchestrator-automatic-agent-choice)).
 - Video input: models with image input but no video get sampled frames plus transcribed audio ([files and media](../user-guide/files-and-media.md#video-input)).
 - Message timestamps and `[AUDIO]` / `[VIDEO]` tags in the model context ([files and media](../user-guide/files-and-media.md#message-tags-and-timestamps)).
 - PDF reading with Tesseract OCR for scanned pages ([files and media](../user-guide/files-and-media.md#pdf-input)).

@@ -169,6 +169,13 @@ notices/errors are implemented in both channels.
   [disposable chat](../user-guide/memory.md#disposable-chats) is deleted. Absent or
   `null` means 30; `GET /api/preferences` returns `null` until it is set. Edited in the
   web **Settings** dialog.
+- `orchestrator`: `true`, `false` or `null`. `null` (default) follows `orchestrator.enabled` in
+  `settings.yaml`; the response also carries the read-only `orchestrator_default`. Turns the
+  [Telegram orchestrator](../user-guide/telegram.md#telegram-orchestrator-automatic-agent-choice) on or off for this
+  user. Non-boolean values are `422`.
+- `core_agent_id`: an agent id this user owns, or `null` (default: the preferred agent). The orchestrator's fallback
+  agent when it is unsure (greetings, general talk). An unknown or foreign agent is `404`; deleting the agent clears
+  it and renaming follows the new id.
 - `agent_id`: must identify an agent configured for this user with an existing
   agent configuration. Without an override, or with `null`, it resolves to the
   user's first agent; users without agents receive `null`. This preference is

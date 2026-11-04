@@ -18,6 +18,19 @@ Models without reasoning support ignore the request. When it is off, the compose
 
 the web **Agents** tab lists the user's agents in the sidebar (name and description) and edits the name, `description`, all `chat_config` options (associative memory is a mode selector plus a timing selector, the latter disabled while the mode is off) and, in the **Folders** tab, the folder list (name, path, indexed, read-only) with the agent's memory index status (sources, files, chats and chunks indexed, last reconciles, rebuilding or indexing) and **Reindex** / **Rebuild from scratch** buttons. a new agent's `id` is derived from its name (lowercase, accents removed, non-alphanumeric characters replaced by `-`) and is not editable from the form. the same operations are available as routes (see the [API reference](../reference/api.md#agent-routes)).
 
+## writing agent descriptions
+
+The `description` (0-500 characters) is also what the [Telegram orchestrator](telegram.md#telegram-orchestrator-automatic-agent-choice)
+reads to choose an agent, so write one or two sentences saying which topics the agent should answer. It is sent, with
+the agent's name, to the decision model's provider; the agent's chat model never sees it.
+
+- Good: `Personal finance: budgets, taxes, invoices, savings and investments.` / `Cooking and nutrition: recipes, meal plans, shopping lists.`
+- Weak: `My helper` or `General assistant` (it matches everything, so choices become uncertain).
+- Agents with overlapping topics need descriptions that tell them apart, for example `Work email: replies, summaries and scheduling for the office` versus `Personal email: family, friends and bills`. Without it the orchestrator cannot separate them and falls back to the core agent.
+- An agent without a description is judged by its name only.
+
+Check the result with `python -m src.admin route-test "how much tax do I owe?" --user <id>` (set `OPENROUTER_API_KEY`; add `--force` if the orchestrator is not enabled yet): it prints the ranked agents, probabilities, confidence and latency.
+
 ## rules
 
 rules:

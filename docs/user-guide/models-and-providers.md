@@ -126,6 +126,16 @@ controls are implemented in Telegram and web. The default speech-to-text model
 must be an OpenRouter model; default chat models can come from any available
 provider.
 
+## decision models (Telegram orchestrator)
+
+Besides chat, embedding and speech models, RECALL can call a *decision model*: a very fast model (about 250 ms) that
+answers a multiple-choice question with probabilities and a confidence instead of writing text. The Telegram
+orchestrator uses it to pick the agent for a new chat. It goes through OpenRouter's **alpha** Decisions API
+(`POST https://openrouter.ai/api/alpha/decisions`), so the endpoint or its answer format may change; all of it is isolated in
+`src/providers/decisions.py`. The model id is a setting (`orchestrator.model`, default `typesafe/jev-1.14`; the same API
+serves `perplexity/pplx-decider-flash-v1.2`, `liquid/d1.1` and `cloudflare/clef-flash`). ZDR follows the user's
+`require_zdr` unless `orchestrator.zdr` overrides it. See [settings.yaml](../reference/settings-yaml.md#telegram-orchestrator).
+
 ## openrouter model catalog and zero data retention
 
 ZDR is optional and off by default (`require_zdr: false`, see
