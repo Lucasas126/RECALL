@@ -10,7 +10,7 @@ from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
 from queue import SimpleQueue
-from time import monotonic
+from time import monotonic, sleep
 from typing import Callable, Iterator, Literal, Optional
 from uuid import uuid4
 
@@ -60,6 +60,7 @@ logger = get_logger("service")
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _REASONING_SUPPORT_TTL_SECONDS = 600
+_REWIND_WAIT_SECONDS = 30  # how long an edit waits for a cancelled reply to stop
 _NAMING_PROMPT = (
     "Name the conversation below with a short title of at most six words, in the language used "
     "in the conversation. Reply with the title only, without quotes or punctuation at the end."
@@ -589,13 +590,17 @@ class ChatService:
         turns = self._load(conversations, chat_id)
         messages = [
             {
-                k: t[k] for k in (
-                    "role", "content", "ts", "reasoning", "actions", "interrupted",
-                    "associative_matches", "associative_skipped", "usage", "usage_report",
-                )
-                if t.get(k) is not None
+                # `index` is the turn's position in the stored file (tool turns count), the handle for edits
+                "index": position,
+                **{
+                    k: t[k] for k in (
+                        "role", "content", "ts", "reasoning", "actions", "interrupted",
+                        "associative_matches", "associative_skipped", "usage", "usage_report",
+                    )
+                    if t.get(k) is not None
+                },
             }
-            for t in turns
+            for position, t in enumerate(turns)
             if t.get("role") in ("user", "assistant")
         ]
         return {
@@ -769,15 +774,26 @@ class ChatService:
     def send(
         self, user_id: str, agent_id: str, chat_id: str, text: str,
         stream: Optional[bool] = None, attachments: Optional[list[dict]] = None,
+        rewind_to: Optional[int] = None,
     ) -> Iterator[ChatEvent]:
         """Send a user message to a chat and yield the reply as events.
 
         Validation and scheduling happen immediately, independently of event consumption.
         A new message interrupts an unfinished reply to the same chat and continues its turn.
         Other chats on the agent run independently. `stream=None` follows the agent's config.
+
+        `rewind_to` edits an earlier message: it is the stored index of one of the user's turns. The active
+        and queued replies of the chat are cancelled and discarded, that turn and everything after it are
+        removed (kept in the chat's `.removed.json` sidecar) and `text` is sent in its place, as one atomic
+        step with respect to the chat's worker. When `attachments` is empty the original turn's
+        attachments are kept; long-term memory (Dream) is not rewound.
         """
         conversations = self._conversations(user_id, agent_id)
         attachments = [ChatAttachment.model_validate(item).model_dump() for item in (attachments or [])]
+        if rewind_to is not None:
+            original = self._edit_target(conversations, chat_id, rewind_to)
+            if not attachments:
+                attachments = self._stored_attachments(original.get("content"))
         text, attachments, notice = self._decompose_videos(user_id, agent_id, chat_id, text, attachments)
         text, attachments = self._transcribe_audio(
             user_id, agent_id, chat_id, text, attachments,
@@ -789,33 +805,103 @@ class ChatService:
         run = _MessageRun(chat_id, text, attachments, stream)
         if notice:
             run.events.put(ChatEvent("notice", text=notice, generation_id=run.generation_id))
-        with slot.state:
-            try:
-                if not conversations.exists_chat(chat_id):
-                    raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id)
-            except ValueError as e:
-                raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from e
-            pending = slot.pending.setdefault(chat_id, deque())
-            same_chat = list(range(len(pending)))
-            active = slot.active.get(chat_id)
-            if active is not None and active.chat_id == chat_id:
-                run.continuation = active.cancellation.cancel()
-            for index in same_chat:
-                pending[index].cancellation.cancel()
-                run.continuation = True
-            if same_chat:
-                pending.insert(same_chat[-1] + 1, run)
-            elif run.continuation:
-                pending.appendleft(run)
+        deadline = monotonic() + _REWIND_WAIT_SECONDS
+        while True:
+            with slot.state:
+                try:
+                    if not conversations.exists_chat(chat_id):
+                        raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id)
+                except ValueError as e:
+                    raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from e
+                if rewind_to is not None and not self._discard_replies(slot, chat_id):
+                    pass  # the cancelled reply is still winding down; its worker needs the state lock to finish
+                else:
+                    if rewind_to is not None:
+                        with slot.lock:
+                            try:
+                                conversations.truncate_from(chat_id, rewind_to)
+                            except FileNotFoundError as e:
+                                raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from e
+                            slot.agents.pop(chat_id, None)  # its context still holds the removed turns
+                    self._enqueue(user_id, agent_id, slot, chat_id, run)
+                    return self._events(run)
+            if monotonic() > deadline:
+                raise AgentBusy("the chat is still replying; try again in a moment")
+            sleep(0.02)
+
+    @staticmethod
+    def _discard_replies(slot: _AgentSlot, chat_id: str) -> bool:
+        """Cancel the chat's active reply and drop its queued ones; True once nothing of it is running."""
+        pending = slot.pending.get(chat_id)
+        while pending:
+            dropped = pending.popleft()
+            dropped.cancellation.cancel()
+            dropped.events.put(None)
+        active = slot.active.get(chat_id)
+        if active is not None:
+            active.cancellation.cancel()
+            return False
+        return True
+
+    def _enqueue(self, user_id: str, agent_id: str, slot: _AgentSlot, chat_id: str, run: _MessageRun) -> None:
+        """Queue a run behind the chat's replies (steering the unfinished one); the caller holds `slot.state`."""
+        pending = slot.pending.setdefault(chat_id, deque())
+        same_chat = list(range(len(pending)))
+        active = slot.active.get(chat_id)
+        if active is not None and active.chat_id == chat_id:
+            run.continuation = active.cancellation.cancel()
+        for index in same_chat:
+            pending[index].cancellation.cancel()
+            run.continuation = True
+        if same_chat:
+            pending.insert(same_chat[-1] + 1, run)
+        elif run.continuation:
+            pending.appendleft(run)
+        else:
+            pending.append(run)
+        if chat_id not in slot.workers:
+            worker = threading.Thread(
+                target=self._work, args=(user_id, agent_id, slot, chat_id), daemon=True,
+            )
+            slot.workers[chat_id] = worker
+            worker.start()
+
+    def _edit_target(self, conversations: ConversationsSource, chat_id: str, index: int) -> dict:
+        """The user turn at a stored index, or an InputError when it is not an editable message."""
+        turns = self._load(conversations, chat_id)
+        if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(turns):
+            raise InputError("that message does not exist in this chat", code="invalid_edit_target")
+        if turns[index].get("role") != "user":
+            raise InputError("only your own messages can be edited", code="invalid_edit_target")
+        return turns[index]
+
+    @staticmethod
+    def _stored_attachments(content: object) -> list[dict]:
+        """Rebuild the attachments of a stored user turn from its non-text content parts."""
+        if not isinstance(content, list):
+            return []
+        attachments = []
+        for part in content:
+            kind = part.get("type") if isinstance(part, dict) else None
+            if kind == "image_url":
+                url = (part.get("image_url") or {}).get("url", "")
+                modality, fmt = "image", url.split(";", 1)[0].removeprefix("data:image/") or "png"
+            elif kind == "video_url":
+                url = (part.get("video_url") or {}).get("url", "")
+                modality, fmt = "video", url.split(";", 1)[0].removeprefix("data:video/") or "mp4"
+            elif kind == "input_audio":
+                audio = part.get("input_audio") or {}
+                fmt = audio.get("format") or "wav"
+                url = f"data:audio/{fmt};base64,{audio.get('data', '')}"
+                modality = "audio"
             else:
-                pending.append(run)
-            if chat_id not in slot.workers:
-                worker = threading.Thread(
-                    target=self._work, args=(user_id, agent_id, slot, chat_id), daemon=True,
-                )
-                slot.workers[chat_id] = worker
-                worker.start()
-        return self._events(run)
+                continue
+            mime = url[5:].split(";", 1)[0] if url.startswith("data:") else f"{modality}/{fmt}"
+            attachments.append({
+                "modality": modality, "name": part.get("name") or f"{modality} {len(attachments) + 1}",
+                "mime_type": mime, "format": fmt[:16], "data_url": url,
+            })
+        return attachments
 
     @staticmethod
     def _transcription_text(transcription: str) -> str:

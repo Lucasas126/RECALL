@@ -49,6 +49,8 @@ class LoginIn(BaseModel):
 class MessageIn(BaseModel):
     content: str = ""
     attachments: list[ChatAttachment] = Field(default_factory=list)
+    # rewind the chat to this stored turn (a user message) and answer `content` in its place
+    edit_index: int | None = Field(default=None, strict=True, ge=0)
 
 
 class ModelIn(BaseModel):
@@ -420,7 +422,10 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
         agent_id: str, chat_id: str, body: MessageIn, user_id: str = Depends(current_user),
     ):
         language = service.language(user_id)
-        command_reply = None if body.attachments else service.dream_command(user_id, agent_id, body.content)
+        command_reply = (
+            None if body.attachments or body.edit_index is not None
+            else service.dream_command(user_id, agent_id, body.content)
+        )
         if command_reply is not None:
             # commands are answered by RECALL itself: not sent to the model, not stored in the chat
             generation_id = uuid4().hex
@@ -432,6 +437,7 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
         events = service.send(
             user_id, agent_id, chat_id, body.content, stream=True,
             attachments=[attachment.model_dump() for attachment in body.attachments],
+            rewind_to=body.edit_index,
         )
 
         def stream() -> Iterator[str]:

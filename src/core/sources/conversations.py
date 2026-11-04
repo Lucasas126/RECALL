@@ -64,6 +64,7 @@ class ChatTitle(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str = Field(min_length=1, max_length=_TITLE_CHARS)
+    generated: bool = False  # written by the naming model (dropped when its source message is rewound)
 
 
 class ChatMetadataError(UserMessageError, RuntimeError):
@@ -162,7 +163,7 @@ class ConversationsSource(Source):
         stored = _normalize_title(title)
         if not stored:
             raise ValueError("chat title is empty")
-        return self._write_title(chat_id, stored)
+        return self._write_title(chat_id, stored, generated=True)
 
     def rename(self, chat_id: str, title: str) -> str:
         """Persist a user-chosen title, replacing any generated one; returns the stored title."""
@@ -174,10 +175,10 @@ class ConversationsSource(Source):
             raise InputError("chat title cannot exceed {limit} characters", limit=_TITLE_CHARS)
         return self._write_title(chat_id, stored)
 
-    def _write_title(self, chat_id: str, title: str) -> str:
+    def _write_title(self, chat_id: str, title: str, *, generated: bool = False) -> str:
         path = self.resolve(f"{chat_id}.title.json")
         try:
-            atomic_write_text(path, ChatTitle(title=title).model_dump_json() + "\n")
+            atomic_write_text(path, ChatTitle(title=title, generated=generated).model_dump_json() + "\n")
         except OSError as exc:
             raise ChatMetadataError("Could not save title for chat {chat_id}.", chat_id=chat_id) from exc
         return title
@@ -196,11 +197,54 @@ class ConversationsSource(Source):
         effort = self.resolve(f"{chat_id}.effort.json")
         title = self.resolve(f"{chat_id}.title.json")
         legacy_transcription = self.resolve(f"{chat_id}.stt.json")  # per-chat STT overrides are no longer read
+        removed = self._removed_path(chat_id)
         path.unlink()
+        removed.unlink(missing_ok=True)
         metadata.unlink(missing_ok=True)
         effort.unlink(missing_ok=True)
         title.unlink(missing_ok=True)
         legacy_transcription.unlink(missing_ok=True)
+
+    def _removed_path(self, chat_id: str) -> Path:
+        return self.resolve(f"{chat_id}.removed.json")
+
+    def truncate_from(self, chat_id: str, index: int) -> list[dict]:
+        """Rewind a chat: keep the turns before `index` and drop that user turn and everything after it.
+
+        `index` is the position of the turn in the stored file, counting every stored turn (tool turns
+        included). Only a user turn can be the target. The dropped turns are appended to the
+        `<chat_id>.removed.json` sidecar so nothing is irrecoverably lost; a generated title is dropped
+        when the first message goes. Returns the dropped turns. The caller must ensure no reply is running.
+        """
+        turns = self.load(chat_id)
+        if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(turns):
+            raise InputError("that message does not exist in this chat", code="invalid_edit_target")
+        if turns[index].get("role") != "user":
+            raise InputError("only your own messages can be edited", code="invalid_edit_target")
+        dropped = turns[index:]
+        sidecar = self._removed_path(chat_id)
+        try:
+            try:
+                history = json.loads(sidecar.read_text(encoding="utf-8"))
+                if not isinstance(history, list):
+                    history = []
+            except (FileNotFoundError, ValueError):
+                history = []
+            history.append({"removed_at": datetime.now().astimezone().isoformat(timespec="seconds"), "turns": dropped})
+            atomic_write_text(sidecar, json.dumps(history, ensure_ascii=False) + "\n")
+            atomic_write_text(
+                self._path(chat_id), "".join(json.dumps(t, ensure_ascii=False) + "\n" for t in turns[:index]),
+            )
+            if index == 0:
+                title = self.resolve(f"{chat_id}.title.json")
+                try:
+                    if ChatTitle.model_validate_json(title.read_text(encoding="utf-8")).generated:
+                        title.unlink(missing_ok=True)
+                except (OSError, UnicodeError, ValidationError):
+                    pass
+        except OSError as exc:
+            raise ChatMetadataError("Could not rewind chat {chat_id}.", chat_id=chat_id) from exc
+        return dropped
 
     def append(self, chat_id: str, role: str, content: str, **extra) -> dict:
         """Append a turn to an existing chat as one JSONL line."""

@@ -2010,6 +2010,7 @@ function updateBusy() {
     li.classList.toggle("generating", Boolean(del) && isGenerating(del.dataset.agent, del.dataset.chat));
   }
   setComposer(Boolean(state.chatId));
+  updateEditButtons();
   updateModelControls();
   if ($("model-dialog").open) renderModelList();
   $("send").innerHTML = state.busy ? ICONS.steer : ICONS.send;
@@ -2085,6 +2086,7 @@ function renderMessages(messages) {
   $("usage").hidden = true;
   for (const m of messages) {
     const view = addMessage(m.role, container);
+    if (m.role === "user" && m.index != null) setEditable(view.el, m.index);
     if (m.reasoning) view.thinking(m.reasoning);
     for (const action of m.actions ?? []) view.action(action);
     if (m.associative_skipped) view.memory({ state: "skipped" });
@@ -2101,6 +2103,108 @@ function renderMessages(messages) {
     }
   }
   scrollDown();
+}
+
+// ------------------------------------------------------------------ editing earlier messages
+
+// Marks a user bubble as editable: `index` is the turn's position in the stored chat file.
+function setEditable(el, index) {
+  el.dataset.index = index;
+  if (el.querySelector(":scope > .msg-edit")) return;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "msg-edit";
+  button.innerHTML = ICONS.pencil;
+  button.title = tr("Edit message");
+  button.setAttribute("aria-label", tr("Edit message"));
+  button.disabled = state.busy || state.modelBusy;
+  button.addEventListener("click", () => startEdit(el));
+  el.prepend(button);
+}
+
+// While a reply streams the edit buttons are disabled (the server could cancel it, but a disabled button is simpler).
+function updateEditButtons() {
+  for (const button of document.querySelectorAll(".msg-edit")) button.disabled = state.busy || state.modelBusy;
+}
+
+// Number of stored messages shown after a bubble (RECALL's own command replies are not stored).
+function messagesAfter(el) {
+  let count = 0;
+  for (let next = el.nextElementSibling; next; next = next.nextElementSibling) {
+    if (next.classList.contains("msg") && !next.classList.contains("command")) count++;
+  }
+  return count;
+}
+
+function startEdit(el) {
+  if (state.busy || state.modelBusy || el.classList.contains("editing")) return;
+  const body = el.querySelector(":scope > .body");
+  const index = Number(el.dataset.index);
+  const form = document.createElement("div");
+  form.className = "msg-edit-form";
+  const field = document.createElement("textarea");
+  field.value = body.textContent;
+  field.rows = Math.min(10, Math.max(2, field.value.split("\n").length));
+  field.setAttribute("aria-label", tr("Edit message text"));
+  const after = messagesAfter(el);
+  const notice = document.createElement("div");
+  notice.className = "msg-edit-notice";
+  notice.setAttribute("role", "status");
+  notice.textContent = after === 0 ? "" : after === 1
+    ? tr("This removes the message after it.") : tr("This removes the {count} messages after it.", { count: after });
+  const actions = document.createElement("div");
+  actions.className = "msg-edit-actions";
+  const save = document.createElement("button");
+  save.type = "button";
+  save.textContent = tr("Save and resend");
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "secondary";
+  cancel.textContent = tr("Cancel editing");
+  actions.append(save, cancel);
+  form.append(field, notice, actions);
+  const close = () => {
+    form.remove();
+    body.hidden = false;
+    el.classList.remove("editing");
+    el.querySelector(":scope > .msg-edit")?.focus();
+  };
+  const submit = () => {
+    const text = field.value.trim();
+    const attachments = [...el.querySelectorAll(".message-attachments .attachment-name")].map((n) => ({ name: n.textContent }));
+    if (!text && !attachments.length) return;
+    if (state.busy || state.modelBusy) return;
+    dispatchMessage(text, [], { index, el, shown: attachments });
+  };
+  save.addEventListener("click", submit);
+  cancel.addEventListener("click", close);
+  field.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+    } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      submit();
+    }
+  });
+  el.classList.add("editing");
+  body.hidden = true;
+  body.after(form);
+  field.focus();
+  field.setSelectionRange(field.value.length, field.value.length);
+}
+
+// Once a reply is stored, give the bubbles added live their stored index so they can be edited too.
+async function syncEditIndexes(request) {
+  const data = await api(chatsUrl(`/${request.chatId}`));
+  if (!isCurrent(request) || isGenerating(request.agentId, request.chatId)) return;
+  const bubbles = [...state.view.querySelectorAll(":scope > .msg.user, :scope > .msg.assistant")]
+    .filter((el) => !el.classList.contains("error-only"));
+  if (bubbles.length !== data.messages.length) return;
+  bubbles.forEach((el, position) => {
+    const m = data.messages[position];
+    if (m.role === "user" && el.classList.contains("user")) setEditable(el, m.index);
+  });
 }
 
 function showUsage(report) {
@@ -2150,6 +2254,7 @@ function addMessage(role, parent = state.view ?? $("messages")) {
     }));
   }
   return {
+    el,
     text(chunk) {
       if (Array.isArray(chunk)) {
         const textParts = chunk.filter((part) => part.type === "text").map((part) => part.text);
@@ -2433,13 +2538,24 @@ $("composer").addEventListener("submit", async (e) => {
   const attachments = state.attachments.splice(0);
   renderPendingAttachments();
   $("input").value = "";
+  await dispatchMessage(content, attachments);
+});
+
+// Sends a message and streams the reply below it. `edit` ({index, el, shown}) rewinds the chat to that
+// stored user message first: its bubble and everything after it disappear and the new text takes its place.
+async function dispatchMessage(content, attachments, edit = null) {
   const key = chatKey(state.agentId, state.chatId);
   state.views.set(key, state.view);
+  if (edit) {
+    while (edit.el.nextElementSibling) edit.el.nextElementSibling.remove();
+    edit.el.remove();
+    $("usage").hidden = true;
+  }
   const userMessage = addMessage("user", state.view);
   userMessage.text(content);
-  userMessage.attachments(attachments);
+  userMessage.attachments(edit ? edit.shown : attachments);
   // /dream commands are answered by RECALL itself (not stored, not the model): shown as a system reply
-  const command = !attachments.length && DREAM_COMMAND.test(content);
+  const command = !edit && !attachments.length && DREAM_COMMAND.test(content);
   const reply = addMessage(command ? "command" : "assistant", state.view);
   const request = {
     userId: state.user.id, agentId: state.agentId, chatId: state.chatId,
@@ -2453,10 +2569,14 @@ $("composer").addEventListener("submit", async (e) => {
   updateBusy();
   scrollDown();
   try {
-    await streamReply(content, attachments, request);
+    await streamReply(content, attachments, request, edit?.index ?? null);
   } catch (err) {
     request.controller.abort();
-    if (sameSession(request) && err.name !== "AbortError") reply.error(err);
+    if (sameSession(request) && err.name !== "AbortError") {
+      reply.error(err);
+      // a rejected edit leaves the server chat as it was: show it again instead of the truncated view
+      if (edit && !command) request.reloadAfter = true;
+    }
   } finally {
     state.requests.delete(request);
     if (sameSession(request)) {
@@ -2469,13 +2589,17 @@ $("composer").addEventListener("submit", async (e) => {
         if (isCurrent(request)) $("input").focus();
         try {
           await refreshChats();
+          if (isCurrent(request)) {
+            if (request.reloadAfter) renderMessages((await api(chatsUrl(`/${request.chatId}`))).messages);
+            else await syncEditIndexes(request);
+          }
         } catch (err) {
           if (isCurrent(request)) reply.error(err);
         }
       }
     }
   }
-});
+}
 
 $("input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
@@ -2484,7 +2608,7 @@ $("input").addEventListener("keydown", (e) => {
   }
 });
 
-async function streamReply(content, attachments, request) {
+async function streamReply(content, attachments, request, editIndex = null) {
   // Serialize acceptance, not generation, so rapid sends reach the service in order.
   const response = state.sendQueue.then(async () => {
     if (!sameSession(request)) throw new DOMException("Session changed", "AbortError");
@@ -2496,6 +2620,7 @@ async function streamReply(content, attachments, request) {
       body: JSON.stringify({
         content,
         attachments: attachments.map(({ size, ...attachment }) => attachment),
+        ...(editIndex == null ? {} : { edit_index: editIndex }),
       }),
       signal: request.controller.signal,
     });
