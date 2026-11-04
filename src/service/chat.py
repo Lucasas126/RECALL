@@ -606,6 +606,30 @@ class ChatService:
                 chats.append({**chat, "agent_id": agent["id"], "agent_name": agent["name"]})
         return sorted(chats, key=lambda chat: chat["updated"], reverse=True)
 
+    def latest_chat(self, user_id: str) -> Optional[dict]:
+        """The user's most recently active chat across all agents (with `agent_id`/`agent_name`), or None."""
+        chats = self.list_all_chats(user_id)
+        return chats[0] if chats else None
+
+    def chat_summary(self, user_id: str, agent_id: str, chat_id: str) -> dict:
+        """The summary (title, turns, last activity) of one chat."""
+        conversations = self._conversations(user_id, agent_id)
+        self._load(conversations, chat_id)
+        return conversations.summary(chat_id, self._retention_days(user_id))
+
+    def discard_chat(self, user_id: str, agent_id: str, chat_id: str, *, wait: float = 5.0) -> None:
+        """Cancel the chat's active and queued replies, wait for them to stop, then delete the chat."""
+        slot = self._slot(user_id, agent_id)
+        deadline = monotonic() + wait
+        while True:
+            with slot.state:
+                if self._discard_replies(slot, chat_id) and not self._chat_busy(slot, chat_id):
+                    break
+            if monotonic() > deadline:
+                raise AgentBusy("the chat is still replying; try again in a moment")
+            sleep(0.02)
+        self.delete_chat(user_id, agent_id, chat_id)
+
     def create_chat(self, user_id: str, agent_id: str, *, disposable: bool = False) -> dict:
         """Create a chat, discarding any other unused empty ones so they never pile up.
 

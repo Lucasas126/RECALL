@@ -283,7 +283,7 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_chat_selector_expires_when_the_current_chat_changes(self) -> None:
         await self.open_panel(select_model)
-        await new_chat(self.update, self.context)
+        self.session.chat_id = "another-chat"
         query = await self.press("pick:0")
         self.assertIn("expired", query.answer.await_args.args[0])
         self.service.set_chat_model.assert_not_called()
@@ -325,6 +325,7 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_newchat_reads_preferred_agent_saved_by_another_channel(self) -> None:
         self.preferences["agent_id"] = "agent-b"
+        self.service.list_agents.return_value = [{"id": "agent-b", "name": "Second"}]  # one agent: no picker
         await new_chat(self.update, self.context)
         self.service.create_chat.assert_called_once_with("test-user", "agent-b")
         self.assertEqual((self.session.agent_id, self.session.chat_id), ("agent-b", "new-chat"))
