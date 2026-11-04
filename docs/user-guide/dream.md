@@ -309,7 +309,7 @@ dream:
   notify_telegram: false     # "dream session completed" + where to see it in the web
 folders: []                  # user folders, edited in the agent's Folders tab (see [files and media](files-and-media.md) and [memory](memory.md))
 memory_limits:
-  memory_chars: 4000
+  memory_chars: 2500
   user_chars: 2500
 ```
 
