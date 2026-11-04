@@ -31,13 +31,16 @@ Telegram resumes your most recently active chat (of any agent) when you write
 within `telegram.chat_idle_minutes` (default 60; the local environment variable
 `RECALL_TELEGRAM_CHAT_IDLE_MINUTES` overrides it) of its last activity, even
 right after the bot restarts. It creates a new chat when the last activity is
-older than that or there is no chat yet. The first assistant
-message in each automatically created chat begins with bold-italic
-`New chat started`.
+older than that or there is no chat yet. Every assistant reply starts with the
+agent's name in **bold** on its own line (only the final message, placed right
+before the answer and after any thinking or tool lines; never in streamed drafts,
+and only on the first message when a long reply is split).
 `/newchat` (also `/new`) opens a picker with your agents (the current one is
 marked ✅) and **✖ Cancel (keep current chat)**. Choosing an agent saves it as
 the active agent, creates a chat with it and closes the picker; Cancel changes
-nothing. With only one agent the chat is created directly.
+nothing. With only one agent the chat is created directly. The confirmation
+(`New chat created with **Agent**.` and `Model: _Provider · model_ (Agent default)`)
+is formatted: bold agent name, italic model.
 When a message starts a new chat because of the idle time (not after
 `/newchat`, and not for the very first chat), the bot does not answer at once:
 it creates the new chat and sends a short message with two buttons,
@@ -53,7 +56,7 @@ during the wait, the pending one is answered first in the new chat and the new
 one follows. A tap after that answers "This option expired.". The pending
 message, including downloaded attachments, is kept in memory only during the
 wait.
-`/selectmodel` and `/selectagent` open the same kind of inline
+`/selectmodel` opens the same kind of inline
 panel as `/settings`: buttons send callbacks instead of chat messages, and the
 bot edits the panel in place for pagination. Choosing an option saves it and
 replaces the panel with a short confirmation; **Close** only removes the
@@ -74,12 +77,13 @@ and leave the panel open.
 Telegram text, image, audio, voice, video, and supported media-document
 messages are sent through `ChatService` with real provider streaming. Sending
 another message to the active chat steers the generation through the service's
-normal cancellation and continuation behavior. `/selectagent` changes the
-active agent and persists the selection. The **Active agent** option inside
-`/settings` offers the same choice within the settings panel, so `/selectagent`
-need not be typed. Both paths leave the previous chat on its original agent and clear
-the channel's current chat; `/newchat` or the next message creates a chat for
-the selected agent. An already-running reply is not rerouted or interrupted.
+normal cancellation and continuation behavior. `/selectagent` ("Choose the agent
+for a new chat") is the same picker as `/newchat`: choosing an agent saves it as
+the active agent and immediately creates a fresh chat with it, so you never keep
+talking to the previous agent. The **Active agent** option inside `/settings`
+does the same and closes the panel with the new-chat confirmation. The previous
+chat stays on its original agent. An already-running reply is not rerouted or
+interrupted.
 When enabled in `/settings`, thinking tokens stream into expandable blockquotes,
 while normal text is rendered with Telegram entities converted from Markdown.
 Completed tool calls are shown in italics as literal

@@ -139,7 +139,7 @@ implemented. Visibility is enforced by channel renderers without changing
 reasoning generation, stored history or service events. Telegram captures each
 reply's user/agent/chat before asynchronous delivery, so changing a session
 cannot reroute an accepted message. The settings agent option changes the
-active Telegram agent like `/selectagent`, rather than just saving a future
+active Telegram agent and starts a fresh chat with it (like `/selectagent`), rather than just saving a future
 preference. Web agent switching is the chat header's agent banner, which shows the active agent's name and switches agent when clicked.
 English/Spanish operational notices and
 application errors use a shared translation catalog served to the browser.
