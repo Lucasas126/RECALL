@@ -93,6 +93,11 @@ names the variables (never their values). Remove them to use the login.
 2. Log in as the account RECALL runs as: `claude auth login`. For a separate login
    folder, run `CLAUDE_CONFIG_DIR=<dir> claude auth login` and set
    `claude_config_dir: <dir>` below.
+   **Docker**: the image already contains the CLI (step 1 is not needed); log each user in inside the container
+   with their own account, using a folder under the config volume:
+   `docker compose exec -it recall-web sh -c 'CLAUDE_CONFIG_DIR=/app/.config/<user_id>/claude-login claude auth login'`
+   and `claude_config_dir: /app/.config/<user_id>/claude-login`. See
+   [deployment](../deployment/docker.md#claude-subscription-logins).
 3. Pick Claude in the model picker: its **Claude subscription** tab becomes
    selectable once `claude` is found and logged in (see
    [providers](models-and-providers.md#providers)); until then the tab is disabled and says why.

@@ -9,19 +9,22 @@ and, if you want, on Telegram.
 
 ## 1. Your account (Administrator)
 
-The administrator creates your user; there is no sign-up page.
+The administrator creates your user; there is no sign-up page. The simplest way is the admin command (on Docker, run it
+inside the container):
 
-1. Copy `.config/example_user/` to `.config/<user_id>/` and edit `user.yaml` (all keys: [user.yaml reference](../reference/user-yaml.md)).
-2. Put your OpenRouter key in an environment variable on the server (for example `OPENROUTER_<USER>_API_KEY` in `.env`) and set
-   `provider.api_key` in `user.yaml` to the **name** of that variable, never the key itself.
-3. Generate your password hash and paste it as `password_hash`:
+```bash
+docker compose exec -it recall-web python -m src.admin create-user <user_id> --name "<Your Name>" --api-key-env OPENROUTER_<USER>_API_KEY
+# without Docker: uv run python -m src.admin create-user <user_id> ...
+```
 
-   ```bash
-   uv run python -m src.web.auth
-   ```
+It asks for a password of at least 8 characters (typed twice, never shown) or, with `--generate`, creates a strong one and
+prints it once. Add `--claude-login` if the user will use their own Claude account (section 6). It never asks for the API key:
+put it in `.env` under the variable name you gave (`provider.api_key` holds only that **name**). To change a password later:
+`python -m src.admin set-password <user_id>`. Telegram: add `<telegram_id>=<user_id>` to `TELEGRAM_ALLOWED_USERS` in `.env`.
+The by-hand alternative is to copy `.config/example_user/` to `.config/<user_id>/` and edit `user.yaml`
+([user.yaml reference](../reference/user-yaml.md)); the hash then comes from `uv run python -m src.web.auth`.
 
-   Choose a password of at least 8 characters; it is typed twice and never shown.
-4. Restart the web UI so the new user is picked up. The administrator then tells you your user id and password through a private
+Restart the web UI so the new user is picked up. The administrator then tells you your user id and password through a private
    channel.
 
 ## 2. Log in on the web
@@ -80,7 +83,10 @@ If you have a Claude Pro/Max account you can use it for Claude models. It must b
 
 3. Open the model picker: the **Claude** tab becomes selectable once the login works.
 
-Claude Code must be installed on the server and this does not work in the Docker image. Read
+On a Docker server the Claude program is already in the image: the administrator creates your login folder under
+`/app/.config/<user_id>/claude-login` and you sign in once with the command in
+[deployment](../deployment/docker.md#claude-subscription-logins) (a URL to open in your browser, then a code to paste).
+Otherwise Claude Code must be installed on the server. Read
 [Claude subscription](../user-guide/claude-subscription.md) for the terms and limits; this route is not zero-data-retention.
 
 ## 7. Connect Telegram (optional)

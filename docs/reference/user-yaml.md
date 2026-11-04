@@ -218,13 +218,30 @@ resetting preferences. A removed agent can be replaced with a valid selection
 or reset with `{"agent_id": null}`. Neither user YAML nor model favorites are
 rewritten.
 
+## creating users (administrator)
+
+Instead of hand-editing, run inside the container (or `python -m src.admin ...` on a plain install):
+
+```bash
+docker compose exec -it recall-web python -m src.admin create-user <user_id> [--name N] [--language en] \
+    [--api-key-env VAR] [--claude-login] [--generate]
+docker compose exec -it recall-web python -m src.admin set-password <user_id> [--generate]
+```
+
+`create-user` writes a valid `user.yaml` with the default `models`, `agents: []`, an Argon2 `password_hash` and
+`provider.api_key` set to the variable NAME (`OPENROUTER_API_KEY` by default; the key is never asked for or
+stored). `--claude-login` sets `claude_subscription.claude_config_dir` to `<config dir>/<user_id>/claude-login`.
+The password is typed twice (hidden) or generated (`--generate`, 24 characters, printed once); passwords shorter
+than 8 characters or trivially weak are refused, and an existing user is never overwritten. `set-password` rewrites
+only `password_hash`; YAML comments in the file are lost. See [deployment](../deployment/docker.md#users-and-passwords).
+
 ## example
 
 ```yaml
 # .config/<user_id>/user.yaml
 id: johndoe
 name: John Doe
-password_hash: "$argon2id$..."          # web login; generate it with `uv run python -m src.web.auth`
+password_hash: "$argon2id$..."          # web login; create it with `python -m src.admin set-password <user_id>`
 language: en
 require_zdr: false                      # optional; true requires zero-data-retention routes everywhere
 provider:

@@ -161,6 +161,52 @@ host.
 The image sets `RECALL_WEB_HOST=0.0.0.0` so the web UI accepts connections on
 the published port (see [web authentication](../reference/settings-yaml.md#web-authentication)).
 
+## users and passwords
+
+Create users inside the running container instead of hand-editing YAML (the password is typed twice, hidden, or
+generated with `--generate` and printed once; it is never an argument and never stored in clear):
+
+```bash
+docker compose exec -it recall-web python -m src.admin create-user <user_id> --name "Ana" --api-key-env OPENROUTER_ANA_API_KEY
+docker compose exec -it recall-web python -m src.admin create-user <user_id> --generate --claude-login
+docker compose exec -it recall-web python -m src.admin set-password <user_id>
+```
+
+The command writes `/app/.config/<user_id>/user.yaml` (no agents; the user creates the first one in the web UI),
+refuses to overwrite an existing user, and prints the next steps: put the provider key in `.env` under the
+variable name given (the key itself is never asked for), and add `<telegram_id>=<user_id>` to
+`TELEGRAM_ALLOWED_USERS` yourself. `set-password` keeps the other keys but YAML comments are lost. Restart the
+services afterwards if they were running.
+
+## claude subscription logins
+
+The image contains the Claude Code CLI, but each person logs in with **their own** Claude account, in their own
+folder, inside the persisted config volume:
+
+1. Create the user with `--claude-login` (above), or add to their `user.yaml`
+   `claude_subscription: {claude_config_dir: /app/.config/<user_id>/claude-login}`.
+2. Log in inside the container (headless flow: it prints a URL, open it in any browser, sign in as that person,
+   paste the code back):
+
+   ```bash
+   docker compose exec -it recall-web sh -c 'CLAUDE_CONFIG_DIR=/app/.config/<user_id>/claude-login claude auth login'
+   ```
+
+   The container user is `app`, so the folder is created with the right owner. Check with
+   `... claude auth status` using the same `CLAUDE_CONFIG_DIR`.
+3. No restart is needed; the Claude tab of the model picker becomes selectable.
+
+Why it persists: with `CLAUDE_CONFIG_DIR` set, the CLI keeps its credentials (`.credentials.json`) and its
+settings (`.claude.json`) inside that folder, which lives under the `/app/.config` volume, so it survives image
+updates (Watchtower) and container recreation. Without `CLAUDE_CONFIG_DIR` it would write to `/app/.claude`, which
+is not a volume and is lost on update; RECALL's guard (`claude_subscription.default_login_users`) already refuses
+the CLI default login for users without their own folder, so `HOME` is deliberately not redirected.
+
+Rules: never copy a login between users or machines. Copying `.credentials.json` from another machine is not
+recommended: the refresh tokens rotate, so the two copies invalidate each other. Treat the folder like a password
+(back it up like `config/`, `chmod 700`). To log a user out, run `claude auth logout` with the same variable or
+delete the folder. Terms and limits: [Claude subscription](../user-guide/claude-subscription.md).
+
 ## image contents
 
 - Python 3.12 slim with the locked dependencies (`uv sync --frozen --no-dev`).
@@ -168,6 +214,10 @@ the published port (see [web authentication](../reference/settings-yaml.md#web-a
   `pdf.ocr_languages: eng+spa` ([Tesseract OCR](../user-guide/files-and-media.md#tesseract-ocr)). Other
   languages need a custom image.
 - `ffmpeg`/`ffprobe` for [video input](../user-guide/files-and-media.md#video-input).
+- Node.js 22 (the `node` binary only, from the official `node:22-slim` image) and the Claude Code CLI, pinned by
+  the `CLAUDE_CODE_VERSION` build argument of the `Dockerfile` (currently 2.1.316) and installed in `/opt/claude`,
+  which is on `PATH`. Used only by the [Claude subscription provider](#claude-subscription-logins);
+  RECALL never updates it, a new release of the image bumps it.
 - Runs as the non-root user `app` (uid/gid 1000).
 - Healthcheck: `GET /` on port 8000 (the static page; no login needed). The
   Telegram service disables it because it has no HTTP server.
@@ -179,9 +229,9 @@ the published port (see [web authentication](../reference/settings-yaml.md#web-a
   Its sign-in also redirects to `localhost` on the RECALL host, which a browser
   on another machine cannot reach. Supporting it needs Node.js in the image and
   a way to complete the OAuth flow remotely.
-- **Claude subscription provider** ([experimental](../user-guide/claude-subscription.md)): the
-  image has no Node.js, no Claude Code CLI and no Claude login, so
-  `claude_subscription:` models fail there. Run RECALL on the host to use it.
+- **Claude subscription provider** ([experimental](../user-guide/claude-subscription.md)): the image has
+  the CLI but no login; each user needs their own, see [Claude subscription logins](#claude-subscription-logins).
+  Without it, `claude_subscription:` models are refused for that user.
 - The web UI is plain HTTP and its session cookie is not marked `Secure`. Keep it
   on the LAN or a VPN, or put an HTTPS reverse proxy in front.
 - amd64 only. Add `linux/arm64` to the workflow `platforms` for ARM servers.
