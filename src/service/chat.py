@@ -21,7 +21,7 @@ from src.agent.tools import chat_folder_options
 from src.agent.dream import DEFAULT_DREAM_PROMPT
 from src.config.agents import AgentStore
 from src.config.favorites import ModelFavorites
-from src.config.loader import load_agent, load_agent_config, load_user, user_models
+from src.config.loader import agent_default_model, load_agent, load_agent_config, load_user, user_models
 from src.config.model_refs import CLAUDE_SUBSCRIPTION, OPENROUTER, PROVIDERS, is_claude_subscription, model_name, provider_of
 from src.config.models import (
     AgentConfig, DreamConfig, FolderConfig, MemoryLimits, ReasoningEffort, ResolvedAgent, UserConfig,
@@ -348,19 +348,34 @@ class ChatService:
         """An agent's config as the API shows it (the personality is SOUL.md, served by the soul routes)."""
         return config.model_dump(mode="json")
 
+    def _check_agent_model(self, user: UserConfig, config: AgentConfig, current: str | None) -> AgentConfig:
+        """Validate a new or changed agent default model (provider usable, model offered, ZDR policy).
+
+        An unchanged value is kept as it is, so a model retired since it was chosen never blocks saving the
+        agent's other settings. Returns the config with the model in its canonical form.
+        """
+        model = config.chat_config.model
+        if model is None or model == current:
+            return config
+        agent_default_model(user, config)
+        canonical = self._check_model(user, model, "chat")
+        return config.model_copy(update={"chat_config": config.chat_config.model_copy(update={"model": canonical})})
+
     def create_agent(self, user_id: str, config: AgentConfig) -> dict:
         """Create an agent; its personality is written afterwards to SOUL.md through `update_soul`."""
-        self._user(user_id)
+        user = self._user(user_id)
         self._check_mcp(config)
         self._check_folders(config.folders)
+        config = self._check_agent_model(user, config, None)
         created = self._agents.create(user_id, config)
         return self._agent_view(user_id, created)
 
     def update_agent(self, user_id: str, agent_id: str, config: AgentConfig) -> dict:
         """Save an idle agent's configuration; a changed id also moves its data folder and preference."""
-        self._owned_agent(user_id, agent_id)
+        user = self._owned_agent(user_id, agent_id)
         self._check_mcp(config)
         self._check_folders(config.folders)
+        config = self._check_agent_model(user, config, self._agent_config(user_id, agent_id).chat_config.model)
         slot = self._slot(user_id, agent_id)
         with slot.state:
             if slot.active or slot.pending:
@@ -584,8 +599,12 @@ class ChatService:
         except (FileNotFoundError, ValueError) as exc:
             raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
         user = self._user(user_id)
+        agent_full = self._agent_config(user_id, agent_id)
+        agent_default = agent_full.chat_config.model
+        # an unusable agent default is reported (and fails the next reply), never an error of this read
         defaults = user_models(user, self._preferences)
-        effective = selection.id if selection is not None else defaults.chat
+        effective = selection.id if selection is not None else (agent_default or defaults.chat)
+        source = "chat" if selection is not None else "agent" if agent_default else "user"
         provider = provider_of(effective, user.provider.name)
         model = {
             "provider": provider,
@@ -593,11 +612,15 @@ class ChatService:
             "zdr": chat_zdr(user.require_zdr, effective, selection.zdr if selection is not None else None),
             "require_zdr": user.require_zdr,
         }
-        agent_config = self._agent_config(user_id, agent_id).chat_config
+        agent_config = agent_full.chat_config
         effort = self._reasoning_effort_override(conversations, chat_id)
         return {
             "model": model,
             "model_override": selection.model_dump(exclude_none=True) if selection else None,
+            # where the effective model comes from: the chat's own selection, the agent's default or the user's
+            "model_source": source,
+            "agent_default_model": agent_default,
+            "user_default_model": defaults.chat,
             "stt_model": defaults.stt,
             "reasoning_effort": {
                 "override": effort,
@@ -693,7 +716,9 @@ class ChatService:
                     raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
                 # an effort the new model does not support would be sent to it; drop it
                 if self._reasoning_effort_override(conversations, chat_id) is not None:
-                    effective = model_id or user_models(self._user(user_id), self._preferences).chat
+                    effective = model_id or user_models(
+                        self._user(user_id), self._preferences, self._agent_config(user_id, agent_id), check=False,
+                    ).chat
                     if self._reasoning_effort_supported(self._user(user_id), effective) is False:
                         conversations.set_reasoning_effort(chat_id, None)
                 slot.agents.pop(chat_id, None)
@@ -801,8 +826,8 @@ class ChatService:
             selection = conversations.model_selection(chat_id)
         except (FileNotFoundError, ValueError) as exc:
             raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
-        resolved = load_agent(user_id, agent_id)
-        chat_model = selection.id if selection else user_models(self._user(user_id), self._preferences).chat
+        resolved = load_agent(user_id, agent_id, check_agent_model=False)
+        chat_model = selection.id if selection else resolved.models.chat  # the agent's default, else the user's
         supported = model_provider(resolved, chat_model).supported_modalities(chat_model)
         if "video" in supported or "image" not in supported:
             return text, attachments, None
@@ -871,7 +896,7 @@ class ChatService:
         if not audio:
             return text, attachments
         self._require_chat(self._conversations(user_id, agent_id), chat_id)
-        resolved = load_agent(user_id, agent_id)
+        resolved = load_agent(user_id, agent_id, check_agent_model=False)
         transcription_model = user_models(self._user(user_id), self._preferences).stt
         if provider_of(transcription_model, resolved.provider_name) != OPENROUTER:
             raise InputError("audio messages require an OpenRouter speech-to-text model")
@@ -963,7 +988,11 @@ class ChatService:
             if agent is None:
                 agent = self._agent_factory(user_id, agent_id, run.chat_id)
                 slot.agents[run.chat_id] = agent
-        agent.refresh_user_models(user_models(self._user(user_id), self._preferences))
+        # the agent's default model is checked (ZDR policy) only for a chat that does not choose its own
+        inherits = self._conversations(user_id, agent_id).model_selection(run.chat_id) is None
+        agent.refresh_user_models(user_models(
+            self._user(user_id), self._preferences, self._agent_config(user_id, agent_id), check=inherits,
+        ))
         agent.config.language = self.language(user_id)
         try:
             result = agent.invoke(
@@ -1234,7 +1263,7 @@ class ChatService:
 
     def _agent_index(self, user_id: str, agent_id: str) -> VectorIndex:
         self._owned_agent(user_id, agent_id)
-        config = load_agent(user_id, agent_id)
+        config = load_agent(user_id, agent_id, check_agent_model=False)
         sources = SourceRegistry.for_agent(config.user_id, config.id, **chat_folder_options(config))
         return self._index_factory(config, sources)
 

@@ -350,6 +350,14 @@ class ChatConfig(BaseModel):
     # suggest relevant fragments from long-term memory each turn (true/false are accepted for llm/off)
     associative_memory: AssociativeMode = "llm"
     associative_execution: AssociativeExecution = "parallel"
+    # the agent's default chat model (`<provider>:<model>` or a bare id of the main provider); None follows the
+    # user's default. A model chosen inside a chat still wins over it.
+    model: Optional[str] = Field(default=None, strict=True, min_length=1, max_length=256)
+
+    @field_validator("model")
+    @classmethod
+    def _valid_model_reference(cls, value: Optional[str]) -> Optional[str]:
+        return None if value is None else validate_reference(value)
 
     @field_validator("tool_groups")
     @classmethod

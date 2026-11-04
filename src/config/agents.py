@@ -20,6 +20,10 @@ class AgentConfigError(UserMessageError, ValueError):
     """An agent configuration could not be read, validated or saved."""
 
 
+class AgentModelError(AgentConfigError):
+    """An agent's default chat model cannot be used under the user's policy."""
+
+
 class AgentConflict(AgentConfigError):
     """An agent id, file or data folder is already in use."""
 

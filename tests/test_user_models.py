@@ -29,6 +29,9 @@ class UserModelDefaultsTests(models_tests.ModelFixture):
                     self.assertEqual(response.json(), {
                         "model": {"id": "vendor/beta", "provider": "openrouter", "zdr": False, "require_zdr": True},
                         "model_override": {"id": "vendor/beta", "provider": "openrouter", "zdr": False},
+                        "model_source": "chat",
+                        "agent_default_model": None,
+                        "user_default_model": "vendor/default",
                         "stt_model": "openai/whisper-large-v3-turbo",
                         "reasoning_effort": {
                             "override": None, "default": "medium", "effective": "medium",

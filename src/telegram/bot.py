@@ -303,6 +303,26 @@ def _effort_view(
     )
 
 
+_SOURCE_LABELS = {"chat": "Chat override", "agent": "Agent default", "user": "User default"}
+
+
+def _model_source(chat: dict[str, Any]) -> str:
+    """Where a chat's effective model comes from: `chat`, `agent` or `user`."""
+    source = chat.get("model_source")
+    if source in _SOURCE_LABELS:
+        return source
+    return "user" if chat.get("model_override") is None else "chat"
+
+
+def _agent_default_model(service: ChatService, session: TelegramSession, agent_id: str | None = None) -> str | None:
+    """The agent's default chat model, or None when it follows the user default (or cannot be read)."""
+    try:
+        model = service.get_agent(session.user_id, agent_id or session.agent_id)["chat_config"].get("model")
+    except (ServiceError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+    return model if isinstance(model, str) and model else None
+
+
 def _panel_view(
     service: ChatService, session: TelegramSession, panel: _Panel,
 ) -> tuple[str, InlineKeyboardMarkup]:
@@ -326,7 +346,7 @@ def _panel_view(
         return _msg(session, "Choose the agent for new and incoming messages:"), InlineKeyboardMarkup([*rows, tail])
     if panel.view in _CHAT_VIEWS:
         chat = service.get_chat_models(session.user_id, panel.agent_id, panel.target_chat)
-        header = _msg(session, "User default" if chat["model_override"] is None else "Chat override")
+        header = _msg(session, _SOURCE_LABELS[_model_source(chat)])
         current = chat["model"]["id"]
     else:
         preferences = service.get_preferences(session.user_id)
@@ -336,6 +356,12 @@ def _panel_view(
             if panel.view == "llm" else
             _msg(session, "Choose the user's default STT model. This does not set a chat override.")
         )
+        agent_default = _agent_default_model(service, session) if panel.view == "llm" else None
+        if agent_default:
+            header += "\n" + _msg(
+                session, "The active agent has its own default model ({model}); it takes precedence over this one.",
+                model=agent_default,
+            )
     if panel.view in ("llm", "chat_llm"):
         zdr = service.require_zdr(session.user_id)
         rows, pages = _paged_rows(session, panel, lambda model, index: _llm_label(model, index, current, panel.favorites, zdr))
@@ -356,7 +382,8 @@ def _panel_view(
                     if service.require_zdr(session.user_id, "stt") else "Current STT model: {model}\n\nPage {page}/{pages}. {count} models available.\nChoose a speech-to-text model. Prices are USD per 1 million input tokens:",
                     model=current, page=panel.page + 1, pages=pages, count=len(panel.items))
     if panel.view in _CHAT_VIEWS:
-        rows.insert(0, [_panel_button(panel, _msg(session, "Use user default"), "inherit")])
+        label = "Use agent default" if chat.get("agent_default_model") else "Use user default"
+        rows.insert(0, [_panel_button(panel, _msg(session, label), "inherit")])
     return f"{header}\n\n{body}", InlineKeyboardMarkup([*rows, tail])
 
 
@@ -399,6 +426,8 @@ def _apply_panel_action(
         panel.page = int(argument)
     elif kind == "inherit" and panel.view == "chat_llm":
         service.set_chat_model(session.user_id, panel.agent_id, panel.target_chat, None)
+        if _agent_default_model(service, session, panel.agent_id):
+            return _msg(session, "This chat now uses the agent's default LLM model.")
         return _msg(session, "This chat now uses the user's default LLM model.")
     elif kind == "pick" and panel.view == "chat_effort" and argument.isdigit() and int(argument) < len(panel.items):
         item = panel.items[int(argument)]
@@ -749,7 +778,7 @@ async def show_model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await update.effective_message.reply_text(
         _msg(session, "Current chat model:\n{model_id}", model_id=_with_provider(model.get("provider"), model["id"]))
         + ("\n\n" + zdr_line if zdr_line else "")
-        + "\n" + _msg(session, "User default" if chat["model_override"] is None else "Chat override"),
+        + "\n" + _msg(session, _SOURCE_LABELS[_model_source(chat)]),
     )
 
 

@@ -242,7 +242,8 @@ class Agent:
         cls, user_id: str, agent_id: Optional[str] = None, chat_id: Optional[str] = None,
         mcp: McpManager | None = None,
     ) -> "Agent":
-        config = load_agent(user_id, agent_id)
+        # an agent default the ZDR policy forbids is checked per chat by the service, where a chat's own model wins
+        config = load_agent(user_id, agent_id, check_agent_model=False)
         provider = main_provider(config)
         sources = SourceRegistry.for_agent(config.user_id, config.id, **chat_folder_options(config))
         profile = load_profile(sources, config.memory_limits)

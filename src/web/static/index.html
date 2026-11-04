@@ -120,6 +120,15 @@
           <div id="agent-panel-advanced" class="agent-panel" hidden>
             <fieldset class="agent-behavior">
               <legend id="agent-behavior-label">Chat behavior</legend>
+              <label>
+                <span id="agent-model-label">Default model</span>
+                <span class="inline-row">
+                  <input id="agent-model" maxlength="256" placeholder="Your default model" autocomplete="off">
+                  <button id="agent-model-browse" type="button">Browse</button>
+                  <button id="agent-model-clear" type="button">Clear</button>
+                </span>
+                <span id="agent-model-hint" class="model-note">Empty follows your default model. A model chosen inside a chat still takes precedence.</span>
+              </label>
               <label class="model-filter"><input id="agent-stream" type="checkbox">
                 <span id="agent-stream-label">Stream replies</span></label>
               <label class="model-filter"><input id="agent-memory" type="checkbox">
@@ -273,7 +282,7 @@
                   <input id="dream-model" maxlength="256" placeholder="Your chat model" autocomplete="off">
                   <button id="dream-model-browse" type="button">Browse</button>
                 </span>
-                <span id="dream-model-hint" class="model-note">Empty uses your default chat model.</span>
+                <span id="dream-model-hint" class="model-note">Empty uses the agent's default chat model, else yours.</span>
               </label>
               <label>
                 <span id="dream-effort-label">Reasoning effort</span>
@@ -466,7 +475,7 @@
     <details id="model-info" class="model-disclosure">
       <summary>Information</summary>
       <p id="model-scope-note" class="model-note">Choosing a model for a chat sets only that chat's override.
-        Use user default removes it. Defaults in Settings are saved with Save settings.
+        The default entry removes it (the agent's default model, else yours). Defaults in Settings are saved with Save settings.
         Favorites are shared across your agents.</p>
       <p class="model-note">Prices are starting rates in USD per 1M tokens; provider,
         context tiers, caching and extras may change charges.</p>
