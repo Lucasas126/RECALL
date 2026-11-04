@@ -9,6 +9,8 @@ from typing import Iterator, Optional, Union
 
 import src.providers.openrouter  # noqa: F401  (registers the openrouter provider)
 import src.providers.ollama  # noqa: F401  (registers the ollama provider)
+from src.config.model_refs import CLAUDE_SUBSCRIPTION, is_claude_subscription, prefix_of, provider_of
+from src.providers.routing import provider_for
 from src.agent import usage
 from src.agent import associative
 from src.agent.profile import AgentProfile, load_profile, system_prompt
@@ -90,11 +92,37 @@ def _dedupe_tool_calls(tool_calls: list[dict]) -> list[dict]:
     return out
 
 
+def provider_settings(config: ResolvedAgent) -> dict:
+    """The user's provider settings, as `provider_for` takes them."""
+    return {
+        "main": config.provider_name, "main_api_key": config.api_key, "openrouter": config.openrouter,
+        "ollama": config.ollama, "claude": config.claude_subscription,
+    }
+
+
+def named_provider(config: ResolvedAgent, name: str, purpose: str) -> LLMProvider:
+    """The provider `name` with this user's settings; raises ProviderUnavailable when it cannot be used."""
+    return provider_for(name, purpose=purpose, **provider_settings(config))
+
+
+def main_provider(config: ResolvedAgent) -> LLMProvider:
+    """The user's main provider, which serves bare model ids."""
+    return named_provider(config, config.provider_name, "the main provider")
+
+
 def embeddings_provider(config: ResolvedAgent, chat_provider: LLMProvider) -> LLMProvider:
-    """The provider used for embeddings, reusing the chat provider when identical."""
+    """The provider used for embeddings: a `<provider>:` prefix, else `embeddings_provider`, else the main one."""
+    named = prefix_of(config.models.embeddings)
+    if named is not None:
+        return named_provider(config, named, "models.embeddings")
     if config.embeddings_provider_name == config.provider_name and config.embeddings_api_key == config.api_key:
         return chat_provider
     return get_provider(config.embeddings_provider_name, api_key=config.embeddings_api_key)
+
+
+def model_provider(config: ResolvedAgent, model: str) -> LLMProvider:
+    """The provider serving a model reference: its `<provider>:` prefix, else the user's main provider."""
+    return named_provider(config, provider_of(model, config.provider_name), f"the model {model}")
 
 
 class Agent:
@@ -109,6 +137,9 @@ class Agent:
         self._default_chat_model = config.models.chat
         self._default_reasoning_effort = config.reasoning_effort
         self.provider = provider
+        # the user's main provider (embeddings, bare model ids); a `<provider>:` model switches `provider`
+        self._base_provider = provider
+        self._providers: dict[str, LLMProvider] = {config.provider_name: provider}
         self._mcp = mcp
         # per-agent access to the data plane (mind palace, conversations, own files, user folders)
         self.sources = sources or SourceRegistry.for_agent(config.user_id, config.id, **chat_folder_options(config))
@@ -147,12 +178,11 @@ class Agent:
         elif not conversations.exists_chat(chat_id):
             raise FileNotFoundError(f"chat not found: {chat_id}")
         selection = conversations.model_selection(chat_id)
-        if selection is not None and selection.provider != self.config.provider_name:
-            raise ValueError("this chat's model requires the OpenRouter chat provider")
         model = selection.id if selection is not None else self._default_chat_model
-        self.zdr_required = selection.zdr if selection is not None else True
+        self.zdr_required = selection.zdr if selection is not None else not is_claude_subscription(model)
         if model != self.config.models.chat:
             self._max_context = None
+        self._route_provider(model)
         self.config.models = self.config.models.model_copy(update={"chat": model})
         effort = conversations.reasoning_effort_selection(chat_id)
         self.config.reasoning_effort = effort.effort if effort is not None else self._default_reasoning_effort
@@ -202,8 +232,9 @@ class Agent:
             self._max_context = None
             self._ctx_input_tokens = None
             self._prev_breakdown = None
+        self._route_provider(model)
         self.config.models = self.config.models.model_copy(update={"chat": model, "stt": models.stt})
-        self.zdr_required = selection.zdr if selection else True
+        self.zdr_required = selection.zdr if selection else not is_claude_subscription(model)
 
     @classmethod
     def from_config(
@@ -211,7 +242,7 @@ class Agent:
         mcp: McpManager | None = None,
     ) -> "Agent":
         config = load_agent(user_id, agent_id)
-        provider = get_provider(config.provider_name, api_key=config.api_key)
+        provider = main_provider(config)
         sources = SourceRegistry.for_agent(config.user_id, config.id, **chat_folder_options(config))
         profile = load_profile(sources, config.memory_limits)
         logger.debug(
@@ -252,7 +283,21 @@ class Agent:
         self.messages[0] = {"role": "system", "content": self._system_prompt()}
 
     def _embeddings_provider(self) -> LLMProvider:
-        return embeddings_provider(self.config, self.provider)
+        return embeddings_provider(self.config, self._base_provider)
+
+    def provider_named(self, name: str, purpose: str = "this chat's model") -> LLMProvider:
+        """One of the user's providers (created on first use); raises ProviderUnavailable when it cannot be used."""
+        if name not in self._providers:
+            self._providers[name] = named_provider(self.config, name, purpose)
+        return self._providers[name]
+
+    def claude_provider(self, purpose: str = "this chat's model") -> LLMProvider:
+        """The user's Claude subscription provider (Claude Code reports a missing install or login when it runs)."""
+        return self.provider_named(CLAUDE_SUBSCRIPTION, purpose)
+
+    def _route_provider(self, model: str) -> None:
+        """Serve a model reference with its provider: the `<provider>:` prefix, else the main provider."""
+        self.provider = self.provider_named(provider_of(model, self.config.provider_name), f"the model {model}")
 
     def query_memory(self, query: str, top_k: int = 5, *, exclude_chat: str | None = None) -> list[dict]:
         """Semantic recall over what is indexed (never syncs); `exclude_chat` leaves one chat's chunks out."""
@@ -783,7 +828,7 @@ class Agent:
         return usage.format_turn(
             breakdown, self._prev_breakdown, approx, self._max_context or None,
             cache=usage.cache_tokens(api_usage),
-        )
+        ) + usage.subscription_note(api_usage)
 
     def _record_latency_report(self) -> None:
         """Format ephemeral wall-clock timings for the latest completed response."""

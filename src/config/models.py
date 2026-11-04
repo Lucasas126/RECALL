@@ -6,6 +6,10 @@ from typing import Annotated, Literal, Optional, Union
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from src.agent.tool_groups import validate_tool_groups
+from src.config.model_refs import (
+    CAPABILITIES, CLAUDE_SUBSCRIPTION, MAIN_PROVIDERS, OPENROUTER, is_claude_subscription, prefix_of,
+    validate_reference,
+)
 ReasoningEffort = Literal["minimal", "low", "medium", "high", "xhigh", "max"]
 
 _ENV_NAME = r"^[A-Za-z_][A-Za-z0-9_]*$"
@@ -127,6 +131,11 @@ class ChatNamingConfig(BaseModel):
     zdr: bool = Field(default=True, strict=True)
     min_messages: int = Field(default=5, ge=1, le=1000, strict=True)
 
+    @model_validator(mode="after")
+    def _claude_subscription_is_not_zdr(self) -> "ChatNamingConfig":
+        _require_no_zdr(self.model, self.zdr, "chat_naming")
+        return self
+
 
 class PromptCacheConfig(BaseModel):
     """Framework-wide OpenRouter prompt-caching settings for Claude models."""
@@ -151,6 +160,11 @@ class AssociativeMemoryConfig(BaseModel):
     query_model: Optional[str] = Field(default=None, strict=True, min_length=1, max_length=256)
     api_key: str = Field(default="OPENROUTER_API_KEY", pattern=_ENV_NAME)
     zdr: bool = Field(default=True, strict=True)
+
+    @model_validator(mode="after")
+    def _claude_subscription_is_not_zdr(self) -> "AssociativeMemoryConfig":
+        _require_no_zdr(self.query_model, self.zdr, "associative_memory")
+        return self
 
 
 class IndexConfig(BaseModel):
@@ -206,9 +220,63 @@ class PdfConfig(BaseModel):
     tesseract_cmd: str | None = Field(default=None, min_length=1, max_length=512)
 
 
+def _require_no_zdr(model: Optional[str], zdr: bool, section: str) -> None:
+    """A `claude_subscription:` model has no zero-retention routing, so the setting must say so explicitly."""
+    if model is not None:
+        validate_reference(model)
+    if is_claude_subscription(model) and zdr:
+        raise ValueError(f"{section}: Claude subscription models are not zero data retention; set {section}.zdr: false to use {model}")
+
+
 class ProviderConfig(BaseModel):
     name: str
     api_key: Optional[str] = None  # name of the env var holding the actual key (not needed for local providers)
+
+    @field_validator("name")
+    @classmethod
+    def _main_capable(cls, value: str) -> str:
+        if value == CLAUDE_SUBSCRIPTION:
+            raise ValueError(
+                "claude_subscription cannot be the main provider (it has no embeddings or speech-to-text); keep "
+                "OpenRouter or Ollama as `provider` and choose the model as models.chat: claude_subscription:<model>"
+            )
+        if value not in MAIN_PROVIDERS:
+            raise ValueError(f"unknown provider {value!r}; use one of: {', '.join(MAIN_PROVIDERS)}")
+        return value
+
+    @field_validator("api_key")
+    @classmethod
+    def _env_name(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and not re.match(_ENV_NAME, value):
+            raise ValueError("api_key must be the name of an environment variable, not the key itself")
+        return value
+
+
+class OpenRouterConfig(BaseModel):
+    """OpenRouter as an additional provider; when it is the main provider, `provider.api_key` is used."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    api_key: str = Field(default="OPENROUTER_API_KEY", pattern=_ENV_NAME)  # env var name, never the key
+
+
+class OllamaConfig(BaseModel):
+    """Ollama as a provider; `host` applies whether or not it is the main provider."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    host: Optional[str] = Field(default=None, max_length=512, pattern=r"^https?://[^\s/?#]+(?:/[^\s?#]*)?$")  # None = OLLAMA_HOST or localhost
+
+
+class ClaudeSubscriptionConfig(BaseModel):
+    """Advanced options of the experimental Claude subscription provider (the user's own Claude Code login)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    claude_config_dir: Optional[str] = Field(default=None, min_length=1, max_length=1024)  # None = the CLI's default login
+    command: Optional[str] = Field(default=None, min_length=1, max_length=1024)  # claude executable; None = PATH
+    claude_code_telemetry: bool = Field(default=False, strict=True)  # False passes Claude Code's telemetry-off flags
+    timeout_seconds: int = Field(default=300, ge=10, le=3600, strict=True)  # longest silence from Claude Code
 
 
 class ModelsConfig(BaseModel):
@@ -220,16 +288,43 @@ class ModelsConfig(BaseModel):
     stt: str = Field(default="openai/whisper-large-v3-turbo", strict=True, min_length=1, max_length=256)
     embeddings: str = Field(default="openai/text-embedding-3-small", strict=True, min_length=1, max_length=256)
 
+    @field_validator("chat")
+    @classmethod
+    def _valid_chat_reference(cls, value: str) -> str:
+        return validate_reference(value)
+
+    @field_validator("stt", "embeddings")
+    @classmethod
+    def _capable_provider(cls, value: str, info) -> str:
+        validate_reference(value)
+        capability = "stt" if info.field_name == "stt" else "embeddings"
+        provider = prefix_of(value)
+        if provider is not None and capability not in CAPABILITIES[provider]:
+            raise ValueError(
+                f"models.{info.field_name} cannot use {provider} (it has no {info.field_name}); "
+                f"use a provider that serves {info.field_name}"
+            )
+        return value
+
 
 class UserConfig(BaseModel):
     id: str
     name: str
     password_hash: Optional[str] = Field(default=None, min_length=1)
     language: str = Field(default="en", pattern=r"^[a-z]{2}(?:-[A-Z]{2})?$")
-    provider: ProviderConfig  # chat provider
+    provider: ProviderConfig  # main provider: serves bare model ids
     embeddings_provider: Optional[ProviderConfig] = None  # falls back to `provider`
     agents: list[str]
     models: ModelsConfig = Field(default_factory=ModelsConfig)
+    openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)
+    ollama: OllamaConfig = Field(default_factory=OllamaConfig)
+    claude_subscription: ClaudeSubscriptionConfig = Field(default_factory=ClaudeSubscriptionConfig)
+
+    def openrouter_settings(self) -> OpenRouterConfig:
+        """OpenRouter settings with the key env var actually used (`provider.api_key` when it is main)."""
+        if self.provider.name == OPENROUTER:
+            return OpenRouterConfig(api_key=self.provider.api_key or self.openrouter.api_key)
+        return self.openrouter
 
 
 class ChatConfig(BaseModel):
@@ -395,3 +490,6 @@ class ResolvedAgent(BaseModel):
     dream: DreamConfig = Field(default_factory=DreamConfig)
     folders: list[FolderConfig] = Field(default_factory=list)
     memory_limits: MemoryLimits = Field(default_factory=MemoryLimits)
+    claude_subscription: ClaudeSubscriptionConfig = Field(default_factory=ClaudeSubscriptionConfig)
+    openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)  # key env var already resolved for a main OpenRouter
+    ollama: OllamaConfig = Field(default_factory=OllamaConfig)

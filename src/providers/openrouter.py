@@ -172,6 +172,7 @@ class OpenRouterProvider(LLMProvider):
 
     def supported_modalities(self, model: str) -> set[str]:
         """Read the selected model's declared input modalities from OpenRouter."""
+        model = self.own_model(model)
         matches = list_openrouter_models(model, zdr=False)
         selected = next((item for item in matches if item.id == model), None)
         return set(selected.input_modalities) if selected else set()
@@ -181,6 +182,7 @@ class OpenRouterProvider(LLMProvider):
         model: str, language: str | None = None, zdr: bool = True,
     ) -> str:
         """Transcribe base64 audio through OpenRouter's dedicated STT endpoint."""
+        model = self.own_model(model)
         if not any(item.id == model for item in list_openrouter_transcription_models("", zdr=zdr)):
             raise RuntimeError(
                 f"speech-to-text model '{model}' is not available with the selected ZDR policy"
@@ -211,6 +213,7 @@ class OpenRouterProvider(LLMProvider):
         If stream is True, yields (kind, text) tuples then a final dict with usage info.
         If stream is False, returns a dict directly.
         """
+        model = self.own_model(model)
         logger.debug("request model=%s stream=%s reasoning=%s msgs=%d", model, stream, reasoning, len(messages))
         if stream:
             return self.invoke_stream(messages, model, self.api_key, reasoning=reasoning, reasoning_tokens=reasoning_tokens, reasoning_effort=reasoning_effort, tools=tools, cancellation=cancellation, zdr=zdr)
@@ -221,6 +224,7 @@ class OpenRouterProvider(LLMProvider):
 
         kind is either "reasoning" (thinking tokens) or "content" (the actual answer).
         """
+        model = self.own_model(model)
 
         url = "https://openrouter.ai/api/v1/chat/completions"
         headers = {
@@ -341,6 +345,7 @@ class OpenRouterProvider(LLMProvider):
 
     def invoke_sync(self, messages: list[dict], model: str, api_key: str, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None, *, zdr: bool = True) -> dict:
         """Non-streaming variant — returns a dict with reasoning, response, usage and model."""
+        model = self.own_model(model)
         url = "https://openrouter.ai/api/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -379,6 +384,7 @@ class OpenRouterProvider(LLMProvider):
             raise
 
     def invoke_embeddings(self, input: list[str], model: str) -> list[list[float]]:
+        model = self.own_model(model)
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -400,6 +406,7 @@ class OpenRouterProvider(LLMProvider):
 
     def context_window(self, model: str):
         """Return the model's max context length from OpenRouter's models list (cached)."""
+        model = self.own_model(model)
         global _MODEL_CONTEXT_LOADED
         if not _MODEL_CONTEXT_LOADED:
             try:
@@ -420,6 +427,7 @@ class OpenRouterProvider(LLMProvider):
 
     def reasoning_options(self, model: str) -> dict | None:
         """Return a model's reasoning capabilities (supported_efforts, default_effort, ...) or None."""
+        model = self.own_model(model)
         try:
             r = requests.get(
                 "https://openrouter.ai/api/v1/models",

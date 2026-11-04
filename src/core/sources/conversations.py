@@ -7,8 +7,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Collection, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from src.config.model_refs import CLAUDE_SUBSCRIPTION, prefix_of, provider_of
 from src.config.models import ReasoningEffort
 from src.core.sources.base import Source
 from src.utils.files import atomic_write_text
@@ -19,13 +20,26 @@ _TITLE_CHARS = 60
 
 
 class ChatModel(BaseModel):
-    """A persistent chat-specific OpenRouter model selection."""
+    """A persistent chat-specific model reference; `provider` records who served it when it was chosen.
+
+    A bare id belongs to the user's main provider at the time it is used, so `provider` is informational
+    for bare ids; a `<provider>:` reference must name the same provider.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    provider: Literal["openrouter"] = "openrouter"
+    provider: Literal["openrouter", "ollama", "claude_subscription"] = "openrouter"
     id: str = Field(strict=True, min_length=1, max_length=256)
     zdr: bool = Field(default=True, strict=True)
+
+    @model_validator(mode="after")
+    def _provider_matches_id(self) -> "ChatModel":
+        named = prefix_of(self.id)
+        if (named is not None and self.provider != named) or (named is None and self.provider == CLAUDE_SUBSCRIPTION):
+            raise ValueError("the chat model's provider does not match its model reference")
+        if self.provider == CLAUDE_SUBSCRIPTION and self.zdr:
+            raise ValueError("Claude subscription models are not zero data retention")
+        return self
 
 
 class ChatReasoningEffort(BaseModel):
@@ -86,10 +100,12 @@ class ConversationsSource(Source):
         except (OSError, UnicodeError, ValidationError) as exc:
             raise ChatMetadataError("Could not read model selection for chat {chat_id}.", chat_id=chat_id) from exc
 
-    def set_model(self, chat_id: str, model_id: str, *, zdr: bool = True) -> ChatModel:
-        """Persist an override after the caller validates model availability."""
+    def set_model(self, chat_id: str, model_id: str, *, zdr: bool = True, main: str = "openrouter") -> ChatModel:
+        """Persist an override after the caller validates model availability; bare ids belong to `main`."""
         path = self._model_path(chat_id)
-        selection = ChatModel(id=model_id, zdr=zdr)
+        provider = provider_of(model_id, main)
+        # Claude subscription traffic has no zero-retention routing, so it is stored as such
+        selection = ChatModel(provider=provider, id=model_id, zdr=zdr and provider != CLAUDE_SUBSCRIPTION)
         try:
             atomic_write_text(path, selection.model_dump_json() + "\n")
         except OSError as exc:

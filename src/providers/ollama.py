@@ -17,6 +17,34 @@ logger = get_logger("provider-ollama")
 DEFAULT_HOST = "http://localhost:11434"
 
 
+class OllamaUnavailable(RuntimeError):
+    """The Ollama server did not answer or answered with an unexpected shape."""
+
+
+def ollama_host(host: str | None = None) -> str:
+    """The configured host, else OLLAMA_HOST, else the local default."""
+    return (host or os.environ.get("OLLAMA_HOST") or DEFAULT_HOST).rstrip("/")
+
+
+def is_ollama_cloud(model: str) -> bool:
+    """Ollama cloud models (`name:cloud`, `name:tag-cloud`) run on Ollama's servers, not on the local machine."""
+    return model.removeprefix("ollama:").rsplit(":", 1)[-1].endswith("cloud")
+
+
+def list_ollama_models(host: str | None = None, *, timeout: float = 5.0) -> list[str]:
+    """Names of the models installed on the Ollama server (`/api/tags`)."""
+    url = f"{ollama_host(host)}/api/tags"
+    try:
+        response = requests.get(url, timeout=timeout)
+        response.raise_for_status()
+        models = response.json().get("models")
+    except (requests.RequestException, ValueError) as exc:
+        raise OllamaUnavailable(f"Ollama at {ollama_host(host)} did not answer: {type(exc).__name__}") from exc
+    if not isinstance(models, list):
+        raise OllamaUnavailable(f"Ollama at {ollama_host(host)} returned an unexpected model list")
+    return sorted({m["name"] for m in models if isinstance(m, dict) and isinstance(m.get("name"), str)})
+
+
 def _to_ollama_messages(messages: list[dict]) -> list[dict]:
     """Translate OpenAI-shaped messages (tool_calls/tool) to ollama's wire format."""
     out: list[dict] = []
@@ -51,7 +79,7 @@ class OllamaProvider(LLMProvider):
     def __init__(self, **data):
         super().__init__(**data)
         if not self.base_url:
-            self.base_url = os.environ.get("OLLAMA_HOST", DEFAULT_HOST)
+            self.base_url = ollama_host()
 
     def invoke(self, messages: list[dict], model: str, stream=True, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None, *, zdr: bool = True):
         """
@@ -60,6 +88,7 @@ class OllamaProvider(LLMProvider):
         If stream is False, returns a dict directly.
         zdr has no effect on local Ollama requests.
         """
+        model = self.own_model(model)
         logger.debug("request model=%s stream=%s reasoning=%s msgs=%d", model, stream, reasoning, len(messages))
         if stream:
             return self.invoke_stream(messages, model, reasoning=reasoning, reasoning_effort=reasoning_effort, tools=tools, cancellation=cancellation)
@@ -70,6 +99,7 @@ class OllamaProvider(LLMProvider):
 
         kind is either "reasoning" (thinking tokens) or "content" (the actual answer).
         """
+        model = self.own_model(model)
         url = f"{self.base_url}/api/chat"
         payload = {"model": model, "messages": _to_ollama_messages(messages), "stream": True}
         if reasoning:
@@ -124,6 +154,7 @@ class OllamaProvider(LLMProvider):
 
     def invoke_sync(self, messages: list[dict], model: str, reasoning=False, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None) -> dict:
         """Non-streaming variant — returns a dict with reasoning, response, usage and model."""
+        model = self.own_model(model)
         url = f"{self.base_url}/api/chat"
         payload = {"model": model, "messages": _to_ollama_messages(messages), "stream": False}
         if reasoning:
@@ -155,6 +186,7 @@ class OllamaProvider(LLMProvider):
             raise
 
     def invoke_embeddings(self, input: list[str], model: str) -> list[list[float]]:
+        model = self.own_model(model)
         payload = {"model": model, "input": list(input)}
         logger.debug("ollama embeddings request; payload=%s", payload)
         response = requests.post(f"{self.base_url}/api/embed", json=payload, timeout=60)
@@ -163,6 +195,7 @@ class OllamaProvider(LLMProvider):
 
     def context_window(self, model: str):
         """Return the model's context length from ollama's /api/show, or None if unknown."""
+        model = self.own_model(model)
         try:
             r = requests.post(f"{self.base_url}/api/show", json={"model": model}, timeout=30)
             r.raise_for_status()
@@ -176,6 +209,7 @@ class OllamaProvider(LLMProvider):
 
     def supported_modalities(self, model: str) -> set[str]:
         """Read Ollama's declared model capabilities without guessing unsupported inputs."""
+        model = self.own_model(model)
         response = requests.post(f"{self.base_url}/api/show", json={"model": model}, timeout=30)
         response.raise_for_status()
         capabilities = response.json().get("capabilities", [])

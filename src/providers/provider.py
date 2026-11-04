@@ -7,6 +7,10 @@ from pydantic import BaseModel
 from src.providers.cancellation import CancellationToken
 
 
+class ProviderUnavailable(RuntimeError):
+    """The provider chosen for a model cannot be used right now (missing key, no login, server down)."""
+
+
 class UnsupportedModalityError(RuntimeError):
     """The selected model cannot accept one of the requested input modalities."""
 
@@ -42,6 +46,10 @@ class LLMProvider(BaseModel):
 
     # name that config providers must match to select this class
     name: ClassVar[str] = ""
+
+    def own_model(self, model: str) -> str:
+        """The provider's model id for a bare id or a `<this provider>:<model>` reference."""
+        return model.removeprefix(f"{self.name}:") if self.name else model
 
     def invoke(self, messages: list[dict], model: str, stream=True, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None, *, zdr: bool = True):
         """

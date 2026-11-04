@@ -81,6 +81,17 @@ def cache_tokens(api_usage: dict | None) -> tuple[int, int] | None:
     return details["cached_tokens"] or 0, details.get("cache_write_tokens") or 0
 
 
+def subscription_note(api_usage: dict | None) -> str:
+    """A line about Claude subscription usage (plan allowance, not per-token billing); empty for other providers."""
+    if (api_usage or {}).get("provider") != "claude_subscription":
+        return ""
+    estimate = api_usage.get("list_price_estimate_usd")
+    price = f" | list-price estimate ${estimate:.4f} (not a charge)" if isinstance(estimate, (int, float)) else ""
+    admission = api_usage.get("admission") or {}
+    blocked = f" | blocked extra requests={admission['blocked_requests']}" if admission.get("blocked_requests") else ""
+    return f"\nplan: Claude subscription (experimental), counts against the plan limits{price}{blocked}"
+
+
 def _format_cache(cache: tuple[int, int], prompt_tokens: int) -> str:
     read, written = cache
     share = f" ({read / prompt_tokens * 100:.0f}% of input)" if prompt_tokens else ""

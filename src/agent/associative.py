@@ -6,6 +6,7 @@ from contextlib import closing
 from time import perf_counter
 from typing import TYPE_CHECKING, Optional
 
+from src.config.model_refs import is_claude_subscription
 from src.config.settings import ASSOC
 from src.core.chunking import excerpt
 from src.providers.cancellation import CancellationToken, GenerationCancelled
@@ -155,6 +156,8 @@ def _query_model(agent: "Agent") -> tuple[LLMProvider, str, bool]:
     """The provider, model and ZDR flag for query proposal: the configured small model, else the chat's own."""
     if ASSOC.query_model is None:
         return agent.provider, agent.config.models.chat, agent.zdr_required
+    if is_claude_subscription(ASSOC.query_model):
+        return agent.claude_provider("associative_memory.query_model"), ASSOC.query_model, ASSOC.zdr
     api_key = os.environ.get(ASSOC.api_key, "").strip()
     if not api_key:
         raise RuntimeError(f"associative query model needs the env var {ASSOC.api_key} to be set")

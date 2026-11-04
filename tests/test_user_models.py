@@ -104,7 +104,7 @@ class UserModelDefaultsTests(models_tests.ModelFixture):
         self.assertEqual(self.service.get_preferences("user-one")["default_llm_model"], "vendor/default")
 
     def test_stt_model_is_a_user_setting_shared_by_all_chats(self) -> None:
-        with patch.object(self.service, "list_transcription_models", return_value=[{"id": "stt/default"}]):
+        with patch.object(self.service, "model_catalog", return_value={"models": [{"id": "stt/default"}]}):
             self.service.update_preferences("user-one", UserPreferences(default_stt_model="stt/default"))
         self.assertEqual(self.service.get_chat("user-one", "agent-one", self.chat)["stt_model"], "stt/default")
         other = self.service.create_chat("user-one", "agent-two")["id"]
@@ -112,7 +112,7 @@ class UserModelDefaultsTests(models_tests.ModelFixture):
         self.assertFalse(hasattr(self.service, "set_chat_transcription_model"))
 
     def test_transcription_uses_user_default_stt_model(self) -> None:
-        with patch.object(self.service, "list_transcription_models", return_value=[{"id": "stt/chat"}]):
+        with patch.object(self.service, "model_catalog", return_value={"models": [{"id": "stt/chat"}]}):
             self.service.update_preferences("user-one", UserPreferences(default_stt_model="stt/chat"))
         resolved = Mock(provider_name="openrouter", api_key="test")
         transcriber = Mock()
