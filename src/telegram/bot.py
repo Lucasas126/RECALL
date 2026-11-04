@@ -168,7 +168,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/selectmodel — Choose among your favorite models (star them in the web UI)\n"
         "/model — Show the model selected for the current chat\n"
         "/stt — Show the default speech-to-text model (change it in /settings)\n"
-        "/dream — Last dream session, schedule and pending chats; /dream start starts one, /dream cancel stops it\n"
+        "/dream — Last dream session, schedule and pending chats\n"
+        "/dreamstart — Start a dream session now\n"
+        "/dreamcancel — Stop the running dream session\n"
         "/help — Show this help\n\n"
         "You can send text, images, audio, voice messages, and video directly."
     )
@@ -1057,7 +1059,7 @@ def _generation_message(
         else:
             plain, part_entities = _convert_markdown(content)
             entities.extend(_shift_entities(part_entities, _utf16_len(text)))
-            text += plain + ("\n\n" if kind == "agent" else "")
+            text += plain + ("\n" if kind == "agent" else "")
     if quote_start is not None and _utf16_len(text) > quote_start:
         entities.append(MessageEntity(
             type=MessageEntity.EXPANDABLE_BLOCKQUOTE,
@@ -1121,20 +1123,38 @@ async def show_agent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     )
 
 
-async def dream_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """`/dream` shows the dream status; `/dream start` starts a session and `/dream cancel` stops it, without waiting."""
+async def _run_dream_command(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
     state: TelegramBotState = context.application.bot_data["state"]
     session = _session(update, state)
     if session is None:
         await _unauthorized(update)
         return
-    text = " ".join(["/dream", *(context.args or [])])
     try:
-        reply = await asyncio.to_thread(state.service.dream_command, session.user_id, session.agent_id, text)
+        reply = await asyncio.to_thread(
+            state.service.dream_command, session.user_id, session.agent_id, text, channel="telegram",
+        )
     except (ServiceError, ValueError, OSError, RuntimeError) as exc:
-        logger.warning("Telegram /dream failed: %s", exc)
-        reply = _msg(session, "Generation failed: {error}", error=error_message(session.language, exc))
-    await update.effective_message.reply_text(reply or "")
+        logger.warning("Telegram %s failed: %s", text.split()[0], exc)
+        await update.effective_message.reply_text(
+            _msg(session, "Generation failed: {error}", error=error_message(session.language, exc)),
+        )
+        return
+    await _reply_markdown(update.effective_message, reply or "")
+
+
+async def dream_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """`/dream` shows the dream status; `/dream start|cancel` still work as text (the menu advertises the one-word forms)."""
+    await _run_dream_command(update, context, " ".join(["/dream", *(context.args or [])]))
+
+
+async def dream_start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """`/dreamstart` starts a dream session without waiting for it."""
+    await _run_dream_command(update, context, "/dream start")
+
+
+async def dream_cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """`/dreamcancel` asks the running dream session to stop."""
+    await _run_dream_command(update, context, "/dream cancel")
 
 
 async def _download_attachment(message, bot) -> dict:
@@ -1200,18 +1220,31 @@ def _format_actions(actions: list[dict]) -> str:
     )
 
 
+# text that cannot follow inline: indented code, list items, fences, headings, quotes, tables, rules, HTML
+_BLOCK_START = re.compile(
+    r"(?: {4}|\t|\s*(?:[-*+•]\s|\d+[.)]\s|```|~~~|#{1,6}(?:\s|$)|>|\||<|(?:[-*_][ \t]*){3,}$))",
+    re.MULTILINE,
+)
+
+
 def _final_messages(
     parts: list[tuple[str, str]], *, show_thinking: bool = True, agent_name: str | None = None,
 ) -> list[tuple[str, list[MessageEntity]]]:
     """Split the rendered timeline without discarding text or entity formatting.
 
-    With `agent_name` (final messages only, never drafts) the reply starts with the agent's name in bold,
-    on its own line right before the first text of the answer (after any thinking or action lines).
+    With `agent_name` (final messages only, never drafts) the first text of the answer starts with the
+    agent's name in bold, inline (`**Aria:** answer`); before a block element (list, code fence, heading,
+    table, quote) the name gets its own line instead.
     """
     if agent_name is not None:
         first = next((index for index, (kind, _) in enumerate(parts) if kind == "text"), None)
         if first is not None:
-            parts = [*parts[:first], ("agent", f"**{_md_escape(agent_name)}**"), *parts[first:]]
+            label = f"**{_md_escape(agent_name)}:**"
+            answer = parts[first][1].lstrip("\n")
+            if answer.strip() and not _BLOCK_START.match(answer):
+                parts = [*parts[:first], ("text", f"{label} {answer.lstrip()}"), *parts[first + 1:]]
+            else:
+                parts = [*parts[:first], ("agent", label), *parts[first:]]
     text, entities = _generation_message(parts, show_thinking=show_thinking)
     messages: list[tuple[str, list[MessageEntity]]] = []
     start = offset = 0
@@ -1539,7 +1572,9 @@ def build_application(
         BotCommand("selectmodel", "Choose a favorite model"),
         BotCommand("model", "Show the current model"),
         BotCommand("stt", "Show the default STT model"),
-        BotCommand("dream", "Dream status; /dream start or /dream cancel"),
+        BotCommand("dream", "Dream status: last session, schedule, pending chats"),
+        BotCommand("dreamstart", "Start a dream session now"),
+        BotCommand("dreamcancel", "Stop the running dream session"),
         BotCommand("help", "Show available commands"),
     ]
     async def set_commands(application: Application) -> None:
@@ -1564,6 +1599,8 @@ def build_application(
     application.add_handler(CommandHandler("stt", show_stt))
     application.add_handler(CommandHandler("agent", show_agent))
     application.add_handler(CommandHandler("dream", dream_command))
+    application.add_handler(CommandHandler("dreamstart", dream_start_command))
+    application.add_handler(CommandHandler("dreamcancel", dream_cancel_command))
     application.add_handler(
         MessageHandler(filters.PHOTO | filters.VIDEO | filters.AUDIO | filters.VOICE | filters.Document.ALL, media_message)
     )

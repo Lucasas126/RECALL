@@ -190,15 +190,15 @@ class TelegramActionStreamingTests(unittest.IsolatedAsyncioTestCase):
         final_text = stream.finish.await_args.args[0][0][0]
         expected = ["Before", ">first()", "After", "Explanation", ">second()", "Final"]
         self.assertEqual(sorted(expected, key=final_text.index), expected)
-        self.assertEqual(stream.update.await_args_list[-1].args[0], final_text.replace("Aria\n\n", ""))
+        self.assertEqual(stream.update.await_args_list[-1].args[0], final_text.replace("Aria: ", ""))
 
     async def test_reply_without_actions_is_unchanged(self) -> None:
         stream = await self.send_events([ChatEvent("text", "**Answer**")])
         text, entities = stream.finish.await_args.args[0][0]
-        self.assertEqual(text, "Aria\n\nAnswer")
+        self.assertEqual(text, "Aria: Answer")
         self.assertEqual(
             [(entity.type, entity.offset, entity.length) for entity in entities],
-            [(MessageEntity.BOLD, 0, 4), (MessageEntity.BOLD, 6, 6)],
+            [(MessageEntity.BOLD, 0, 5), (MessageEntity.BOLD, 6, 6)],
         )
         for call in stream.update.await_args_list:  # drafts never carry the agent name
             self.assertNotIn("Aria", call.args[0])
@@ -212,25 +212,44 @@ class TelegramActionStreamingTests(unittest.IsolatedAsyncioTestCase):
         quote = next(e for e in entities if e.type == MessageEntity.EXPANDABLE_BLOCKQUOTE)
         self.assertLessEqual(quote.offset + quote.length, text.index("Aria"))
         bold = next(e for e in entities if e.type == MessageEntity.BOLD)
-        self.assertEqual((bold.offset, bold.length), (text.index("Aria"), 4))
+        self.assertEqual((bold.offset, bold.length), (text.index("Aria"), 5))
+        self.assertIn("Aria: Answer", text)
 
     async def test_name_with_markdown_characters_and_emoji_keeps_exact_entities(self) -> None:
         self.agent_name = "my_*agent*_ 😀"
         stream = await self.send_events([ChatEvent("text", "Hi")])
         text, entities = stream.finish.await_args.args[0][0]
-        self.assertTrue(text.startswith("my_*agent*_ 😀\n\nHi"))
+        self.assertTrue(text.startswith("my_*agent*_ 😀: Hi"))
         bold = entities[0]
-        self.assertEqual((bold.type, bold.offset, bold.length), (MessageEntity.BOLD, 0, _utf16_len(self.agent_name)))
+        self.assertEqual((bold.type, bold.offset, bold.length), (MessageEntity.BOLD, 0, _utf16_len(self.agent_name) + 1))
 
     async def test_long_reply_splits_under_the_limit_with_the_name_only_on_the_first_message(self) -> None:
         stream = await self.send_events([ChatEvent("text", "a" * 9000)])
         messages = stream.finish.await_args.args[0]
         self.assertGreater(len(messages), 2)
         self.assertTrue(all(_utf16_len(text) <= 4096 for text, _ in messages))
-        self.assertTrue(messages[0][0].startswith("Aria\n\n"))
-        self.assertFalse(any("Aria" in text for text, _ in messages[1:]))
+        self.assertTrue(messages[0][0].startswith("Aria: aaa"))
+        self.assertTrue(all("Aria" not in text for text, _ in messages[1:]))
         self.assertEqual(messages[0][1][0].offset, 0)
-        self.assertEqual("".join(text for text, _ in messages), "Aria\n\n" + "a" * 9000)
+        self.assertEqual("".join(text for text, _ in messages), "Aria: " + "a" * 9000)
+        for text, entities in messages:
+            for entity in entities:
+                self.assertLessEqual(entity.offset + entity.length, _utf16_len(text))
+
+    def test_name_is_inline_unless_the_answer_starts_with_a_block(self) -> None:
+        inline = ["Hola, qué tal", "\n\nHola", "**Bold** start", "*emph* start", "-5 degrees", "2024 was a year", "  two spaces"]
+        for answer in inline:
+            with self.subTest(answer=answer):
+                text, entities = _final_messages([("text", answer)], agent_name="Aria")[0]
+                self.assertTrue(text.startswith("Aria: "), text)
+                self.assertEqual((entities[0].type, entities[0].offset, entities[0].length), (MessageEntity.BOLD, 0, 5))
+        blocks = ["- item", "* item", "1. one", "```py\nx = 1\n```", "# Title", "> quote", "| a | b |\n|---|---|\n| 1 | 2 |", "    code", "---"]
+        for answer in blocks:
+            with self.subTest(answer=answer):
+                text, entities = _final_messages([("text", answer)], agent_name="Aria")[0]
+                self.assertTrue(text.startswith("Aria:\n"), text)
+                self.assertNotIn("\n\n", text.split("Aria:", 1)[1][:2])
+                self.assertEqual((entities[0].type, entities[0].offset, entities[0].length), (MessageEntity.BOLD, 0, 5))
 
 
 if __name__ == "__main__":

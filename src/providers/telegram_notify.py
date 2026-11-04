@@ -4,6 +4,7 @@ import os
 import re
 
 import httpx
+import telegramify_markdown
 
 from src.utils.logger import get_logger
 
@@ -72,6 +73,24 @@ class TelegramNotifier:
             response = self._post(payload)
             if response.status_code == 400 and entities:
                 response = self._post({"chat_id": chat_id, "text": text})
+            if response.status_code != 200:
+                raise RuntimeError(f"Telegram sendMessage failed with HTTP {response.status_code}")
+            sent += 1
+        return sent
+
+    def send_markdown(self, user_id: str, text: str) -> int:
+        """Like `send`, with `text` as Markdown converted to Telegram entities (plain text if that fails)."""
+        try:
+            plain, converted = telegramify_markdown.convert(text)
+            entities = [entity.to_dict() for entity in converted]
+        except Exception:
+            logger.warning("Could not format the Telegram notification; sending plain text")
+            return self.send(user_id, text)
+        sent = 0
+        for chat_id in self._chats.get(user_id, []):
+            response = self._post({"chat_id": chat_id, "text": plain, "entities": entities})
+            if response.status_code == 400:
+                response = self._post({"chat_id": chat_id, "text": plain})
             if response.status_code != 200:
                 raise RuntimeError(f"Telegram sendMessage failed with HTTP {response.status_code}")
             sent += 1

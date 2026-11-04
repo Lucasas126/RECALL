@@ -50,7 +50,10 @@ from src.providers.tavily import TavilyClient
 from src.providers.telegram_notify import TelegramNotifier
 from src.service import providers as provider_settings
 from src.service.providers import CatalogCapability, ProviderAvailability
-from src.service.dream import DreamDependencies, DreamManager, format_local_time, parse_dream_command
+from src.service.dream import (
+    STATUS_EMOJI, STATUS_SUMMARY_CHARS, DreamDependencies, DreamManager, format_local_time, md_escape,
+    parse_dream_command, summary_block,
+)
 from src.utils.logger import get_logger
 from src.utils.media import VideoDecomposition, decompose_video
 from src.utils.pdf import extract_pdf_text, run_tesseract
@@ -254,7 +257,7 @@ class ChatService:
             web_client=lambda: TavilyClient.from_config(TAVILY),
             agents=self._all_agents,
             language=self.language,
-            notifier=notifier.send if notifier is not None else None,
+            notifier=notifier.send_markdown if notifier is not None else None,
             public_url=WEB_PUBLIC_URL or None,
         )
 
@@ -1300,14 +1303,22 @@ class ChatService:
 
     # ------------------------------------------------------------------ dream mode and own files
 
-    def dream_command(self, user_id: str, agent_id: str, text: str) -> str | None:
-        """Answer `/dream`, `/dream start` or `/dream cancel` for the agent; None when `text` is not one."""
+    def dream_command(
+        self, user_id: str, agent_id: str, text: str, channel: Literal["web", "telegram"] = "web",
+    ) -> str | None:
+        """Answer `/dream`, `/dream start` or `/dream cancel` for the agent; None when `text` is not one.
+
+        `channel` picks the wording of command hints (Telegram has `/dreamstart`, `/dreamcancel`) and the
+        layout of the status: Markdown for Telegram, plain lines for the web chat.
+        """
         command = parse_dream_command(text)
         if command is None:
             return None
         self._owned_agent(user_id, agent_id)
         language = self.language(user_id)
         if command == "invalid":
+            if channel == "telegram":
+                return message(language, "Unknown /dream option. Use /dream for the status, /dreamstart to start a session or /dreamcancel to stop the running one.")
             return message(language, "Unknown /dream option. Use /dream for the status, /dream start to start a session or /dream cancel to stop the running one.")
         if command == "start":
             result = self._dream.start(user_id, agent_id, trigger="command")
@@ -1322,10 +1333,17 @@ class ChatService:
             return message(
                 language, "Cancelling the dream session: a running tool call finishes first, then the session stops.",
             )
-        return self._dream_status_text(language, self._dream.status(user_id, agent_id))
+        status = self._dream.status(user_id, agent_id)
+        if channel == "telegram":
+            return self._dream_status_text(language, status, "telegram", load_agent_config(user_id, agent_id).name)
+        return self._dream_status_text(language, status)
 
     @staticmethod
-    def _dream_status_text(language: str, status: dict) -> str:
+    def _dream_status_text(
+        language: str, status: dict, channel: Literal["web", "telegram"] = "web", agent_name: str = "",
+    ) -> str:
+        if channel == "telegram":
+            return ChatService._dream_status_markdown(language, status, agent_name)
         labels = {
             "completed": message(language, "completed"),
             "budget_exhausted": message(language, "out of budget"),
@@ -1370,6 +1388,51 @@ class ChatService:
             lines.append(message(language, "Use /dream cancel to stop the running session."))
         else:
             lines.append(message(language, "Use /dream start to start a new session."))
+        return "\n".join(lines)
+
+    @staticmethod
+    def _dream_status_markdown(language: str, status: dict, agent_name: str) -> str:
+        """The Telegram `/dream` reply as Markdown: bold title and labels, summary as a block quote."""
+        labels = {
+            "completed": message(language, "completed"),
+            "budget_exhausted": message(language, "out of budget"),
+            "failed": message(language, "failed"),
+            "cancelled": message(language, "cancelled"),
+            "timed_out": message(language, "timed out"),
+        }
+        lines = [f"**💤 {message(language, 'Dream · {agent}', agent=md_escape(agent_name))}**", ""]
+        last = status["last_session"]
+        if last is None:
+            lines.append(f"**📭 {message(language, 'Last session')}:** {message(language, 'No dream sessions yet.')}")
+        else:
+            emoji = STATUS_EMOJI.get(last["status"], "💤")
+            label = labels.get(last["status"], md_escape(str(last["status"])))
+            lines.append(f"**{emoji} {message(language, 'Last session')}:** {label} · {format_local_time(last['started_at'])}")
+        if status["running"]:
+            when = f" ({message(language, 'started {when}', when=format_local_time(status['last_started_at']))})" if status["last_started_at"] else ""
+            lines.append(f"**🔄 {message(language, 'Running')}:** {message(language, 'yes')}{when}")
+        schedule = status["schedule"]
+        if schedule["every_hours"] is None and schedule["daily_at"] is None:
+            value = message(language, "none (manual only)")
+        elif not schedule["enabled"]:
+            value = message(language, "off (dream mode is disabled)")
+        elif schedule["every_hours"] is not None:
+            value = message(
+                language, "every {hours} h · next run {next}",
+                hours=schedule["every_hours"], next=format_local_time(schedule["next_run"]),
+            )
+        else:
+            value = message(
+                language, "daily at {time} · next run {next}",
+                time=schedule["daily_at"], next=format_local_time(schedule["next_run"]),
+            )
+        lines.append(f"**🗓 {message(language, 'Schedule')}:** {value}")
+        lines.append(f"**📥 {message(language, 'Pending chats')}:** {status['pending_chats']}")
+        excerpt = summary_block(language, (last or {}).get("summary"), STATUS_SUMMARY_CHARS)
+        if excerpt:
+            lines += ["", f"**📝 {message(language, 'Summary')}**", excerpt]
+        hint = "Use /dreamcancel to stop the running session." if status["running"] else "Use /dreamstart to start a new session."
+        lines += ["", f"_{message(language, hint)}_"]
         return "\n".join(lines)
 
     def dream_status(self, user_id: str, agent_id: str) -> dict:

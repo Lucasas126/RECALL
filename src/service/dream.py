@@ -340,15 +340,56 @@ _NOTIFICATIONS = {
 }
 
 
+STATUS_EMOJI = {"completed": "✅", "budget_exhausted": "⚠️", "failed": "❌", "cancelled": "⏹", "timed_out": "⏱"}
+NOTIFICATION_SUMMARY_CHARS = 600
+STATUS_SUMMARY_CHARS = 1500
+
+
+def md_escape(text: str) -> str:
+    """Neutralize Markdown specials so names cannot break the surrounding bold/italic markers."""
+    return re.sub(r"([\\`*_{}\[\]()#+\-.!~>|=<])", r"\\\1", text)
+
+
+def summary_block(language: str, text: str | None, limit: int) -> str:
+    """The dream agent's summary as a Markdown block quote, cut at a paragraph or sentence boundary.
+
+    The summary is Markdown written by a model: it keeps its paragraphs and lists, an unclosed code
+    fence is closed after truncation, and every line sits inside the quote so it cannot leak out of it.
+    Returns "" for an empty summary.
+    """
+    body = (text or "").replace("\r\n", "\n").strip()
+    if not body:
+        return ""
+    cut = len(body) > limit
+    if cut:
+        head = body[:limit]
+        floor = limit // 3
+        for pattern in (r"\n\s*\n", r"[.!?…](?:\s|$)", r"\n", r"\s"):
+            ends = [m.start() + (1 if pattern.startswith("[") else 0) for m in re.finditer(pattern, head) if m.start() >= floor]
+            if ends:
+                head = head[:ends[-1]]
+                break
+        body = head.rstrip()
+    if sum(1 for line in body.split("\n") if line.lstrip().startswith(("```", "~~~"))) % 2:
+        body += "\n```"
+    if cut:
+        body += "\n\n… " + message(language, "(full summary in the web UI)")
+    return "\n".join(f"> {line}" if line.strip() else ">" for line in body.split("\n"))
+
+
 def dream_notification(language: str, agent_name: str, summary: dict, link: str | None) -> str:
-    """The Telegram message for a finished session: outcome, where to find it and, if known, its link."""
-    lines = [
-        message(language, _NOTIFICATIONS[summary["status"]], agent=agent_name),
-        message(
-            language, "See it in the web UI: Agents → {agent} → Dream sessions → {date}.",
-            agent=agent_name, date=format_local_time(summary["started_at"]),
-        ),
-    ]
+    """The Telegram message (Markdown) for a finished session: outcome, summary excerpt, where to find it."""
+    agent = md_escape(agent_name)
+    title = message(language, _NOTIFICATIONS[summary["status"]], agent=agent)
+    parts = [f"**{STATUS_EMOJI.get(summary['status'], '💤')} {title}**"]
+    excerpt = summary_block(language, summary.get("summary"), NOTIFICATION_SUMMARY_CHARS)
+    if excerpt:
+        parts.append(excerpt)
+    lines = [message(
+        language, "See it in the web UI: Agents → {agent} → Dream sessions → {date}.",
+        agent=agent, date=format_local_time(summary["started_at"]),
+    )]
     if link:
-        lines.append(message(language, "Open it: {url}", url=link))
-    return "\n".join(lines)
+        lines.append(message(language, "Open it: {url}", url=f"<{link}>"))
+    parts.append("\n".join(lines))
+    return "\n\n".join(parts)

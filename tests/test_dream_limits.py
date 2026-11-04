@@ -301,7 +301,7 @@ class DreamNotificationLinkTests(unittest.TestCase):
         self.assertIsNone(session_link(None, "aria", self.summary["id"]))
         self.assertIsNone(session_link("", "aria", self.summary["id"]))
         text = dream_notification("en", "Aria", self.summary, None)
-        self.assertEqual(text.splitlines()[0], "Dream session completed for Aria.")
+        self.assertEqual(text.splitlines()[0], "**✅ Dream session completed for Aria.**")
         self.assertIn("Agents → Aria → Dream sessions →", text)
         self.assertNotIn("http", text)
 
@@ -310,10 +310,10 @@ class DreamNotificationLinkTests(unittest.TestCase):
         self.assertEqual(link, "http://recall.example:8000/#agents/aria/dreams/20261103-040000-ab12")
         text = dream_notification("en", "Aria", self.summary, link)
         self.assertIn("Agents → Aria → Dream sessions →", text)
-        self.assertEqual(text.splitlines()[-1], f"Open it: {link}")
+        self.assertEqual(text.splitlines()[-1], f"Open it: <{link}>")
         spanish = dream_notification("es", "Aria", {**self.summary, "status": "timed_out"}, link)
         self.assertIn("alcanzó su límite de tiempo", spanish)
-        self.assertIn(f"Ábrela: {link}", spanish)
+        self.assertIn(f"Ábrela: <{link}>", spanish)
 
     def test_manager_passes_the_public_url_to_the_notification(self) -> None:
         notifier = Mock()

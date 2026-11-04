@@ -341,8 +341,40 @@ class TelegramDreamCommandTests(unittest.TestCase):
         context.application.bot_data = {"state": state}
         context.args = ["start"]
         asyncio.run(dream_command(update, context))
-        service.dream_command.assert_called_once_with("u", "a", "/dream start")
-        update.effective_message.reply_text.assert_awaited_once_with("Dream session started.")
+        service.dream_command.assert_called_once_with("u", "a", "/dream start", channel="telegram")
+        update.effective_message.reply_text.assert_awaited_once_with("Dream session started.", entities=[])
+
+    def test_one_word_commands_call_the_same_service_command(self) -> None:
+        from src.telegram.bot import TelegramBotState, TelegramSession, dream_cancel_command, dream_start_command
+
+        for handler, expected in ((dream_start_command, "/dream start"), (dream_cancel_command, "/dream cancel")):
+            with self.subTest(handler=handler.__name__):
+                service = Mock()
+                service.dream_command.return_value = "Done."
+                state = TelegramBotState(service, {7: TelegramSession("u", "a")})
+                update = Mock()
+                update.effective_user.id = 7
+                update.effective_message.reply_text = AsyncMock()
+                context = Mock()
+                context.application.bot_data = {"state": state}
+                context.args = []
+                asyncio.run(handler(update, context))
+                service.dream_command.assert_called_once_with("u", "a", expected, channel="telegram")
+
+    def test_commands_are_registered_and_advertised_as_one_word(self) -> None:
+        from unittest.mock import patch
+        from src.telegram import bot
+
+        service = Mock()
+        service.login.return_value = {"agents": []}
+        with patch.object(bot, "load_allowed_users", return_value={}):
+            app = bot.build_application("123:abc", service, dream_scheduler=False)
+        handled = {c for h in app.handlers[0] if isinstance(h, bot.CommandHandler) for c in h.commands}
+        self.assertTrue({"dream", "dreamstart", "dreamcancel"} <= handled)
+        source = open(bot.__file__, encoding="utf-8").read()
+        for name in ("dream", "dreamstart", "dreamcancel"):
+            self.assertIn(f'BotCommand("{name}"', source)
+        self.assertNotIn('BotCommand("dream start', source)
 
 
 if __name__ == "__main__":

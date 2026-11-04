@@ -39,6 +39,21 @@ class NotifierSendTest(unittest.TestCase):
         self.assertIn("entities", calls[0])
         self.assertNotIn("entities", calls[1])
 
+    def test_send_markdown_sends_converted_entities_and_falls_back_on_400(self):
+        notifier = TelegramNotifier("token", {123: "user-a"})
+        calls = []
+
+        def fake_post(url, json, timeout):
+            calls.append(json)
+            return _Response(400 if "entities" in json else 200)
+
+        with patch("src.providers.telegram_notify.httpx.post", side_effect=fake_post):
+            sent = notifier.send_markdown("user-a", "**✅ Done**\n\n> quote")
+        self.assertEqual(sent, 1)
+        self.assertEqual(calls[0]["text"], "✅ Done\n\nquote")
+        self.assertEqual(calls[0]["entities"][0]["type"], "bold")
+        self.assertEqual(calls[1], {"chat_id": 123, "text": "✅ Done\n\nquote"})
+
 
 if __name__ == "__main__":
     unittest.main()
