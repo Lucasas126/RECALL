@@ -13,7 +13,7 @@ import test_service_steering as steering
 from auth_helpers import login
 from src.agent.agent import Agent
 from src.agent.tool_groups import DISPOSABLE_BLOCKED_TOOLS
-from src.config.models import ModelsConfig, ResolvedAgent
+from src.config.models import AgentTerminalConfig, ModelsConfig, ResolvedAgent, SshBackendConfig
 from src.config.preferences import UserPreferences
 from src.core.review import ReviewQueue
 from src.core.sources.conversations import DEFAULT_DISPOSABLE_RETENTION_DAYS
@@ -22,6 +22,7 @@ from src.providers.provider import LLMProvider
 from src.utils.i18n import InputError
 from src.web.app import create_app
 
+TERMINAL_TOOLS = {"terminal", "sandbox_read", "sandbox_write", "sandbox_patch", "sandbox_search"}
 WRITE_TOOLS = {"write", "append", "edit", "move", "delete", "memory", "skill_manage", "soul_edit"}
 
 
@@ -145,11 +146,11 @@ class DisposableToolTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def _agent(self, chat_id: str | None, groups=("memory_read", "memory_edit", "self")) -> Agent:
+    def _agent(self, chat_id: str | None, groups=("memory_read", "memory_edit", "self"), **extra) -> Agent:
         config = ResolvedAgent(
             user_id="u", id="a", name="Aria", models=ModelsConfig(chat="vendor/chat"), provider_name="ollama",
             api_key="", embeddings_provider_name="ollama", embeddings_api_key="", tools=True,
-            tool_groups=list(groups), has_memory=True, associative_memory=False,
+            tool_groups=list(groups), has_memory=True, associative_memory=False, **extra,
         )
         return Agent(config, Mock(spec=LLMProvider), chat_id, sources=self.sources)
 
@@ -171,8 +172,24 @@ class DisposableToolTests(unittest.TestCase):
     def test_folder_write_tools_are_blocked_too(self) -> None:
         self.assertEqual(
             DISPOSABLE_BLOCKED_TOOLS,
-            WRITE_TOOLS | {"folder_write", "folder_append", "folder_edit", "folder_move", "folder_delete"},
+            WRITE_TOOLS | {"folder_write", "folder_append", "folder_edit", "folder_move", "folder_delete"}
+            | TERMINAL_TOOLS,
         )
+
+    def test_a_disposable_chat_never_builds_the_terminal_tools(self) -> None:
+        chats = self.sources.conversations()
+        extra = {
+            "terminal": AgentTerminalConfig(backend="box"),
+            "terminal_backend": SshBackendConfig(
+                type="ssh", host="192.0.2.10", user="agent", key_file="/k/id", known_hosts_file="/k/kh",
+            ),
+        }
+        groups = ("memory_read", "terminal")
+        open_ = self._agent(chats.create(), groups, **extra)
+        self.assertTrue(TERMINAL_TOOLS <= self._names(open_))  # the control: a normal chat does get them
+        locked = self._agent(chats.create(disposable=True), groups, **extra)
+        self.assertFalse(TERMINAL_TOOLS & self._names(locked))
+        self.assertFalse(TERMINAL_TOOLS & set(locked._tool_handlers))
 
     def test_handler_level_refusal_and_open_chat_switch(self) -> None:
         chats = self.sources.conversations()

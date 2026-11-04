@@ -32,7 +32,7 @@ from src.config.preferences import PreferencesError, UserPreferences, UserPrefer
 from src.config.zdr import chat_zdr, ensure_zdr_compatible, zdr_required
 from src.config.settings import (
     CHAT_NAMING, CONFIG_DIR, DATA_DIR, MCP, ORCHESTRATOR, PDF, SPEECH_TO_TEXT, TAVILY, TELEGRAM_ALLOWED_USERS_ENV,
-    VIDEO_DECOMPOSITION, WEB_PUBLIC_URL, memory_limits,
+    TERMINAL, VIDEO_DECOMPOSITION, WEB_PUBLIC_URL, memory_limits,
 )
 from src.core.index import VectorIndex
 from src.providers.decisions import DecisionError, decide_choice
@@ -55,6 +55,8 @@ from src.service.dream import (
     STATUS_EMOJI, STATUS_SUMMARY_CHARS, DreamDependencies, DreamManager, format_local_time, md_escape,
     parse_dream_command, summary_block,
 )
+from src.terminal.approvals import ApprovalBroker, ApprovalNotFound
+from src.terminal.context import RunContext, run_context
 from src.utils.logger import get_logger
 from src.utils.media import VideoDecomposition, decompose_video
 from src.utils.pdf import extract_pdf_text, run_tesseract
@@ -188,12 +190,15 @@ class ChatEvent:
     `kind` is `reasoning` (thinking tokens), `text` (answer tokens), `tool` (an action the agent
     took, in `data`: name, arguments, result, error), `usage` (context report, emitted once
     after the reply), `interrupted` (partial answer in `text`, reasoning/actions in `data`) or
-    `notice` (a warning about how the request was handled, in `text`, sent before the reply).
+    `notice` (a warning about how the request was handled, in `text`, sent before the reply),
+    `approval` (a tool waits for the user's go-ahead; `data`: id, tool, command, cwd, reason, risk, timeout_seconds,
+    expires_at) or `approval_resolved` (`data`: id, decision approved|denied, reason). The reply resumes by itself
+    once the approval is answered through `resolve_approval`, times out or is cancelled.
     Non-streaming replies arrive as `tool` events followed by one `text` event. All events
     carry a generation id so adapters can distinguish overlapping deliveries.
     """
 
-    kind: Literal["reasoning", "text", "tool", "usage", "interrupted", "memory", "notice"]
+    kind: Literal["reasoning", "text", "tool", "usage", "interrupted", "memory", "notice", "approval", "approval_resolved"]
     text: str = ""
     data: Optional[dict] = None
     generation_id: str = ""
@@ -256,6 +261,7 @@ class ChatService:
         self._cleanup_thread: threading.Thread | None = None
         self._cleanup_stop = threading.Event()
         self._last_cleanup = 0.0
+        self._approvals = ApprovalBroker(TERMINAL.approval_timeout_seconds)
 
     @staticmethod
     def _build_index(config: ResolvedAgent, sources: SourceRegistry) -> VectorIndex:
@@ -370,6 +376,7 @@ class ChatService:
     def close(self) -> None:
         """Stop background resources such as MCP server processes and the dream scheduler."""
         self._cleanup_stop.set()
+        self._approvals.close()  # tools waiting for an approval are denied so their threads can end
         if self._cleanup_thread is not None:
             self._cleanup_thread.join(5)
             self._cleanup_thread = None
@@ -1076,6 +1083,20 @@ class ChatService:
             return False
         return True
 
+    def list_approvals(self, user_id: str, agent_id: str, chat_id: str) -> list[dict]:
+        """Approvals the chat's tools are waiting on (same payload as the `approval` event)."""
+        self._owned_agent(user_id, agent_id)
+        self._require_chat(self._conversations(user_id, agent_id), chat_id)
+        return self._approvals.pending(user_id, agent_id, chat_id)
+
+    def resolve_approval(self, user_id: str, agent_id: str, chat_id: str, approval_id: str, decision: str) -> dict:
+        """Approve or deny a pending approval of the chat; raises ApprovalNotFound / ApprovalForbidden."""
+        self._owned_agent(user_id, agent_id)
+        pending = self._approvals.get(approval_id)
+        if pending is not None and (pending["agent_id"], pending["chat_id"]) != (agent_id, chat_id):
+            raise ApprovalNotFound("unknown or expired approval: {approval_id}", approval_id=approval_id)
+        return {"status": self._approvals.resolve(approval_id, user_id, decision)}
+
     def _enqueue(self, user_id: str, agent_id: str, slot: _AgentSlot, chat_id: str, run: _MessageRun) -> None:
         """Queue a run behind the chat's replies (steering the unfinished one); the caller holds `slot.state`."""
         pending = slot.pending.setdefault(chat_id, deque())
@@ -1300,9 +1321,15 @@ class ChatService:
                     return
                 run = pending.popleft()
                 slot.active[chat_id] = run
+            context = RunContext(
+                user_id, agent_id, chat_id, self._approvals,
+                lambda kind, data, run=run: run.events.put(ChatEvent(kind, data=data, generation_id=run.generation_id)),
+                run.cancellation,
+            )
             try:
-                for event in self._run(user_id, agent_id, slot, run):
-                    run.events.put(event)
+                with run_context(context):
+                    for event in self._run(user_id, agent_id, slot, run):
+                        run.events.put(event)
             except Exception as e:  # worker failures are delivered to the requesting channel
                 logger.exception("reply failed for %s/%s/%s", user_id, agent_id, run.chat_id)
                 run.events.put(e)

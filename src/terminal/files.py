@@ -1,0 +1,272 @@
+"""File operations on the sandbox filesystem, executed THROUGH the terminal backend.
+
+Every operation is a small POSIX shell snippet; file content travels on STDIN (never inside the command
+line). Paths are validated and shell-quoted. The same approval policy as `terminal` applies, reads included.
+"""
+
+from __future__ import annotations
+
+import difflib
+import posixpath
+import re
+import shlex
+
+from src.terminal.output import clean
+from src.terminal.policy import Assessment, assess_write
+from src.terminal.session import TerminalSession
+
+MAX_PATH = 4096
+MAX_FILE_BYTES = 2_000_000
+MAX_READ_LINES = 2000
+MAX_LINE_CHARS = 2000
+MAX_SEARCH_RESULTS = 200
+_NORMAL = Assessment("normal")
+_TOTAL = "@@TOTAL "
+# exit codes of the snippets
+_MISSING, _IS_DIR, _BINARY, _FAILED = 3, 4, 5, 2
+_BINARY_CHECK = (
+    """[ "$(head -c 8192 "$f" | LC_ALL=C tr -d '\\000' | wc -c)" = "$(head -c 8192 "$f" | wc -c)" ] || exit 5"""
+)
+_AWK = (
+    'NR>=s && NR<=e { l=$0; if (length(l)>m) l=substr(l,1,m) " [line cut]"; printf "%6d|%s\\n", NR, l } '
+    'END { print "' + _TOTAL + '" NR }'
+)
+
+
+def check_path(path: str) -> str:
+    """The path as typed, or ValueError: no NUL, not empty, bounded."""
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("path must not be empty")
+    if "\x00" in path:
+        raise ValueError("path must not contain a NUL byte")
+    if len(path) > MAX_PATH:
+        raise ValueError(f"path is longer than {MAX_PATH} characters")
+    if "\n" in path or "\r" in path:
+        raise ValueError("path must not contain line breaks")
+    return path.strip()
+
+
+def shell_path(path: str) -> str:
+    """A shell word for `path`; a leading `~` expands to $HOME (relative paths hang from the working directory)."""
+    if path == "~":
+        return '"$HOME"'
+    if path.startswith("~/"):
+        return '"$HOME"/' + shlex.quote(path[2:])
+    return shlex.quote(path)
+
+
+def _guard(path: str) -> str:
+    """Make a path that starts with `-` safe as an operand."""
+    return "./" + path if path.startswith("-") else path
+
+
+def _where(session: TerminalSession, path: str) -> str:
+    return path if path.startswith(("/", "~")) else posixpath.join(session.config.workdir, path)
+
+
+def _problem(code: int | None, path: str, stderr: str) -> str:
+    return {
+        _MISSING: f"error: no such file: {path}",
+        _IS_DIR: f"error: {path} is a directory",
+        _BINARY: f"error: {path} looks like a binary file; it cannot be shown as text",
+    }.get(code, f"error: could not access {path}" + (f": {stderr.strip()}" if stderr.strip() else ""))
+
+
+def _fetch(session: TerminalSession, tool: str, display: str, path: str, body: str):
+    result, denial = session.run(tool, display, body, assessment=_NORMAL)
+    return result, denial
+
+
+# ---------------------------------------------------------------------- read
+def sandbox_read(session: TerminalSession, path: str, offset: int = 1, limit: int = 200) -> str:
+    path = check_path(path)
+    offset, limit = max(1, int(offset)), max(1, min(int(limit), MAX_READ_LINES))
+    script = "\n".join([
+        "f=" + shell_path(path),
+        f'[ -e "$f" ] || exit {_MISSING}',
+        f'[ -d "$f" ] && exit {_IS_DIR}',
+        _BINARY_CHECK,
+        f"awk -v s={offset} -v e={offset + limit - 1} -v m={MAX_LINE_CHARS} '{_AWK}' \"$f\"",
+    ])
+    result, denial = _fetch(session, "sandbox_read", f"read {path} (lines {offset}-{offset + limit - 1})", path, script)
+    if denial:
+        return denial
+    if result.timed_out or result.exit_code != 0:
+        return "error: reading timed out" if result.timed_out else _problem(result.exit_code, path, result.stderr)
+    lines = result.stdout.splitlines()
+    total = 0
+    if lines and lines[-1].startswith(_TOTAL):
+        total = int(lines.pop().removeprefix(_TOTAL) or 0)
+    text, _ = clean("\n".join(lines), session.output_limit)
+    shown_end = offset + len(lines) - 1
+    if not lines:
+        return f"{path}: empty or past the end ({total} lines in total)"
+    footer = f"\n[{path}: lines {offset}-{shown_end} of {total}]"
+    if shown_end < total:
+        footer += f" Use offset={shown_end + 1} to continue."
+    return text + footer
+
+
+# ---------------------------------------------------------------------- write
+def _write_script(path: str) -> str:
+    p = shell_path(path)
+    return (
+        f"f={p}\n"
+        f'[ -d "$f" ] && exit {_IS_DIR}\n'
+        'd=$(dirname -- "$f") && mkdir -p -- "$d" || exit 2\n'
+        't=$(mktemp "$d/.recall-tmp-XXXXXX") || exit 2\n'
+        'if ! cat > "$t"; then rm -f -- "$t"; exit 2; fi\n'
+        'if [ -e "$f" ]; then chmod --reference="$f" "$t" 2>/dev/null || true; else chmod 644 "$t"; fi\n'
+        'mv -f -- "$t" "$f" || { rm -f -- "$t"; exit 2; }'
+    )
+
+
+def _write(session: TerminalSession, tool: str, display: str, path: str, content: str, assessment: Assessment,
+           preapproved: bool = False):
+    data = content.encode("utf-8")
+    if len(data) > MAX_FILE_BYTES:
+        return None, f"error: content is {len(data)} bytes; the limit is {MAX_FILE_BYTES}"
+    result, denial = session.run(tool, display, _write_script(path), stdin=data, assessment=assessment, preapproved=preapproved)
+    if denial:
+        return None, denial
+    if result.timed_out:
+        return None, "error: writing timed out"
+    if result.exit_code != 0:
+        return None, _problem(result.exit_code, path, result.stderr)
+    return len(data), None
+
+
+def sandbox_write(session: TerminalSession, path: str, content: str) -> str:
+    path = check_path(path)
+    size, problem = _write(
+        session, "sandbox_write", f"write {path} ({len(content.encode('utf-8'))} bytes)", path, content,
+        assess_write(posixpath.normpath(_where(session, path))),
+    )
+    return problem or f"wrote {size} bytes to {path}"
+
+
+# ---------------------------------------------------------------------- patch
+def _lines_match(text: str, old: str) -> list[tuple[int, int]]:
+    """Whitespace-tolerant matches of `old` in `text` as (start, end) character spans of whole lines."""
+    target = [line.strip() for line in old.strip("\n").split("\n")]
+    if not target or not any(target):
+        return []
+    lines = text.split("\n")
+    offsets, pos = [], 0
+    for line in lines:
+        offsets.append(pos)
+        pos += len(line) + 1
+    spans = []
+    for i in range(len(lines) - len(target) + 1):
+        if all(lines[i + k].strip() == target[k] for k in range(len(target))):
+            end = offsets[i + len(target) - 1] + len(lines[i + len(target) - 1])
+            spans.append((offsets[i], end))
+    return spans
+
+
+def patch_text(text: str, old: str, new: str, replace_all: bool = False) -> tuple[str | None, str]:
+    """(patched text, how it matched) or (None, error message)."""
+    if not old:
+        return None, "error: old must not be empty"
+    if old == new:
+        return None, "error: old and new are identical"
+    crlf = "\r\n" in text and "\r\n" not in old
+    if crlf:
+        old, new = old.replace("\n", "\r\n"), new.replace("\n", "\r\n")
+    count = text.count(old)
+    if count == 1 or (count > 1 and replace_all):
+        return text.replace(old, new), "exact" if count == 1 else f"exact, {count} replacements"
+    if count > 1:
+        return None, f"error: old matches {count} places; add surrounding lines to make it unique or set replace_all"
+    work = text.replace("\r\n", "\n") if crlf else text
+    spans = _lines_match(work, old.replace("\r\n", "\n") if crlf else old)
+    if not spans:
+        return None, "error: old was not found (also tried ignoring leading and trailing whitespace on each line)"
+    if len(spans) > 1 and not replace_all:
+        return None, f"error: old matches {len(spans)} places ignoring whitespace; add context or set replace_all"
+    replacement = new.replace("\r\n", "\n") if crlf else new
+    out, last = [], 0
+    for start, end in spans:
+        out.append(work[last:start])
+        out.append(replacement.strip("\n"))
+        last = end
+    out.append(work[last:])
+    result = "".join(out)
+    return (result.replace("\n", "\r\n") if crlf else result), "whitespace-tolerant"
+
+
+def sandbox_patch(session: TerminalSession, path: str, old: str, new: str, replace_all: bool = False) -> str:
+    path = check_path(path)
+    fetch = "\n".join([
+        "f=" + shell_path(path),
+        f'[ -e "$f" ] || exit {_MISSING}',
+        f'[ -d "$f" ] && exit {_IS_DIR}',
+        f'[ "$(wc -c < "$f")" -le {MAX_FILE_BYTES} ] || exit 2',
+        _BINARY_CHECK,
+        'cat -- "$f"',
+    ])
+    assessment = assess_write(posixpath.normpath(_where(session, path)))
+    result, denial = session.run("sandbox_patch", f"patch {path}", fetch, assessment=assessment)
+    if denial:
+        return denial
+    if result.timed_out or result.exit_code != 0:
+        return "error: reading timed out" if result.timed_out else _problem(result.exit_code, path, result.stderr)
+    original = result.stdout
+    patched, how = patch_text(original, old, new, replace_all)
+    if patched is None:
+        return how
+    # the approval for this path was just given; the write below is part of the same operation
+    size, problem = _write_after_patch(session, path, patched, assessment)
+    if problem:
+        return problem
+    diff = "".join(difflib.unified_diff(
+        original.splitlines(keepends=True), patched.splitlines(keepends=True), f"a/{path}", f"b/{path}",
+    ))
+    text, _ = clean(diff or "(no textual change)", session.output_limit)
+    return f"patched {path} ({how})\n{text}"
+
+
+def _write_after_patch(session: TerminalSession, path: str, content: str, assessment: Assessment):
+    """Write the patched file under the approval that already covered the fetch (one prompt per patch)."""
+    return _write(session, "sandbox_patch", f"write patched {path}", path, content, assessment, preapproved=True)
+
+
+# ---------------------------------------------------------------------- search
+def sandbox_search(session: TerminalSession, pattern: str, path: str = ".", glob: str | None = None,
+                   files: bool = False) -> str:
+    path = check_path(path or ".")
+    if not isinstance(pattern, str) or not pattern or "\x00" in pattern:
+        raise ValueError("pattern must be a non-empty string without NUL bytes")
+    if glob is not None and "\x00" in glob:
+        raise ValueError("glob must not contain a NUL byte")
+    p = shell_path(path)
+    cap = MAX_SEARCH_RESULTS + 1
+    if files:
+        name = f" -name {shlex.quote(pattern)}"
+        script = (
+            f"f={p}\n[ -e \"$f\" ] || exit {_MISSING}\n"
+            f"find \"$f\"{name} -not -path '*/.git/*' 2>/dev/null | head -n {cap}"
+        )
+        display = f"find files named {pattern} in {path}"
+    else:
+        include = f" --include={shlex.quote(glob)}" if glob else ""
+        script = (
+            f"f={p}\n[ -e \"$f\" ] || exit {_MISSING}\n"
+            f"grep -rIn -E --exclude-dir=.git{include} -e {shlex.quote(pattern)} -- \"$f\" | head -n {cap}"
+        )
+        display = f"search {pattern} in {path}" + (f" ({glob})" if glob else "")
+    result, denial = session.run("sandbox_search", display, script, assessment=_NORMAL)
+    if denial:
+        return denial
+    if result.timed_out:
+        return "error: the search timed out; narrow the path or the pattern"
+    if result.exit_code == _MISSING:
+        return _problem(_MISSING, path, "")
+    lines = [line for line in result.stdout.splitlines() if line]
+    if not lines:
+        if result.stderr.strip():
+            return "error: " + clean(result.stderr, 500)[0]
+        return "no matches"
+    more = len(lines) > MAX_SEARCH_RESULTS
+    text, _ = clean("\n".join(lines[:MAX_SEARCH_RESULTS]), session.output_limit)
+    return text + (f"\n[showing the first {MAX_SEARCH_RESULTS} results; narrow the search]" if more else "")

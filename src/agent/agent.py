@@ -16,6 +16,7 @@ from src.agent import associative
 from src.agent.profile import AgentProfile, load_profile, system_prompt
 from src.agent.tool_groups import DISPOSABLE_BLOCKED_TOOLS
 from src.agent.tools import build_tools, chat_folder_options
+from src.agent.toolsets.terminal import terminal_notice
 from src.agent.toolsets.mcp import build_mcp_tools
 from src.config.loader import load_agent
 from src.config.models import ModelsConfig, ResolvedAgent
@@ -294,6 +295,8 @@ class Agent:
             blocks.append(_ASSOC_NOTICE)
         if self._disposable:
             blocks.append(_DISPOSABLE_NOTICE)
+        if "terminal" in self._tool_handlers and (notice := terminal_notice(self.config)):
+            blocks.append(notice)
         if self._mcp_notes:
             blocks.append("## Connected services (MCP)\n\n" + "\n\n".join(self._mcp_notes))
         return system_prompt(self.profile, blocks)

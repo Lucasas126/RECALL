@@ -57,6 +57,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       tesseract-ocr tesseract-ocr-eng tesseract-ocr-spa \
       ffmpeg \
+      openssh-client \
       tzdata \
  && rm -rf /var/lib/apt/lists/*
 

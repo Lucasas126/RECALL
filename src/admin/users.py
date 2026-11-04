@@ -4,6 +4,7 @@
                                     [--claude-login] [--generate]
     python -m src.admin set-password <user_id> [--generate]
     python -m src.admin route-test "message text" --user <user_id> [--force]
+    python -m src.admin terminal-test --user <user_id> --backend <name>
 
 Passwords are never accepted as arguments (shell history): they are typed twice with
 hidden input, or generated with --generate and printed once. Provider API keys are never
@@ -23,7 +24,9 @@ import yaml
 
 from src.config.loader import load_user
 from src.config.models import ModelsConfig
-from src.config.settings import CONFIG_DIR
+from src.config.settings import CONFIG_DIR, TERMINAL
+from src.terminal.backends import build_backend
+from src.terminal.output import clean
 from src.utils.files import atomic_write_text
 from src.web.auth import hash_password
 
@@ -165,7 +168,46 @@ def _build_parser() -> argparse.ArgumentParser:
     route.add_argument("text", help="the message text")
     route.add_argument("--user", required=True, help="RECALL user id whose agents are ranked")
     route.add_argument("--force", action="store_true", help="run even when the orchestrator is disabled in settings")
+    term = sub.add_parser(
+        "terminal-test", help="run `echo ok; uname -sr` in one of a user's terminal backends (connection check)",
+    )
+    term.add_argument("--user", required=True, help="RECALL user id that owns the backend")
+    term.add_argument("--backend", required=True, help="name under terminal_backends in the user's user.yaml")
     return parser
+
+
+TERMINAL_TEST_COMMAND = "echo ok; uname -sr"
+TERMINAL_TEST_TIMEOUT = 15
+
+
+def terminal_test(user_id: str, backend_name: str) -> int:
+    """Run a harmless command through the named backend; prints the exit code and the cleaned output only."""
+    try:
+        user = load_user(check_user_id(user_id))
+    except (AdminError, FileNotFoundError, ValueError) as exc:
+        print(f"error: cannot load user '{user_id}': {exc}", file=sys.stderr)
+        return 1
+    config = user.terminal_backends.get(backend_name)
+    if config is None:
+        known = ", ".join(sorted(user.terminal_backends)) or "(none)"
+        print(f"error: backend '{backend_name}' is not defined for '{user_id}'. Defined: {known}", file=sys.stderr)
+        return 1
+    if config.type == "local" and not TERMINAL.allow_local:
+        print("error: that backend is of type local, which is disabled (settings.yaml terminal.allow_local)",
+              file=sys.stderr)
+        return 1
+    where = f"{config.user}@{config.host}:{config.port}" if config.type == "ssh" else f"local:{config.workdir}"
+    print(f"backend: {backend_name} ({config.type}, {where})")
+    cwd = "~" if config.type == "ssh" else "~/workspace"
+    result = build_backend(backend_name, config).run(TERMINAL_TEST_COMMAND, cwd, TERMINAL_TEST_TIMEOUT)
+    print(f"exit code: {'timed out' if result.timed_out else result.exit_code}")
+    out, _ = clean(result.stdout, 2000)
+    err, _ = clean(result.stderr, 2000)
+    if out.strip():
+        print("stdout:\n" + out.rstrip())
+    if err.strip():
+        print("stderr:\n" + err.rstrip())
+    return 0 if result.exit_code == 0 and not result.timed_out else 1
 
 
 def route_test(user_id: str, text: str, *, force: bool = False) -> int:
@@ -215,6 +257,8 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     if args.command == "route-test":
         return route_test(args.user, args.text, force=args.force)
+    if args.command == "terminal-test":
+        return terminal_test(args.user, args.backend)
     try:
         if args.command == "create-user":
             check_user_id(args.user_id)

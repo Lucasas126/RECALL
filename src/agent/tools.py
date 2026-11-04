@@ -7,6 +7,7 @@ from src.agent.toolsets.memory import build_memory_tools
 from src.agent.toolsets.self_files import build_self_tools
 from src.agent.toolsets.tags import build_tag_tools
 from src.agent.toolsets.folders import build_folder_tools
+from src.agent.toolsets.terminal import build_terminal_tools
 from src.agent.toolsets.web import build_web_tools
 from src.agent.tool_groups import DISPOSABLE_BLOCKED_TOOLS, validate_tool_groups
 from src.config.models import ResolvedAgent
@@ -22,6 +23,7 @@ _ORDER = (
     "folder_list", "folder_read", "folder_search",
     "folder_write", "folder_append", "folder_edit", "folder_move", "folder_delete",
     "web_search", "web_retrieve",
+    "terminal", "sandbox_read", "sandbox_write", "sandbox_patch", "sandbox_search",
 )
 
 
@@ -64,6 +66,8 @@ def build_tools(
         base_tools.extend(build_folder_tools(agent, writable="folders_edit" in selected and not disposable))
     if web_client is not None and "web" in selected:
         base_tools.extend(build_web_tools(web_client))
+    if "terminal" in selected and not disposable:
+        base_tools.extend(build_terminal_tools(agent.config))
     tools_by_name = {
         func.tool_spec["function"]["name"]: func
         for func in base_tools

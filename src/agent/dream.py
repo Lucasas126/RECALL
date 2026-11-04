@@ -16,6 +16,7 @@ from src.agent.toolsets.memory import build_memory_tools
 from src.agent.toolsets.self_files import build_self_tools
 from src.agent.toolsets.tags import build_tag_tools
 from src.agent.toolsets.folders import build_folder_tools
+from src.agent.toolsets.terminal import build_terminal_tools
 from src.agent.toolsets.web import build_web_tools
 from src.config.models import ResolvedAgent
 from src.core.review import ReviewQueue
@@ -119,6 +120,9 @@ def build_dream_tools(
         funcs.extend(build_folder_tools(host, writable=False))
     if "web" in host.config.dream.tools and web_client is not None:
         funcs.extend(build_web_tools(web_client))
+    terminal = host.config.terminal
+    if "terminal" in host.config.dream.tools and terminal is not None and terminal.allow_in_dream:
+        funcs.extend(build_terminal_tools(host.config, unattended=True))  # never prompts: see TerminalSession.decide
     return [func.tool_spec for func in funcs], {func.tool_spec["function"]["name"]: func for func in funcs}
 
 
