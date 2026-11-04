@@ -1711,7 +1711,6 @@ async function refreshModels(initial = false, recheck = initial) {
       state.modelProvider = initialProvider(state.modelProviders ?? []);
     }
     if (!stt) state.modelFavorites = favorites;
-    if (initial) state.modelFavoritesOnly = !stt && state.modelProvider !== null && favoritesOf(state.modelProvider).length > 0;
     state.modelCatalog = null;
     state.modelCatalogProvider = null;
     if (!state.modelProvider) return;
@@ -1830,7 +1829,7 @@ function openModelPicker(target) {
   $("model-search").value = "";
   $("model-error").textContent = "";
   $("model-zdr").checked = Boolean(state.user?.require_zdr);
-  state.modelFavoritesOnly = !stt && state.modelFavorites.length > 0;
+  state.modelFavoritesOnly = false;  // the filter is off whenever the selector opens; favorites still sort first
   $("model-favorites-only").hidden = stt;
   $("model-filters").hidden = stt;
   if (stt) $("model-sort").value = "prompt-asc";

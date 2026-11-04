@@ -618,8 +618,8 @@ Editing the search text does not reset the checkbox. Opening the selector or
 changing its filter does not change the chat's policy: choosing a model does.
 The composer shows no ZDR text while the user does not require it and the chat has not
 opted in; otherwise it shows "ZDR required" or "ZDR not required" for the current chat.
-Saved favorites appear first, and reopening the selector defaults to favorites when
-any exist. Favorites missing from the current catalog are visible but cannot
+Saved favorites appear first. The Favorites only filter is always off when the selector
+opens. Favorites missing from the current catalog are visible but cannot
 be selected; they can still be removed. The browser keeps the catalog until
 refresh, a filter change or logout, but additions and selections are revalidated
 on the server. An unrestricted catalog is never reused as a ZDR-filtered one.
