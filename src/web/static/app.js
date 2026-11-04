@@ -106,6 +106,13 @@ function translateInterface() {
     ["agent-associative-execution-label", "Associative search timing"],
     ["agent-associative-parallel", "In parallel with the reply"], ["agent-associative-sequential", "Before the reply"],
     ["agent-tool-groups-label", "Tool groups"],
+    ["agent-terminal-legend", "Terminal"], ["agent-terminal-backend-label", "Backend"],
+    ["agent-terminal-no-backends", "No terminal backends are configured. Add one under terminal_backends in your user configuration; see docs/user-guide/terminal.md."],
+    ["agent-terminal-workdir-label", "Working directory"], ["agent-terminal-approvals-label", "Approvals"],
+    ["agent-terminal-approvals-manual", "Manual: ask for everything"], ["agent-terminal-approvals-smart", "Smart: ask for dangerous actions"],
+    ["agent-terminal-approvals-off", "Off: never ask (risky)"],
+    ["agent-terminal-timeout-label", "Command timeout (seconds)"], ["agent-terminal-dream-label", "Allow in dream"],
+    ["agent-terminal-dream-hint", "Dream sessions run unattended: with this on, an agent whose dream tools include the terminal can run commands in the sandbox without you watching."],
     ["agent-effort-label", "Reasoning effort"], ["agent-effort-default", "Default"],
     ["agent-tokens-enabled-label", "Limit reasoning tokens"], ["agent-reasoning-tokens-label", "Reasoning tokens"],
     ["agent-retained-label", "Messages kept in context"],
@@ -221,6 +228,7 @@ function normalizeError(source) {
 function httpError(body, status) {
   const error = new Error(formatApiError(body?.detail) || tr("HTTP {status}", { status }));
   error.code = typeof body?.code === "string" ? body.code : null;
+  error.status = status;
   return error;
 }
 
@@ -573,9 +581,11 @@ function fillAgentForm(agent) {
       const text = document.createElement("span");
       text.textContent = translatedText(group.name);
       label.append(checkbox, text);
+      if (group.id === "terminal") checkbox.addEventListener("change", updateTerminalBlock);
       return label;
     }),
   );
+  renderTerminalBlock(agent);
   $("agent-tool-groups").append(Object.assign(document.createElement("p"), {
     className: "model-note", textContent: tr("The folder groups need at least one folder, set in the Folders tab."),
   }));
@@ -592,6 +602,41 @@ function fillAgentForm(agent) {
   resetIndexStatus();
   showAgentPanel("basic");
 }
+
+// The Terminal block follows the `terminal` tool group: shown (and validated) only while the group is ticked.
+function terminalGroupChecked() {
+  return Boolean(document.querySelector('input[name="agent-tool-group"][value="terminal"]:checked'));
+}
+
+function updateTerminalBlock() {
+  const enabled = terminalGroupChecked();
+  $("agent-terminal").hidden = !enabled;
+  $("agent-terminal").disabled = !enabled;  // a disabled fieldset is not validated, so hidden fields never block saving
+}
+
+function renderTerminalBlock(agent) {
+  const saved = agent.terminal ?? null;
+  const options = terminalBackendOptions(state.user?.terminal_backends, saved?.backend);
+  $("agent-terminal-backend").replaceChildren(...options.map((option) => Object.assign(document.createElement("option"), {
+    value: option.value, textContent: option.label,
+  })));
+  $("agent-terminal-backend").value = saved?.backend ?? options[0]?.value ?? "";
+  $("agent-terminal-no-backends").hidden = options.length > 0;
+  $("agent-terminal-workdir").value = saved?.workdir ?? "~/workspace";
+  $("agent-terminal-approvals").value = saved?.approvals ?? "manual";
+  $("agent-terminal-approvals-hint").textContent = terminalApprovalHint($("agent-terminal-approvals").value);
+  $("agent-terminal-approvals").classList.toggle("warning", $("agent-terminal-approvals").value === "off");
+  $("agent-terminal-timeout").value = saved?.timeout_seconds ?? 60;
+  $("agent-terminal-dream").checked = saved?.allow_in_dream ?? false;
+  $("agent-terminal-error").textContent = "";
+  updateTerminalBlock();
+}
+
+$("agent-terminal-approvals").addEventListener("change", () => {
+  const value = $("agent-terminal-approvals").value;
+  $("agent-terminal-approvals-hint").textContent = terminalApprovalHint(value);
+  $("agent-terminal-approvals").classList.toggle("warning", value === "off");
+});
 
 const AGENT_PANELS = ["basic", "tools", "mcp", "folders"];
 // panels of a saved agent with their own saves, outside the agent form
@@ -909,6 +954,11 @@ function agentFormBody() {
     // edited in the Dream tab; sent back unchanged so saving the agent does not reset it
     ...(saved ? { dream: saved.dream } : {}),
     folders: agentFoldersBody(),
+    terminal: buildTerminalConfig(saved?.terminal, terminalGroupChecked(), {
+      backend: $("agent-terminal-backend").value, workdir: $("agent-terminal-workdir").value,
+      approvals: $("agent-terminal-approvals").value, timeout: $("agent-terminal-timeout").value,
+      allowInDream: $("agent-terminal-dream").checked,
+    }),
     chat_config: {
       model: $("agent-model").value.trim() || null,  // null follows the user's default model
       stream: $("agent-stream").checked,
@@ -936,6 +986,7 @@ function setAgentBusy(busy) {
 async function refreshAgents(previousId, currentId) {
   const me = await api("/api/me");
   state.user.agents = me.agents;
+  state.user.terminal_backends = me.terminal_backends ?? [];
   renderAgentOptions();
   renderAgentsEmpty();
   await loadAgentConfigs();
@@ -981,6 +1032,7 @@ $("agent-form").addEventListener("submit", async (event) => {
   const soul = previousId ? "" : $("agent-prompt").value;
   setAgentBusy(true);
   $("agent-error").textContent = "";
+  $("agent-terminal-error").textContent = "";
   $("agent-status").textContent = "";
   try {
     const saved = await api(previousId ? `/api/agents/${previousId}` : "/api/agents", {
@@ -999,7 +1051,14 @@ $("agent-form").addEventListener("submit", async (event) => {
     }
     $("agent-status").textContent = tr("Agent saved.");
   } catch (err) {
-    if (session === state.session) $("agent-error").textContent = err.message;
+    if (session === state.session) {
+      if (terminalGroupChecked() && isTerminalError(err.message)) {
+        $("agent-terminal-error").textContent = err.message;
+        showAgentPanel("tools");
+      } else {
+        $("agent-error").textContent = err.message;
+      }
+    }
   } finally {
     if (session === state.session) setAgentBusy(false);
   }
@@ -1626,9 +1685,11 @@ async function openChat(chatId) {
     if (usage) showUsage(usage);
     else $("usage").hidden = true;
   } else {
+    forgetApprovals(agentId, chatId);
     renderMessages(data.messages);
   }
   updateBusy();
+  syncApprovals(agentId, chatId);
   await refreshChats();
   $("input").focus();
 }
@@ -2110,6 +2171,7 @@ function resetStreams() {
   state.requests.clear();
   state.views.clear();
   state.usages.clear();
+  resetApprovals();
   state.view = null;
   state.latest = null;
   state.sendQueue = Promise.resolve();
@@ -2298,6 +2360,295 @@ function showUsage(report) {
   $("usage").querySelector("pre").textContent = report;
 }
 
+// ------------------------------------------------------------------ terminal approvals
+
+// "Dangerous command" for an action the policy flags, "Approval required" for one the agent's approvals setting asks about.
+function approvalTitle(approval) {
+  return approval?.risk === "dangerous" ? tr("Dangerous command") : tr("Approval required");
+}
+
+// Seconds left as m:ss; never negative.
+function formatCountdown(seconds) {
+  const total = Math.max(0, Math.ceil(Number(seconds) || 0));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+// Whole seconds until `expiresAt` (epoch seconds) at `nowMs` (epoch milliseconds); 0 once it has passed.
+function approvalRemaining(expiresAt, nowMs) {
+  const left = Math.ceil(Number(expiresAt) - nowMs / 1000);
+  return Number.isFinite(left) ? Math.max(0, left) : 0;
+}
+
+// The outcome kind an `approval_resolved` event shows: the reason (timeout, cancel, shutdown) wins over the decision.
+function approvalOutcome(decision, reason) {
+  if (reason === "timed out") return "timed_out";
+  if (reason === "cancelled" || reason === "service shutdown") return "cancelled";
+  return decision === "approved" ? "approved" : "denied";
+}
+
+function approvalOutcomeLabel(kind) {
+  switch (kind) {
+    case "approved": return tr("Approved");
+    case "denied": return tr("Denied");
+    case "timed_out": return tr("Timed out");
+    case "cancelled": return tr("Cancelled");
+    case "expired": return tr("Expired");
+    default: return tr("Resolved");
+  }
+}
+
+function approvalInitialState() {
+  return { phase: "pending", kind: null, error: null, decision: null };
+}
+
+function approvalActive(current) {
+  return current.phase === "pending" || current.phase === "submitting";
+}
+
+// Card state machine. Phases: pending -> submitting -> resolved | expired; a failed answer goes back to pending.
+// Actions: submit {decision}, answered {status}, failed {status, message}, resolved {decision, reason}, gone {expired}.
+// The server's `approval_resolved` is the truth: it overrides an "expired" mark, but a settled card never changes again.
+function approvalTransition(current, action) {
+  const settled = current.phase === "resolved" || current.phase === "expired";
+  switch (action.type) {
+    case "submit":
+      return current.phase === "pending" ? { phase: "submitting", kind: null, error: null, decision: action.decision } : current;
+    case "resolved":
+      if (current.phase === "resolved") return current;
+      return { phase: "resolved", kind: approvalOutcome(action.decision, action.reason), error: null, decision: current.decision };
+    case "answered":
+      if (settled) return current;
+      return { phase: "resolved", kind: approvalOutcome(action.status, null), error: null, decision: current.decision };
+    case "failed":
+      if (settled) return current;
+      if (action.status === 404) return { phase: "expired", kind: "expired", error: null, decision: current.decision };
+      return { phase: "pending", kind: null, error: action.message || "", decision: null };
+    case "gone":
+      if (settled) return current;
+      return { phase: "resolved", kind: action.expired ? "timed_out" : "unknown", error: null, decision: current.decision };
+    default:
+      return current;
+  }
+}
+
+const approvalEntries = new Map();
+let approvalTimer = null;
+let approvalTicks = 0;
+
+function buildApprovalCard(entry) {
+  const approval = entry.data;
+  const make = (tag, className, text) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text != null) node.textContent = text;
+    return node;
+  };
+  const card = make("div", `approval-card${approval.risk === "dangerous" ? " dangerous" : ""}`);
+  card.setAttribute("role", "group");
+  card.dataset.approvalId = approval.id;
+  const title = make("span", "approval-title", approvalTitle(approval));
+  title.id = `approval-title-${approval.id}`;
+  card.setAttribute("aria-labelledby", title.id);
+  const countdown = make("span", "approval-countdown");
+  countdown.setAttribute("role", "timer");
+  countdown.title = tr("Time left");
+  const head = make("div", "approval-head");
+  head.append(title, make("span", "approval-tool", approval.tool ?? ""), countdown);
+  // focusable so a long command can be scrolled with the keyboard
+  const command = make("pre", "approval-command", approval.command ?? "");
+  command.tabIndex = 0;
+  card.append(head, command);
+  for (const [label, value] of [[tr("Working directory"), approval.cwd], [tr("Reason"), approval.reason]]) {
+    if (!value) continue;
+    const row = make("p", "approval-meta");
+    row.append(make("strong", null, `${label}: `), document.createTextNode(value));
+    card.append(row);
+  }
+  const approve = make("button", "primary", tr("Approve"));
+  const deny = make("button", null, tr("Deny"));
+  approve.type = deny.type = "button";
+  approve.addEventListener("click", () => answerApproval(entry, "approve"));
+  deny.addEventListener("click", () => answerApproval(entry, "deny"));
+  const actions = make("div", "approval-actions");
+  actions.append(approve, deny);
+  const status = make("p", "approval-status");
+  status.setAttribute("role", "status");
+  const error = make("p", "approval-error");
+  error.setAttribute("role", "alert");
+  card.append(actions, status, error);
+  entry.nodes = { card, countdown, actions, approve, deny, status, error };
+  return card;
+}
+
+function renderApproval(entry) {
+  const { phase, kind, error, decision } = entry.state;
+  const { card, countdown, actions, approve, deny, status, error: errorNode } = entry.nodes;
+  const active = approvalActive(entry.state);
+  card.classList.toggle("resolved", !active);
+  card.dataset.outcome = kind ?? "";
+  actions.hidden = !active;
+  approve.disabled = deny.disabled = phase === "submitting";
+  countdown.hidden = !active;
+  countdown.textContent = formatCountdown(approvalRemaining(entry.data.expires_at, Date.now()));
+  if (phase === "submitting") {
+    status.textContent = tr(decision === "deny" ? "Denying…" : "Approving…");
+  } else if (kind) {
+    status.replaceChildren(Object.assign(document.createElement("span"), {
+      className: `approval-badge ${kind}`, textContent: approvalOutcomeLabel(kind),
+    }));
+  } else {
+    status.textContent = "";
+  }
+  errorNode.textContent = phase === "expired" ? tr("This approval expired or was already answered.") : error ?? "";
+}
+
+function applyApproval(entry, action) {
+  entry.state = approvalTransition(entry.state, action);
+  renderApproval(entry);
+}
+
+// Draws the card for a pending approval once (events and the pending list may both report it); `place(node)` inserts it.
+function showApproval(approval, place) {
+  const existing = approvalEntries.get(approval.id);
+  if (existing) return existing;
+  const entry = {
+    id: approval.id, createdAt: Date.now(), state: approvalInitialState(),
+    data: { agent_id: state.agentId, chat_id: state.chatId, ...approval },
+  };
+  place(buildApprovalCard(entry));
+  renderApproval(entry);
+  approvalEntries.set(entry.id, entry);
+  if (!approvalTimer) approvalTimer = setInterval(approvalTimerTick, 1000);
+  return entry;
+}
+
+function settleApproval({ id, decision, reason }) {
+  const entry = approvalEntries.get(id);
+  if (entry) applyApproval(entry, { type: "resolved", decision, reason });
+}
+
+async function answerApproval(entry, decision) {
+  if (entry.state.phase !== "pending") return;
+  applyApproval(entry, { type: "submit", decision });
+  const { agent_id: agentId, chat_id: chatId, id } = entry.data;
+  try {
+    const result = await api(
+      `/api/agents/${encodeURIComponent(agentId)}/chats/${encodeURIComponent(chatId)}/approvals/${encodeURIComponent(id)}`,
+      { method: "POST", body: JSON.stringify({ decision }) },
+    );
+    applyApproval(entry, { type: "answered", status: result?.status });
+  } catch (err) {
+    applyApproval(entry, {
+      type: "failed", status: err.status,
+      message: tr("Could not send the answer: {error}", { error: err.message }),
+    });
+  }
+}
+
+// Once a second: countdowns; every third second: ask the server which approvals are still pending, which also
+// settles cards whose resolution this page never saw (a reload, another client or a dropped stream).
+function approvalTimerTick() {
+  const chats = new Map();
+  for (const entry of approvalEntries.values()) {
+    if (!approvalActive(entry.state)) continue;
+    entry.nodes.countdown.textContent = formatCountdown(approvalRemaining(entry.data.expires_at, Date.now()));
+    chats.set(`${entry.data.agent_id}/${entry.data.chat_id}`, [entry.data.agent_id, entry.data.chat_id]);
+  }
+  if (!chats.size) {
+    clearInterval(approvalTimer);
+    approvalTimer = null;
+    return;
+  }
+  approvalTicks++;
+  if (approvalTicks % 3 === 0) for (const [agentId, chatId] of chats.values()) syncApprovals(agentId, chatId);
+}
+
+function placeApprovalInView(node) {
+  if (!state.view) return;
+  let stack = state.view.querySelector(":scope > .approval-stack");
+  if (!stack) {
+    stack = document.createElement("div");
+    stack.className = "approval-stack";
+    state.view.append(stack);
+  }
+  stack.append(node);
+  scrollDown();
+}
+
+// Loads a chat's pending approvals: draws the missing cards (current chat only) and settles cards the server no longer lists.
+async function syncApprovals(agentId, chatId) {
+  const session = state.session;
+  const startedAt = Date.now();
+  let pending;
+  try {
+    pending = await api(`/api/agents/${encodeURIComponent(agentId)}/chats/${encodeURIComponent(chatId)}/approvals`);
+  } catch {
+    return;
+  }
+  if (session !== state.session || !Array.isArray(pending)) return;
+  const listed = new Set(pending.map((approval) => approval.id));
+  if (state.agentId === agentId && state.chatId === chatId) {
+    for (const approval of pending) showApproval({ agent_id: agentId, chat_id: chatId, ...approval }, placeApprovalInView);
+  }
+  for (const entry of approvalEntries.values()) {
+    const data = entry.data;
+    if (data.agent_id !== agentId || data.chat_id !== chatId || !approvalActive(entry.state)) continue;
+    if (listed.has(entry.id) || entry.createdAt >= startedAt) continue;
+    applyApproval(entry, { type: "gone", expired: approvalRemaining(data.expires_at, Date.now()) === 0 });
+  }
+}
+
+// A chat view that is drawn again loses its cards: forget them so the pending list can draw them back.
+function forgetApprovals(agentId, chatId) {
+  for (const [id, entry] of approvalEntries) {
+    if (entry.data.agent_id === agentId && entry.data.chat_id === chatId) approvalEntries.delete(id);
+  }
+}
+
+function resetApprovals() {
+  approvalEntries.clear();
+  clearInterval(approvalTimer);
+  approvalTimer = null;
+}
+
+// ------------------------------------------------------------------ terminal settings (agent form)
+
+function terminalApprovalHint(value) {
+  switch (value) {
+    case "smart": return tr("Only dangerous actions wait for your approval; the rest run on their own.");
+    case "off": return tr("Nothing asks. Everything runs without approval, except what the hardline always refuses.");
+    default: return tr("Every command and file operation waits for your approval.");
+  }
+}
+
+// Backend choices by name and type (never hosts or keys); a saved backend that no longer exists stays selectable so the error can be seen.
+function terminalBackendOptions(backends, saved) {
+  const options = (backends ?? []).map((backend) => ({ value: backend.name, label: `${backend.name} (${backend.type})` }));
+  if (saved && !options.some((option) => option.value === saved)) {
+    options.push({ value: saved, label: tr("{name} (not defined)", { name: saved }) });
+  }
+  return options;
+}
+
+// The `terminal` block to save: the form's fields while the group is enabled, else the saved block untouched.
+function buildTerminalConfig(saved, enabled, fields) {
+  if (!enabled) return saved ?? null;
+  if (!fields.backend) return null;
+  return {
+    ...(saved ?? {}),
+    backend: fields.backend,
+    workdir: fields.workdir.trim() || "~/workspace",
+    approvals: fields.approvals,
+    timeout_seconds: Number(fields.timeout),
+    allow_in_dream: Boolean(fields.allowInDream),
+  };
+}
+
+// Save errors about the terminal block (missing backend, local disabled, bad fields) belong next to it.
+function isTerminalError(message) {
+  return /terminal/i.test(String(message ?? ""));
+}
+
 function addMessage(role, parent = state.view ?? $("messages")) {
   const el = document.createElement("div");
   el.className = `msg ${role}`;
@@ -2416,6 +2767,9 @@ function addMessage(role, parent = state.view ?? $("messages")) {
       result.textContent = a.result;
       item.append(summary, result);
       el.insertBefore(item, body);
+    },
+    approval(approval) {
+      showApproval(approval, (node) => el.insertBefore(node, body));
     },
     interrupted(snapshot = null) {
       this.settleMemory();
@@ -2665,6 +3019,7 @@ async function dispatchMessage(content, attachments, edit = null) {
   } finally {
     state.requests.delete(request);
     if (sameSession(request)) {
+      syncApprovals(request.agentId, request.chatId);
       if (!isGenerating(request.agentId, request.chatId) && !isCurrent(request)) {
         state.views.delete(key);
         state.usages.delete(key);
@@ -2675,7 +3030,11 @@ async function dispatchMessage(content, attachments, edit = null) {
         try {
           await refreshChats();
           if (isCurrent(request)) {
-            if (request.reloadAfter) renderMessages((await api(chatsUrl(`/${request.chatId}`))).messages);
+            if (request.reloadAfter) {
+              forgetApprovals(request.agentId, request.chatId);
+              renderMessages((await api(chatsUrl(`/${request.chatId}`))).messages);
+              syncApprovals(request.agentId, request.chatId);
+            }
             else await syncEditIndexes(request);
           }
         } catch (err) {
@@ -2767,6 +3126,8 @@ function handleEvent(raw, request) {
   else if (event === "tool") reply.action(payload);
   else if (event === "memory") reply.memory(payload);
   else if (event === "notice") reply.notice(payload);
+  else if (event === "approval") reply.approval(payload);
+  else if (event === "approval_resolved") settleApproval(payload);
   else if (event === "interrupted") reply.interrupted(payload);
   else if (event === "error") reply.error(payload);
   else if (event === "done") {

@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 import test_service_steering as steering
 from auth_helpers import login
+from terminal_helpers import ssh_config
 from src.terminal.context import current_run
 from src.web.app import create_app
 
@@ -135,6 +136,32 @@ class ApprovalApiTests(steering.SteeringFixture):
         self.assertEqual(self.client.get("/api/agents/agent-one/chats/missing/approvals").status_code, 404)
         anonymous = TestClient(create_app(self.service))
         self.assertEqual(anonymous.get(f"{self.base}/approvals").status_code, 401)
+
+
+class TerminalBackendListingTests(steering.SteeringFixture):
+    BACKEND = ssh_config(host="203.0.113.77", user="sandboxer", port=2222, key_file="/keys/secret_id", known_hosts_file="/keys/kh_secret")
+    backends: dict = {}
+
+    def _user(self, user_id):
+        user = super()._user(user_id)
+        return user.model_copy(update={"terminal_backends": dict(self.backends)})
+
+    def me(self):
+        client = TestClient(create_app(self.service))
+        client.__enter__()
+        self.addCleanup(client.__exit__, None, None, None)
+        login(client, "user-one")
+        return client.get("/api/me")
+
+    def test_no_backends_by_default(self) -> None:
+        self.assertEqual(self.me().json()["terminal_backends"], [])
+
+    def test_lists_only_name_and_type(self) -> None:
+        self.backends = {"box": self.BACKEND, "alpha": self.BACKEND}
+        response = self.me()
+        self.assertEqual(response.json()["terminal_backends"], [{"name": "alpha", "type": "ssh"}, {"name": "box", "type": "ssh"}])
+        for secret in ("203.0.113.77", "sandboxer", "2222", "/keys/secret_id", "secret_id", "kh_secret"):
+            self.assertNotIn(secret, response.text)
 
 
 if __name__ == "__main__":

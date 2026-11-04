@@ -193,6 +193,35 @@
             <fieldset id="agent-tool-groups" class="model-capabilities">
               <legend id="agent-tool-groups-label">Tool groups</legend>
             </fieldset>
+            <fieldset id="agent-terminal" class="agent-terminal" hidden disabled>
+              <legend id="agent-terminal-legend">Terminal</legend>
+              <p id="agent-terminal-no-backends" class="model-note" hidden>No terminal backends are configured. Add one under terminal_backends in your user configuration; see docs/user-guide/terminal.md.</p>
+              <label>
+                <span id="agent-terminal-backend-label">Backend</span>
+                <select id="agent-terminal-backend"></select>
+              </label>
+              <label>
+                <span id="agent-terminal-workdir-label">Working directory</span>
+                <input id="agent-terminal-workdir" maxlength="1024" placeholder="~/workspace" autocomplete="off">
+              </label>
+              <label>
+                <span id="agent-terminal-approvals-label">Approvals</span>
+                <select id="agent-terminal-approvals">
+                  <option value="manual" id="agent-terminal-approvals-manual">Manual: ask for everything</option>
+                  <option value="smart" id="agent-terminal-approvals-smart">Smart: ask for dangerous actions</option>
+                  <option value="off" id="agent-terminal-approvals-off">Off: never ask (risky)</option>
+                </select>
+                <span id="agent-terminal-approvals-hint" class="model-note"></span>
+              </label>
+              <label>
+                <span id="agent-terminal-timeout-label">Command timeout (seconds)</span>
+                <input id="agent-terminal-timeout" type="number" min="1" max="600" step="1" required>
+              </label>
+              <label class="model-filter"><input id="agent-terminal-dream" type="checkbox">
+                <span id="agent-terminal-dream-label">Allow in dream</span></label>
+              <p id="agent-terminal-dream-hint" class="model-note terminal-warning">Dream sessions run unattended: with this on, an agent whose dream tools include the terminal can run commands in the sandbox without you watching.</p>
+              <p id="agent-terminal-error" class="error" role="alert"></p>
+            </fieldset>
           </div>
           <div id="agent-panel-mcp" class="agent-panel" hidden>
             <p id="agent-mcp-note" class="model-note">MCP servers act on each user's own account. Connect accounts in Settings &gt; Connections.</p>

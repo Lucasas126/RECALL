@@ -318,6 +318,10 @@ class ChatService:
             "provider": user.provider.name,
             "require_zdr": user.require_zdr,
             "agents": self.list_agents(user_id),
+            # names and types only, to choose a backend in the agent form; never hosts, users or key paths
+            "terminal_backends": [
+                {"name": name, "type": backend.type} for name, backend in sorted(user.terminal_backends.items())
+            ],
         }
 
     def authenticate(self, user_id: str, password: str) -> dict:
