@@ -156,7 +156,7 @@ class AssociativeMemoryConfig(BaseModel):
 
     context_messages: int = Field(default=6, ge=0, le=100, strict=True)
     top_n: int = Field(default=3, ge=1, le=20, strict=True)
-    score_threshold: float = Field(default=0.25, ge=0, le=1)
+    score_threshold: float = Field(default=0.35, ge=0, le=1)
     query_model: Optional[str] = Field(default=None, strict=True, min_length=1, max_length=256)
     api_key: str = Field(default="OPENROUTER_API_KEY", pattern=_ENV_NAME)
     zdr: Optional[bool] = Field(default=None, strict=True)  # None follows the user's require_zdr

@@ -56,7 +56,7 @@ tavily:
 associative_memory:
   context_messages: 6       # recent messages the memory subagent sees
   top_n: 3                  # default maximum fragments injected per turn; each user can choose their own in Settings
-  score_threshold: 0.25     # minimum similarity for a fragment to be injected (application-wide, not per user)
+  score_threshold: 0.35     # minimum similarity for a fragment to be injected (application-wide, not per user)
   query_model: openai/gpt-4o-mini  # small OpenRouter model that proposes the search query; null uses each chat's own model
   api_key: OPENROUTER_API_KEY      # shared env var NAME for the OpenRouter key, never the secret
   # zdr: false                     # optional override of the user's require_zdr (user.yaml) for query requests; unset follows it
