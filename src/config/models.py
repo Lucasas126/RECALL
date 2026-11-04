@@ -416,8 +416,8 @@ class MemoryLimits(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    memory_chars: int = Field(default=2200, ge=100, le=50_000, strict=True)
-    user_chars: int = Field(default=1400, ge=100, le=50_000, strict=True)
+    memory_chars: int = Field(default=4000, ge=100, le=50_000, strict=True)
+    user_chars: int = Field(default=2500, ge=100, le=50_000, strict=True)
 
 
 # source names the agent's own data already uses; a folder cannot take them

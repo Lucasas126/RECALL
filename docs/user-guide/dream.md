@@ -309,8 +309,8 @@ dream:
   notify_telegram: false     # "dream session completed" + where to see it in the web
 folders: []                  # user folders, edited in the agent's Folders tab (see [files and media](files-and-media.md) and [memory](memory.md))
 memory_limits:
-  memory_chars: 2200
-  user_chars: 1400
+  memory_chars: 4000
+  user_chars: 2500
 ```
 
 the schedule runs in whichever process is up (web or Telegram), checked every

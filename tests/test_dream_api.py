@@ -121,9 +121,9 @@ class DreamApiTests(unittest.TestCase):
     def test_memories_round_trip_with_limit(self) -> None:
         saved = self.client.put(f"{self.base}/memories/user", json={"content": "Name: Ana\n§\nLikes tea"}).json()
         self.assertEqual(saved["entries"], ["Name: Ana", "Likes tea"])
-        self.assertEqual(saved["limit"], 1400)
+        self.assertEqual(saved["limit"], 2500)
         self.assertEqual(self.client.get(f"{self.base}/memories/memory").json()["content"], "")
-        self.assertEqual(self.client.put(f"{self.base}/memories/user", json={"content": "x" * 1401}).status_code, 400)
+        self.assertEqual(self.client.put(f"{self.base}/memories/user", json={"content": "x" * 2501}).status_code, 400)
         self.assertEqual(self.client.get(f"{self.base}/memories/other").status_code, 422)
 
     def test_dream_settings_validation(self) -> None:

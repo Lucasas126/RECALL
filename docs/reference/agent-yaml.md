@@ -7,7 +7,7 @@ One file per agent: `.config/<user_id>/agents/<agent_id>.yaml`. The agent's pers
 
 Defaults when a key is omitted: `stream: true`, `has_memory: true`, `reasoning: true`, `reasoning_effort: medium`,
 `conversation_messages_retained: 30`, `tools: true`, `associative_memory: llm`, `associative_execution: parallel`,
-`memory_limits` 2200/1400, `dream.enabled: false`. The values in the example below are illustrative.
+`memory_limits` 4000/2500, `dream.enabled: false`. The values in the example below are illustrative.
 
 ## agent file
 
@@ -49,8 +49,8 @@ folders:                             # user folders, each exposed as the source 
     indexed: true                    # feeds associative memory and query_memory (default true)
     read_only: false                 # never writable, whatever the tool groups (default false)
 memory_limits:                       # chars of MEMORY.md / USER.md, injected in every prompt
-  memory_chars: 2200
-  user_chars: 1400
+  memory_chars: 4000
+  user_chars: 2500
 ```
 
 the agent's personality lives only in `data/<user_id>/<agent_id>/SOUL.md` (a

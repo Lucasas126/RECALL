@@ -14,7 +14,7 @@ from src.utils.files import atomic_write_text, exclusive_file_lock
 from src.utils.i18n import InputError
 
 SOUL_FILE = "SOUL.md"
-SOUL_MAX_CHARS = 20000
+SOUL_MAX_CHARS = 8000
 SOUL_HISTORY_KEEP = 5
 MEMORY_DELIMITER = "\n§\n"
 MemoryTarget = Literal["memory", "user"]

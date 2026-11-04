@@ -3455,7 +3455,7 @@ async function routeFromHash(hash = location.hash) {
 globalThis.addEventListener("hashchange", () => routeFromHash());
 
 $("soul-content").addEventListener("input", () => {
-  renderCount("soul-count", $("soul-content").value.length, Number($("soul-content").dataset.max || 20000));
+  renderCount("soul-count", $("soul-content").value.length, Number($("soul-content").dataset.max || 8000));
 });
 $("soul-save").addEventListener("click", saveSoul);
 $("soul-default").addEventListener("click", () => {
