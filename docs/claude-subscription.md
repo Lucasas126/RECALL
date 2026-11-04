@@ -12,11 +12,26 @@ Hermes plugin `claude-subscription-directsdk-experimental` by Nous Research
 Use it only for yourself, with your own Claude login. Anthropic's terms do not
 allow a third-party product to offer claude.ai logins to other people, so **do not
 let other people use your login** and do not point one user's configuration at
-another person's login. There is no per-user switch: any RECALL user can pick a
-Claude model whenever the CLI on the server is logged in, and then uses *that*
-login. On a shared install give each person their own login folder
-(`claude_config_dir` below, run `claude auth login` with that folder), or do not
-log the CLI in at all.
+another person's login. RECALL enforces this with one server-wide setting,
+`claude_subscription.default_login_users` in `settings.yaml`:
+
+- A user with their own `claude_config_dir` (see below) always uses it.
+- A user without one would use the CLI's *default* login, the one of the OS
+  account running RECALL. That is allowed only for the user ids listed in
+  `default_login_users`; the list is **empty by default**, so on a new install
+  nobody uses the default login implicitly. List only the person whose login it
+  is: `default_login_users: [<user_id>]`. Because `settings.yaml` is tracked, you
+  can instead set the process environment variable
+  `RECALL_CLAUDE_DEFAULT_LOGIN_USERS=<user_id>[,<user_id>...]`, which replaces the
+  yaml list (like `RECALL_WEB_HOST`, it is read from the process environment, not
+  from `.env`).
+- Anyone else sees the Claude tab as *not available* ("No Claude login of your
+  own"), and every request to a `claude_subscription:` model (chat, dream, chat
+  title, associative query, Telegram) fails before the CLI is started with the
+  error code `claude_no_own_login`; Telegram lists do not offer Claude models.
+  Only the administrator can fix it: give that user their own login folder
+  (`claude_config_dir`, run `claude auth login` with `CLAUDE_CONFIG_DIR` set to
+  that folder), or add them to the list if the login really is theirs.
 Subscription limits, extra-usage settings and data retention are those of your
 Claude account; this route is **not zero data retention**.
 

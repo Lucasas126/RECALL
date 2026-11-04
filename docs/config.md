@@ -85,7 +85,7 @@ A provider is **available** when the server can use it, checked on the server:
 | --- | --- | --- |
 | OpenRouter | its API key environment variable is set (never read back) | `API key variable not set` |
 | Ollama | the server answers at its host | `Ollama not reachable` |
-| Claude subscription | the `claude` CLI is found and `claude auth status` says it is logged in | `Claude Code not installed` / ``Run `claude auth login` `` |
+| Claude subscription | the user has their own `claude_config_dir` or is listed in `claude_subscription.default_login_users` (`settings.yaml`), the `claude` CLI is found and `claude auth status` says it is logged in | `No Claude login of your own` / `Claude Code not installed` / ``Run `claude auth login` `` |
 
 Slow checks (Ollama, Claude Code) are cached for 60 seconds per server, so opening
 the picker does not start the CLI each time; the key check is a plain lookup. The
@@ -112,6 +112,10 @@ claude_subscription:      # advanced options only, see claude-subscription.md
   claude_code_telemetry: false
   timeout_seconds: 300
 ```
+
+Who may use the CLI's default login (no `claude_config_dir`) is a server-wide
+setting, `claude_subscription.default_login_users: [<user_id>]` in `settings.yaml`
+(empty by default = nobody; see [claude subscription](claude-subscription.md)).
 
 The blocks have no `enabled` key (the strict schema rejects it). A model whose
 provider is not available fails with `provider not available: <provider>: <what to
@@ -479,6 +483,7 @@ message. Errors render as a dismissable card (`role="alert"`) in the transcript,
 | `missing_api_key` | the provider's API key variable is not set on the server | Choose another model |
 | `provider_unreachable` | the Ollama/provider server did not answer | Choose another model |
 | `claude_not_installed` | Claude Code is not installed | Choose another model |
+| `claude_no_own_login` | the user has no `claude_config_dir` and is not listed in `default_login_users` (checked in the picker and before every Claude request) | hint to ask the administrator + Choose another model (no button sets it up) |
 | `claude_not_logged_in` | Claude Code is not logged in | hint with `claude auth login` (shown, never run) + Choose another model |
 | `provider_unavailable` | Claude Code did not report its login state | Choose another model |
 | `model_unavailable` | the model is not in the provider's catalog/installed | Choose another model |
