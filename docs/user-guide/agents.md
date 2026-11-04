@@ -6,12 +6,12 @@ the file format is in [agent.yaml](../reference/agent-yaml.md); the tools in [to
 
 A user with no agents sees an empty state with a **Create an agent** button.
 
-The web **Agents** tab edits one agent in four form tabs: **Basic** (name, description and, for a new agent, its personality),
-**Advanced** (streaming, memory, reasoning, associative-memory options, retained messages and the default model), **Tools**
-(use tools and the tool groups) and **MCP**; **Folders** holds the user folders and the memory index status. A saved agent also
+The web **Agents** tab edits one agent in form tabs: **Basic** (name, description and, for a new agent, its personality, plus a collapsed
+**Advanced** section with streaming, memory, reasoning, associative-memory options, retained messages and the default model),
+**Tools** (use tools and the tool groups) and **MCP**; **Folders** holds the user folders and the memory index status. A saved agent also
 has the dream tabs (**Soul & memory**, **Dream**, **Dream sessions**, see [dream mode](dream.md#web-ui)).
 
-Reasoning is on by default for new agents (and for agent files that omit `reasoning`); turn it off in **Advanced > Reasoning**.
+Reasoning is on by default for new agents (and for agent files that omit `reasoning`); turn it off in **Basic > Advanced > Reasoning**.
 Models without reasoning support ignore the request. When it is off, the composer's effort selector reads **Disabled in this agent**.
 
 ## managing agents

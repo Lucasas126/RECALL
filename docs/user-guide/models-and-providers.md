@@ -71,7 +71,7 @@ existing agent does). It applies to new chats and to old chats without a
 selection; a chat's own selection keeps winning. The picker entry that clears a
 chat selection reads **Use agent default** when the agent has one, else **Use
 user default** (web and Telegram). The agent default is edited in the web UI
-(Agents > Advanced > Default model, same picker with provider tabs; **Clear**
+(Agents > Basic > Advanced > Default model, same picker with provider tabs; **Clear**
 follows the user default), not in Telegram. Saving validates it like a chat model
 (provider usable, model offered, ZDR catalog filter) and rewrites the agent file
 through the agent store, which keeps all other keys but not YAML comments.
@@ -283,7 +283,7 @@ The selector is disabled when the agent has `reasoning: false`, or when the
 selected model does not advertise `reasoning` or `reasoning_effort` in its
 OpenRouter supported parameters (the same check as the Reasoning filter). The
 control itself then says why, also on narrow screens: **Disabled in this agent**
-(its tooltip points to Agents > Advanced > Reasoning), **Not available in this
+(its tooltip points to Agents > Basic > Advanced > Reasoning), **Not available in this
 model**, or **Unknown for this model** when support could not be verified. Support is cached by the service for ten minutes; if the
 catalog cannot be reached, the state is shown as unverified and the value cannot
 be changed. Changes are rejected with HTTP 409 while the agent has active or

@@ -45,7 +45,7 @@ In **Agents** choose **New agent**:
 - **Name** and **description**: what you see in the list; the description is not sent to the model.
 - **Personality (SOUL)**: free text that says who the agent is and how it should talk. It is stored in the agent's `SOUL.md`, can
   be edited later in **Soul & memory**, and keeps a history of the last versions.
-- **Advanced**: streaming, whether the agent keeps the conversation in context, reasoning, how many messages are kept, how it
+- **Advanced** (a collapsed section at the bottom of the Basic tab): streaming, whether the agent keeps the conversation in context, reasoning, how many messages are kept, how it
   searches its memory and its optional default model.
 - **Tools**: tool groups the agent may use: memory (read, or read and edit), web search (needs the administrator's Tavily key),
   self (it may edit its own personality, memories and skills) and folders. Fewer tools means a safer, simpler agent.
@@ -61,7 +61,7 @@ Models belong to **you**, not to the agent. The model picker has one tab per pro
 or a program that is not installed. Star a model to make it a **favorite**; favorites are also what Telegram offers.
 
 The model used in a chat is, in order: the model you pick in that chat (composer) > the agent's default model (Agents >
-Advanced > Default model) > your default model (Settings). Choosing **Use agent default** or **Use user default** clears an override.
+Basic > Advanced > Default model) > your default model (Settings). Choosing **Use agent default** or **Use user default** clears an override.
 Speech-to-text (voice messages) is a single default in Settings. Details: [models and providers](../user-guide/models-and-providers.md).
 
 ## 6. Use your own Claude login (optional, experimental)
