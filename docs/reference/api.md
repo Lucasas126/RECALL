@@ -14,7 +14,7 @@ plus an optional `"code"` (see [error codes](#error-codes)).
 | agents | `GET`/`POST /api/agents`, `GET`/`PUT`/`DELETE /api/agents/<agent_id>`, `GET /api/tool-groups`, `GET /api/agents/<agent_id>/index`, `POST /api/agents/<agent_id>/index/reindex` (table below) |
 | MCP | `GET /api/mcp`, `GET /api/mcp/<server_id>/tools`, `POST /api/mcp/<server_id>/connect`, `DELETE /api/mcp/<server_id>/connection` ([MCP servers](../user-guide/mcp.md)) |
 | chats | `GET /api/chats`, `GET`/`POST /api/agents/<agent_id>/chats`, `GET`/`DELETE .../chats/<chat_id>`, `GET .../chats/<chat_id>/models`, `PUT .../model`, `PUT .../reasoning-effort`, `PUT .../title`, `POST .../chats/<chat_id>/messages` (SSE, see [architecture](../architecture/overview.md#web-steering)) |
-| dream and soul | `.../dream/settings\|status\|start\|cancel\|sessions`, `.../soul`, `.../soul/history`, `.../memories/<target>` ([dream mode](../user-guide/dream.md#web-api)) |
+| dream and soul | `.../dream/settings\|status\|start\|cancel\|sessions`, `.../soul` (the response also carries `default`, the default SOUL.md template), `.../soul/history`, `.../memories/<target>` ([dream mode](../user-guide/dream.md#web-api)) |
 
 ## providers and model catalog API
 

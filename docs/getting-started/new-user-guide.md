@@ -43,7 +43,8 @@ sidebar). You cannot chat until you have one.
 In **Agents** choose **New agent**:
 
 - **Name** and **description**: what you see in the list; the description is not sent to the model.
-- **Personality (SOUL)**: free text that says who the agent is and how it should talk. It is stored in the agent's `SOUL.md`, can
+- **Personality (SOUL)**: free text that says who the agent is and how it should talk. Left empty, the agent starts with a short
+  default `SOUL.md` that explains how it uses its memory and files. It is stored in the agent's `SOUL.md`, can
   be edited later in **Soul & memory**, and keeps a history of the last versions.
 - **Advanced** (a collapsed section at the bottom of the Basic tab): streaming, whether the agent keeps the conversation in context, reasoning, how many messages are kept, how it
   searches its memory and its optional default model.
