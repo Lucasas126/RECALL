@@ -31,6 +31,22 @@ Telegram creates a chat automatically on the first message after the bot
 restarts, and after one hour without a user message. The first assistant
 message in each automatically created chat begins with bold-italic
 `New chat started`.
+`/newchat` (also `/new`) opens a picker with your agents (the current one is
+marked ✅) and **✖ Cancel (keep current chat)**. Choosing an agent saves it as
+the active agent, creates a chat with it and closes the picker; Cancel changes
+nothing. With only one agent the chat is created directly.
+When a message starts a new chat because of the one-hour idle time (not after
+`/newchat`, and not for the very first chat), the message is still answered
+immediately in the new chat, and a short message with two buttons is sent just
+before the reply: **↩ Continue previous chat** and **🔀 Change agent**. The
+first switches to the previous chat (and its agent) and replays your message
+there; the second opens the agent picker and replays the message in a fresh
+chat with the chosen agent. Either way the auto-created chat is cancelled and
+deleted, and the buttons are removed. After a bot restart the previous chat is
+the most recently active one across agents. The buttons work once and expire
+after 10 minutes or as soon as you send another message (a tap then answers
+"This option expired."). The pending message, including downloaded
+attachments, is kept in memory only until then.
 `/selectmodel` and `/selectagent` open the same kind of inline
 panel as `/settings`: buttons send callbacks instead of chat messages, and the
 bot edits the panel in place for pagination. Choosing an option saves it and
