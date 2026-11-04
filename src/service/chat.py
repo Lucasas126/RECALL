@@ -255,7 +255,13 @@ class ChatService:
             if not (user_dir / "user.yaml").is_file() or not _ID_RE.match(user_dir.name):
                 continue
             try:
-                pairs.extend((user_dir.name, agent_id) for agent_id in load_user(user_dir.name).agents)
+                user = load_user(user_dir.name)
+                keys = {user.provider.api_key, (user.embeddings_provider or user.provider).api_key}
+                missing = sorted(var for var in keys if var and not os.environ.get(var))
+                if missing:  # such a user cannot run a session (e.g. the repo's example user): skip it quietly
+                    logger.debug("dream scheduler skips %s: env var %s is not set", user_dir.name, ", ".join(missing))
+                    continue
+                pairs.extend((user_dir.name, agent_id) for agent_id in user.agents)
             except Exception:  # one broken user file must not stop the others' schedules
                 logger.exception("dream scheduler could not read user %s", user_dir.name)
         return pairs
