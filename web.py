@@ -1,11 +1,12 @@
 import dotenv
-import uvicorn
 
-from src.config.settings import WEB_HOST, WEB_PORT
-from src.utils.logger import setup_logging
-from src.web.app import create_app
+dotenv.load_dotenv()  # before the imports below: settings read environment variables when imported
 
-dotenv.load_dotenv()
+import uvicorn  # noqa: E402
+
+from src.config.settings import WEB_HOST, WEB_PORT  # noqa: E402
+from src.utils.logger import setup_logging  # noqa: E402
+from src.web.app import create_app  # noqa: E402
 
 
 def main():

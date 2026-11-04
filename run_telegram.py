@@ -1,14 +1,16 @@
 import os
 
 import dotenv
-from telegram import Update
 
-from src.telegram.bot import build_application
-from src.utils.logger import setup_logging
+dotenv.load_dotenv()  # before the imports below: settings read environment variables when imported
+
+from telegram import Update  # noqa: E402
+
+from src.telegram.bot import build_application  # noqa: E402
+from src.utils.logger import setup_logging  # noqa: E402
 
 
 def main() -> None:
-    dotenv.load_dotenv()
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set in the environment.")
