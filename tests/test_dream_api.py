@@ -10,6 +10,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 from auth_helpers import TEST_PASSWORD_HASH, login
+from src.agent.default_soul import default_soul
 from src.config.loader import load_agent
 from src.core.sources.registry import SourceRegistry
 from src.service.chat import ChatService
@@ -86,11 +87,11 @@ class DreamApiTests(unittest.TestCase):
         self.assertEqual(self.client.post(
             "/api/agents", json={"id": "bea", "name": "Bea", "personality_prompt": "I am Bea."},
         ).status_code, 422)
-        # a new agent starts with no SOUL.md (an empty personality) and gets one through the soul route
+        # a new agent starts with the default SOUL.md and its owner replaces it through the soul route
         created = self.client.post("/api/agents", json={"id": "bea", "name": "Bea"})
         self.assertEqual(created.status_code, 201, created.text)
-        self.assertFalse((self.data_dir / "ana" / "bea" / "SOUL.md").exists())
-        self.assertEqual(self.client.get("/api/agents/bea/soul").json()["content"], "")
+        self.assertEqual((self.data_dir / "ana" / "bea" / "SOUL.md").read_text(encoding="utf-8"), default_soul())
+        self.assertEqual(self.client.get("/api/agents/bea/soul").json()["content"], default_soul())
         self.client.put("/api/agents/bea/soul", json={"content": "I am Bea."})
         self.assertEqual((self.data_dir / "ana" / "bea" / "SOUL.md").read_text(encoding="utf-8"), "I am Bea.")
         bea = yaml.safe_load((self.config_dir / "ana" / "agents" / "bea.yaml").read_text(encoding="utf-8"))

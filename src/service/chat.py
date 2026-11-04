@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from src.agent.agent import Agent, embeddings_provider, main_provider, model_provider
 from src.agent.tools import chat_folder_options
 from src.agent.dream import DEFAULT_DREAM_PROMPT
+from src.agent.default_soul import default_soul
 from src.config.agents import AgentStore
 from src.config.favorites import ModelFavorites
 from src.config.loader import agent_default_model, load_agent, load_agent_config, load_user, user_models
@@ -375,12 +376,15 @@ class ChatService:
         return config.model_copy(update={"chat_config": config.chat_config.model_copy(update={"model": canonical})})
 
     def create_agent(self, user_id: str, config: AgentConfig) -> dict:
-        """Create an agent; its personality is written afterwards to SOUL.md through `update_soul`."""
+        """Create an agent with the default SOUL.md (never over an existing one); its owner edits it through `update_soul`."""
         user = self._user(user_id)
         self._check_mcp(config)
         self._check_folders(config.folders)
         config = self._check_agent_model(user, config, None)
         created = self._agents.create(user_id, config)
+        files = self._agent_files(user_id, created.id)
+        if files.soul() is None:  # a reused data folder keeps its SOUL.md, even an empty one
+            files.write_soul(default_soul())
         return self._agent_view(user_id, created)
 
     def update_agent(self, user_id: str, agent_id: str, config: AgentConfig) -> dict:
@@ -1293,7 +1297,7 @@ class ChatService:
     def get_soul(self, user_id: str, agent_id: str) -> dict:
         self._owned_agent(user_id, agent_id)
         content = self._agent_files(user_id, agent_id).soul_text()
-        return {"content": content, "chars": len(content), "max_chars": SOUL_MAX_CHARS}
+        return {"content": content, "chars": len(content), "max_chars": SOUL_MAX_CHARS, "default": default_soul()}
 
     def update_soul(self, user_id: str, agent_id: str, content: str) -> dict:
         """Replace SOUL.md (the previous version goes to the history); applies to new chats."""

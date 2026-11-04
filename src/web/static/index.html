@@ -114,7 +114,7 @@
             <label id="agent-prompt-field">
               <span id="agent-prompt-label">Personality (SOUL.md)</span>
               <textarea id="agent-prompt" rows="10" maxlength="20000"></textarea>
-              <span id="agent-prompt-hint" class="model-note">Saved as the agent's SOUL.md. After creating the agent, edit it in the Soul &amp; memory tab.</span>
+              <span id="agent-prompt-hint" class="model-note">Saved as the agent's SOUL.md. Leave it empty to start with the default SOUL.md; edit it later in the Soul &amp; memory tab.</span>
             </label>
             <details id="agent-advanced" class="agent-advanced">
             <summary id="agent-advanced-summary">Advanced</summary>
@@ -216,6 +216,7 @@
               <textarea id="soul-content" rows="12" maxlength="20000" aria-labelledby="soul-title"></textarea>
               <p id="soul-error" class="error" role="alert"></p>
               <div class="agent-actions">
+                <button id="soul-default" type="button" hidden>Insert default template</button>
                 <button id="soul-save" type="button" class="primary">Save SOUL.md</button>
                 <span id="soul-status" class="model-note" role="status"></span>
               </div>

@@ -89,7 +89,8 @@ function translateInterface() {
     ["agent-name-label", "Name"], ["agent-description-label", "Description"],
     ["agent-description-hint", "Optional. Shown in the agent list; not sent to the model."],
     ["agent-prompt-label", "Personality (SOUL.md)"], ["agent-behavior-label", "Chat behavior"],
-    ["agent-prompt-hint", "Saved as the agent's SOUL.md. After creating the agent, edit it in the Soul & memory tab."],
+    ["agent-prompt-hint", "Saved as the agent's SOUL.md. Leave it empty to start with the default SOUL.md; edit it later in the Soul & memory tab."],
+    ["soul-default", "Insert default template"],
     ["agent-stream-label", "Stream replies"], ["agent-memory-label", "Use memory"],
     ["agent-reasoning-label", "Reasoning"], ["agent-keep-reasoning-label", "Keep reasoning in memory"],
     ["agent-tools-label", "Use tools"], ["agent-associative-label", "Associative memory"],
@@ -2840,10 +2841,17 @@ async function loadSoul() {
     $("soul-content").value = soul.content;
     $("soul-content").dataset.max = soul.max_chars;
     $("soul-content").maxLength = soul.max_chars;
+    state.defaultSoul = soul.default || "";
     renderCount("soul-count", soul.chars, soul.max_chars);
+    updateSoulDefault();
   } catch (err) {
     if (dreamCurrent(session, token)) $("soul-error").textContent = err.message;
   }
+}
+
+// the default template is offered only while the editor is empty; inserting it does not save
+function updateSoulDefault() {
+  $("soul-default").hidden = Boolean($("soul-content").value.trim()) || !state.defaultSoul;
 }
 
 async function loadSoulHistory() {
@@ -2916,6 +2924,7 @@ async function saveSoul() {
     if (!dreamCurrent(session, token)) return;
     $("soul-content").value = soul.content;
     renderCount("soul-count", soul.chars, soul.max_chars);
+    updateSoulDefault();
     $("soul-status").textContent = tr("Saved. New chats use it.");
     await loadSoulHistory();
   } catch (err) {
@@ -3449,6 +3458,13 @@ $("soul-content").addEventListener("input", () => {
   renderCount("soul-count", $("soul-content").value.length, Number($("soul-content").dataset.max || 20000));
 });
 $("soul-save").addEventListener("click", saveSoul);
+$("soul-default").addEventListener("click", () => {
+  $("soul-content").value = state.defaultSoul;
+  renderCount("soul-count", state.defaultSoul.length, Number($("soul-content").dataset.max) || state.defaultSoul.length);
+  updateSoulDefault();
+  $("soul-status").textContent = tr("Template inserted. Save to apply it.");
+});
+$("soul-content").addEventListener("input", updateSoulDefault);
 $("soul-version-close").addEventListener("click", () => { $("soul-version").hidden = true; });
 for (const [target, id] of Object.entries(MEMORY_IDS)) {
   $(`${id}-content`).addEventListener("input", () => {
