@@ -35,11 +35,11 @@ from telegram.ext import (
 from src.config.favorites import FavoritesError
 from src.config.models import ReasoningEffort
 from src.config.preferences import PreferencesError, UserPreferences
-from src.config.settings import TELEGRAM_ALLOWED_USERS_ENV, TELEGRAM_CHAT_IDLE_MINUTES
+from src.config.settings import ORCHESTRATOR, TELEGRAM_ALLOWED_USERS_ENV, TELEGRAM_CHAT_IDLE_MINUTES
 from src.providers.catalog import CatalogUnavailable
 from src.providers.ollama import is_ollama_cloud
 from src.providers.telegram_notify import parse_allowed_users
-from src.service.chat import ChatEvent, ChatService, ServiceError
+from src.service.chat import ChatEvent, ChatService, RouteDecision, ServiceError
 from src.utils.logger import get_logger
 from src.utils.i18n import InputError, error_message, message
 
@@ -79,11 +79,17 @@ class _Reroute:
     """
 
     token: str
-    previous_chat_id: str
-    previous_agent_id: str
-    previous_title: str
+    previous_chat_id: str = ""  # empty when there is no previous chat (the very first message)
+    previous_agent_id: str = ""
+    previous_title: str = ""
     auto_chat_id: str = ""
     auto_agent_id: str = ""
+    # set by the orchestrator: agent ids offered as buttons (uncertain pick), the ones answering by default, the grace
+    candidates: list[str] = field(default_factory=list)
+    default_agent_id: str = ""
+    routed: bool = False
+    uncertain: bool = False
+    grace: float = 0
     text: str = ""
     attachments: list[dict] = field(default_factory=list)
     update: "Update | None" = None
@@ -844,10 +850,10 @@ def _prepare_message_session(session: TelegramSession, service: ChatService) -> 
             service.update_preferences(session.user_id, UserPreferences(agent_id=agent_id))
         session.agent_id, session.chat_id = agent_id, chat["id"]
     if starts_new_chat:
-        previous = (chat["id"], agent_id, str(chat.get("title") or chat["id"])) if chat and chat.get("turns", 1) else None
+        previous = (chat["id"], agent_id, str(chat.get("title") or chat["id"])) if chat and chat.get("turns", 1) else ("", "", "")
         created = _create_session_chat(session, service)
-        if previous is not None:
-            session.pending_reroute = _Reroute(secrets.token_hex(4), *previous, created["id"], session.agent_id)
+        # without a previous chat the record only lives while the orchestrator decides (see _launch_generation)
+        session.pending_reroute = _Reroute(secrets.token_hex(4), *previous, created["id"], session.agent_id)
     session.last_message_at = now
 
 
@@ -866,14 +872,85 @@ async def _launch_generation(
     if record is not None:
         state: TelegramBotState = context.application.bot_data["state"]
         record.text, record.attachments, record.update = text, attachments, update
-        await _offer_reroute(update, state.service, session, record)
+        await _orchestrate(update, context, session, record)
         if session.pending_reroute is not record:  # a later message already started it
             return
-        if record.message_id:
-            _arm_grace(context, session, record, _REROUTE_GRACE_SECONDS)
-            return
-        session.pending_reroute, record.attachments = None, []  # no buttons could be shown: answer at once
+        if record.previous_chat_id or record.routed:
+            await _offer_reroute(update, state.service, session, record)
+            if session.pending_reroute is not record:
+                return
+            if record.message_id:
+                _arm_grace(context, session, record, record.grace or _REROUTE_GRACE_SECONDS)
+                return
+        session.pending_reroute, record.attachments = None, []  # no buttons to show or could be shown: answer at once
     asyncio.create_task(_send_generation(update, context, text, attachments))
+
+
+async def _switch_auto_chat(session: TelegramSession, service: ChatService, record: _Reroute, agent_id: str) -> bool:
+    """Replace the empty auto-created chat by a new chat of `agent_id` (the saved preference is not changed)."""
+    try:
+        created = await asyncio.to_thread(service.create_chat, session.user_id, agent_id)
+    except (ServiceError, OSError, ValueError) as exc:
+        logger.warning("Could not create the orchestrator's chat: %s", exc)
+        return False
+    old_agent, old_chat = record.auto_agent_id, record.auto_chat_id
+    session.agent_id, session.chat_id = agent_id, created["id"]
+    record.auto_agent_id, record.auto_chat_id = agent_id, created["id"]
+    try:
+        await asyncio.to_thread(service.discard_chat, session.user_id, old_agent, old_chat)
+    except (ServiceError, OSError, ValueError) as exc:
+        logger.warning("Could not delete the auto-created Telegram chat: %s", exc)
+    return True
+
+
+async def _orchestrate(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, session: TelegramSession, record: _Reroute,
+) -> None:
+    """Let the decision model pick the agent of a message that starts a new chat; any failure keeps the preferred one.
+
+    Confident pick: its chat answers after `grace_seconds`. Uncertain: the core (else preferred) agent answers after
+    `uncertain_grace_seconds` unless the user taps one of the top candidates. Only the text is sent to the router.
+    """
+    state: TelegramBotState = context.application.bot_data["state"]
+    service = state.service
+    if service.orchestrator_active(session.user_id) is not True:
+        return
+    text = record.text.strip()
+    if not text:  # media without a caption: nothing to route on, the core agent (if any) takes it
+        core = service.orchestrator_core_agent(session.user_id)
+        if isinstance(core, str) and core != record.auto_agent_id:
+            await _switch_auto_chat(session, service, record, core)
+        return
+    with suppress(TelegramError):
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    try:
+        decision = await asyncio.wait_for(
+            asyncio.to_thread(service.route_message, session.user_id, text), ORCHESTRATOR.timeout_seconds + 0.5,
+        )
+    except Exception as exc:  # includes the timeout: the router must never block or break the message
+        logger.warning("Telegram orchestrator unavailable (%s); using the preferred agent", type(exc).__name__)
+        return
+    if not isinstance(decision, RouteDecision) or session.pending_reroute is not record:
+        return
+    known = {agent["id"] for agent in service.list_agents(session.user_id)}
+    ranking = [agent_id for agent_id, _ in decision.ranking if agent_id in known]
+    if decision.agent_id not in known:
+        return
+    if not decision.uncertain:
+        target, candidates, grace = decision.agent_id, [], ORCHESTRATOR.grace_seconds
+    else:
+        target = next((a for a in (decision.core_agent_id, record.auto_agent_id) if a in known), decision.agent_id)
+        candidates = list(dict.fromkeys(ranking[:3]))
+        if target not in candidates:
+            candidates.append(target)
+        grace = ORCHESTRATOR.uncertain_grace_seconds
+    if target != record.auto_agent_id and not await _switch_auto_chat(session, service, record, target):
+        return
+    record.routed, record.uncertain, record.candidates, record.grace = True, decision.uncertain, candidates, grace
+    record.default_agent_id = target
+    logger.debug(
+        "orchestrator routed to %s (confidence %.2f, uncertain=%s)", target, decision.confidence, decision.uncertain,
+    )
 
 
 async def _reroute_pending(
@@ -951,6 +1028,13 @@ async def reroute_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             text = await _reroute_pending(
                 update, context, session, record, record.previous_agent_id, record.previous_chat_id,
             )
+        elif action[:1] == "s" and action[1:].isdigit() and int(action[1:]) < len(record.candidates):
+            agent_id = record.candidates[int(action[1:])]
+            if agent_id == record.auto_agent_id:  # the default pick: answer now
+                await query.answer()
+                await _start_pending(context, session, record)
+                return
+            text = await _reroute_pending(update, context, session, record, agent_id)
         elif action == "a":
             agents = state.service.list_agents(session.user_id)
             panel = _new_panel(update, "reroute_agent")
@@ -1392,27 +1476,59 @@ class _ReplyStream:
 async def _offer_reroute(
     update: Update, service: ChatService, session: TelegramSession, record: _Reroute,
 ) -> None:
-    """Send the small message with the re-route buttons just before the reply of an idle new chat."""
+    """Send the small message with the re-route buttons just before the reply of a new chat."""
     agents: list[dict] = []
     with suppress(ServiceError, OSError):
         agents = service.list_agents(session.user_id)
-    record.agent_name = next((a["name"] for a in agents if a["id"] == record.auto_agent_id), record.auto_agent_id)
-    row = [InlineKeyboardButton(
-        _msg(session, "↩ Continue previous chat"), callback_data=f"{_REROUTE_CALLBACK}:{record.token}:c",
-    )]
+    names = {agent["id"]: agent["name"] for agent in agents}
+    record.agent_name = names.get(record.auto_agent_id, record.auto_agent_id)
+    token = f"{_REROUTE_CALLBACK}:{record.token}"
+    rows: list[list[InlineKeyboardButton]] = []
+    seconds = int(record.grace or _REROUTE_GRACE_SECONDS)
+    entities = None
+    if record.routed and record.uncertain:
+        for index, agent_id in enumerate(record.candidates):
+            star = "⭐ " if agent_id == record.auto_agent_id else ""
+            label = f"{star}{names.get(agent_id, agent_id)}"[:60]
+            rows.append([InlineKeyboardButton(label, callback_data=f"{token}:s{index}")])
+    last_row = []
+    if record.previous_chat_id:
+        last_row.append(InlineKeyboardButton(_msg(session, "↩ Continue previous chat"), callback_data=f"{token}:c"))
     if len(agents) > 1:
-        row.append(InlineKeyboardButton(
-            _msg(session, "🔀 Change agent"), callback_data=f"{_REROUTE_CALLBACK}:{record.token}:a",
-        ))
+        other = "🔀 More agents" if record.routed and record.uncertain else (
+            "🔀 Other agent" if record.routed else "🔀 Change agent"
+        )
+        last_row.append(InlineKeyboardButton(_msg(session, other), callback_data=f"{token}:a"))
+    if last_row:
+        rows.append(last_row)
+    agent = _md_escape(record.agent_name)
+    if record.routed and record.uncertain:
+        key = (
+            "It has been a while. I am not sure which agent fits this message. Pick one below; otherwise **{agent}** "
+            "will answer in {seconds} seconds." if record.previous_chat_id else
+            "I am not sure which agent fits this message. Pick one below; otherwise **{agent}** will answer in {seconds} seconds."
+        )
+    elif record.routed:
+        key = (
+            "It has been a while. I chose **{agent}** for this message." if record.previous_chat_id
+            else "I chose **{agent}** for this message."
+        )
+    else:
+        key = ""
     try:
-        sent = await update.effective_message.reply_text(
-            _msg(
+        if key:
+            text, entities = _convert_markdown(_msg(session, key, agent=agent, seconds=seconds))
+        else:
+            text = _msg(
                 session,
                 "It has been a while. Starting a new chat with {agent}. Tap below to continue the previous chat or pick "
                 "another agent; otherwise I will answer in {seconds} seconds.",
-                agent=record.agent_name, seconds=int(_REROUTE_GRACE_SECONDS),
-            ),
-            reply_markup=InlineKeyboardMarkup([row]),
+                agent=record.agent_name, seconds=seconds,
+            )
+        sent = await update.effective_message.reply_text(
+            text, entities=entities, reply_markup=InlineKeyboardMarkup(rows),
+        ) if entities is not None else await update.effective_message.reply_text(
+            text, reply_markup=InlineKeyboardMarkup(rows),
         )
     except TelegramError as exc:
         logger.warning("Could not send the re-route buttons: %s", exc)

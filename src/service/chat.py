@@ -31,10 +31,11 @@ from src.agent.tool_groups import DEFAULT_TOOL_GROUPS, TOOL_GROUP_CATALOG
 from src.config.preferences import PreferencesError, UserPreferences, UserPreferencesStore
 from src.config.zdr import chat_zdr, ensure_zdr_compatible, zdr_required
 from src.config.settings import (
-    CHAT_NAMING, CONFIG_DIR, DATA_DIR, MCP, PDF, SPEECH_TO_TEXT, TAVILY, TELEGRAM_ALLOWED_USERS_ENV,
+    CHAT_NAMING, CONFIG_DIR, DATA_DIR, MCP, ORCHESTRATOR, PDF, SPEECH_TO_TEXT, TAVILY, TELEGRAM_ALLOWED_USERS_ENV,
     VIDEO_DECOMPOSITION, WEB_PUBLIC_URL, memory_limits,
 )
 from src.core.index import VectorIndex
+from src.providers.decisions import DecisionError, decide_choice
 from src.core.sources.agent_files import AgentFilesSource, MemoryTarget
 from src.core.sources.conversations import DEFAULT_DISPOSABLE_RETENTION_DAYS, ConversationsSource
 from src.core.sources.registry import SourceRegistry
@@ -61,6 +62,10 @@ from src.utils.i18n import InputError, UserMessageError, message
 from src.web.auth import verify_password
 
 logger = get_logger("service")
+
+_ROUTING_INSTRUCTIONS = (
+    "Which agent is best suited to answer this user message? Choose the one whose topic matches best."
+)
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _REASONING_SUPPORT_TTL_SECONDS = 600
@@ -118,6 +123,20 @@ def _naming_transcript(turns: list[dict]) -> str:
         text = " ".join(str(content).split())[:_NAMING_TURN_CHARS]
         lines.append(f"{turn['role']}: {text}")
     return "\n".join(lines)
+
+
+@dataclass(frozen=True)
+class RouteDecision:
+    """The orchestrator's pick for a message: the chosen agent, how sure it is and the ranking behind it."""
+
+    agent_id: str
+    confidence: float
+    ranking: list[tuple[str, float]]
+    uncertain: bool
+    core_agent_id: Optional[str] = None
+    agent_names: dict[str, str] = field(default_factory=dict)
+    latency_ms: float = 0.0
+    cost: Optional[float] = None
 
 
 class ServiceError(UserMessageError):
@@ -447,8 +466,11 @@ class ChatService:
             raise UnknownAgent("unknown agent: {agent_id}", agent_id=agent_id) from exc
 
     def _replace_preferred_agent(self, user_id: str, old_id: str, new_id: str | None) -> None:
-        if self._preferences.get(user_id).agent_id == old_id:
+        preferences = self._preferences.get(user_id)
+        if preferences.agent_id == old_id:
             self._preferences.update(user_id, UserPreferences(agent_id=new_id))
+        if preferences.core_agent_id == old_id:
+            self._preferences.update(user_id, UserPreferences(core_agent_id=new_id))
 
     def _forget_slot(self, user_id: str, agent_id: str) -> None:
         with self._slots_guard:
@@ -462,7 +484,10 @@ class ChatService:
     @staticmethod
     def _preferences_body(preferences: UserPreferences) -> dict:
         """Preferences plus the application-wide size limits (settings.yaml) the interface needs for its counters."""
-        return {**preferences.model_dump(), "limits": memory_limits().model_dump(mode="json")}
+        return {
+            **preferences.model_dump(), "orchestrator_default": ORCHESTRATOR.enabled,
+            "limits": memory_limits().model_dump(mode="json"),
+        }
 
     def language(self, user_id: str) -> Literal["en", "es"]:
         """Read the current alert language without changing cached agents or chat state."""
@@ -501,6 +526,14 @@ class ChatService:
                 load_agent_config(user.id, agent_id)
             except FileNotFoundError as exc:
                 raise UnknownAgent("unknown agent: {agent_id}", agent_id=agent_id) from exc
+        core_id = resolved.core_agent_id
+        if core_id is not None:
+            self._check_id("agent", core_id, UnknownAgent)
+            if core_id not in user.agents:
+                raise UnknownAgent(
+                    "agent '{agent_id}' is not owned by user '{user_id}'", agent_id=core_id, user_id=user.id,
+                )
+            self._agent_config(user.id, core_id)
         return resolved.model_copy(update={
             "agent_id": agent_id,
             "default_llm_model": resolved.default_llm_model or user.models.chat,
@@ -608,6 +641,69 @@ class ChatService:
             for chat in self.list_chats(user_id, agent["id"], keep):
                 chats.append({**chat, "agent_id": agent["id"], "agent_name": agent["name"]})
         return sorted(chats, key=lambda chat: chat["updated"], reverse=True)
+
+    # ------------------------------------------------------------------ telegram orchestrator
+
+    def orchestrator_active(self, user_id: str) -> bool:
+        """Whether messages that start a new Telegram chat are routed by the decision model for this user."""
+        try:
+            user = self._user(user_id)
+            override = self._preferences.get(user_id).orchestrator
+        except (ServiceError, PreferencesError, OSError, ValueError):
+            return False
+        enabled = ORCHESTRATOR.enabled if override is None else override
+        return enabled and len(user.agents) >= 2
+
+    def orchestrator_core_agent(self, user_id: str) -> Optional[str]:
+        """The user's core agent (fallback when unsure) when it still exists, else None."""
+        try:
+            user = self._user(user_id)
+            core = self._preferences.get(user_id).core_agent_id
+        except (ServiceError, PreferencesError, OSError, ValueError):
+            return None
+        return core if core in user.agents else None
+
+    def route_message(self, user_id: str, text: str) -> Optional[RouteDecision]:
+        """Ask the decision model which of the user's agents suits `text`; None means "use the preferred agent".
+
+        Never raises: a disabled orchestrator, fewer than two agents, an empty text or any failure of the
+        decision API (timeout, HTTP error, bad answer, unknown id, missing key) returns None. Only the text
+        and the agents' ids, names and descriptions leave the machine.
+        """
+        text = (text or "").strip()
+        if not text or not self.orchestrator_active(user_id):
+            return None
+        try:
+            user = self._user(user_id)
+            criteria, names = {}, {}
+            for agent_id in user.agents:
+                config = self._agent_config(user_id, agent_id)
+                names[agent_id] = config.name
+                description = (config.description or "").strip()
+                criteria[agent_id] = f"{config.name}: {description}" if description else config.name
+            api_key = os.environ.get(ORCHESTRATOR.api_key, "").strip()
+            if not api_key:
+                logger.warning("orchestrator skipped: env var %s is not set", ORCHESTRATOR.api_key)
+                return None
+            decision = decide_choice(
+                api_key=api_key, model=ORCHESTRATOR.model, state=text, criteria=criteria,
+                instructions=_ROUTING_INSTRUCTIONS, zdr=zdr_required(user.require_zdr, ORCHESTRATOR.zdr),
+                timeout=ORCHESTRATOR.timeout_seconds,
+            )
+            ranking = sorted(decision.probabilities.items(), key=lambda item: item[1], reverse=True)
+            if decision.choice not in dict(ranking):
+                ranking.insert(0, (decision.choice, decision.confidence))
+            return RouteDecision(
+                agent_id=decision.choice, confidence=decision.confidence, ranking=ranking,
+                uncertain=decision.confidence < ORCHESTRATOR.min_confidence,
+                core_agent_id=self.orchestrator_core_agent(user_id),
+                agent_names=names, latency_ms=decision.latency_ms, cost=decision.cost,
+            )
+        except DecisionError as exc:
+            logger.warning("orchestrator: %s; using the preferred agent", exc)
+        except Exception as exc:  # the router must never break a message
+            logger.warning("orchestrator failed (%s); using the preferred agent", type(exc).__name__)
+        return None
 
     def latest_chat(self, user_id: str) -> Optional[dict]:
         """The user's most recently active chat across all agents (with `agent_id`/`agent_name`), or None."""

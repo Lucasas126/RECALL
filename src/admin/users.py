@@ -3,6 +3,7 @@
     python -m src.admin create-user <user_id> [--name N] [--language en] [--api-key-env VAR]
                                     [--claude-login] [--generate]
     python -m src.admin set-password <user_id> [--generate]
+    python -m src.admin route-test "message text" --user <user_id> [--force]
 
 Passwords are never accepted as arguments (shell history): they are typed twice with
 hidden input, or generated with --generate and printed once. Provider API keys are never
@@ -158,7 +159,49 @@ def _build_parser() -> argparse.ArgumentParser:
     setp = sub.add_parser("set-password", help="replace a user's web password (other keys are kept)")
     setp.add_argument("user_id")
     setp.add_argument("--generate", action="store_true", help="generate a strong password and print it once")
+    route = sub.add_parser(
+        "route-test", help="show how the Telegram orchestrator would rank a user's agents for a message",
+    )
+    route.add_argument("text", help="the message text")
+    route.add_argument("--user", required=True, help="RECALL user id whose agents are ranked")
+    route.add_argument("--force", action="store_true", help="run even when the orchestrator is disabled in settings")
     return parser
+
+
+def route_test(user_id: str, text: str, *, force: bool = False) -> int:
+    """Print the ranked agents with probabilities, confidence and latency (same code path as Telegram; no secret)."""
+    import os
+    import time
+
+    from src.config.settings import ORCHESTRATOR
+    from src.service.chat import ChatService
+
+    if force:
+        ORCHESTRATOR.enabled = True  # this process only
+    service = ChatService()
+    if not os.environ.get(ORCHESTRATOR.api_key, "").strip():
+        print(f"error: the env var {ORCHESTRATOR.api_key} is not set", file=sys.stderr)
+        return 1
+    if not service.orchestrator_active(user_id):
+        print("The orchestrator is off for this user, or the user has fewer than 2 agents (use --force to override "
+              "the switch).", file=sys.stderr)
+        return 1
+    started = time.monotonic()
+    decision = service.route_message(user_id, text)
+    elapsed = (time.monotonic() - started) * 1000
+    if decision is None:
+        print("No decision (see the log; Telegram would use the preferred agent).", file=sys.stderr)
+        return 1
+    print(f"model: {ORCHESTRATOR.model}")
+    for agent_id, probability in decision.ranking:
+        mark = "*" if agent_id == decision.agent_id else " "
+        print(f" {mark} {probability:6.3f}  {agent_id}  ({decision.agent_names.get(agent_id, agent_id)})")
+    verdict = "uncertain" if decision.uncertain else "confident"
+    print(f"choice: {decision.agent_id}  confidence: {decision.confidence:.3f} ({verdict}, "
+          f"threshold {ORCHESTRATOR.min_confidence})")
+    print(f"core agent: {decision.core_agent_id or '(none: preferred agent)'}")
+    print(f"latency: {elapsed:.0f} ms total, {decision.latency_ms:.0f} ms API; cost: {decision.cost}")
+    return 0
 
 
 def _ask_api_key_env() -> str:
@@ -170,6 +213,8 @@ def _ask_api_key_env() -> str:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+    if args.command == "route-test":
+        return route_test(args.user, args.text, force=args.force)
     try:
         if args.command == "create-user":
             check_user_id(args.user_id)

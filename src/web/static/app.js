@@ -76,6 +76,9 @@ function translateInterface() {
     ["settings-title", "User settings"], ["settings-save", "Save settings"],
     ["settings-thinking-label", "Show model thinking"],
     ["settings-assoc-max-label", "Maximum associative memory matches"],
+    ["settings-orchestrator-label", "Choose the agent automatically in Telegram"],
+    ["settings-orchestrator-hint", "When a Telegram message starts a new chat, a fast model picks the best agent from the agents' descriptions. You can still override it with the buttons. The message text and the agents' names and descriptions are sent to the decision model's provider."],
+    ["settings-core-agent-label", "Core agent (used when unsure)"],
     ["settings-disposable-days-label", "Days to keep disposable chats"],
     ["settings-disposable-days-hint", "Disposable chats are deleted after this many days without activity (1–365). Leave empty to use the default of 30."],
     ["settings-assoc-max-hint", "Leave empty to use the application default. The minimum similarity is set by the application, not by you."],
@@ -91,7 +94,7 @@ function translateInterface() {
     ["tab-chats", "Chats"], ["tab-agents", "Agents"],
     ["agent-new-label", "New agent"], ["agents-empty", "Select an agent to edit it, or create a new one."],
     ["agent-name-label", "Name"], ["agent-description-label", "Description"],
-    ["agent-description-hint", "Optional. Shown in the agent list; not sent to the model."],
+    ["agent-description-hint", "Optional. Shown in the agent list; not sent to the agent's chat model. The Telegram orchestrator reads it to pick agents: one or two sentences, what topics should this agent answer?"],
     ["agent-prompt-label", "Personality (SOUL.md)"], ["agent-behavior-label", "Chat behavior"],
     ["agent-prompt-hint", "Saved as the agent's SOUL.md. Leave it empty to start with the default SOUL.md; edit it later in the Soul & memory tab."],
     ["soul-default", "Insert default template"],
@@ -1111,6 +1114,10 @@ function fillSettings() {
   $("settings-language").value = state.preferences.language;
   $("settings-assoc-max").value = state.preferences.associative_max_matches ?? "";
   $("settings-disposable-days").value = state.preferences.disposable_retention_days ?? "";
+  $("settings-orchestrator").checked = state.preferences.orchestrator ?? state.preferences.orchestrator_default ?? false;
+  const core = $("settings-core-agent");
+  core.replaceChildren(new Option(tr("Same as preferred agent"), ""), ...(state.user?.agents ?? []).map((a) => new Option(a.name, a.id)));
+  core.value = state.preferences.core_agent_id ?? "";
   $("settings-theme").value = localStorage.getItem("theme") ?? "system";
   renderSettingsModels();
 }
@@ -1395,6 +1402,10 @@ $("settings-form").addEventListener("submit", async (e) => {
   const rawDays = $("settings-disposable-days").value.trim();
   const retentionDays = rawDays === "" ? null : Number(rawDays);
   if (retentionDays !== (state.settingsOriginal.disposable_retention_days ?? null)) changes.disposable_retention_days = retentionDays;
+  const orchestratorBefore = state.settingsOriginal.orchestrator ?? state.settingsOriginal.orchestrator_default ?? false;
+  if ($("settings-orchestrator").checked !== orchestratorBefore) changes.orchestrator = $("settings-orchestrator").checked;
+  const coreAgent = $("settings-core-agent").value || null;
+  if (coreAgent !== (state.settingsOriginal.core_agent_id ?? null)) changes.core_agent_id = coreAgent;
   for (const key of ["default_llm_model", "default_stt_model"]) {
     if (state.settingsModelDraft?.[key] !== state.settingsOriginal[key]) changes[key] = state.settingsModelDraft[key];
   }

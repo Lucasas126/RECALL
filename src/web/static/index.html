@@ -118,7 +118,7 @@
             <label>
               <span id="agent-description-label">Description</span>
               <textarea id="agent-description" rows="2" maxlength="500"></textarea>
-              <span id="agent-description-hint" class="model-note">Optional. Shown in the agent list; not sent to the model.</span>
+              <span id="agent-description-hint" class="model-note">Optional. Shown in the agent list; not sent to the agent's chat model. The Telegram orchestrator reads it to pick agents: one or two sentences, what topics should this agent answer?</span>
             </label>
             <label id="agent-prompt-field">
               <span id="agent-prompt-label">Personality (SOUL.md)</span>
@@ -405,6 +405,12 @@
       <p><label for="settings-disposable-days"><span id="settings-disposable-days-label">Days to keep disposable chats</span></label><br>
         <input id="settings-disposable-days" type="number" min="1" max="365" step="1" inputmode="numeric">
         <span id="settings-disposable-days-hint" class="model-note">Disposable chats are deleted after this many days without activity (1–365). Leave empty to use the default of 30.</span>
+      </p>
+      <p><label class="model-filter"><input id="settings-orchestrator" type="checkbox"> <span id="settings-orchestrator-label">Choose the agent automatically in Telegram</span></label><br>
+        <span id="settings-orchestrator-hint" class="model-note">When a Telegram message starts a new chat, a fast model picks the best agent from the agents' descriptions. You can still override it with the buttons. The message text and the agents' names and descriptions are sent to the decision model's provider.</span>
+      </p>
+      <p><label for="settings-core-agent"><span id="settings-core-agent-label">Core agent (used when unsure)</span></label><br>
+        <select id="settings-core-agent"></select>
       </p>
       <p><span id="settings-llm-label">Default LLM model</span><br>
         <button id="settings-llm" type="button" aria-haspopup="dialog" disabled></button>

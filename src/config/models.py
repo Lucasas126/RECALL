@@ -167,6 +167,24 @@ class AssociativeMemoryConfig(BaseModel):
         return self
 
 
+class OrchestratorConfig(BaseModel):
+    """Telegram orchestrator: a fast decision model picks the agent for a message that starts a new chat.
+
+    api_key names an environment variable, not a secret. Opt-in: each user can also switch it on or off.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(default=False, strict=True)
+    model: str = Field(default="typesafe/jev-1.14", strict=True, min_length=1, max_length=256)
+    api_key: str = Field(default="OPENROUTER_API_KEY", pattern=_ENV_NAME)
+    zdr: Optional[bool] = Field(default=None, strict=True)  # None follows the user's require_zdr
+    min_confidence: float = Field(default=0.6, ge=0, le=1, allow_inf_nan=False)
+    timeout_seconds: float = Field(default=4, ge=1, le=30, allow_inf_nan=False)
+    grace_seconds: float = Field(default=8, ge=0, le=600, allow_inf_nan=False)
+    uncertain_grace_seconds: float = Field(default=20, ge=0, le=600, allow_inf_nan=False)
+
+
 class IndexConfig(BaseModel):
     """Framework-wide vector index settings: storage names, chunk sizes and the folder reconcile interval."""
 

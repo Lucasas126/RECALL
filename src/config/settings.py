@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 
 from src.config.models import (
-    AssociativeMemoryConfig, ChatNamingConfig, ClaudeLoginSettings, IndexConfig, McpSettings, MemoryLimits, PdfConfig, PromptCacheConfig, SpeechToTextConfig, TavilyConfig,
+    AssociativeMemoryConfig, ChatNamingConfig, ClaudeLoginSettings, IndexConfig, McpSettings, MemoryLimits, OrchestratorConfig, PdfConfig, PromptCacheConfig, SpeechToTextConfig, TavilyConfig,
     VideoDecompositionConfig,
 )
 
@@ -134,3 +134,6 @@ CLAUDE_LOGIN = ClaudeLoginSettings.model_validate(_claude)
 
 # ------------------------------------------------------------------ associative memory
 ASSOC = AssociativeMemoryConfig.model_validate(_raw.get("associative_memory", {}))
+
+# ------------------------------------------------------------------ telegram orchestrator
+ORCHESTRATOR = OrchestratorConfig.model_validate(_raw.get("orchestrator") or {})

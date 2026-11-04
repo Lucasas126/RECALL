@@ -28,6 +28,10 @@ class UserPreferences(BaseModel):
     associative_max_matches: Annotated[int, Field(strict=True, ge=1, le=20)] | None = None
     # days of inactivity after which a disposable chat is deleted; None means the default (30)
     disposable_retention_days: Annotated[int, Field(strict=True, ge=1, le=365)] | None = None
+    # Telegram orchestrator for this user; None follows settings.yaml `orchestrator.enabled`
+    orchestrator: bool | None = Field(default=None, strict=True)
+    # agent used when the orchestrator is unsure (greetings, general talk); None means the preferred agent
+    core_agent_id: Annotated[str, Field(strict=True, pattern=r"^[A-Za-z0-9_-]{1,64}$")] | None = None
 
     def language_for(self, configured: str) -> Literal["en", "es"]:
         """Resolve an explicit language override or the legacy YAML language."""

@@ -76,6 +76,19 @@ associative_memory:
   api_key: OPENROUTER_API_KEY      # shared env var NAME for the OpenRouter key, never the secret
   # zdr: false                     # optional override of the user's require_zdr (user.yaml) for query requests; unset follows it
 
+# Telegram orchestrator (see docs/user-guide/telegram.md): when a Telegram message starts a NEW chat, a fast "decision
+# model" picks the best agent from the agents' descriptions; the user can override with buttons.
+# Only the message text and the agents' ids, names and descriptions are sent, never history or attachments.
+orchestrator:
+  enabled: false                  # opt-in; each user can switch it on or off in Settings
+  model: typesafe/jev-1.14        # OpenRouter decision model (alpha Decisions API); others: liquid/d1.1, cloudflare/clef-flash
+  api_key: OPENROUTER_API_KEY     # shared env var NAME for the OpenRouter key, never the secret
+  # zdr: false                    # optional override of the user's require_zdr (user.yaml); unset follows it
+  min_confidence: 0.6             # below this the choice is "uncertain" and the user gets candidate buttons
+  timeout_seconds: 4              # 1-30; a slower router is ignored and the preferred agent answers
+  grace_seconds: 8                # wait before answering with a confident pick
+  uncertain_grace_seconds: 20     # wait before answering with the core/preferred agent when unsure
+
 chat_naming:
   model: openai/gpt-4o-mini    # small OpenRouter model that names chats
   api_key: OPENROUTER_API_KEY  # shared env var NAME for the OpenRouter key, never the secret
