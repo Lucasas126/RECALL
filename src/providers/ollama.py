@@ -68,6 +68,11 @@ def _to_ollama_messages(messages: list[dict]) -> list[dict]:
     return out
 
 
+def _think_unsupported(error: httpx.HTTPStatusError) -> bool:
+    """Ollama answers 400 `... does not support thinking` when `think` is sent to a non-thinking model."""
+    return error.response.status_code == 400 and "does not support thinking" in error.response.text.lower()
+
+
 class OllamaProvider(LLMProvider):
 
     name: ClassVar[str] = "ollama"
@@ -91,8 +96,27 @@ class OllamaProvider(LLMProvider):
         model = self.own_model(model)
         logger.debug("request model=%s stream=%s reasoning=%s msgs=%d", model, stream, reasoning, len(messages))
         if stream:
-            return self.invoke_stream(messages, model, reasoning=reasoning, reasoning_effort=reasoning_effort, tools=tools, cancellation=cancellation)
-        return self.invoke_sync(messages, model, reasoning=reasoning, reasoning_effort=reasoning_effort, tools=tools, cancellation=cancellation)
+            return self._stream_without_think_fallback(messages, model, reasoning, reasoning_effort, tools, cancellation)
+        try:
+            return self.invoke_sync(messages, model, reasoning=reasoning, reasoning_effort=reasoning_effort, tools=tools, cancellation=cancellation)
+        except httpx.HTTPStatusError as e:
+            if not (reasoning and _think_unsupported(e)):
+                raise
+            logger.warning("model %s does not support thinking; retrying without it", model)
+            return self.invoke_sync(messages, model, reasoning=False, tools=tools, cancellation=cancellation)
+
+    def _stream_without_think_fallback(self, messages, model, reasoning, reasoning_effort, tools, cancellation):
+        """Stream; a model that rejects `think` (reasoning is on by default) is retried once without it."""
+        started = False
+        try:
+            for item in self.invoke_stream(messages, model, reasoning=reasoning, reasoning_effort=reasoning_effort, tools=tools, cancellation=cancellation):
+                started = True
+                yield item
+        except httpx.HTTPStatusError as e:
+            if started or not (reasoning and _think_unsupported(e)):
+                raise
+            logger.warning("model %s does not support thinking; retrying without it", model)
+            yield from self.invoke_stream(messages, model, reasoning=False, tools=tools, cancellation=cancellation)
 
     def invoke_stream(self, messages: list[dict], model: str, reasoning=False, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None):
         """Streaming variant — yields (kind, text) tuples then a final dict with usage info.

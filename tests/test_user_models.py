@@ -35,7 +35,7 @@ class UserModelDefaultsTests(models_tests.ModelFixture):
                         "stt_model": "openai/whisper-large-v3-turbo",
                         "reasoning_effort": {
                             "override": None, "default": "medium", "effective": "medium",
-                            "reasoning": False, "supported": False,
+                            "reasoning": True, "supported": False,
                         },
                     })
                     get.assert_called_once_with("user-one")

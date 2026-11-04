@@ -343,7 +343,7 @@ class ChatConfig(BaseModel):
 
     stream: bool = True
     has_memory: bool = True
-    reasoning: bool = False
+    reasoning: bool = True
     # effort level for models that support it (minimal|low|medium|high|xhigh|max); openrouter maps it
     reasoning_effort: Optional[str] = "medium"
     reasoning_tokens: Optional[int] = None
@@ -495,7 +495,7 @@ class ResolvedAgent(BaseModel):
     embeddings_api_key: str
     stream: bool = True
     has_memory: bool = True
-    reasoning: bool = False
+    reasoning: bool = True
     reasoning_effort: Optional[str] = None
     reasoning_tokens: Optional[int] = None
     keep_reasoning_in_memory: bool = False

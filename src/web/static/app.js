@@ -514,7 +514,7 @@ function openNewAgent() {
   fillAgentForm({
     name: "", id: "", description: "",
     chat_config: {
-      stream: true, has_memory: true, reasoning: false, reasoning_effort: "medium", reasoning_tokens: null,
+      stream: true, has_memory: true, reasoning: true, reasoning_effort: "medium", reasoning_tokens: null,
       keep_reasoning_in_memory: false, conversation_messages_retained: 30, tools: true, associative_memory: "llm",
       associative_execution: "parallel",
     },
@@ -1608,21 +1608,34 @@ function updateModelControls() {
   $("model-filters").dataset.active = String(activeFilters > 0);
 }
 
+// why the composer's effort selector is unavailable: `status` is the label shown inside the control itself
+// (so it also reads on the narrow layout, where the side note is hidden); null when the selector works
+function reasoningEffortState(effort) {
+  if (!effort) return { status: null, note: "" };
+  if (!effort.reasoning) {
+    return { status: tr("Disabled in this agent"), note: tr("Reasoning is disabled in this agent. Enable it in Agents > Advanced > Reasoning.") };
+  }
+  if (effort.supported === false) {
+    return { status: tr("Not available in this model"), note: tr("This model does not support reasoning effort.") };
+  }
+  if (effort.supported === null) {
+    return { status: tr("Unknown for this model"), note: tr("Reasoning effort support could not be verified right now.") };
+  }
+  return { status: null, note: tr(effort.override === null ? "Agent default" : "Chat override") };
+}
+
 function updateReasoningEffortControls() {
   const effort = state.chatId ? state.reasoningEffort : null;
+  const { status, note } = reasoningEffortState(effort);
+  const select = $("chat-effort");
   $("chat-effort-default").textContent = effort?.default ? `${tr("Default")} (${effort.default})` : tr("Default");
-  $("chat-effort").value = effort?.override ?? "";
-  $("chat-effort").disabled = !effort?.reasoning || effort.supported !== true
-    || !state.chatId || state.busy || state.modelBusy;
-  let note = "";
-  if (effort) {
-    if (!effort.reasoning) note = tr("Reasoning is off for this agent.");
-    else if (effort.supported === false) note = tr("This model does not support reasoning effort.");
-    else if (effort.supported === null) note = tr("Reasoning effort support could not be verified right now.");
-    else note = tr(effort.override === null ? "Agent default" : "Chat override");
-  }
+  $("chat-effort-status").textContent = status ?? "";
+  select.value = status ? "unavailable" : (effort?.override ?? "");
+  select.dataset.unavailable = String(Boolean(status));
+  select.disabled = Boolean(status) || !effort || !state.chatId || state.busy || state.modelBusy;
   $("effort-policy").textContent = note;
-  $("chat-effort").title = note || tr("Reasoning effort");
+  select.title = note || tr("Reasoning effort");
+  select.setAttribute("aria-label", status ? `${tr("Reasoning effort")}: ${status}` : tr("Reasoning effort"));
 }
 
 $("chat-effort").addEventListener("change", async (e) => {

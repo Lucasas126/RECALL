@@ -66,6 +66,7 @@ main { display: flex; flex-direction: column; min-width: 0; height: 100vh; heigh
 #chat-controls > span, #chat-effort-label, #effort-policy { color: var(--muted); font-size: .85em; }
 #chat-effort-label { display: flex; align-items: center; gap: 6px; }
 #chat-effort:disabled { opacity: .6; }
+#chat-effort[data-unavailable="true"] { font-style: italic; }
 #model-policy.privacy-warning, #model-zdr-warning { color: var(--warn); }
 #model-dialog { color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 12px; width: min(680px, calc(100vw - 32px)); max-height: 85vh; padding: 20px; }
 #model-dialog[open] { display: flex; flex-direction: column; }

@@ -22,6 +22,18 @@ class AgentDescriptionTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_reasoning_defaults_to_on_and_explicit_false_is_kept(self):
+        self.assertTrue(AgentConfig(id="aria", name="Aria").chat_config.reasoning)
+        self.store.create("user-a", AgentConfig(id="off", name="Off", chat_config={"reasoning": False}))
+        self.store.create("user-a", AgentConfig(id="omit", name="Omit"))
+        path = self.store.path_for("user-a", "omit")
+        lines = [line for line in path.read_text(encoding="utf-8").splitlines() if not line.strip().startswith("reasoning:")]
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        self.assertTrue(self.store.load("user-a", "omit").chat_config.reasoning)
+        self.assertFalse(self.store.load("user-a", "off").chat_config.reasoning)
+        self.store.create("user-a", AgentConfig(id="new", name="New"))
+        self.assertTrue(self.store.load("user-a", "new").chat_config.reasoning)
+
     def test_description_defaults_to_empty(self):
         self.assertEqual(AgentConfig(id="aria", name="Aria").description, "")
 
