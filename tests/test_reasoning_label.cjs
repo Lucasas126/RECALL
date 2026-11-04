@@ -14,7 +14,7 @@ const state = (effort) => context.reasoningEffortState(effort);
 test("agent with reasoning off says so and where to enable it", () => {
   const result = state({ reasoning: false, supported: true, override: null, default: "medium" });
   assert.equal(result.status, "Disabled in this agent");
-  assert.match(result.note, /Agents > Advanced > Reasoning/);
+  assert.match(result.note, /Agents > Basic > Advanced > Reasoning/);
 });
 
 test("unsupported and unverified models get their own label", () => {

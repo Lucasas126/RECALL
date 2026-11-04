@@ -102,7 +102,7 @@ function translateInterface() {
     ["agent-tokens-enabled-label", "Limit reasoning tokens"], ["agent-reasoning-tokens-label", "Reasoning tokens"],
     ["agent-retained-label", "Messages kept in context"],
     ["agent-retained-hint", "Empty keeps all messages."], ["agent-save", "Save agent"], ["agent-delete", "Delete agent"],
-    ["agent-tab-basic", "Basic"], ["agent-tab-advanced", "Advanced"], ["agent-tab-tools", "Tools"],
+    ["agent-tab-basic", "Basic"], ["agent-advanced-summary", "Advanced"], ["agent-tab-tools", "Tools"],
     ["agent-tab-mcp", "MCP"], ["agent-tab-soul", "Soul & memory"], ["agent-tab-dream", "Dream"],
     ["agent-tab-sessions", "Dream sessions"],
     ["soul-note", "These files are part of every chat's system prompt. Changes apply to new chats."],
@@ -584,7 +584,7 @@ function fillAgentForm(agent) {
   showAgentPanel("basic");
 }
 
-const AGENT_PANELS = ["basic", "advanced", "tools", "mcp", "folders"];
+const AGENT_PANELS = ["basic", "tools", "mcp", "folders"];
 // panels of a saved agent with their own saves, outside the agent form
 const DREAM_PANELS = ["soul", "dream", "sessions"];
 
@@ -598,6 +598,7 @@ function translatedText(text) {
 }
 
 function showAgentPanel(panel) {
+  if (panel === "advanced") panel = "basic"; // the Advanced tab is now a disclosure inside Basic
   if (DREAM_PANELS.includes(panel) && !state.agentForm.originalId) panel = "basic";
   for (const name of [...AGENT_PANELS, ...DREAM_PANELS]) {
     $(`agent-tab-${name}`).setAttribute("aria-pressed", String(name === panel));
@@ -948,6 +949,9 @@ for (const name of [...AGENT_PANELS, ...DREAM_PANELS]) $(`agent-tab-${name}`).ad
 $("agent-form").addEventListener("invalid", (e) => {
   const panel = e.target.closest(".agent-panel");
   if (panel) showAgentPanel(panel.id.replace("agent-panel-", ""));
+  // a rejected field inside the collapsed Advanced section must be visible too
+  const details = e.target.closest("details");
+  if (details) details.open = true;
 }, true);
 
 $("agent-associative").addEventListener("change", () => {
@@ -1613,7 +1617,7 @@ function updateModelControls() {
 function reasoningEffortState(effort) {
   if (!effort) return { status: null, note: "" };
   if (!effort.reasoning) {
-    return { status: tr("Disabled in this agent"), note: tr("Reasoning is disabled in this agent. Enable it in Agents > Advanced > Reasoning.") };
+    return { status: tr("Disabled in this agent"), note: tr("Reasoning is disabled in this agent. Enable it in Agents > Basic > Advanced > Reasoning.") };
   }
   if (effort.supported === false) {
     return { status: tr("Not available in this model"), note: tr("This model does not support reasoning effort.") };

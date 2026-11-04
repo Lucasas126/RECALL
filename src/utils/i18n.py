@@ -283,7 +283,7 @@ _SPANISH = {
     "Disabled in this agent": "Desactivado en este agente",
     "Not available in this model": "No disponible en este modelo",
     "Unknown for this model": "Desconocido para este modelo",
-    "Reasoning is disabled in this agent. Enable it in Agents > Advanced > Reasoning.": "El razonamiento está desactivado en este agente. Actívalo en Agentes > Avanzado > Razonamiento.",
+    "Reasoning is disabled in this agent. Enable it in Agents > Basic > Advanced > Reasoning.": "El razonamiento está desactivado en este agente. Actívalo en Agentes > Básico > Avanzado > Razonamiento.",
     "Reasoning is off for this agent.": "El razonamiento está desactivado para este agente.",
     "This model does not support reasoning effort.": "Este modelo no admite esfuerzo de razonamiento.",
     "Reasoning effort support could not be verified right now.": "No se pudo comprobar ahora si el modelo admite esfuerzo de razonamiento.",

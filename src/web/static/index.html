@@ -93,7 +93,6 @@
           <h3 id="agent-form-title">Edit agent</h3>
           <nav class="tabs agent-tabs" aria-label="Agent configuration">
             <button id="agent-tab-basic" type="button" aria-pressed="true">Basic</button>
-            <button id="agent-tab-advanced" type="button" aria-pressed="false">Advanced</button>
             <button id="agent-tab-tools" type="button" aria-pressed="false">Tools</button>
             <button id="agent-tab-mcp" type="button" aria-pressed="false">MCP</button>
             <button id="agent-tab-folders" type="button" aria-pressed="false">Folders</button>
@@ -117,8 +116,8 @@
               <textarea id="agent-prompt" rows="10" maxlength="20000"></textarea>
               <span id="agent-prompt-hint" class="model-note">Saved as the agent's SOUL.md. After creating the agent, edit it in the Soul &amp; memory tab.</span>
             </label>
-          </div>
-          <div id="agent-panel-advanced" class="agent-panel" hidden>
+            <details id="agent-advanced" class="agent-advanced">
+            <summary id="agent-advanced-summary">Advanced</summary>
             <fieldset class="agent-behavior">
               <legend id="agent-behavior-label">Chat behavior</legend>
               <label>
@@ -177,6 +176,7 @@
                 <span id="agent-retained-hint" class="model-note">Empty keeps all messages.</span>
               </label>
             </fieldset>
+            </details>
           </div>
           <div id="agent-panel-tools" class="agent-panel" hidden>
             <label class="model-filter"><input id="agent-tools" type="checkbox">

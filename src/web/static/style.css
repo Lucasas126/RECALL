@@ -437,3 +437,36 @@ details.action, details.thinking { border-left: 2px solid var(--line); padding-l
 #index-rebuild { color: var(--danger); }
 #index-status-error:empty { display: none; }
 @media (max-width: 700px) { .folder-row { grid-template-columns: 1fr; } }
+
+/* Agents view: anchor content at the top. The wrapping flex container used the default align-content (stretch), which spread
+   the free height between its lines, so the form floated down and moved whenever a panel changed height. */
+#agents-view { align-content: flex-start; }
+#agent-error:empty, #agent-status:empty { display: none; }
+.agent-tabs { position: sticky; top: 0; z-index: 2; }
+.agent-advanced > summary { cursor: pointer; color: var(--muted); padding: 4px 0; }
+.agent-advanced[open] > summary { margin-bottom: 10px; }
+.agent-advanced > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+/* Checkboxes: custom box from theme tokens; native input semantics are kept */
+input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none; flex: none; width: 1.1em; height: 1.1em; margin: 0; padding: 0;
+  border: 1.5px solid var(--muted); border-radius: 4px; background: var(--bg) center / 78% no-repeat; cursor: pointer;
+  vertical-align: middle; transition: background-color .15s, border-color .15s, box-shadow .15s;
+}
+input[type="checkbox"]:hover:not(:disabled) { border-color: var(--accent); }
+input[type="checkbox"]:checked {
+  background-color: var(--accent); border-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23fff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-7'/%3E%3C/svg%3E");
+}
+:root[data-theme="dark"] input[type="checkbox"]:checked,
+:root:not([data-theme]) input[type="checkbox"]:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%230f1726' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-7'/%3E%3C/svg%3E");
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) input[type="checkbox"]:checked {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23fff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-7'/%3E%3C/svg%3E");
+  }
+}
+input[type="checkbox"]:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft), 0 0 0 4.5px var(--accent); }
+input[type="checkbox"]:disabled { opacity: .5; cursor: not-allowed; }
+@media (pointer: coarse) { input[type="checkbox"] { width: 22px; height: 22px; } }
