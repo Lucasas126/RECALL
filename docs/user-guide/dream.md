@@ -310,10 +310,10 @@ dream:
   prompt: ""                 # empty = built-in default
   notify_telegram: false     # "dream session completed" + where to see it in the web
 folders: []                  # user folders, edited in the agent's Folders tab (see [files and media](files-and-media.md) and [memory](memory.md))
-memory_limits:
-  memory_chars: 2500
-  user_chars: 2500
 ```
+
+The maximum sizes of `SOUL.md`, `MEMORY.md` and `USER.md` are application-wide (`memory_limits` in
+[settings.yaml](../reference/settings-yaml.md#memory-limits)); a legacy `memory_limits` key in an agent file is ignored.
 
 the schedule runs in whichever process is up (web or Telegram), checked every
 minute; the lock and the `last_started_at` in `review_state.json` stop double
@@ -341,8 +341,8 @@ routes (`404` for agents the user does not own):
 
 | method | route | result |
 | --- | --- | --- |
-| `GET` | `/api/agents/<id>/dream/settings` | `{dream, memory_limits, default_prompt}` |
-| `PUT` | `/api/agents/<id>/dream/settings` | saves `{dream, memory_limits}`; `422` for both schedules or an unknown dream tool group |
+| `GET` | `/api/agents/<id>/dream/settings` | `{dream, default_prompt}` |
+| `PUT` | `/api/agents/<id>/dream/settings` | saves `{dream}`; `422` for both schedules or an unknown dream tool group |
 | `GET` | `/api/agents/<id>/dream/status` | `{running, cancelling, current_session_id, last_session, schedule: {enabled, every_hours, daily_at, next_run}, last_started_at, last_finished_at, pending_chats}` |
 | `POST` | `/api/agents/<id>/dream/start` | `202` with `{status: started \| started_nothing_pending \| already_running, session_id, pending}` |
 | `POST` | `/api/agents/<id>/dream/cancel` | `202` with `{status: cancelling \| not_running, session_id}`; returns at once, the session ends after its running tool call (see [time limit and cancel](#time-limit-and-cancel)) |

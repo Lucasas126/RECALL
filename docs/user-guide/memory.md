@@ -9,7 +9,8 @@ and [sources](../architecture/sources.md).
 - **personality and short memories**: `SOUL.md`, `MEMORY.md` and `USER.md` are always in the system prompt; skills are
   indexed. See [dream mode](dream.md#per-agent-files). A new agent's `SOUL.md` starts as a short default text that explains
   these files and the tools that edit them; the agent owns it and may rewrite it. To reset or opt in, empty the SOUL editor
-  and use **Insert default template** in **Soul & memory**.
+  and use **Insert default template** in **Soul & memory**. Their maximum sizes (default 15000, 2500 and 2500
+  characters) are set for the whole application in `memory_limits` of [settings.yaml](../reference/settings-yaml.md#memory-limits).
 - **associative memory**: before each reply RECALL searches the agent's index and suggests the best fragments to the agent
   (modes, settings and the per-user maximum are below).
 - **dream mode**: background sessions in which the agent reviews recent conversations and curates its own files: [dream mode](dream.md).

@@ -7,7 +7,7 @@ One file per agent: `.config/<user_id>/agents/<agent_id>.yaml`. The agent's pers
 
 Defaults when a key is omitted: `stream: true`, `has_memory: true`, `reasoning: true`, `reasoning_effort: medium`,
 `conversation_messages_retained: 30`, `tools: true`, `associative_memory: llm`, `associative_execution: parallel`,
-`memory_limits` 2500/2500, `dream.enabled: false`. The values in the example below are illustrative.
+`dream.enabled: false`. The values in the example below are illustrative.
 
 ## agent file
 
@@ -48,10 +48,11 @@ folders:                             # user folders, each exposed as the source 
     path: /path/to/obsidian-vault    # must exist; never created
     indexed: true                    # feeds associative memory and query_memory (default true)
     read_only: false                 # never writable, whatever the tool groups (default false)
-memory_limits:                       # chars of MEMORY.md / USER.md, injected in every prompt
-  memory_chars: 2500
-  user_chars: 2500
 ```
+
+The size limits of `SOUL.md`, `MEMORY.md` and `USER.md` are not agent settings: they are application-wide and set in the
+`memory_limits` block of [settings.yaml](settings-yaml.md#memory-limits). A `memory_limits` key left over in an older agent
+file is ignored when loading and is not written again when the agent is saved.
 
 the agent's personality lives only in `data/<user_id>/<agent_id>/SOUL.md` (a
 missing file is an empty personality; the agent YAML has no personality field),

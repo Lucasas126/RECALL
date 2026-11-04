@@ -10,6 +10,7 @@ web UI and the Telegram bot after editing it. In Docker you can mount your own c
 | `paths` | `config_dir` (`.config`), `data_dir` (`data`), `logs_dir` (`logs`) | [Docker](../deployment/docker.md#persistent-state) |
 | `index` | `dir_name`, `collection`, `file_types`, `chunk_tokens`, `max_chunk_tokens`, `overlap_tokens`, `embed_batch`, `folders_reconcile_minutes` | [memory](../user-guide/memory.md#memory-index) |
 | `agent` | `max_tool_hops` (default 5): tool round-trips before a final answer is forced | here |
+| `memory_limits` | `soul_chars` (15000), `memory_chars` (2500), `user_chars` (2500): maximum sizes of SOUL.md, MEMORY.md and USER.md | [memory limits](#memory-limits) |
 | `web` | `host`, `port`, `session_secret_env`, `public_url` | [web authentication](#web-authentication) |
 | `telegram` | `allowed_users_env` (default `TELEGRAM_ALLOWED_USERS`) | [Telegram](../user-guide/telegram.md#telegram-access) |
 | `video`, `pdf`, `speech_to_text` | frame sampling, OCR and transcription defaults | [files and media](../user-guide/files-and-media.md) |
@@ -18,6 +19,21 @@ web UI and the Telegram bot after editing it. In Docker you can mount your own c
 | `associative_memory` | `context_messages`, `top_n`, `score_threshold`, `query_model`, `api_key`, `zdr` | [memory](../user-guide/memory.md#associative-memory) |
 | `chat_naming` | `model`, `api_key`, `zdr`, `min_messages` | [chat naming](#chat-naming) |
 | `mcp` | `connect_timeout_seconds`, `call_timeout_seconds`, `servers` | [MCP servers](../user-guide/mcp.md) |
+
+## memory limits
+
+```yaml
+memory_limits:
+  soul_chars: 15000    # 1000-100000
+  memory_chars: 2500   # 100-50000
+  user_chars: 2500     # 100-50000
+```
+
+Maximum characters of an agent's `SOUL.md`, `MEMORY.md` and `USER.md`. They apply to every user and agent (there is no
+per-user or per-agent override) and to writes by the agent, by dreams and by the web editors. `MEMORY.md` and `USER.md`
+are injected in every system prompt with a `used/limit` counter. Lowering a limit does not truncate existing text: the
+file just cannot be saved or extended until it fits. Values outside the bounds, or unknown keys, stop the start-up.
+Agent files from older versions may still contain `memory_limits`; it is ignored.
 
 ## web authentication
 
