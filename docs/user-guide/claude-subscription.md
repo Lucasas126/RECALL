@@ -80,7 +80,7 @@ names the variables (never their values). Remove them to use the login.
    `claude_config_dir: <dir>` below.
 3. Pick Claude in the model picker: its **Claude subscription** tab becomes
    selectable once `claude` is found and logged in (see
-   [providers](config.md#providers)); until then the tab is disabled and says why.
+   [providers](models-and-providers.md#providers)); until then the tab is disabled and says why.
    There is nothing to enable. The options below are optional, advanced and have
    no UI; set them in that user's `user.yaml` only if you need them:
 
@@ -103,7 +103,7 @@ provider and asks you to run `claude update` when it is older.
 ## selecting it: model references
 
 A model reference is a bare model id, served by the user's main provider, or
-`<provider>:<model>` (see [model references](config.md#model-references));
+`<provider>:<model>` (see [model references](../reference/user-yaml.md#model-references));
 `claude_subscription:<model>` is served by the user's Claude login. `<model>` is a
 Claude Code model name; the pickers offer `haiku`, `sonnet` and `opus` (pinned to
 Haiku/Sonnet/Opus 5.5 with their 1M context window). The same reference works
@@ -136,7 +136,7 @@ Rules:
   for that turn (indicator "skipped") and the chat keeps its title; both are logged.
 - These two settings need no ZDR setting to use a `claude_subscription:` model.
   Zero data retention is optional and off by default (`require_zdr` in `user.yaml`,
-  see [config](config.md#zero-data-retention-is-a-user-policy)); the privacy of the
+  see [config](../reference/user-yaml.md#zero-data-retention-is-a-user-policy)); the privacy of the
   Anthropic account (for example opting out of training) is managed in that account.
   Only when ZDR is required does a subscription model conflict: `settings.yaml`
   fails to load with `chat_naming.zdr: true` or `associative_memory.zdr: true` and a
@@ -192,4 +192,4 @@ unlocked by a flag.
   pinned aliases; other Claude Code model names can be typed as
   `claude_subscription:<name>` in YAML or the Dream tab.
 - Docker: not supported. The image has no Node.js, no Claude Code and no login;
-  run RECALL directly on the host to use this provider (see [deployment](deployment.md)).
+  run RECALL directly on the host to use this provider (see [deployment](../deployment/docker.md)).

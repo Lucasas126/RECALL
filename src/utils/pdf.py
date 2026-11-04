@@ -22,7 +22,7 @@ _MAX_IMAGES_PER_PAGE = 10     # bounds OCR cost on image-heavy pages
 _DEFAULT_WINDOWS_TESSERACT = Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
 _TESSERACT_MISSING = (
     "Tesseract is needed to read scanned PDF pages but was not found. "
-    "Install it (see docs/config.md, Tesseract OCR section) or set pdf.tesseract_cmd in settings.yaml."
+    "Install it (see docs/user-guide/files-and-media.md, Tesseract OCR section) or set pdf.tesseract_cmd in settings.yaml."
 )
 
 OcrFunction = Callable[[bytes], str]

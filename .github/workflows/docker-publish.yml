@@ -2,7 +2,7 @@ name: Build & push image
 
 # The server follows the `latest` tag through Watchtower, so `latest` must only
 # move when a GitHub Release is published. Pull requests and pushes to main
-# build the image as a check but never push it. See docs/deployment.md.
+# build the image as a check but never push it. See docs/deployment/docker.md.
 on:
   release:
     types: [published]

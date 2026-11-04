@@ -1,12 +1,12 @@
 # associative memory v2: sources, indexing and chunking
 
 Status: **implemented** (see [implementation notes](#implementation-notes)). The
-behavior is documented in [config](config.md#memory-index),
-[user folders](config.md#user-folders), [sources](sources.md#indexing) and
-[architecture](architecture.md#associative-recall-in-parallel); this page keeps the
+behavior is documented in [memory](../user-guide/memory.md#memory-index),
+[user folders](../user-guide/memory.md#user-folders), [sources](sources.md#indexing) and
+[architecture](overview.md#associative-recall-in-parallel); this page keeps the
 design and the decisions taken.
 
-## problems with the current index
+## problems of the original index (solved by this design)
 
 - **whole-chat re-embedding**: a chat is one growing `.jsonl`; every new message
   changes its MD5, so all its chunks are deleted and every turn is embedded again.
@@ -40,7 +40,7 @@ Replaces the single `vault:` path. Per agent, a list of named folders:
 ```yaml
 folders:
   - name: obsidian              # source name -> addresses `obsidian:path/note.md`
-    path: G:/path/to/vault
+    path: /path/to/vault
     indexed: true               # used by associative memory and query_memory (default true)
     read_only: false            # optional hard override: never writable, whatever the tools
   - name: work

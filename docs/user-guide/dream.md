@@ -186,7 +186,7 @@ and/or `folders` reads.
 the dream's `query_memory` searches the same index as the chats and never updates
 it: a dream start queues a stat-only reconcile of the agent's own sources, and the
 end of the session queues another one so the notes and skills it wrote are indexed
-for the next chats (see [memory index](config.md#memory-index)).
+for the next chats (see [memory index](memory.md#memory-index)).
 
 ### default dream prompt (summary)
 
@@ -209,14 +209,14 @@ code and is used when it is empty.
 
 an agent can have several named `folders` (any folder, usually the user's
 Obsidian vault), each exposed as the source `<name>:` with the usual path guard
-(see [user folders](config.md#user-folders)). in chats, the `folders_read` tool
+(see [user folders](memory.md#user-folders)). in chats, the `folders_read` tool
 group gives `folder_list`/`folder_read`/`folder_search` over every folder and
 `folders_edit` adds `folder_write`/`folder_append`/`folder_edit`/`folder_move`/
 `folder_delete`, except on folders marked `read_only`. in dreams the folders are
 always read-only, and readable only with the `folders` dream tool group. the
 folders must exist (saving a missing one is a `400`); hidden entries
 (`.obsidian/`, `.git/`) are skipped by listings, searches and the index. folders
-with `indexed: true` feed associative memory. the safe/auto [overlay](overlay.md)
+with `indexed: true` feed associative memory. the safe/auto [overlay](../architecture/obsidian-overlay.md)
 is still planned.
 
 ### questions for the user
@@ -359,7 +359,7 @@ session sends one message: "dream session completed" (or failed / out of
 budget / reached its time limit / cancelled) for the agent, with where to find
 it in the web UI (Agents -> agent name -> Dream sessions -> session date, the
 date as listed there). when the web UI's public address is configured
-(`web.public_url` or `RECALL_PUBLIC_URL`, see [config](config.md#web-authentication)),
+(`web.public_url` or `RECALL_PUBLIC_URL`, see [config](../reference/settings-yaml.md#web-authentication)),
 the message adds `Open it: <public_url>/#agents/<agent_id>/dreams/<session_id>`;
 it is sent as plain text, so Telegram makes the URL clickable (LAN addresses
 too). the link opens the session directly, after the login form when needed. the message goes to every Telegram id mapped

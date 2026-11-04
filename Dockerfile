@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # One image, two processes: the web UI (default CMD) and the Telegram bot
-# (`python run_telegram.py`, see docker-compose.yml). See docs/deployment.md.
+# (`python run_telegram.py`, see docker-compose.yml). See docs/deployment/docker.md.
 
 # ---------- builder ----------
 # Use uv to resolve & install deps into a venv we copy into the runtime image.

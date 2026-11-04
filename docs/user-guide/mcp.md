@@ -3,7 +3,7 @@
 RECALL agents can use external services through the
 [Model Context Protocol](https://modelcontextprotocol.io/) (MCP). RECALL is the
 MCP client: it starts each server, lists its tools and exposes them to the model
-next to the built-in [tools](tools.md).
+next to the built-in [tools](../reference/tools.md).
 
 Status: implemented for stdio servers (a local command such as `npx`). Remote
 (streamable HTTP) servers are planned.
@@ -115,16 +115,16 @@ whose YAML references a server no longer in the catalog is an error.
   environment variable, failed start), the chat still works: the model is told the
   service is unavailable and why, and that the user can connect it in Settings.
 
-Implementation: [src/providers/mcp.py](../src/providers/mcp.py) (`McpManager`),
-[src/agent/toolsets/mcp.py](../src/agent/toolsets/mcp.py) and the
-`/api/mcp` routes (see [configuration](config.md#managing-agents)).
+Implementation: [src/providers/mcp.py](../../src/providers/mcp.py) (`McpManager`),
+[src/agent/toolsets/mcp.py](../../src/agent/toolsets/mcp.py) and the
+`/api/mcp` routes (see [configuration](agents.md#managing-agents)).
 
 ## Google Calendar
 
 The catalog ships with the community
 [`@cocal/google-calendar-mcp`](https://github.com/nspady/google-calendar-mcp)
 server, run through `npx` (requires Node.js 20+ on the RECALL host; the Docker
-image does not include it, see [deployment](deployment.md#limitations)). One Google
+image does not include it, see [deployment](../deployment/docker.md#limitations)). One Google
 OAuth client is shared by the framework; each user signs in with their own Google
 account and gets their own token file.
 

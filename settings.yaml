@@ -44,7 +44,7 @@ speech_to_text:
   language: null  # optional ISO-639-1 code; null enables provider auto-detection
 
 prompt_cache:
-  enabled: true                     # mark Claude prompts on OpenRouter with cache breakpoints (see docs/config.md)
+  enabled: true                     # mark Claude prompts on OpenRouter with cache breakpoints (see docs/reference/settings-yaml.md)
   anthropic_providers: [Amazon Bedrock]  # preferred OpenRouter routes for Claude; other routes stay as fallback
   trim_slack_percent: 25            # when history passes conversation_messages_retained, cut this much extra; 0 trims one message at a time
 
@@ -68,7 +68,7 @@ chat_naming:
   min_messages: 5              # chats shorter than this keep the first-message title
 
 # MCP servers offered to every user; each user connects their own account in Settings,
-# and each agent enables the servers it needs (see docs/mcp.md)
+# and each agent enables the servers it needs (see docs/user-guide/mcp.md)
 mcp:
   connect_timeout_seconds: 120  # server start and tool listing (the first npx run downloads it)
   call_timeout_seconds: 60      # maximum time for one tool call

@@ -73,7 +73,7 @@ Requirements: Docker Engine with the Compose plugin, amd64.
    ```
 
 4. Put each user's configuration in `config/<user_id>/` (`user.yaml` and
-   `agents/<agent_id>.yaml`, see [configuration](config.md#config-files)). To
+   `agents/<agent_id>.yaml`, see [configuration](../reference/user-yaml.md#example)). To
    move an existing install, copy its `.config/` contents to `config/` and its
    `data/` to `data/`.
 5. Start everything:
@@ -88,8 +88,8 @@ The web UI listens on `http://<server>:${RECALL_PORT}` (default 8000).
 
 ## proxmox LXC
 
-The home server is Proxmox VE; each app runs in its own unprivileged Debian LXC
-with Docker Compose under `/opt/<app>` (same layout as the other apps). For RECALL:
+Example for a Proxmox VE host where each app runs in its own unprivileged Debian LXC
+with Docker Compose under `/opt/<app>`. For RECALL:
 
 1. Create an unprivileged Debian LXC (for example CT `400`, hostname `recall`,
    `onboot: 1`) with the `nesting=1,keyctl=1` features so Docker runs inside it.
@@ -140,34 +140,34 @@ host.
 `user.yaml` (`provider.api_key`) and cannot be listed in advance. See
 `.env.deploy.example` for:
 
-- `RECALL_SESSION_SECRET`: web session signing secret ([web authentication](config.md#web-authentication)).
-- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USERS`: [Telegram access](config.md#telegram-access).
+- `RECALL_SESSION_SECRET`: web session signing secret ([web authentication](../reference/settings-yaml.md#web-authentication)).
+- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USERS`: [Telegram access](../user-guide/telegram.md#telegram-access).
   Only one process can poll a bot token, so do not run a local
   `run_telegram.py` with the same token while the server bot is up.
 - `OPENROUTER_API_KEY` (associative memory, chat naming) and one variable per
   user key referenced in `user.yaml`.
-- Optional `TAVILY_API_KEY` ([shared web access](config.md#shared-web-access-tavily))
+- Optional `TAVILY_API_KEY` ([shared web access](../reference/settings-yaml.md#shared-web-access-tavily))
   and `OLLAMA_HOST`. To reach Ollama on the Docker host via
   `host.docker.internal`, add `extra_hosts: ["host.docker.internal:host-gateway"]`
   to the RECALL services.
 - Optional `RECALL_PUBLIC_URL`, the address you open the web UI at (for
   example `http://<server-ip>:8000`), so Telegram dream notifications link to
-  the session ([web.public_url](config.md#web-authentication)). Set it in `.env`
+  the session ([web.public_url](../reference/settings-yaml.md#web-authentication)). Set it in `.env`
   (a commented placeholder is in `.env.deploy.example`); without it the
   notification is text-only.
 - Deploy-only values read by Compose: `GHCR_OWNER` (lowercase), `RECALL_TAG`,
   `RECALL_PORT`, `RECALL_*_DIR`, `TZ`.
 
 The image sets `RECALL_WEB_HOST=0.0.0.0` so the web UI accepts connections on
-the published port (see [web authentication](config.md#web-authentication)).
+the published port (see [web authentication](../reference/settings-yaml.md#web-authentication)).
 
 ## image contents
 
 - Python 3.12 slim with the locked dependencies (`uv sync --frozen --no-dev`).
 - `tesseract-ocr` with English and Spanish data, matching the default
-  `pdf.ocr_languages: eng+spa` ([Tesseract OCR](config.md#tesseract-ocr)). Other
+  `pdf.ocr_languages: eng+spa` ([Tesseract OCR](../user-guide/files-and-media.md#tesseract-ocr)). Other
   languages need a custom image.
-- `ffmpeg`/`ffprobe` for [video input](config.md#video-input).
+- `ffmpeg`/`ffprobe` for [video input](../user-guide/files-and-media.md#video-input).
 - Runs as the non-root user `app` (uid/gid 1000).
 - Healthcheck: `GET /` on port 8000 (the static page; no login needed). The
   Telegram service disables it because it has no HTTP server.
@@ -175,11 +175,11 @@ the published port (see [web authentication](config.md#web-authentication)).
 ## limitations
 
 - **Google Calendar MCP**: the image has no Node.js/`npx`, so the server reports
-  the missing command and chats continue without it ([MCP](mcp.md#runtime-behavior)).
+  the missing command and chats continue without it ([MCP](../user-guide/mcp.md#runtime-behavior)).
   Its sign-in also redirects to `localhost` on the RECALL host, which a browser
   on another machine cannot reach. Supporting it needs Node.js in the image and
   a way to complete the OAuth flow remotely.
-- **Claude subscription provider** ([experimental](claude-subscription.md)): the
+- **Claude subscription provider** ([experimental](../user-guide/claude-subscription.md)): the
   image has no Node.js, no Claude Code CLI and no Claude login, so
   `claude_subscription:` models fail there. Run RECALL on the host to use it.
 - The web UI is plain HTTP and its session cookie is not marked `Secure`. Keep it

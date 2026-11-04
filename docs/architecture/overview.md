@@ -23,12 +23,12 @@ L1  data / sources plane      mind palace, conversations, obsidian (+overlay), v
 - **L1 — data/sources plane (core)**: the actual data and how to access it. a `SourceRegistry` gives unified, typed access (`mind_palace()`, `obsidian()`, `vector()`). depends on nothing above.
 - **L2 — capabilities**: the cognitive modes. each one receives the sources it needs by injection (dependency injection), never via a global. reads/writes L1 directly.
 - **L3 — external adapter (future)**: a thin adapter that could expose L1 and selected L2 capabilities to external clients. It imports L1 and L2, never the reverse.
-- **L4 — orchestration**: the recall agent itself, plus the background scheduler for dream mode ([dream.md](dream.md)). accesses L1 and L2 directly.
+- **L4 — orchestration**: the recall agent itself, plus the background scheduler for dream mode ([dream.md](../user-guide/dream.md)). accesses L1 and L2 directly.
 
 ## resources vs tools
 
-- **resources** = read-only views: mind palace snapshot, recent conversations, obsidian notes.
-- **tools** = mutations or reasoning: `remember`, `obsidian_write`, `associative_search`, `deep_recall`, `consolidate`.
+- **resources** = read-only views of sources: mind palace notes, conversations, the agent's own files, user folders.
+- **tools** = what the model calls to read or change them: `query_memory`, `read`, `write`, `edit`, `folder_*`, `web_search`, `memory`, `soul_edit`, ... (see [tools](../reference/tools.md)). Recall mode (`deep_recall`) is planned, not implemented.
 - dream mode is **not** a tool — it is a background session that writes to L1, triggered by its schedule, `/dream start` or the web API.
 
 ## channels and the chat service
@@ -37,13 +37,13 @@ channels (web, telegram, cli) are thin adapters over one channel-agnostic `ChatS
 
 ```
 web (src/web)  ─┐
-telegram (planned) ─┼─▶ ChatService ─▶ Agent ─▶ SourceRegistry
+telegram (src/telegram) ─┼─▶ ChatService ─▶ Agent ─▶ SourceRegistry
 cli (cli.py, direct) ─┘
 ```
 
-- a channel resolves its own identity to a `user_id` (web: Argon2 password login and signed session; telegram: a telegram id → user, planned) and then calls the service with that `user_id`. the service never trusts ids to be well formed: it validates user, agent ownership and chat ids.
+- a channel resolves its own identity to a `user_id` (web: Argon2 password login and signed session; telegram: a telegram id → user through `TELEGRAM_ALLOWED_USERS`) and then calls the service with that `user_id`. the service never trusts ids to be well formed: it validates user, agent ownership and chat ids.
 - operations: `login`, `list_agents`, `list_chats`, `create_chat`, `get_chat`, `delete_chat`, `send`. CRUD returns plain dicts; `send` returns events.
-- `send` yields `ChatEvent`s (`reasoning`, `text`, `tool`, `usage`, `interrupted`, `notice` when a video was replaced by frames for an image-only model, and `memory` while associative recall searches and when it ends), not channel formats. the `memory` event carries the search state and the number of matched fragments (see the messages endpoint below); adapters decide how to display it. a telegram adapter would call `send(..., stream=False)`, deliver the `text` event as a message and handle `interrupted` without claiming a completed answer. rendering and transport stay in the adapter.
+- `send` yields `ChatEvent`s (`reasoning`, `text`, `tool`, `usage`, `interrupted`, `notice` when a video was replaced by frames for an image-only model, and `memory` while associative recall searches and when it ends), not channel formats. the `memory` event carries the search state and the number of matched fragments (see the messages endpoint below); adapters decide how to display it. the telegram adapter streams the events into messages (native drafts in private chats) and handles `interrupted` without claiming a completed answer. rendering and transport stay in the adapter.
 - one `Agent` runtime is kept per (user, agent, chat), so chat context and mutable reply state cannot leak between conversations; different chats of the same configured agent can execute in parallel, while a new message can interrupt its active reply to the same chat.
 
 status: implemented for the web and Telegram channels; the cli still uses `Agent` directly.
@@ -54,11 +54,11 @@ unsupported attachments are rejected before model invocation with a message
 localized using the user's `language` setting. Audio is transcribed through
 the configured OpenRouter speech-to-text model before the chat model runs. Videos
 for image-only models are decomposed into frames and audio first (see
-[config.md](./config.md#video-input)). The audio becomes text, so the resulting
+[config.md](../user-guide/files-and-media.md#video-input)). The audio becomes text, so the resulting
 conversation turn stays text-only apart from any frames and can be reopened with
 any later chat model. PDFs follow the same rule: `ChatService.send` replaces each PDF with its
 extracted text, with page markers, before validation, so no provider receives the file or
-its page images (see [config.md](./config.md#pdf-input)).
+its page images (see [config.md](../user-guide/files-and-media.md#pdf-input)).
 
 ### web interface
 
@@ -83,7 +83,7 @@ Status: implemented.
   tabs: Basic (name, description and, for a new agent, its personality), Advanced (streaming,
   memory, reasoning and associative-memory options, retained messages), Tools (Use tools and the
   tool groups) and MCP. Save and Delete stay visible under those tabs, and a rejected field opens
-  the tab that holds it. A saved agent also has the [dream mode](./dream.md#web-ui) tabs Soul &
+  the tab that holds it. A saved agent also has the [dream mode](../user-guide/dream.md#web-ui) tabs Soul &
   memory, Dream and Dream sessions, each with its own save actions.
 - reasoning blocks: trailing newlines from the model are trimmed so no empty line shows under an
   expanded block.
@@ -111,13 +111,13 @@ The service validates model availability and rejects changes while its agent
 has active/queued work. Its cached agent is rebuilt lazily when the current
 chat's selection changes. `Agent.open_chat` restores each chat's override (or
 the user default), so other chats and CLI reopening behave consistently.
-See [model selection and favorites](config.md#choosing-a-model-per-chat).
+See [model selection and favorites](../user-guide/models-and-providers.md#choosing-a-model-per-chat).
 
 Reasoning effort follows the same pattern: a nullable per-chat override in
 `ConversationsSource`, validated by the service against the model's advertised
 reasoning support, and applied by `Agent.open_chat` over the agent default.
 Telegram's `/settings` panel and the web composer both use it. See
-[reasoning effort per chat](config.md#reasoning-effort-per-chat).
+[reasoning effort per chat](../user-guide/models-and-providers.md#reasoning-effort-per-chat).
 
 ### shared channel preferences
 
@@ -148,7 +148,7 @@ values; provider text is not translated. Cached agents receive the latest
 language at generation start for capability errors, without changing models
 or rebuilding context. Static navigation/help text and technical diagnostics
 are not a complete localized interface.
-See [shared user preferences](config.md#shared-user-preferences).
+See [shared user preferences](../reference/user-yaml.md#shared-user-preferences).
 
 ### channel-neutral steering
 
@@ -214,7 +214,7 @@ The messages endpoint returns SSE with the generation id in each event's `id:`
 field. Existing `text`, `reasoning`, `tool`, `usage` and `done` payloads are unchanged.
 An `error` event carries the (localized) message as a plain string, or
 `{"message": "...", "code": "..."}` when the error has a stable code (see
-[error codes](config.md#error-codes)). When a turn runs an associative search, `memory` events report its
+[error codes](../reference/api.md#error-codes)). When a turn runs an associative search, `memory` events report its
 state: `{"state": "searching"}` when the stream starts, then once
 `{"state": "done", "matches": N}` (`N` is 0 when nothing relevant was found) or
 `{"state": "skipped"}` when the search failed, finished too late to be used or was
@@ -229,7 +229,7 @@ context panel to be restored when reopening a chat. Older turns that predate
 `usage_report` show their saved input/output token totals, when available. When
 the provider reports prompt-cache usage, the report has a `cache:` line with the
 tokens read from and written to the cache, and the saved totals include
-`cache_read` and `cache_write` (see [prompt caching](config.md#prompt-caching)).
+`cache_read` and `cache_write` (see [prompt caching](../reference/settings-yaml.md#prompt-caching)).
 The current response's `usage` event also appends ephemeral latency measurements:
 total agent processing time, associative-memory lookup, summed main-model calls,
 and remaining tools/overhead time, each in milliseconds and as a share of total.
@@ -276,7 +276,7 @@ returns chunks of the chat being answered (`recall(..., chat_id=...)` passes it 
 queries what is already indexed, and the index is kept current in background workers
 (the chat's new exchange and the files the turn wrote, queued after each reply; a
 stat-only reconcile at chat and dream start; user folders on an interval), see
-[memory index](config.md#memory-index). `CancellationToken._link` lets the search stop one
+[memory index](../user-guide/memory.md#memory-index). `CancellationToken._link` lets the search stop one
 model call without cancelling the turn. Status: implemented; the web and Telegram
 channels receive the `memory` events from the service, the CLI prints the final one as
 a note. The web chat shows them as a small pill above the reply: a pulsing dot while

@@ -104,7 +104,7 @@ _SPANISH = {
     "{name} has no pages.": "{name} no tiene páginas.",
     "{name} has {pages} pages; the limit is {limit} pages per PDF.": "{name} tiene {pages} páginas; el límite es de {limit} páginas por PDF.",
     "No text could be read from {name}.": "No se ha podido leer texto de {name}.",
-    "Tesseract is needed to read scanned PDF pages but was not found. Install it (see docs/config.md, Tesseract OCR section) or set pdf.tesseract_cmd in settings.yaml.": "Se necesita Tesseract para leer páginas escaneadas de PDF, pero no se ha encontrado. Instálalo (ver la sección Tesseract OCR de docs/config.md) o define pdf.tesseract_cmd en settings.yaml.",
+    "Tesseract is needed to read scanned PDF pages but was not found. Install it (see docs/user-guide/files-and-media.md, Tesseract OCR section) or set pdf.tesseract_cmd in settings.yaml.": "Se necesita Tesseract para leer páginas escaneadas de PDF, pero no se ha encontrado. Instálalo (ver la sección Tesseract OCR de docs/user-guide/files-and-media.md) o define pdf.tesseract_cmd en settings.yaml.",
     "Tesseract could not read a page. Check that the language packs {languages} are installed.": "Tesseract no ha podido leer una página. Comprueba que los paquetes de idioma {languages} están instalados.",
     "Tesseract timed out reading a page.": "Tesseract ha tardado demasiado en leer una página.",
     "Tesseract executable not found at {path}. Fix pdf.tesseract_cmd in settings.yaml.": "No se ha encontrado el ejecutable de Tesseract en {path}. Corrige pdf.tesseract_cmd en settings.yaml.",

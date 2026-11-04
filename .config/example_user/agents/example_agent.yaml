@@ -5,7 +5,7 @@ chat_config:
   #                                    # main provider); unset follows the user's default. A model chosen in a chat wins.
   stream: true
 # the personality lives in data/example_user/example_agent/SOUL.md (edit it in the web UI's Soul & memory tab)
-dream:                 # background self-review sessions (see docs/dream.md); manual only by default
+dream:                 # background self-review sessions (see docs/user-guide/dream.md); manual only by default
   enabled: false
   every_hours: null
   daily_at: null       # e.g. "04:00" (local time); do not set it together with every_hours

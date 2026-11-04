@@ -1,5 +1,5 @@
 # Adapted from the MIT-licensed Hermes plugin "claude-subscription-directsdk-experimental"
-# (Copyright (c) 2026 Nous Research and contributors). See docs/claude-subscription.md.
+# (Copyright (c) 2026 Nous Research and contributors). See docs/user-guide/claude-subscription.md.
 """Claude Code process plumbing: command lookup, child environment, history frames, request body, process trees."""
 from __future__ import annotations
 

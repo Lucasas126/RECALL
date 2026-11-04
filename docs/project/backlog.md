@@ -1,0 +1,54 @@
+# backlog
+
+One list of ideas and planned work, with what is already done kept separate. Implemented behaviour is documented in the
+[user guide](../README.md); nothing under **planned** exists in the code yet (checked against the code when this page was written).
+
+## planned
+
+### automation and behavior
+
+- **Reminders and proactive messages**: the agent schedules a message ("remind me on Friday...") sent later through Telegram and shown in the web, reusing the dream scheduler. First step towards automations.
+- **Automations**: rules and actions based on conversation or calendar events.
+- **Recall mode**: the agent enters its mind palace with a context trimmed to the last messages, searches and reads what it needs, and returns only the relevant information, dropping the retrieval process from its context. Complements [dream mode](../user-guide/dream.md): dreams write the palace, recall reads it cheaply.
+- **Chat compaction**: summarize the oldest messages into a running summary instead of dropping them beyond `conversation_messages_retained`.
+- **Warnings section** for configuration mismatches: a reasoning effort or token budget the selected model does not support, a tool that is unavailable, a model that is not offered. (Today the reasoning selector is disabled with an explanation when unsupported; there is no general warnings area.)
+
+### tools
+
+- **File tools v2** for every source: paginated reads with line numbers and text extraction for PDF/Office files; regex content search and glob file search; `patch` (unique find-and-replace with tolerant matching, returning a diff); a stale-write guard.
+- **Terminal tool group**, off by default and enabled per agent: a per-agent Docker sandbox (never inside the RECALL container, which holds `.env` and all users' data) and a local backend only for trusted single-user installs; an SSH backend; foreground commands with timeouts and truncated output, background jobs with poll/wait/kill; approval of dangerous commands through the web UI or Telegram buttons (manual / smart / off); child processes without provider keys and scrubbed output; not available in dream mode.
+- **Server admin agent** for the home Proxmox server, built on the terminal feature: Proxmox API through an MCP server, SSH as a dedicated sudo user, read-only commands free and state changes approved by the user, its own agent only for the owner, an audit log, read-only dreams for health review. Risk: AdGuard on that server is the DHCP/DNS of the whole home network.
+- **PDF generation** and **image and graph generation** (possibly through an MCP server).
+- **Remote MCP servers** (streamable HTTP); Node.js and the Google Calendar sign-in in the Docker image ([MCP](../user-guide/mcp.md#runtime-behavior)).
+
+### usage and data
+
+- **Cost control**: spend per user, agent and day (building on `src/agent/usage.py`), shown in the web UI, optional monthly caps and a separate cap for dreams.
+- **Backup / export and import of an agent** (`SOUL.md`, memories, skills, palace, conversations); scheduled backups of `data/` for Docker.
+- **Obsidian safe/auto overlay** with optional auto-commit, designed in [overlay](../architecture/obsidian-overlay.md); today a user folder pointing at the vault is the implemented way.
+- Tags in the vector index.
+
+### interface
+
+- Search across chat history from the web UI (the agent can already search its conversations; the user cannot).
+- Optional voice replies (TTS) in Telegram, per agent.
+- Remove unnecessary messages from the settings and configuration selectors to keep the interface clean.
+- A global `defaults.yaml` merged under `user.yaml` and agent files, and a channel to user index in a `ConfigStore` ([agent.yaml](../reference/agent-yaml.md#loading)).
+
+## done
+
+- Video input: models with image input but no video get sampled frames plus transcribed audio ([files and media](../user-guide/files-and-media.md#video-input)).
+- Message timestamps and `[AUDIO]` / `[VIDEO]` tags in the model context ([files and media](../user-guide/files-and-media.md#message-tags-and-timestamps)).
+- PDF reading with Tesseract OCR for scanned pages ([files and media](../user-guide/files-and-media.md#pdf-input)).
+- Date filters and other filters for web search; tool groups per agent ([tools](../reference/tools.md)).
+- Google Calendar through MCP ([MCP servers](../user-guide/mcp.md)).
+- Prompt caching for Claude on OpenRouter with cache usage in the debug panel ([settings.yaml](../reference/settings-yaml.md#prompt-caching)).
+- Zero data retention as an optional user policy, `require_zdr` ([models and providers](../user-guide/models-and-providers.md#openrouter-model-catalog-and-zero-data-retention)).
+- Claude subscription provider, experimental, with per-user logins through `claude_subscription.claude_config_dir` ([Claude subscription](../user-guide/claude-subscription.md)).
+- Provider tabs in the model picker including **Any**; per-agent default model `chat_config.model`; favorites.
+- Dream mode ([dream mode](../user-guide/dream.md)); associative memory v2 with user folders as sources, incremental indexing and score threshold 0.35, and a per-user maximum number of matches ([memory](../user-guide/memory.md)).
+- Associative memory injected while the model already generates, with a latency breakdown ([architecture](../architecture/overview.md#associative-recall-in-parallel)).
+- Web: agents tab, new/manage/delete chats, parallel and steerable generation, automatic and manual chat names, password login (no registration), styled error cards with codes and an empty state for users without agents ([API reference](../reference/api.md#error-codes)).
+- Telegram channel with several users mapped through `TELEGRAM_ALLOWED_USERS=<telegram_id>=<user_id>` ([Telegram](../user-guide/telegram.md)).
+- Docker image, Compose file and Watchtower ([Docker](../deployment/docker.md)).
+- Friendlier handling of provider 429 errors with a model hint.

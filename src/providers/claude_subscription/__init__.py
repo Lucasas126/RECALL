@@ -1,7 +1,7 @@
 """Experimental Claude subscription provider: the official Claude Code CLI with the user's own login.
 
 Adapted from the MIT-licensed Hermes plugin "claude-subscription-directsdk-experimental"
-(Copyright (c) 2026 Nous Research and contributors). See docs/claude-subscription.md.
+(Copyright (c) 2026 Nous Research and contributors). See docs/user-guide/claude-subscription.md.
 """
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
 # Adapted from the MIT-licensed Hermes plugin "claude-subscription-directsdk-experimental"
-# (Copyright (c) 2026 Nous Research and contributors). See docs/claude-subscription.md.
+# (Copyright (c) 2026 Nous Research and contributors). See docs/user-guide/claude-subscription.md.
 """MCP server that only lists RECALL's tool schemas; RECALL, not Claude Code, executes every tool."""
 import json
 import sys

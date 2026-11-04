@@ -1,5 +1,5 @@
 # Adapted from the MIT-licensed Hermes plugin "claude-subscription-directsdk-experimental"
-# (Copyright (c) 2026 Nous Research and contributors). See docs/claude-subscription.md.
+# (Copyright (c) 2026 Nous Research and contributors). See docs/user-guide/claude-subscription.md.
 # Ported from the plugin's admission relay: stable request context, message cache breakpoint pinning
 # (with the long-tool-loop turn mark) and restoration of the queried tool-result frame.
 """Prompt-cache hygiene for the Messages request Claude Code builds, applied by the admission relay.

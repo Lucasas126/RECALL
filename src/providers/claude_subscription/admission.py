@@ -1,5 +1,5 @@
 # Adapted from the MIT-licensed Hermes plugin "claude-subscription-directsdk-experimental"
-# (Copyright (c) 2026 Nous Research and contributors). See docs/claude-subscription.md.
+# (Copyright (c) 2026 Nous Research and contributors). See docs/user-guide/claude-subscription.md.
 # Kept: single-request admission, SSE capture, HTTP CONNECT proxy support, socket cancellation and the
 # prompt-cache hygiene of `cache.py`. Left out: request gzip and eager tool-input streaming.
 """Request-scoped loopback relay that forwards only the first Messages request of one Claude Code run.

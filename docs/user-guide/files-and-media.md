@@ -1,0 +1,151 @@
+# files and media
+
+What users can attach to a chat and how RECALL turns it into something a model can read. Defaults live in the `video`, `pdf`
+and `speech_to_text` blocks of [settings.yaml](../reference/settings-yaml.md). Limits: 10 MB per file, 25 MB per web message,
+22 MB per Telegram file. Images are sent as they are to models that declare image input; audio is always transcribed first.
+
+## video input
+
+A video sent to a chat model that declares `image` but not `video` input is
+decomposed before the model runs. RECALL uses `ffmpeg` and `ffprobe` from the
+`PATH` to sample one frame every `video.frame_interval_seconds` (up to
+`video.max_frames`, scaled to `video.max_width` pixels), and sends the frames as
+image attachments in order. The audio track, when present, is transcribed with
+the speech-to-text flow below. The message carries a note with the frame
+timestamps, whether only part of the video was sampled, and whether the video
+has an audio track, so the model knows the frames come from a decomposed video.
+Models with native `video` input receive the file unchanged. Models without
+`image` input still reject videos. Sampling stops after the last frame, and the
+audio extraction skips video decoding, to keep CPU use low.
+
+When this happens the web UI and Telegram show a warning above the reply, because
+the model sees only the sampled frames and may miss motion or events between them.
+
+The defaults live in `settings.yaml` under `video`. Install `ffmpeg` (which
+includes `ffprobe`) on the host running RECALL; a missing binary produces an
+explicit error for video messages only.
+
+## pdf input
+
+The web composer and Telegram accept PDFs. RECALL reads them locally before the model runs: PyMuPDF
+extracts the selectable text of each page, and a page with fewer than `pdf.ocr_min_chars` non-whitespace
+characters (default 25) is rendered at `pdf.ocr_dpi` and read with Tesseract as a whole. A page with enough
+text is still read with OCR for each large embedded image (at least 5% of the page area, up to 10 images per
+page), because scanned or photographed details such as a card's name and address are often stored only as
+images. Small images such as logos are skipped, and pages without large images skip OCR. The OCR text of an image
+is added after the page's digital text, so a heading that appears in both may show up twice. The model receives
+only text: no PDF file and no page images. Vector graphics and charts are not interpreted, except text Tesseract
+recognizes inside images.
+
+The text is added to the user's message under `Attached document: <name>`, with a `[Page N]` marker before each
+page (`[Page N, OCR]` for OCR pages) so answers can cite pages. The stored turn keeps this text, not the file,
+so later chats can recall it like any other message.
+
+Limits: `pdf.max_pages` (default 30) per PDF; longer documents are rejected. Files are subject to the channel
+size limits (10 MB per file and 25 MB per web message, 22 MB per Telegram file). Password-protected and invalid
+files are rejected with an explicit error. Tesseract must be installed as a system program (see
+[Tesseract OCR](#tesseract-ocr)); without it, PDFs with selectable text still work, and a scanned
+page fails with an error that names the fix. `pdf.ocr_languages` must match the installed language packs.
+
+The defaults live in `settings.yaml` under `pdf`.
+
+## tesseract ocr
+
+Scanned PDF pages are read with the Tesseract OCR program. The Python package `pytesseract` only wraps
+the program, and `uv sync` does not install it, so install it on the machine that runs RECALL (the web UI
+and the Telegram bot). PDFs with selectable text do not need it.
+
+Windows (PowerShell or Command Prompt):
+
+```
+winget install --id UB-Mannheim.TesseractOCR -e
+```
+
+The installer is also available from the [UB-Mannheim Tesseract page](https://github.com/UB-Mannheim/tesseract/wiki).
+In its component list, select the Spanish language data if you want Spanish OCR.
+
+macOS (Homebrew):
+
+```
+brew install tesseract tesseract-lang
+```
+
+Debian or Ubuntu:
+
+```
+sudo apt install tesseract-ocr tesseract-ocr-eng tesseract-ocr-spa
+```
+
+Fedora:
+
+```
+sudo dnf install tesseract tesseract-langpack-eng tesseract-langpack-spa
+```
+
+Check the installation in a new terminal:
+
+```
+tesseract --version
+tesseract --list-langs
+```
+
+The language list must include every code in `pdf.ocr_languages` (default `eng+spa`). To use other
+languages, install their packs and change `pdf.ocr_languages` in `settings.yaml`.
+
+RECALL finds the executable in this order: `pdf.tesseract_cmd` in `settings.yaml` (full path), then the
+`PATH`, then `C:\Program Files\Tesseract-OCR\tesseract.exe` on Windows. Restart the web UI and the Telegram
+bot after installing, so they see the new `PATH`. If Tesseract is missing, a scanned page fails with an
+error that names this section; PDFs with selectable text still work.
+
+### windows notes
+
+- `winget` may install Tesseract per user, in `%LOCALAPPDATA%\Programs\Tesseract-OCR`, instead of
+  `C:\Program Files\Tesseract-OCR`. RECALL does not search that folder, so add it to the user `PATH`
+  (PowerShell; open a new terminal afterwards):
+
+  ```
+  [Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path','User') + ';' + "$env:LOCALAPPDATA\Programs\Tesseract-OCR", 'User')
+  ```
+
+  Check whether it is already there first: `[Environment]::GetEnvironmentVariable('Path','User') -split ';'`.
+- A terminal or process started before the `PATH` change does not see it. Open a new terminal, or reload
+  the variable in the current one with `$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')`.
+  Then restart the web UI and the Telegram bot from that terminal.
+- The installer's Spanish data may be missing. Download it into the `tessdata` folder of the installation,
+  then check with `tesseract --list-langs`:
+
+  ```
+  Invoke-WebRequest -Uri 'https://github.com/tesseract-ocr/tessdata/raw/main/spa.traineddata' -OutFile "$env:LOCALAPPDATA\Programs\Tesseract-OCR\tessdata\spa.traineddata"
+  ```
+
+  Use the same folder for other languages, for example `eng.traineddata`. Pack files from other sources must
+  match the Tesseract version; use the `tessdata` repository above.
+
+## message tags and timestamps
+
+Each user turn is sent to the model prefixed with its local timestamp (for example
+`[2026-10-31 14:01+01:00]`), taken from the `ts` stored with the turn, so reloaded
+chats keep the same dates. Assistant replies are not prefixed. Text derived from
+audio starts with `[AUDIO]`, and text describing a video starts with `[VIDEO]`.
+Stored conversations keep the original message text; the prefixes are added only
+to the context sent to the model.
+
+## speech-to-text
+
+Audio is always transcribed before the chat model is invoked. RECALL uses
+OpenRouter's `/api/v1/audio/transcriptions` endpoint with the configured model
+and routing policy, then stores the transcription as text in the conversation.
+This keeps later model changes independent of whether the selected chat model
+supports audio input.
+
+The transcription model is a single user setting, the **Default STT model** in
+web **Settings** or Telegram `/settings`; it is shared by all chats and agents.
+The initial default is `openai/whisper-large-v3-turbo`. When ZDR applies
+(`speech_to_text.zdr`, else the user's `require_zdr`) the model must have an
+active ZDR transcription endpoint and requests carry `provider: {"zdr": true}`;
+otherwise audio requests fail explicitly. Without ZDR the plain public
+transcription catalog is used and no `provider` field is sent.
+OpenRouter's current transcription catalog can be queried through
+`GET /api/speech-to-text/models?q=<query>&zdr=true`; without `zdr` the endpoint follows
+that policy. Telegram `/stt` shows the
+current default.

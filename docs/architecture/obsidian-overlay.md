@@ -1,5 +1,7 @@
 # obsidian safe/auto overlay
 
+Status: **planned design, not implemented** (there is no `obsidian` source or overlay in the code). Today an Obsidian vault is used as a [user folder](../user-guide/memory.md#user-folders) (`folders:`), which edits the real files unless `read_only: true`.
+
 the overlay controls how the agent reads and writes the user's obsidian vault. it exists because a user may not want the agent touching real vault files.
 
 ## modes

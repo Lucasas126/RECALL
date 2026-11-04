@@ -1,5 +1,0 @@
-- add a warning section for general platform warnings for configuration mismatches such as
-    - a reasoning effort that is set is not supported by the selected model
-    - a reasoning token budget that is set is not supported by the selected model
-    - a tool that is called is not available or not supported by the selected model
-    - a model that is selected is not available or supported by the platform

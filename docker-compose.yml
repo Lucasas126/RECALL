@@ -1,5 +1,5 @@
 # RECALL on a home server. Copy .env.deploy.example to .env next to this file,
-# fill it in, then `docker compose up -d`. See docs/deployment.md.
+# fill it in, then `docker compose up -d`. See docs/deployment/docker.md.
 #
 # The image tag below (default `latest`) only moves when a GitHub Release is
 # published, so Watchtower updates the server per release, not per push.
@@ -15,7 +15,7 @@ x-recall: &recall
     TZ: ${TZ:-UTC}
   volumes:
     # User & agent YAML, password hashes, preferences and MCP tokens.
-    # You provide .config/<user_id>/ on the server (see docs/deployment.md).
+    # You provide .config/<user_id>/ on the server (see docs/deployment/docker.md).
     - ${RECALL_CONFIG_DIR:-./config}:/app/.config
     # Per-agent data plane: mind palace, conversations, vector index.
     - ${RECALL_DATA_DIR:-./data}:/app/data

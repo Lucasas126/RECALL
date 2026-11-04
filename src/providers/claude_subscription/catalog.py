@@ -1,5 +1,5 @@
 # Adapted from the MIT-licensed Hermes plugin "claude-subscription-directsdk-experimental"
-# (Copyright (c) 2026 Nous Research and contributors). See docs/claude-subscription.md.
+# (Copyright (c) 2026 Nous Research and contributors). See docs/user-guide/claude-subscription.md.
 """Pinned Claude Code model routes: aliases, context windows and the CLI version each one needs."""
 from __future__ import annotations
 

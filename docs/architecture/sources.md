@@ -17,7 +17,7 @@ the data plane (L1) is a set of **sources**: named, typed locations the agent ca
 - **conversations**: chats with the user, written by the system, never edited by the agent. stored as one JSONL file per chat, `conversations:<chat_id>.jsonl` (one turn per line, timestamped). a chat title is derived from its first user message. assistant turns may carry `reasoning` and `actions` (the tool calls of that turn, with truncated results) for display. the agent can read and search all of its chats. chats are created, appended to and deleted through `ConversationsSource` methods (`create`, `append`, `delete_chat`), not through the generic write/delete. chat ids match `[A-Za-z0-9_-]{1,64}`; new ids look like `20261030-114140-3ad2f3`. older per-day files (`2026-08-31.jsonl`) are valid chats whose id is the day.
 - **agent**: the agent's own files, rooted at `data/<user_id>/<agent_id>/` but limited to `SOUL.md`, `soul_history/`, `memories/` and `skills/` (`AgentFilesSource`). tools read it as `agent:SOUL.md`, `agent:skills/<name>/SKILL.md`, ...; changes go through the `self` tools and the web API, which keep the SOUL history, memory limits and skill frontmatter valid. only `skills/` is indexed (read-only through the index), so a relevant skill surfaces by itself; `SOUL.md` and the memory files are always in the system prompt and are not indexed.
 - **dream**: dream mode bookkeeping in `dream/` (`review_state.json`, `sessions/`, `.lock`), used by the dream runner and the service only (`DreamStateSource`); listing or reading it through tools is refused.
-- **user folders** (`FolderSource`): each entry of the agent's `folders:` list (name, path, `indexed`, `read_only`) is a source named after the folder, e.g. `notes:Projects/plan.md`. every configured folder is registered, so indexed ones feed the index; tools can read them only with a folder tool group (`folders_read` / `folders_edit` in chats, the `folders` dream tool group in dreams) and write them only with `folders_edit` in chats, never in dreams and never when `read_only`. the folder must exist; hidden entries are skipped by listings, searches, reads and the index. see [user folders](config.md#user-folders).
+- **user folders** (`FolderSource`): each entry of the agent's `folders:` list (name, path, `indexed`, `read_only`) is a source named after the folder, e.g. `notes:Projects/plan.md`. every configured folder is registered, so indexed ones feed the index; tools can read them only with a folder tool group (`folders_read` / `folders_edit` in chats, the `folders` dream tool group in dreams) and write them only with `folders_edit` in chats, never in dreams and never when `read_only`. the folder must exist; hidden entries are skipped by listings, searches, reads and the index. see [user folders](../user-guide/memory.md#user-folders).
 - **obsidian**: the user's vault, bound per agent (see agents.md). accessed through the safe/auto overlay (see overlay.md). planned; a user folder pointing at the vault is the implemented way to use one today.
 
 Cancelled agent generations append an assistant turn with `interrupted: true`,
@@ -26,7 +26,7 @@ the emitted partial `content` (possibly empty), partial `reasoning` and complete
 marker when using it as context, including after reopening the chat.
 `ChatService.get_chat` exposes the flag and the web UI labels interrupted replies. Active
 and queued chats are protected from empty-chat pruning. See
-[generation cancellation](architecture.md#generation-cancellation).
+[generation cancellation](overview.md#generation-cancellation).
 
 Each chat may also have a `<chat_id>.model.json` sidecar, managed only through
 `ConversationsSource.model_selection` and `set_model`. It stores
@@ -48,7 +48,7 @@ Both selections are managed through the conversations source, never through
 direct channel filesystem access.
 New assistant turns also record their model ID, so usage from a different
 model is not reused as the current model's input-token count.
-See [per-chat model selection](config.md#choosing-a-model-per-chat).
+See [per-chat model selection](../user-guide/models-and-providers.md#choosing-a-model-per-chat).
 
 sources are configurable per agent — an agent may have no obsidian, or several user folders.
 
@@ -83,7 +83,7 @@ a capability never opens files directly — it always asks the registry, so isol
 
 ## indexing
 
-sources marked `indexed` feed the agent's vector index (`VectorIndex`, one Chroma collection per agent in `data/<user_id>/<agent_id>/.index`, so retrieval never crosses agents): the mind palace, `agent:skills/`, the conversations and the indexed user folders. each chunk carries `source`, `address`, `context` (heading path, or chat title and date) and, for chats, `chat`. what has been indexed (each file's `(mtime, size)` and MD5, each chat's indexed byte offset and turn count) is kept in `.index/manifest.sqlite3`, so a reconcile only stats files and a chat only embeds its new exchanges (chunk ids `conversations:<chat_id>::turn<N>`). the index reads files through the source's path guard (`Source.index_scan`, `Source.resolve`), not through the tools' read permission, so a folder with no folder tool group is still indexed. see [memory index](config.md#memory-index) for the chunking, the update schedule and cross-process locking. planned: tags in chunk metadata, and indexing obsidian through the overlay so vectors reflect the agent's view.
+sources marked `indexed` feed the agent's vector index (`VectorIndex`, one Chroma collection per agent in `data/<user_id>/<agent_id>/.index`, so retrieval never crosses agents): the mind palace, `agent:skills/`, the conversations and the indexed user folders. each chunk carries `source`, `address`, `context` (heading path, or chat title and date) and, for chats, `chat`. what has been indexed (each file's `(mtime, size)` and MD5, each chat's indexed byte offset and turn count) is kept in `.index/manifest.sqlite3`, so a reconcile only stats files and a chat only embeds its new exchanges (chunk ids `conversations:<chat_id>::turn<N>`). the index reads files through the source's path guard (`Source.index_scan`, `Source.resolve`), not through the tools' read permission, so a folder with no folder tool group is still indexed. see [memory index](../user-guide/memory.md#memory-index) for the chunking, the update schedule and cross-process locking. planned: tags in chunk metadata, and indexing obsidian through the overlay so vectors reflect the agent's view.
 
 ## status
 
