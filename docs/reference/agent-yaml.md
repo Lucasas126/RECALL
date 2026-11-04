@@ -5,7 +5,7 @@ One file per agent: `.config/<user_id>/agents/<agent_id>.yaml`. The agent's pers
 [dream mode](../user-guide/dream.md#per-agent-files). Agents have no `models` block (model ids belong to the user: see
 [models and providers](../user-guide/models-and-providers.md)); unknown keys are rejected.
 
-Defaults when a key is omitted: `stream: true`, `has_memory: true`, `reasoning: false`, `reasoning_effort: medium`,
+Defaults when a key is omitted: `stream: true`, `has_memory: true`, `reasoning: true`, `reasoning_effort: medium`,
 `conversation_messages_retained: 30`, `tools: true`, `associative_memory: llm`, `associative_execution: parallel`,
 `memory_limits` 2200/1400, `dream.enabled: false`. The values in the example below are illustrative.
 

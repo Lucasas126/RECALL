@@ -11,6 +11,9 @@ The web **Agents** tab edits one agent in four form tabs: **Basic** (name, descr
 (use tools and the tool groups) and **MCP**; **Folders** holds the user folders and the memory index status. A saved agent also
 has the dream tabs (**Soul & memory**, **Dream**, **Dream sessions**, see [dream mode](dream.md#web-ui)).
 
+Reasoning is on by default for new agents (and for agent files that omit `reasoning`); turn it off in **Advanced > Reasoning**.
+Models without reasoning support ignore the request. When it is off, the composer's effort selector reads **Disabled in this agent**.
+
 ## managing agents
 
 the web **Agents** tab lists the user's agents in the sidebar (name and description) and edits the name, `description`, all `chat_config` options (associative memory is a mode selector plus a timing selector, the latter disabled while the mode is off) and, in the **Folders** tab, the folder list (name, path, indexed, read-only) with the agent's memory index status (sources, files, chats and chunks indexed, last reconciles, rebuilding or indexing) and **Reindex** / **Rebuild from scratch** buttons. a new agent's `id` is derived from its name (lowercase, accents removed, non-alphanumeric characters replaced by `-`) and is not editable from the form. the same operations are available as routes (see the [API reference](../reference/api.md#agent-routes)).

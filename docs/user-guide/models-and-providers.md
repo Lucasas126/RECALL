@@ -282,7 +282,9 @@ when the CLI opens that chat, and is deleted with the chat.
 The selector is disabled when the agent has `reasoning: false`, or when the
 selected model does not advertise `reasoning` or `reasoning_effort` in its
 OpenRouter supported parameters (the same check as the Reasoning filter). The
-UI then says why. Support is cached by the service for ten minutes; if the
+control itself then says why, also on narrow screens: **Disabled in this agent**
+(its tooltip points to Agents > Advanced > Reasoning), **Not available in this
+model**, or **Unknown for this model** when support could not be verified. Support is cached by the service for ten minutes; if the
 catalog cannot be reached, the state is shown as unverified and the value cannot
 be changed. Changes are rejected with HTTP 409 while the agent has active or
 queued replies.
