@@ -75,6 +75,33 @@ WEB_PUBLIC_URL = _public_url(os.environ.get("RECALL_PUBLIC_URL") or _web.get("pu
 # ------------------------------------------------------------------ telegram
 TELEGRAM_ALLOWED_USERS_ENV = _telegram["allowed_users_env"]
 
+
+def parse_chat_idle_minutes(yaml_value: object, env_value: str | None = None) -> float:
+    """Minutes without a message after which Telegram starts a new chat.
+
+    `telegram.chat_idle_minutes` (default 60, integer 1..10080) is overridden by the local environment variable
+    RECALL_TELEGRAM_CHAT_IDLE_MINUTES (any positive number, fractional allowed, e.g. 0.5 for tests).
+    """
+    if env_value is not None and env_value.strip():
+        try:
+            minutes = float(env_value)
+        except ValueError:
+            raise ValueError(f"RECALL_TELEGRAM_CHAT_IDLE_MINUTES must be a positive number, got {env_value!r}") from None
+        if not 0 < minutes < float("inf"):
+            raise ValueError(f"RECALL_TELEGRAM_CHAT_IDLE_MINUTES must be a positive number, got {env_value!r}")
+        return minutes
+    if yaml_value is None:
+        return 60.0
+    if isinstance(yaml_value, bool) or not isinstance(yaml_value, int) or not 1 <= yaml_value <= 10080:
+        raise ValueError(f"telegram.chat_idle_minutes must be an integer from 1 to 10080, got {yaml_value!r}")
+    return float(yaml_value)
+
+
+# minutes of silence after which a Telegram message starts a new chat
+TELEGRAM_CHAT_IDLE_MINUTES = parse_chat_idle_minutes(
+    _telegram.get("chat_idle_minutes"), os.environ.get("RECALL_TELEGRAM_CHAT_IDLE_MINUTES"),
+)
+
 # ------------------------------------------------------------------ speech to text
 SPEECH_TO_TEXT = SpeechToTextConfig.model_validate(_speech_to_text)
 

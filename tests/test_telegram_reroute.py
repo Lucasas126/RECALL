@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from src.config.preferences import UserPreferences
+from src.config.settings import parse_chat_idle_minutes
 from src.service.chat import ChatEvent
 from src.telegram.bot import (
-    TelegramBotState, TelegramSession, _offer_reroute, _send_generation, new_chat, panel_callback,
+    TelegramBotState, TelegramSession, new_chat, panel_callback,
     reroute_callback, text_message,
 )
 
@@ -23,6 +25,7 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.service.create_chat.side_effect = lambda user, agent: {"id": f"chat-of-{agent}"}
         self.service.chat_summary.return_value = {"id": "old-chat", "title": "Old topic", "turns": 4}
+        self.service.chat_active.return_value = False
         self.service.get_chat.return_value = {"model": {"id": "llm/base", "provider": "OpenRouter"}, "model_source": "agent"}
         self.service.update_preferences.side_effect = (
             lambda user, changes: self.preferences.update(changes.model_dump(exclude_unset=True))
@@ -39,6 +42,14 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
         )
         self.context.bot.delete_message = AsyncMock()
         self.context.bot.edit_message_reply_markup = AsyncMock()
+        self.context.bot.edit_message_text = AsyncMock()
+        grace = patch("src.telegram.bot._REROUTE_GRACE_SECONDS", 30)  # long: tests fire the timer themselves
+        grace.start()
+        self.addCleanup(grace.stop)
+
+    @staticmethod
+    def ago(**delta) -> str:
+        return (datetime.now(timezone.utc) - timedelta(**delta)).isoformat(timespec="seconds")
 
     def markup_buttons(self) -> list:
         markup = self.message.reply_text.await_args.kwargs["reply_markup"]
@@ -56,16 +67,19 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
         )
         return query, update
 
-    async def idle_message(self, *, hours: float = 2):
-        """A text message after idle time; returns the generation mock. The notice message gets id 55."""
+    async def idle_message(self, *, hours: float = 2, grace: float | None = None):
+        """A text message after idle time; returns the generation mock. The buttons message gets id 55."""
         if hours:
             self.session.last_message_at = datetime.now(timezone.utc) - timedelta(hours=hours)
-        with patch("src.telegram.bot._send_generation", new=AsyncMock()) as generation:
+        patches = [patch("src.telegram.bot._send_generation", new=AsyncMock())]
+        if grace is not None:
+            patches.append(patch("src.telegram.bot._REROUTE_GRACE_SECONDS", grace))
+        with patches[0] as generation:
+            for extra in patches[1:]:
+                extra.start()
+                self.addCleanup(extra.stop)
             await text_message(self.update, self.context)
             await _drain()
-        record = self.session.pending_reroute
-        if record is not None:
-            await _offer_reroute(self.update, self.service, self.session, record)
         return generation
 
     # ------------------------------------------------------------------ /newchat
@@ -124,8 +138,11 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_idle_message_offers_both_buttons_within_the_callback_limit(self) -> None:
         generation = await self.idle_message()
-        generation.assert_called_once()
+        generation.assert_not_called()  # nothing is generated during the grace period
         self.assertEqual(self.session.chat_id, "chat-of-agent-a")
+        text = self.message.reply_text.await_args.args[0]
+        self.assertIn("It has been a while. Starting a new chat with First.", text)
+        self.assertIn("30 seconds", text)
         buttons = self.markup_buttons()
         self.assertEqual([button.text for button in buttons], ["↩ Continue previous chat", "🔀 Change agent"])
         for button in buttons:
@@ -158,7 +175,9 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_first_message_after_restart_offers_the_latest_chat_of_any_agent(self) -> None:
         self.session.chat_id, self.session.last_message_at = None, None
-        self.service.latest_chat.return_value = {"id": "x1", "agent_id": "agent-b", "title": "Latest", "turns": 2}
+        self.service.latest_chat.return_value = {
+            "id": "x1", "agent_id": "agent-b", "title": "Latest", "turns": 2, "updated": self.ago(hours=5),
+        }
         await self.idle_message(hours=0)
         record = self.session.pending_reroute
         self.assertEqual((record.previous_chat_id, record.previous_agent_id), ("x1", "agent-b"))
@@ -184,7 +203,9 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_continue_switches_to_the_previous_chats_agent(self) -> None:
         self.session.chat_id, self.session.last_message_at = None, None
-        self.service.latest_chat.return_value = {"id": "x1", "agent_id": "agent-b", "title": "Latest", "turns": 2}
+        self.service.latest_chat.return_value = {
+            "id": "x1", "agent_id": "agent-b", "title": "Latest", "turns": 2, "updated": self.ago(hours=5),
+        }
         self.service.chat_summary.return_value = {"id": "x1", "title": "Latest", "turns": 2}
         await self.idle_message(hours=0)
         query, update = self.query(self.markup_buttons()[0].callback_data, 55)
@@ -216,31 +237,118 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(generation.await_args.kwargs["new_chat_notice"])
         self.assertIsNone(self.session.pending_reroute)
 
-    async def test_expired_buttons_are_refused_and_nothing_is_deleted(self) -> None:
-        await self.idle_message()
+    async def test_tap_after_the_grace_period_is_expired(self) -> None:
+        await self.idle_message(grace=0.01)
         data = self.markup_buttons()[0].callback_data
-        self.session.pending_reroute.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        with patch("src.telegram.bot._send_generation", new=AsyncMock()) as generation:
+            await asyncio.sleep(0.1)
         query, update = self.query(data, 55)
         await reroute_callback(update, self.context)
         self.assertIn("expired", query.answer.await_args.args[0])
         query.edit_message_reply_markup.assert_awaited_once_with(reply_markup=None)
         self.service.discard_chat.assert_not_called()
-        self.assertIsNone(self.session.pending_reroute)
+        self.assertEqual(self.session.chat_id, "chat-of-agent-a")
 
-    async def test_sending_another_message_expires_the_buttons(self) -> None:
-        await self.idle_message()
-        data = self.markup_buttons()[0].callback_data
+    async def test_grace_expiry_starts_one_generation_and_removes_the_keyboard(self) -> None:
+        with patch("src.telegram.bot._send_generation", new=AsyncMock()) as generation:
+            self.session.last_message_at = datetime.now(timezone.utc) - timedelta(hours=2)
+            with patch("src.telegram.bot._REROUTE_GRACE_SECONDS", 0.05):
+                await text_message(self.update, self.context)
+                generation.assert_not_called()
+                await asyncio.sleep(0.3)
+        generation.assert_called_once()
+        self.assertEqual(generation.await_args.args[2:4], ("hello there", []))
+        self.assertTrue(generation.await_args.kwargs["new_chat_notice"])
+        edit = self.context.bot.edit_message_text.await_args.kwargs
+        self.assertEqual((edit["message_id"], edit["reply_markup"]), (55, None))
+        self.assertEqual(edit["text"], "Answering in a new chat with First.")
+        self.assertIsNone(self.session.pending_reroute)
+        self.assertEqual(self.session.chat_id, "chat-of-agent-a")
+        self.service.discard_chat.assert_not_called()
+
+    async def test_new_message_during_grace_starts_the_pending_one_first(self) -> None:
+        generation = await self.idle_message()
         record = self.session.pending_reroute
-        record.attachments = [{"name": "a"}]
+        self.message.text = "second"
+        with patch("src.telegram.bot._send_generation", new=AsyncMock()) as generation:
+            await text_message(self.update, self.context)
+            await _drain()
+        self.assertEqual([call.args[2] for call in generation.await_args_list], ["hello there", "second"])
+        self.assertEqual(
+            [call.kwargs["new_chat_notice"] for call in generation.await_args_list], [True, False],
+        )
+        self.assertIsNone(self.session.pending_reroute)
+        self.assertEqual(self.session.chat_id, "chat-of-agent-a")
+        self.assertTrue(record.timer.cancelled() or record.timer.done())
+        self.service.discard_chat.assert_not_called()
+
+    # ------------------------------------------------------------------ resume from real activity
+
+    async def test_first_message_after_restart_within_timeout_resumes_silently(self) -> None:
+        self.session.chat_id, self.session.last_message_at = None, None
+        self.service.latest_chat.return_value = {
+            "id": "x1", "agent_id": "agent-b", "title": "Latest", "turns": 2, "updated": self.ago(minutes=1),
+        }
+        with patch("src.telegram.bot._send_generation", new=AsyncMock()) as generation:
+            await text_message(self.update, self.context)
+            await _drain()
+        self.assertEqual((self.session.agent_id, self.session.chat_id), ("agent-b", "x1"))
+        self.assertEqual(self.preferences["agent_id"], "agent-b")
+        self.assertIsNone(self.session.pending_reroute)
+        self.message.reply_text.assert_not_called()
+        self.service.create_chat.assert_not_called()
+        generation.assert_called_once()
+        self.assertFalse(generation.await_args.kwargs["new_chat_notice"])
+
+    async def test_restart_resume_counts_a_running_reply_as_active(self) -> None:
+        self.session.chat_id, self.session.last_message_at = None, None
+        self.service.latest_chat.return_value = {
+            "id": "x1", "agent_id": "agent-a", "title": "Long", "turns": 2, "updated": self.ago(hours=5),
+        }
+        self.service.chat_active.return_value = True
         with patch("src.telegram.bot._send_generation", new=AsyncMock()):
             await text_message(self.update, self.context)
+        self.assertEqual(self.session.chat_id, "x1")
         self.assertIsNone(self.session.pending_reroute)
-        self.assertEqual(record.attachments, [])
-        self.context.bot.edit_message_reply_markup.assert_awaited_with(chat_id=456, message_id=55, reply_markup=None)
-        query, update = self.query(data, 55)
-        await reroute_callback(update, self.context)
-        self.assertIn("expired", query.answer.await_args.args[0])
-        self.service.discard_chat.assert_not_called()
+
+    async def test_restart_resume_refused_when_older_than_the_timeout(self) -> None:
+        self.session.chat_id, self.session.last_message_at = None, None
+        self.service.latest_chat.return_value = {
+            "id": "x1", "agent_id": "agent-b", "title": "Latest", "turns": 2, "updated": self.ago(minutes=61),
+        }
+        generation = await self.idle_message(hours=0)
+        generation.assert_not_called()
+        self.assertEqual(self.session.chat_id, "chat-of-agent-a")
+        self.assertEqual(self.session.pending_reroute.previous_chat_id, "x1")
+        self.assertEqual(len(self.markup_buttons()), 2)
+
+    async def test_persisted_activity_newer_than_memory_keeps_the_chat(self) -> None:
+        self.session.last_message_at = datetime.now(timezone.utc) - timedelta(hours=3)
+        self.service.chat_summary.return_value = {"id": "old-chat", "title": "T", "turns": 4, "updated": self.ago(minutes=2)}
+        with patch("src.telegram.bot._send_generation", new=AsyncMock()):
+            await text_message(self.update, self.context)
+        self.assertEqual(self.session.chat_id, "old-chat")
+        self.assertIsNone(self.session.pending_reroute)
+
+    async def test_custom_idle_timeout_is_honoured(self) -> None:
+        self.session.last_message_at = datetime.now(timezone.utc) - timedelta(seconds=30)
+        with patch("src.telegram.bot._CHAT_IDLE_TIMEOUT", timedelta(seconds=10)):
+            generation = await self.idle_message(hours=0)
+        generation.assert_not_called()
+        self.assertEqual(self.session.chat_id, "chat-of-agent-a")
+
+    def test_idle_minutes_setting_and_env_override(self) -> None:
+        self.assertEqual(parse_chat_idle_minutes(None), 60.0)
+        self.assertEqual(parse_chat_idle_minutes(1), 1.0)
+        self.assertEqual(parse_chat_idle_minutes(10080), 10080.0)
+        self.assertEqual(parse_chat_idle_minutes(30, "0.5"), 0.5)
+        self.assertEqual(parse_chat_idle_minutes(30, "  "), 30.0)
+        for bad in (0, 10081, -1, "60", 1.5, True):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                parse_chat_idle_minutes(bad)
+        for bad in ("0", "-2", "abc", "inf", "nan"):
+            with self.assertRaises(ValueError, msg=bad):
+                parse_chat_idle_minutes(30, bad)
 
     async def test_unusable_previous_chat_leaves_everything_untouched(self) -> None:
         from src.service.chat import UnknownChat
@@ -254,18 +362,18 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.session.chat_id, "chat-of-agent-a")
         self.assertIsNotNone(self.session.pending_reroute)
 
-    async def test_generation_offers_buttons_only_for_idle_new_chat(self) -> None:
-        await self.idle_message_with_real_generation()
-        self.message.reply_text.assert_awaited()
-        self.assertEqual(self.session.pending_reroute.message_id, 55)
-
-    async def idle_message_with_real_generation(self) -> None:
+    async def test_idle_message_with_real_generation_sends_buttons_then_answers_after_grace(self) -> None:
         self.session.last_message_at = datetime.now(timezone.utc) - timedelta(hours=2)
         self.service.send.return_value = iter([ChatEvent("text", text="ok")])
         stream = Mock(start=AsyncMock(), update=AsyncMock(), finish=AsyncMock())
-        with patch("src.telegram.bot._ReplyStream", return_value=stream):
+        with patch("src.telegram.bot._ReplyStream", return_value=stream), \
+                patch("src.telegram.bot._REROUTE_GRACE_SECONDS", 0.05):
             await text_message(self.update, self.context)
-            await _drain()
+            self.assertEqual(self.session.pending_reroute.message_id, 55)
+            self.service.send.assert_not_called()
+            await asyncio.sleep(0.4)
+        self.service.send.assert_called_once()
+        self.assertIsNone(self.session.pending_reroute)
 
 
 async def _drain() -> None:

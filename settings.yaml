@@ -31,6 +31,7 @@ web:
 
 telegram:
   allowed_users_env: TELEGRAM_ALLOWED_USERS  # comma-separated telegram_id=recall_user_id entries
+  chat_idle_minutes: 60  # minutes without a message after which a new chat starts (1-10080)
 
 video:
   frame_interval_seconds: 5  # seconds between frames sampled from videos sent to image-only models

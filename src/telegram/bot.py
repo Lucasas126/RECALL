@@ -34,7 +34,7 @@ from telegram.ext import (
 from src.config.favorites import FavoritesError
 from src.config.models import ReasoningEffort
 from src.config.preferences import PreferencesError, UserPreferences
-from src.config.settings import TELEGRAM_ALLOWED_USERS_ENV
+from src.config.settings import TELEGRAM_ALLOWED_USERS_ENV, TELEGRAM_CHAT_IDLE_MINUTES
 from src.providers.catalog import CatalogUnavailable
 from src.providers.ollama import is_ollama_cloud
 from src.providers.telegram_notify import parse_allowed_users
@@ -48,10 +48,13 @@ _PREVIOUS_PAGE = "⬅️ Previous"
 _NEXT_PAGE = "➡️ Next"
 _MAX_TELEGRAM_FILE_BYTES = 22_000_000
 _MAX_TELEGRAM_MESSAGE_CHARS = 4_090
-_CHAT_IDLE_TIMEOUT = timedelta(hours=1)
+_CHAT_IDLE_TIMEOUT = timedelta(minutes=TELEGRAM_CHAT_IDLE_MINUTES)  # telegram.chat_idle_minutes
 _PANEL_CALLBACK = "p"
 _REROUTE_CALLBACK = "r"
-_REROUTE_TTL = timedelta(minutes=10)
+# seconds the answer waits after an idle new chat is announced, so the user can still pick another place;
+# opening the agent picker gives the user more time
+_REROUTE_GRACE_SECONDS = 8
+_REROUTE_PICKER_SECONDS = 60
 # panel views that create a chat with the picked agent (instead of only saving a preference)
 _CREATE_VIEWS = frozenset({"new_chat", "reroute_agent"})
 
@@ -71,8 +74,8 @@ class TelegramSession:
 class _Reroute:
     """A message answered in an auto-created (idle) chat that the user may replay elsewhere.
 
-    Valid until the user sends another message, uses it once, or `expires_at`; then it is dropped,
-    which also frees the stored attachments.
+    Lives during the grace period: until a button is used, the grace timer fires or the user sends another
+    message (which starts the pending generation first). Then it is dropped, which frees the attachments.
     """
 
     token: str
@@ -83,7 +86,8 @@ class _Reroute:
     auto_agent_id: str = ""
     text: str = ""
     attachments: list[dict] = field(default_factory=list)
-    expires_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc) + _REROUTE_TTL)
+    update: "Update | None" = None
+    agent_name: str = ""
     chat_id: int = 0
     message_id: int = 0
     task: "asyncio.Task | None" = None
@@ -707,7 +711,7 @@ async def new_chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if session is None:
         await _unauthorized(update)
         return
-    await _drop_reroute(context, session)
+    await _flush_reroute(context, session)
     try:
         agents = state.service.list_agents(session.user_id)
     except (ServiceError, OSError) as exc:
@@ -761,63 +765,124 @@ async def _drop_reroute(context: ContextTypes.DEFAULT_TYPE, session: TelegramSes
             )
 
 
-async def _expire_reroute_later(context: ContextTypes.DEFAULT_TYPE, session: TelegramSession, record: _Reroute) -> None:
-    await asyncio.sleep(max(0.0, (record.expires_at - datetime.now(timezone.utc)).total_seconds()))
-    if session.pending_reroute is record:
-        await _drop_reroute(context, session)
+async def _start_pending(context: ContextTypes.DEFAULT_TYPE, session: TelegramSession, record: _Reroute) -> None:
+    """End the grace period: answer the pending message in the auto-created chat and drop its buttons."""
+    if session.pending_reroute is not record:
+        return
+    session.pending_reroute = None  # before any await, so a tap or the timer cannot repeat it
+    if record.timer is not None and record.timer is not asyncio.current_task():
+        record.timer.cancel()
+    text, attachments, record.attachments = record.text, record.attachments, []
+    asyncio.create_task(_send_generation(record.update, context, text, attachments, new_chat_notice=True))
+    if record.message_id:
+        with suppress(TelegramError):
+            await context.bot.edit_message_text(
+                chat_id=record.chat_id, message_id=record.message_id, reply_markup=None,
+                text=_msg(session, "Answering in a new chat with {agent}.", agent=record.agent_name or record.auto_agent_id),
+            )
 
 
-def _previous_chat(session: TelegramSession, service: ChatService) -> tuple[str, str, str] | None:
-    """(chat id, agent id, title) of the chat a new idle chat replaces, or None when there is none."""
+async def _grace_then_generate(
+    context: ContextTypes.DEFAULT_TYPE, session: TelegramSession, record: _Reroute, seconds: float,
+) -> None:
+    await asyncio.sleep(seconds)
+    await _start_pending(context, session, record)
+
+
+def _arm_grace(context: ContextTypes.DEFAULT_TYPE, session: TelegramSession, record: _Reroute, seconds: float) -> None:
+    """(Re)start the single timer that answers the pending message after `seconds`."""
+    if record.timer is not None:
+        record.timer.cancel()
+    record.timer = asyncio.create_task(_grace_then_generate(context, session, record, seconds))
+
+
+def _last_chat(session: TelegramSession, service: ChatService) -> tuple[dict, str] | None:
+    """(summary, agent id) of the chat the next message would continue, from persisted data, or None.
+
+    A session that still knows its chat reads that one; after a restart the latest chat of any agent is used.
+    """
     try:
-        if session.chat_id is not None:
-            chat = service.chat_summary(session.user_id, session.agent_id, session.chat_id)
-            agent_id = session.agent_id
-        elif session.last_message_at is None:  # first message after a restart: the latest chat of any agent
+        if session.chat_id is not None and session.last_message_at is not None:
+            chat, agent_id = service.chat_summary(session.user_id, session.agent_id, session.chat_id), session.agent_id
+        else:
             chat = service.latest_chat(session.user_id)
             agent_id = chat.get("agent_id") if isinstance(chat, dict) else None
-        else:
-            return None
     except (ServiceError, OSError, ValueError) as exc:
-        logger.warning("Could not look up the previous Telegram chat: %s", exc)
+        logger.warning("Could not look up the last Telegram chat: %s", exc)
         return None
-    if not isinstance(chat, dict) or not agent_id or not chat.get("id") or not chat.get("turns", 1):
-        return None  # nothing worth going back to (an empty chat is removed when the new one is created)
-    return chat["id"], agent_id, str(chat.get("title") or chat["id"])
+    if not isinstance(chat, dict) or not agent_id or not chat.get("id"):
+        return None
+    return chat, agent_id
+
+
+def _last_activity(session: TelegramSession, service: ChatService, chat: dict | None, agent_id: str | None) -> datetime | None:
+    """The newest of the in-memory and the persisted activity; a chat with a running reply is active now."""
+    moments = [session.last_message_at] if session.chat_id is not None and session.last_message_at else []
+    if chat is not None:
+        try:
+            if service.chat_active(session.user_id, agent_id, chat["id"]) is True:
+                return datetime.now(timezone.utc)
+        except (ServiceError, OSError, ValueError, TypeError) as exc:
+            logger.warning("Could not check whether the Telegram chat is replying: %s", exc)
+        try:
+            stamp = datetime.fromisoformat(str(chat.get("updated")))
+            moments.append(stamp if stamp.tzinfo else stamp.astimezone())
+        except ValueError:
+            pass
+    return max(moments) if moments else None
 
 
 def _prepare_message_session(session: TelegramSession, service: ChatService) -> bool:
+    """Pick the chat for an incoming message: continue/resume the active one or start a new idle chat.
+
+    The idle time is measured from the real last activity (the persisted chat, not only memory), so a bot
+    restart does not start a new chat. An idle new chat with a previous chat gets a `pending_reroute` record.
+    """
     now = datetime.now(timezone.utc)
     session.pending_reroute = None
-    starts_new_chat = (
-        session.chat_id is None
-        or (
-            session.last_message_at is not None
-            and now - session.last_message_at > _CHAT_IDLE_TIMEOUT
-        )
-    )
+    found = _last_chat(session, service)
+    chat, agent_id = found if found is not None else (None, None)
+    last = _last_activity(session, service, chat, agent_id)
+    starts_new_chat = last is None or now - last > _CHAT_IDLE_TIMEOUT
+    if not starts_new_chat and (session.chat_id is None or session.last_message_at is None):
+        # fresh session after a restart: resume the latest chat silently, with its agent
+        if agent_id != session.agent_id:
+            service.update_preferences(session.user_id, UserPreferences(agent_id=agent_id))
+        session.agent_id, session.chat_id = agent_id, chat["id"]
     if starts_new_chat:
-        previous = _previous_chat(session, service)
-        chat = _create_session_chat(session, service)
+        previous = (chat["id"], agent_id, str(chat.get("title") or chat["id"])) if chat and chat.get("turns", 1) else None
+        created = _create_session_chat(session, service)
         if previous is not None:
-            session.pending_reroute = _Reroute(secrets.token_hex(4), *previous, chat["id"], session.agent_id)
+            session.pending_reroute = _Reroute(secrets.token_hex(4), *previous, created["id"], session.agent_id)
     session.last_message_at = now
     notice = session.pending_new_chat_notice or starts_new_chat
     session.pending_new_chat_notice = False
     return notice
 
 
-def _launch_generation(
+async def _flush_reroute(context: ContextTypes.DEFAULT_TYPE, session: TelegramSession) -> None:
+    """Another message or command arrived during the grace period: answer the pending message first."""
+    if session.pending_reroute is not None:
+        await _start_pending(context, session, session.pending_reroute)
+
+
+async def _launch_generation(
     update: Update, context: ContextTypes.DEFAULT_TYPE, session: TelegramSession,
     text: str, attachments: list[dict], notice: bool,
 ) -> None:
-    """Start the reply as a background task and arm the re-route buttons of an idle new chat."""
-    task = asyncio.create_task(_send_generation(update, context, text, attachments, new_chat_notice=notice))
+    """Start the reply as a background task, or announce an idle new chat and wait out the grace period."""
     record = session.pending_reroute
     if record is not None:
-        record.text, record.attachments, record.task = text, attachments, task
-        record.expires_at = datetime.now(timezone.utc) + _REROUTE_TTL
-        record.timer = asyncio.create_task(_expire_reroute_later(context, session, record))
+        state: TelegramBotState = context.application.bot_data["state"]
+        record.text, record.attachments, record.update = text, attachments, update
+        await _offer_reroute(update, state.service, session, record)
+        if session.pending_reroute is not record:  # a later message already started it
+            return
+        if record.message_id:
+            _arm_grace(context, session, record, _REROUTE_GRACE_SECONDS)
+            return
+        session.pending_reroute, record.attachments = None, []  # no buttons could be shown: answer at once
+    asyncio.create_task(_send_generation(update, context, text, attachments, new_chat_notice=notice))
 
 
 async def _reroute_pending(
@@ -884,7 +949,6 @@ async def reroute_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         record is None or record.token != token or query.message is None
         or query.message.message_id != record.message_id
         or session.chat_id != record.auto_chat_id
-        or datetime.now(timezone.utc) > record.expires_at
     ):
         await query.answer(_msg(session, "This option expired."), show_alert=True)
         with suppress(TelegramError):
@@ -901,6 +965,7 @@ async def reroute_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             agents = state.service.list_agents(session.user_id)
             panel = _new_panel(update, "reroute_agent")
             panel.items, panel.reroute_token = agents, record.token
+            _arm_grace(context, session, record, _REROUTE_PICKER_SECONDS)
             await query.answer()
             await _open_panel(update, context, *_panel_view(state.service, session, panel), panel)
             return
@@ -1299,19 +1364,25 @@ async def _offer_reroute(
     update: Update, service: ChatService, session: TelegramSession, record: _Reroute,
 ) -> None:
     """Send the small message with the re-route buttons just before the reply of an idle new chat."""
+    agents: list[dict] = []
+    with suppress(ServiceError, OSError):
+        agents = service.list_agents(session.user_id)
+    record.agent_name = next((a["name"] for a in agents if a["id"] == record.auto_agent_id), record.auto_agent_id)
     row = [InlineKeyboardButton(
         _msg(session, "↩ Continue previous chat"), callback_data=f"{_REROUTE_CALLBACK}:{record.token}:c",
     )]
-    try:
-        if len(service.list_agents(session.user_id)) > 1:
-            row.append(InlineKeyboardButton(
-                _msg(session, "🔀 Change agent"), callback_data=f"{_REROUTE_CALLBACK}:{record.token}:a",
-            ))
-    except (ServiceError, OSError):
-        pass
+    if len(agents) > 1:
+        row.append(InlineKeyboardButton(
+            _msg(session, "🔀 Change agent"), callback_data=f"{_REROUTE_CALLBACK}:{record.token}:a",
+        ))
     try:
         sent = await update.effective_message.reply_text(
-            _msg(session, "It has been over an hour, so this message started a new chat. Continue the previous one instead?"),
+            _msg(
+                session,
+                "It has been a while. Starting a new chat with {agent}. Tap below to continue the previous chat or pick "
+                "another agent; otherwise I will answer in {seconds} seconds.",
+                agent=record.agent_name, seconds=int(_REROUTE_GRACE_SECONDS),
+            ),
             reply_markup=InlineKeyboardMarkup([row]),
         )
     except TelegramError as exc:
@@ -1335,9 +1406,6 @@ async def _send_generation(
         return
     user_id, agent_id, chat_id = session.user_id, session.agent_id, session.chat_id
     chat = update.effective_chat
-    record = session.pending_reroute if new_chat_notice else None
-    if record is not None and record.auto_chat_id == chat_id:
-        await _offer_reroute(update, state.service, session, record)
     stream = _ReplyStream(context.bot, chat.id, use_draft=chat.type == ChatType.PRIVATE)
     await stream.start()
     content = _ReplyContent()
@@ -1395,7 +1463,7 @@ async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if session is None:
         await _unauthorized(update)
         return
-    await _drop_reroute(context, session)
+    await _flush_reroute(context, session)
     try:
         new_chat_notice = _prepare_message_session(session, state.service)
     except (PreferencesError, ServiceError, ValueError, OSError) as exc:
@@ -1404,7 +1472,7 @@ async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             _msg(session, "Could not prepare the chat: {error}", error=error_message(session.language, exc)),
         )
         return
-    _launch_generation(update, context, session, update.effective_message.text or "", [], new_chat_notice)
+    await _launch_generation(update, context, session, update.effective_message.text or "", [], new_chat_notice)
 
 
 async def media_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1413,12 +1481,12 @@ async def media_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if session is None:
         await _unauthorized(update)
         return
-    await _drop_reroute(context, session)
+    await _flush_reroute(context, session)
     try:
         attachment = await _download_attachment(update.effective_message, context.bot)
         text = update.effective_message.caption or ""
         new_chat_notice = _prepare_message_session(session, state.service)
-        _launch_generation(update, context, session, text, [attachment], new_chat_notice)
+        await _launch_generation(update, context, session, text, [attachment], new_chat_notice)
     except (TelegramError, PreferencesError, ServiceError, ValueError, OSError) as exc:
         await update.effective_message.reply_text(
             _msg(session, "Attachment rejected: {error}", error=error_message(session.language, exc)),

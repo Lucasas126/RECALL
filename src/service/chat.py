@@ -611,6 +611,12 @@ class ChatService:
         chats = self.list_all_chats(user_id)
         return chats[0] if chats else None
 
+    def chat_active(self, user_id: str, agent_id: str, chat_id: str) -> bool:
+        """Whether the chat has a reply running or queued right now."""
+        slot = self._slot(user_id, agent_id)
+        with slot.state:
+            return self._chat_busy(slot, chat_id)
+
     def chat_summary(self, user_id: str, agent_id: str, chat_id: str) -> dict:
         """The summary (title, turns, last activity) of one chat."""
         conversations = self._conversations(user_id, agent_id)
