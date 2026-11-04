@@ -159,6 +159,41 @@ rejected with a message pointing to `folders`. move the path to
 `folders: [{name: vault, path: <path>}]` and rename the `vault_read` / `vault_edit` tool
 groups to `folders_read` / `folders_edit` and the `vault` dream tool group to `folders`.
 
+## Disposable chats
+
+A **disposable chat** is a normal chat that the agent does not learn from. Start one with the
+clock button next to **New chat** in the web sidebar; it carries a clock badge in the chat
+list and a banner above its messages saying when it will be deleted. Everything else (model,
+reasoning effort, tools to read, attachments, editing a message) works as in any chat.
+
+What a disposable chat changes:
+
+- **Not learned from.** It is never listed or read by Dream, and it is not added to the memory
+  index (so associative memory and `query_memory` never return its content). Converting a
+  chat to disposable removes its already indexed chunks.
+- **Persistent state is read-only.** The agent can still read and search its memory, SOUL,
+  skills, notes and linked folders, but `memory`, `skill_manage`, `soul_edit`, and the
+  write tools of the memory and folder groups (`write`, `append`, `edit`, `move`, `delete`,
+  `folder_write`, `folder_append`, `folder_edit`, `folder_move`, `folder_delete`) are not
+  offered to the model and are refused if called. Its system prompt says so and suggests
+  converting the chat if the user wants something remembered. Web search and MCP tools are
+  unchanged.
+- **Deleted after inactivity.** A disposable chat is removed, with its sidecar files
+  (title, model, effort, edit history), 30 days after its last activity (the modification
+  time of its transcript). Change the period in **Settings > Days to keep disposable chats**
+  (`disposable_retention_days`, 1-365; empty means 30). Expired chats are removed when chats
+  are listed and once an hour by the scheduler; a chat with a running or queued reply is
+  never removed.
+
+Use **Make it a normal chat** in the banner to keep a disposable chat: it counts for Dream
+and the index from then on (a Dream reviews all its turns, since none were reviewed before).
+A normal chat has a small **Make it disposable** chip in the composer for the opposite
+conversion. Converting is refused while the chat has an active or queued reply. This is
+independent of the model provider: the text of a disposable chat is still sent to the model
+provider like any other chat. Telegram always creates normal chats.
+
+The flag is the sidecar `<chat_id>.disposable.json` (`{"created_at": "..."}`).
+
 ## Editing an earlier message
 
 Hover over (or, on touch screens, look at) one of your own messages in the web UI and

@@ -84,6 +84,8 @@ watermark per chat:
 - a session that fails, hits its budget, times out or is cancelled leaves the
   rest pending; oldest first next time.
 - deleted chats are dropped from the state.
+- [disposable chats](memory.md#disposable-chats) are never pending and cannot be read
+  by the dream; once converted to normal chats they start at turn 0 and are reviewed.
 
 ## a dream session
 

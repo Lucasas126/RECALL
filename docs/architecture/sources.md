@@ -41,6 +41,13 @@ message drops only those. `truncate_from` rewinds a chat (see
 [editing an earlier message](../user-guide/memory.md#editing-an-earlier-message)): it rewrites
 the JSONL atomically and appends the removed turns to `<chat_id>.removed.json`, which is not
 a chat file and is removed by `delete_chat`.
+A `<chat_id>.disposable.json` sidecar (`{"created_at": ...}`, never a `.jsonl`) marks a
+[disposable chat](../user-guide/memory.md#disposable-chats): `ConversationsSource.is_disposable`,
+`disposable_chats`, `set_disposable`, `expires_at` (last activity, the transcript's mtime, plus
+the retention) and `expired_disposable`; `summary` reports `disposable` and `expires_at`.
+`ReviewQueue` skips these chats, the index skips them (and drops the chunks of a chat that became
+disposable on the next reconcile or at once via `forget_chat`), `build_tools(disposable=True)`
+omits the write tools, and `ChatService` deletes expired ones lazily and from the scheduler.
 Missing metadata means the current user's LLM default; sidecars without `zdr`
 follow the user's `require_zdr`, and a stored flag is per chat and persists
 across restarts. Invalid metadata is an

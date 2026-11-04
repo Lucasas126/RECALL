@@ -13,7 +13,7 @@ plus an optional `"code"` (see [error codes](#error-codes)).
 | models | `GET /api/providers/status`, `GET /api/models/catalog`, `GET /api/models`, `GET`/`POST /api/models/favorites`, `DELETE /api/models/favorites/<model_id>` ([models and providers](../user-guide/models-and-providers.md)) |
 | agents | `GET`/`POST /api/agents`, `GET`/`PUT`/`DELETE /api/agents/<agent_id>`, `GET /api/tool-groups`, `GET /api/agents/<agent_id>/index`, `POST /api/agents/<agent_id>/index/reindex` (table below) |
 | MCP | `GET /api/mcp`, `GET /api/mcp/<server_id>/tools`, `POST /api/mcp/<server_id>/connect`, `DELETE /api/mcp/<server_id>/connection` ([MCP servers](../user-guide/mcp.md)) |
-| chats | `GET /api/chats`, `GET`/`POST /api/agents/<agent_id>/chats`, `GET`/`DELETE .../chats/<chat_id>`, `GET .../chats/<chat_id>/models`, `PUT .../model`, `PUT .../reasoning-effort`, `PUT .../title`, `POST .../chats/<chat_id>/messages` (SSE, see [architecture](../architecture/overview.md#web-steering)) |
+| chats | `GET /api/chats`, `GET`/`POST /api/agents/<agent_id>/chats`, `POST .../chats/<chat_id>/disposable`, `GET`/`DELETE .../chats/<chat_id>`, `GET .../chats/<chat_id>/models`, `PUT .../model`, `PUT .../reasoning-effort`, `PUT .../title`, `POST .../chats/<chat_id>/messages` (SSE, see [architecture](../architecture/overview.md#web-steering)) |
 | dream and soul | `.../dream/settings\|status\|start\|cancel\|sessions`, `.../soul` (the response also carries `default`, the default SOUL.md template), `.../soul/history`, `.../memories/<target>` ([dream mode](../user-guide/dream.md#web-api)) |
 
 ## providers and model catalog API
@@ -55,7 +55,7 @@ message. Errors render as a dismissable card (`role="alert"`) in the transcript,
 | `provider_unavailable` | Claude Code did not report its login state | Choose another model |
 | `model_unavailable` | the model is not in the provider's catalog/installed | Choose another model |
 | `rate_limited` | the upstream provider answered 429 | Choose another model |
-| `agent_busy` | the agent or chat still has active/queued replies | none (wait) |
+| `agent_busy` | the agent or chat still has active/queued replies (also when converting a chat to or from disposable) | none (wait) |
 | `mcp_not_connected` | an MCP tool needs an account the user has not connected | Open Settings |
 
 New codes are set with `UserMessageError(..., code="...")` or a class-level `code`.
@@ -79,6 +79,20 @@ New codes are set with `UserMessageError(..., code="...")` or a class-level `cod
 
 The rules these routes follow (ids, renames, deletion, locks, `409` while replies run) are in
 [managing agents](../user-guide/agents.md#managing-agents).
+
+## Disposable chats
+
+`POST /api/agents/<agent_id>/chats` accepts an optional JSON body `{"disposable": true}` (or
+the query `?disposable=true`); without it a normal chat is created. Chat summaries (list,
+create, `GET .../chats/<chat_id>`, rename) include `"disposable": bool` and `"expires_at"`:
+the ISO time a disposable chat will be deleted (last activity plus the user's
+`disposable_retention_days`, default 30), `null` for normal chats.
+
+`POST /api/agents/<agent_id>/chats/<chat_id>/disposable` with `{"disposable": true|false}`
+converts the chat in either direction and returns its summary. Becoming disposable drops its
+indexed chunks and excludes it from Dream; becoming normal counts it again from the start.
+A chat with an active or queued reply returns `409` (`agent_busy`); an unknown chat is `404`
+and a non-boolean value `422`. See [disposable chats](../user-guide/memory.md#disposable-chats).
 
 ## Editing a message
 

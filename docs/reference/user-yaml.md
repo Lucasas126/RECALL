@@ -165,6 +165,10 @@ notices/errors are implemented in both channels.
 - `language`: `en` or `es` for RECALL-generated alerts/errors, not model replies
   or third-party error text. Without an override, Spanish user YAML language
   codes resolve to `es`; other codes resolve to `en`.
+- `disposable_retention_days`: integer 1-365, days of inactivity after which a
+  [disposable chat](../user-guide/memory.md#disposable-chats) is deleted. Absent or
+  `null` means 30; `GET /api/preferences` returns `null` until it is set. Edited in the
+  web **Settings** dialog.
 - `agent_id`: must identify an agent configured for this user with an existing
   agent configuration. Without an override, or with `null`, it resolves to the
   user's first agent; users without agents receive `null`. This preference is

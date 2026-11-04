@@ -32,6 +32,10 @@ The web **Agents** tab configures these groups for each agent:
   `folder_edit`, `folder_move` and `folder_delete`, refused on folders marked
   `read_only`.
 
+In a [disposable chat](../user-guide/memory.md#disposable-chats) the write tools of
+`memory_edit`, `self` (`memory`, `skill_manage`, `soul_edit`) and `folders_edit` are
+removed, whatever the groups; the read tools stay.
+
 Without `tool_groups`, agents get `memory_read`, `memory_edit`, `web` and
 `self`. `skill_view` is added whenever the agent has skills, even without
 `self`. The folder groups need at least one entry in `folders:`; each folder is a
