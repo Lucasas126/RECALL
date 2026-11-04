@@ -121,7 +121,20 @@ main { display: flex; flex-direction: column; min-width: 0; height: 100vh; heigh
 #messages { flex: 1; overflow-y: auto; padding: 20px var(--gutter); display: flex; flex-direction: column; gap: 14px; overscroll-behavior: contain; }
 .msg { max-width: min(100%, 760px); word-break: break-word; padding: 10px 14px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); }
 .msg.user { align-self: flex-end; background: var(--accent-soft); border-color: transparent; white-space: pre-wrap; }
-.msg.error { color: var(--danger); }
+.msg.error-only { padding: 0; border: 0; background: none; }
+.msg.error-only > .body:empty, .msg.error-only[data-author]::before { display: none; }
+.error-card { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--warn-line); border-left: 4px solid var(--warn); border-radius: 12px; background: var(--warn-bg); color: var(--text); }
+.error-card-icon { color: var(--warn); margin-top: 1px; }
+.error-card-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.error-card-title { color: var(--warn); }
+.error-card-hint, .error-card-text, .error-card-detail { margin: 0; }
+.error-card-detail { color: var(--muted); font-size: .85em; }
+.error-card-command { align-self: flex-start; padding: 2px 8px; border-radius: 6px; background: var(--panel); border: 1px solid var(--line); font-family: ui-monospace, Consolas, monospace; user-select: all; }
+.error-card-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px; }
+.empty-state { margin: auto; max-width: 420px; padding: 28px 24px; text-align: center; border: 1px dashed var(--line); border-radius: 14px; background: var(--panel); display: flex; flex-direction: column; gap: 10px; align-items: center; }
+.empty-state h2 { margin: 0; font-size: 1.15em; }
+.empty-state p { margin: 0; color: var(--muted); }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .msg.interrupted { border-left: 3px solid var(--muted); }
 .interruption { margin-top: 8px; color: var(--muted); font-size: .85em; }
 .notice { display: table; margin-bottom: 8px; padding: 4px 10px; border: 1px solid var(--warn-line); border-radius: 8px; background: var(--warn-bg); color: var(--warn); font-size: .85em; }

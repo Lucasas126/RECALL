@@ -32,7 +32,7 @@ from src.service.chat import (
     UnknownUser,
 )
 from src.utils.logger import get_logger
-from src.utils.i18n import error_message, message, messages
+from src.utils.i18n import error_code, error_message, message, messages
 from src.config.settings import WEB_SESSION_SECRET_ENV
 
 logger = get_logger("web")
@@ -446,7 +446,7 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
                     yield _sse(event.kind, data, generation_id)
             except Exception as e:  # the response has started: report the failure in-band
                 logger.exception("reply failed for %s/%s/%s", user_id, agent_id, chat_id)
-                yield _sse("error", error_message(language, e), generation_id)
+                yield _sse("error", _error_payload(language, e), generation_id)
             yield _sse("done", "", generation_id)
 
         return StreamingResponse(
@@ -464,5 +464,15 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     return app
 
 
+def _error_payload(language: str, exc: Exception):
+    """SSE `error` data: the message string, or `{message, code}` when the error has a stable code."""
+    text = error_message(language, exc)
+    code = error_code(exc)
+    return {"message": text, "code": code} if code else text
+
+
 def _error(status: int, exc: Exception, language: str = "en") -> JSONResponse:
-    return JSONResponse({"detail": error_message(language, exc)}, status_code=status)
+    body = {"detail": error_message(language, exc)}
+    if code := error_code(exc):
+        body["code"] = code
+    return JSONResponse(body, status_code=status)

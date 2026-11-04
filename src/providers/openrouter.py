@@ -29,6 +29,8 @@ _MODEL_CONTEXT_LOADED = False
 class OpenRouterRateLimited(UserMessageError, RuntimeError):
     """The model's upstream provider is temporarily rate-limited (HTTP 429)."""
 
+    code = "rate_limited"
+
 
 def _raise_openrouter_error(status_code, body) -> None:
     """Raise a clear error carrying OpenRouter's own message and upstream detail (never swallow it)."""

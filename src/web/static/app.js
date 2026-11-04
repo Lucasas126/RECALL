@@ -1,6 +1,7 @@
 const $ = (id) => document.getElementById(id);
 // inline line icons (currentColor); constants only, never built from user data
 const ICONS = {
+  alert: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 7.5v5.5\"/><path d=\"M12 16.5h.01\"/></svg>",
   send: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M12 19V5\"/><path d=\"m5 12 7-7 7 7\"/></svg>",
   steer: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><polygon points=\"3 11 22 2 13 21 11 13 3 11\"/></svg>",
   pencil: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M12 20h9\"/><path d=\"M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z\"/></svg>",
@@ -150,6 +151,7 @@ function translateInterface() {
     ["connections-note", "Connect your own account for each service your agents can use. Every user connects separately."],
     ["connections-browser-note", "Sign-in opens in a browser on the computer running RECALL."],
   ]) $(id).textContent = tr(text);
+  renderAgentsEmpty();
   $("dream-model").placeholder = tr("Your chat model");
   $("agent-model").placeholder = tr("Your default model");
   for (const [id, text] of [
@@ -182,7 +184,7 @@ async function api(path, options = {}) {
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(formatApiError(body.detail) || tr("HTTP {status}", { status: res.status }));
+    throw httpError(body, res.status);
   }
   return res.status === 204 ? null : res.json();
 }
@@ -197,6 +199,61 @@ function formatApiError(detail) {
     }).join("; ");
   }
   return detail ? JSON.stringify(detail) : "";
+}
+
+// ---- errors: stable codes -> explanation and action (DOM-free helpers, unit-tested)
+
+function normalizeError(source) {
+  if (source == null) return { message: "", code: null };
+  if (typeof source === "string") return { message: source, code: null };
+  return { message: String(source.message ?? ""), code: typeof source.code === "string" ? source.code : null };
+}
+
+function httpError(body, status) {
+  const error = new Error(formatApiError(body?.detail) || tr("HTTP {status}", { status }));
+  error.code = typeof body?.code === "string" ? body.code : null;
+  return error;
+}
+
+// Title, hint and optional action for an error `code`; null when the code is unknown (the plain message is shown).
+// Actions: create-agent, choose-model, new-chat, open-settings; `command` is shown as text, never run.
+function errorInfo(code) {
+  const chooseModel = { action: "choose-model", label: tr("Choose another model") };
+  switch (code) {
+    case "no_agents":
+      return { title: tr("You have no agents yet"), hint: tr("An agent is the assistant you chat with. Create one to start chatting."),
+        action: "create-agent", label: tr("Create an agent") };
+    case "missing_api_key":
+      return { title: tr("This model's provider has no API key"),
+        hint: tr("Set the key on the computer running RECALL and restart it, or use another model."), ...chooseModel };
+    case "provider_unreachable":
+      return { title: tr("The model's provider is not reachable"),
+        hint: tr("Check that its server is running, or use another model."), ...chooseModel };
+    case "claude_not_installed":
+      return { title: tr("Claude Code is not installed"),
+        hint: tr("Install Claude Code on the computer running RECALL, or use another model."), ...chooseModel };
+    case "claude_not_logged_in":
+      return { title: tr("Claude Code is not logged in"),
+        hint: tr("Run this command on the computer running RECALL, then send your message again:"),
+        command: "claude auth login", ...chooseModel };
+    case "provider_unavailable":
+      return { title: tr("The model's provider is not available"),
+        hint: tr("Check the provider's status in the model picker, or use another model."), ...chooseModel };
+    case "model_unavailable":
+      return { title: tr("That model is not available"), hint: tr("Pick a different model for this chat."), ...chooseModel };
+    case "rate_limited":
+      return { title: tr("The provider is busy"), hint: tr("Wait a moment and try again, or choose another model."), ...chooseModel };
+    case "agent_busy":
+      return { title: tr("The agent is still replying"), hint: tr("Wait for its current replies to finish, then try again.") };
+    case "unknown_chat":
+      return { title: tr("This chat no longer exists"), hint: tr("Open another chat or start a new one."),
+        action: "new-chat", label: tr("Start a new chat") };
+    case "mcp_not_connected":
+      return { title: tr("A connection is missing"), hint: tr("Connect the service in Settings, then try again."),
+        action: "open-settings", label: tr("Open Settings") };
+    default:
+      return null;
+  }
 }
 
 const chatsUrl = (suffix = "") => `/api/agents/${state.agentId}/chats${suffix}`;
@@ -271,7 +328,7 @@ async function showApp(user) {
     // a deep link (for example from a dream notification) opens its agent page after login
     if (session === state.session && route) await routeFromHash(route);
   } catch (err) {
-    if (session === state.session) addMessage("assistant").error(err.message);
+    if (session === state.session) addMessage("assistant").error(err);
   }
 }
 
@@ -335,6 +392,7 @@ async function selectAgent(agentId) {
   renderAgentBanner();
   renderMessages([]);
   setComposer(false);
+  if (!agentId && state.user && !state.user.agents.length) renderNoAgents();
   await refreshChats();
 }
 
@@ -353,7 +411,7 @@ $("agent-select").addEventListener("change", async (e) => {
   } catch (err) {
     if (session === state.session) {
       $("agent-select").value = state.agentId ?? "";
-      addMessage("assistant").error(err.message);
+      addMessage("assistant").error(err);
     }
   }
 });
@@ -866,6 +924,7 @@ async function refreshAgents(previousId, currentId) {
   const me = await api("/api/me");
   state.user.agents = me.agents;
   renderAgentOptions();
+  renderAgentsEmpty();
   await loadAgentConfigs();
   if (previousId && previousId === state.agentId && previousId !== currentId) {
     // the server moved the preference when the agent was renamed or deleted
@@ -874,7 +933,11 @@ async function refreshAgents(previousId, currentId) {
   }
 }
 
-$("tab-chats").addEventListener("click", () => showTab("chats"));
+$("tab-chats").addEventListener("click", async () => {
+  await showTab("chats");
+  // an agent created from the empty state has no chat yet
+  if (state.user && state.agentId && !state.chatId) await newChat();
+});
 $("tab-agents").addEventListener("click", () => showTab("agents"));
 $("agent-new").addEventListener("click", openNewAgent);
 for (const name of [...AGENT_PANELS, ...DREAM_PANELS]) $(`agent-tab-${name}`).addEventListener("click", () => showAgentPanel(name));
@@ -1330,7 +1393,7 @@ globalThis.addEventListener("focus", async () => {
   try {
     await refreshPreferences();
   } catch (err) {
-    if (session === state.session) addMessage("assistant").error(err.message);
+    if (session === state.session) addMessage("assistant").error(err);
   }
 });
 
@@ -1410,7 +1473,7 @@ function startRenameChat(chat, title) {
         });
       }
     } catch (err) {
-      if (session === state.session) addMessage("assistant").error(err.message);
+      if (session === state.session) addMessage("assistant").error(err);
     }
     if (session === state.session) await refreshChats();
   };
@@ -1435,7 +1498,10 @@ async function newChat() {
   try {
     const preferences = await refreshPreferences();
     if (session !== state.session || state.modelBusy || state.settingsBusy) return;
-    if (!preferences.agent_id) throw new Error(tr("No agents are configured for this user."));
+    if (!preferences.agent_id) {
+      renderNoAgents();
+      return;
+    }
     if (preferences.agent_id !== state.agentId) await selectAgent(preferences.agent_id);
     const agentId = state.agentId;
     const chat = await api(chatsUrl(), { method: "POST" });
@@ -1445,7 +1511,7 @@ async function newChat() {
     state.reasoningEffort = null;
     await openChat(chat.id);
   } catch (err) {
-    if (session === state.session) addMessage("assistant").error(err.message);
+    if (session === state.session) addMessage("assistant").error(err);
   }
 }
 
@@ -1572,7 +1638,7 @@ $("chat-effort").addEventListener("change", async (e) => {
   } catch (err) {
     if (session === state.session) {
       e.target.value = state.reasoningEffort?.override ?? "";
-      addMessage("assistant").error(err.message);
+      addMessage("assistant").error(err);
     }
   } finally {
     if (session === state.session) {
@@ -2163,14 +2229,99 @@ function addMessage(role, parent = state.view ?? $("messages")) {
         el.append(note);
       }
     },
-    error(message) {
+    error(source) {
       this.settleMemory();
-      el.classList.add("error");
-      const note = document.createElement("div");
-      note.textContent = `[error] ${message}`;
-      el.append(note);
+      // with nothing streamed yet the card replaces the reply bubble; otherwise it follows the partial reply
+      const bare = !raw && !el.querySelector(".action, .thinking");
+      if (bare) el.classList.add("error-only");
+      const card = errorCard(source, () => {
+        card.remove();
+        if (bare) el.remove();
+      });
+      el.append(card);
     },
   };
+}
+
+
+async function runErrorAction(action) {
+  if (action === "create-agent") {
+    await showTab("agents");
+    openNewAgent();
+  } else if (action === "choose-model") {
+    if (state.chatId && !state.busy) openModelPicker("chat-llm");
+    else $("settings-open").click();
+  } else if (action === "new-chat") {
+    await newChat();
+  } else if (action === "open-settings") {
+    $("settings-open").click();
+  }
+}
+
+// A styled, dismissable error block; `onDismiss` removes it (and any wrapper that is left empty).
+function errorCard(source, onDismiss) {
+  const { message, code } = normalizeError(source);
+  const info = errorInfo(code);
+  const card = document.createElement("div");
+  card.className = "error-card";
+  card.setAttribute("role", "alert");
+  const icon = document.createElement("span");
+  icon.className = "error-card-icon";
+  icon.innerHTML = ICONS.alert;
+  const main = document.createElement("div");
+  main.className = "error-card-main";
+  main.append(Object.assign(document.createElement("strong"), {
+    className: "error-card-title", textContent: info?.title ?? tr("Something went wrong"),
+  }));
+  if (info?.hint) main.append(Object.assign(document.createElement("p"), { className: "error-card-hint", textContent: info.hint }));
+  if (info?.command) main.append(Object.assign(document.createElement("code"), { className: "error-card-command", textContent: info.command }));
+  if (message && message !== info?.title) {
+    main.append(Object.assign(document.createElement("p"), {
+      className: info ? "error-card-detail" : "error-card-text", textContent: message,
+    }));
+  }
+  const actions = document.createElement("div");
+  actions.className = "error-card-actions";
+  if (info?.action) {
+    const act = Object.assign(document.createElement("button"), { type: "button", className: "primary", textContent: info.label });
+    act.addEventListener("click", () => runErrorAction(info.action));
+    actions.append(act);
+  }
+  const dismiss = Object.assign(document.createElement("button"), { type: "button", className: "link", textContent: tr("Dismiss") });
+  dismiss.addEventListener("click", () => (onDismiss ?? (() => card.remove()))());
+  actions.append(dismiss);
+  main.append(actions);
+  card.append(icon, main);
+  return card;
+}
+
+// Shown instead of the chat when the user has no agents at all.
+function renderNoAgents() {
+  const container = document.createElement("div");
+  container.className = "chat-view";
+  state.view = container;
+  $("messages").replaceChildren(container);
+  $("usage").hidden = true;
+  const panel = document.createElement("section");
+  panel.className = "empty-state";
+  const create = Object.assign(document.createElement("button"), {
+    type: "button", className: "primary", textContent: tr("Create an agent"),
+  });
+  create.addEventListener("click", () => runErrorAction("create-agent"));
+  panel.append(
+    Object.assign(document.createElement("h2"), { textContent: tr("You have no agents yet") }),
+    Object.assign(document.createElement("p"), { textContent: tr("An agent is the assistant you chat with. Create one to start chatting.") }),
+    create,
+  );
+  container.append(panel);
+  setComposer(false);
+}
+
+function renderAgentsEmpty() {
+  const none = Boolean(state.user) && !state.user.agents.length;
+  $("agents-empty").textContent = tr(none
+    ? "You have no agents yet. Use New agent to create your first one."
+    : "Select an agent to edit it, or create a new one.");
 }
 
 function scrollDown() {
@@ -2250,7 +2401,7 @@ $("file-input").addEventListener("change", async (event) => {
     state.attachments.push(...await Promise.all(valid.map(readAttachment)));
     renderPendingAttachments();
   } catch (err) {
-    addMessage("assistant").error(err.message);
+    addMessage("assistant").error(err);
   }
 });
 
@@ -2284,7 +2435,7 @@ $("composer").addEventListener("submit", async (e) => {
     await streamReply(content, attachments, request);
   } catch (err) {
     request.controller.abort();
-    if (sameSession(request) && err.name !== "AbortError") reply.error(err.message);
+    if (sameSession(request) && err.name !== "AbortError") reply.error(err);
   } finally {
     state.requests.delete(request);
     if (sameSession(request)) {
@@ -2298,7 +2449,7 @@ $("composer").addEventListener("submit", async (e) => {
         try {
           await refreshChats();
         } catch (err) {
-          if (isCurrent(request)) reply.error(err.message);
+          if (isCurrent(request)) reply.error(err);
         }
       }
     }
@@ -2337,7 +2488,7 @@ async function streamReply(content, attachments, request) {
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(formatApiError(body.detail) || tr("HTTP {status}", { status: res.status }));
+    throw httpError(body, res.status);
   }
 
   const reader = res.body.getReader();
@@ -3119,7 +3270,7 @@ function renderTraceEvent(event) {
           ? tr("{count} remaining tool calls were skipped.", { count: formatCount(event.skipped_tool_calls) })
           : tr("the session was closed before the next model call.")}` });
     case "error":
-      return element("div", { className: "trace-error error", textContent: `[${tr("error")}] ${event.message ?? event.error ?? ""}` });
+      return element("div", { className: "trace-error error", textContent: `\u26A0 ${event.message ?? event.error ?? ""}` });
     case "session_finished":
       return note(tr("Session finished: {status}", { status: dreamStatusLabel(event.status) }) + (event.error ? ` — ${event.error}` : ""));
     default:

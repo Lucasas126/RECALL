@@ -15,8 +15,8 @@ _SPANISH = {
     "Chat override": "Seleccionado para este chat",
     "Audio model": "Modelo de audio",
     "No chat selected": "Ningún chat seleccionado",
-    "Provider not available: {provider}. The API key variable {variable} is not set on the server.": "Proveedor no disponible: {provider}. La variable de la clave de API {variable} no está definida en el servidor.",
-    "Provider not available: {provider}. The server at {host} did not answer.": "Proveedor no disponible: {provider}. El servidor en {host} no ha respondido.",
+    "Provider not available: {provider}. The API key variable {variable} is not set on the server. Set it and restart RECALL, or choose another model.": "Proveedor no disponible: {provider}. La variable de la clave de API {variable} no está definida en el servidor. Defínela y reinicia RECALL, o elige otro modelo.",
+    "Provider not available: {provider}. The server at {host} did not answer. Check that it is running, or choose another model.": "Proveedor no disponible: {provider}. El servidor en {host} no ha respondido. Comprueba que esté en marcha, o elige otro modelo.",
     "Provider not available: {provider}. Claude Code is not installed on the computer running RECALL.": "Proveedor no disponible: {provider}. Claude Code no está instalado en el ordenador que ejecuta RECALL.",
     "Provider not available: {provider}. Claude Code is not logged in; run `claude auth login` on the computer running RECALL.": "Proveedor no disponible: {provider}. Claude Code no tiene la sesión iniciada; ejecuta `claude auth login` en el ordenador que ejecuta RECALL.",
     "Provider not available: {provider}. Claude Code did not report its login state; run `claude auth status`.": "Proveedor no disponible: {provider}. Claude Code no ha indicado su estado de sesión; ejecuta `claude auth status`.",
@@ -35,8 +35,8 @@ _SPANISH = {
     "Experimental: uses your own Claude Code login.": "Experimental: usa tu propio inicio de sesión de Claude Code.",
     "Counts against your Claude plan limits; no per-token price.": "Cuenta para los límites de tu plan de Claude; sin precio por token.",
     "{provider} cannot serve this kind of model.": "{provider} no puede servir este tipo de modelo.",
-    "The model {model} is not installed on the Ollama server.": "El modelo {model} no está instalado en el servidor de Ollama.",
-    "{model} is not one of the offered Claude subscription models.": "{model} no es uno de los modelos ofrecidos de la suscripción de Claude.",
+    "The model {model} is not installed on the Ollama server. Install it with `ollama pull {model}` or choose another model.": "El modelo {model} no está instalado en el servidor de Ollama. Instálalo con `ollama pull {model}` o elige otro modelo.",
+    "{model} is not one of the offered Claude subscription models. Choose another model.": "{model} no es uno de los modelos ofrecidos de la suscripción de Claude. Elige otro modelo.",
     "audio messages require an OpenRouter speech-to-text model": "Los mensajes de audio necesitan un modelo de transcripción de OpenRouter.",
     "Not ZDR (Claude subscription, experimental)": "Sin ZDR (suscripción de Claude, experimental)",
     "ZDR: not applicable (local Ollama model)": "ZDR: no aplica (modelo local de Ollama)",
@@ -122,8 +122,8 @@ _SPANISH = {
     "➡️ Next": "➡️ Siguiente",
     "not logged in": "No has iniciado sesión.",
     "message is empty": "El mensaje está vacío.",
-    "model is not available in the OpenRouter chat catalog with the selected ZDR filter": "El modelo no está disponible en el catálogo de OpenRouter con el filtro ZDR seleccionado.",
-    "model is not available in the OpenRouter chat catalog": "El modelo no está disponible en el catálogo de OpenRouter.",
+    "model is not available in the OpenRouter chat catalog with the selected ZDR filter. Choose another model or turn the ZDR filter off.": "El modelo no está disponible en el catálogo de OpenRouter con el filtro ZDR seleccionado. Elige otro modelo o desactiva el filtro ZDR.",
+    "model is not available in the OpenRouter chat catalog. Choose another model.": "El modelo no está disponible en el catálogo de OpenRouter. Elige otro modelo.",
     "wait for this agent's active and queued replies before changing models": "Espera a que terminen las respuestas activas y pendientes de este agente antes de cambiar de modelo.",
     "wait for this chat's active and queued replies before changing models": "Espera a que terminen las respuestas activas y pendientes de este chat antes de cambiar de modelo.",
     "wait for this chat's active and queued replies before changing reasoning effort": "Espera a que terminen las respuestas activas y pendientes de este chat antes de cambiar el esfuerzo de razonamiento.",
@@ -131,6 +131,36 @@ _SPANISH = {
     "unknown user: {user_id}": "Usuario desconocido: {user_id}",
     "unknown agent: {agent_id}": "Agente desconocido: {agent_id}",
     "unknown chat: {chat_id}": "Chat desconocido: {chat_id}",
+    "Something went wrong": "Algo ha salido mal",
+    "Dismiss": "Descartar",
+    "You have no agents yet": "Todavía no tienes agentes",
+    "An agent is the assistant you chat with. Create one to start chatting.": "Un agente es el asistente con el que chateas. Crea uno para empezar.",
+    "You have no agents yet. Use New agent to create your first one.": "Todavía no tienes agentes. Usa Nuevo agente para crear el primero.",
+    "Create an agent": "Crear un agente",
+    "Choose another model": "Elegir otro modelo",
+    "This model's provider has no API key": "El proveedor de este modelo no tiene clave de API",
+    "Set the key on the computer running RECALL and restart it, or use another model.": "Define la clave en el ordenador que ejecuta RECALL y reinícialo, o usa otro modelo.",
+    "The model's provider is not reachable": "No se puede acceder al proveedor del modelo",
+    "Check that its server is running, or use another model.": "Comprueba que su servidor esté en marcha, o usa otro modelo.",
+    "Claude Code is not installed": "Claude Code no está instalado",
+    "Install Claude Code on the computer running RECALL, or use another model.": "Instala Claude Code en el ordenador que ejecuta RECALL, o usa otro modelo.",
+    "Claude Code is not logged in": "Claude Code no tiene la sesión iniciada",
+    "Run this command on the computer running RECALL, then send your message again:": "Ejecuta este comando en el ordenador que ejecuta RECALL y vuelve a enviar tu mensaje:",
+    "The model's provider is not available": "El proveedor del modelo no está disponible",
+    "Check the provider's status in the model picker, or use another model.": "Revisa el estado del proveedor en el selector de modelos, o usa otro modelo.",
+    "That model is not available": "Ese modelo no está disponible",
+    "Pick a different model for this chat.": "Elige otro modelo para este chat.",
+    "The provider is busy": "El proveedor está saturado",
+    "Wait a moment and try again, or choose another model.": "Espera un momento y vuelve a intentarlo, o elige otro modelo.",
+    "The agent is still replying": "El agente sigue respondiendo",
+    "Wait for its current replies to finish, then try again.": "Espera a que terminen sus respuestas actuales y vuelve a intentarlo.",
+    "This chat no longer exists": "Este chat ya no existe",
+    "Open another chat or start a new one.": "Abre otro chat o empieza uno nuevo.",
+    "Start a new chat": "Empezar un chat nuevo",
+    "A connection is missing": "Falta una conexión",
+    "Connect the service in Settings, then try again.": "Conecta el servicio en Ajustes y vuelve a intentarlo.",
+    "Open Settings": "Abrir Ajustes",
+    "No agents are configured for this user. Create one in the Agents tab.": "Este usuario no tiene agentes configurados. Crea uno en la pestaña Agentes.",
     "chat title cannot be empty": "El título del chat no puede estar vacío",
     "Could not read title for chat {chat_id}.": "No se ha podido leer el título del chat {chat_id}.",
     "Could not save title for chat {chat_id}.": "No se ha podido guardar el título del chat {chat_id}.",
@@ -517,14 +547,23 @@ def messages(language: Literal["en", "es"]) -> dict[str, str]:
 class UserMessageError(Exception):
     """An error with a translatable RECALL template and opaque interpolation values."""
 
-    def __init__(self, template: str, **values: object) -> None:
+    code: str | None = None  # stable machine-readable id the web UI maps to an explanation and an action
+
+    def __init__(self, template: str, *, code: str | None = None, **values: object) -> None:
         self.template = template
         self.values = values
+        if code is not None:
+            self.code = code
         super().__init__(template.format(**values) if values else template)
 
 
 class InputError(UserMessageError, ValueError):
     """Invalid channel or service input."""
+
+
+def error_code(error: Exception) -> str | None:
+    """The stable error code of an application error, or None for plain errors."""
+    return error.code if isinstance(error, UserMessageError) else None
 
 
 def error_message(language: str, error: Exception) -> str:

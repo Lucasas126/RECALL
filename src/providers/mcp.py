@@ -46,6 +46,8 @@ class UnknownMcpServer(McpError, ValueError):
 class McpNotConnected(McpError):
     """The user has not connected the account the server needs."""
 
+    code = "mcp_not_connected"
+
 
 @dataclass(frozen=True)
 class McpTool:

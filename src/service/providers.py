@@ -122,19 +122,21 @@ def unavailable(row: dict) -> InputError:
     label = LABELS[row["id"]]
     reason = row["reason"]
     if reason == "no_api_key":
-        return InputError("Provider not available: {provider}. The API key variable {variable} is not set on the server.",
-                          provider=label, variable=row["detail"])
+        return InputError("Provider not available: {provider}. The API key variable {variable} is not set on the server. "
+                          "Set it and restart RECALL, or choose another model.",
+                          code="missing_api_key", provider=label, variable=row["detail"])
     if reason == "unreachable":
-        return InputError("Provider not available: {provider}. The server at {host} did not answer.",
-                          provider=label, host=row["detail"])
+        return InputError("Provider not available: {provider}. The server at {host} did not answer. "
+                          "Check that it is running, or choose another model.",
+                          code="provider_unreachable", provider=label, host=row["detail"])
     if reason == "cli_missing":
         return InputError("Provider not available: {provider}. Claude Code is not installed on the computer running RECALL.",
-                          provider=label)
+                          code="claude_not_installed", provider=label)
     if reason == "logged_out":
         return InputError("Provider not available: {provider}. Claude Code is not logged in; run `claude auth login` on the "
-                          "computer running RECALL.", provider=label)
+                          "computer running RECALL.", code="claude_not_logged_in", provider=label)
     return InputError("Provider not available: {provider}. Claude Code did not report its login state; run `claude auth status`.",
-                      provider=label)
+                      code="provider_unavailable", provider=label)
 
 
 def _decorate(row: dict, provider: str, main: str) -> dict:
@@ -181,10 +183,16 @@ def require_listed(provider: str, canonical: str, capability: str, rows: list[di
         return
     if provider == OPENROUTER and capability == "stt":
         raise InputError("The speech-to-text model is not available with the required routing policy." if zdr
-                         else "The speech-to-text model is not available in the OpenRouter catalog.")
+                         else "The speech-to-text model is not available in the OpenRouter catalog.",
+                         code="model_unavailable")
     if provider == OPENROUTER:
-        raise InputError("model is not available in the OpenRouter chat catalog with the selected ZDR filter" if zdr
-                         else "model is not available in the OpenRouter chat catalog")
+        raise InputError("model is not available in the OpenRouter chat catalog with the selected ZDR filter. "
+                         "Choose another model or turn the ZDR filter off." if zdr
+                         else "model is not available in the OpenRouter chat catalog. Choose another model.",
+                         code="model_unavailable")
     if provider == OLLAMA:
-        raise InputError("The model {model} is not installed on the Ollama server.", model=model_name(canonical))
-    raise InputError("{model} is not one of the offered Claude subscription models.", model=model_name(canonical))
+        raise InputError("The model {model} is not installed on the Ollama server. "
+                         "Install it with `ollama pull {model}` or choose another model.",
+                         code="model_unavailable", model=model_name(canonical))
+    raise InputError("{model} is not one of the offered Claude subscription models. Choose another model.",
+                     code="model_unavailable", model=model_name(canonical))

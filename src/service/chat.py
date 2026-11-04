@@ -123,15 +123,21 @@ class UnknownUser(ServiceError):
 
 
 class UnknownAgent(ServiceError):
-    pass
+    code = "unknown_agent"
 
 
 class UnknownChat(ServiceError):
-    pass
+    code = "unknown_chat"
 
 
 class AgentBusy(ServiceError):
-    pass
+    code = "agent_busy"
+
+
+class NoAgents(UnknownAgent):
+    """The user has no agents at all, so there is nothing to chat with until one is created."""
+
+    code = "no_agents"
 
 
 class UnknownDreamSession(ServiceError):
@@ -1315,6 +1321,8 @@ class ChatService:
         """The user's config, after checking that the user owns the agent."""
         user = self._user(user_id)
         self._check_id("agent", agent_id, UnknownAgent)
+        if not user.agents:
+            raise NoAgents("No agents are configured for this user. Create one in the Agents tab.")
         if agent_id not in user.agents:
             raise UnknownAgent(
                 "agent '{agent_id}' is not owned by user '{user_id}'", agent_id=agent_id, user_id=user_id,

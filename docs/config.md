@@ -462,6 +462,32 @@ or rebuilding the agent. If preferences cannot be read, the failure is reported
 explicitly: Telegram uses its last successfully read language, while HTTP errors
 use the browser's last-known `Accept-Language` header and log the lookup failure.
 
+### Error codes
+
+HTTP application errors are `{"detail": "<localized message>"}`; when the error has a
+stable machine-readable code the body also has `"code"`, and the SSE `error` event of a
+reply is `{"message", "code"}` instead of a plain string. The code is optional: errors
+without one keep the plain shape, and Telegram ignores it. The web UI maps each code to
+a title, a hint and, where an action exists, a button; unknown codes fall back to the
+message. Errors render as a dismissable card (`role="alert"`) in the transcript, not as raw
+`[error]` text.
+
+| code | raised when | web action |
+| --- | --- | --- |
+| `no_agents` | the user has no agents (HTTP 404) | Create an agent (opens the new-agent form); the chat shows an empty state instead |
+| `unknown_agent`, `unknown_chat` | the agent/chat does not exist or is not the user's | `unknown_chat`: Start a new chat |
+| `missing_api_key` | the provider's API key variable is not set on the server | Choose another model |
+| `provider_unreachable` | the Ollama/provider server did not answer | Choose another model |
+| `claude_not_installed` | Claude Code is not installed | Choose another model |
+| `claude_not_logged_in` | Claude Code is not logged in | hint with `claude auth login` (shown, never run) + Choose another model |
+| `provider_unavailable` | Claude Code did not report its login state | Choose another model |
+| `model_unavailable` | the model is not in the provider's catalog/installed | Choose another model |
+| `rate_limited` | the upstream provider answered 429 | Choose another model |
+| `agent_busy` | the agent or chat still has active/queued replies | none (wait) |
+| `mcp_not_connected` | an MCP tool needs an account the user has not connected | Open Settings |
+
+New codes are set with `UserMessageError(..., code="...")` or a class-level `code`.
+
 `GET /api/preferences` returns resolved fields for the current
 cookie user. `PATCH /api/preferences` accepts any subset of the fields and
 returns the resolved result. Omitted fields keep their saved overrides, or

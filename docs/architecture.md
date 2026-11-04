@@ -211,8 +211,10 @@ modify the new session, and only the latest request of a chat can update its usa
 Detaching a transport does not cancel a service generation on its own.
 
 The messages endpoint returns SSE with the generation id in each event's `id:`
-field. Existing `text`, `reasoning`, `tool`, `usage`, `error` and `done` payloads
-are unchanged. When a turn runs an associative search, `memory` events report its
+field. Existing `text`, `reasoning`, `tool`, `usage` and `done` payloads are unchanged.
+An `error` event carries the (localized) message as a plain string, or
+`{"message": "...", "code": "..."}` when the error has a stable code (see
+[error codes](config.md#error-codes)). When a turn runs an associative search, `memory` events report its
 state: `{"state": "searching"}` when the stream starts, then once
 `{"state": "done", "matches": N}` (`N` is 0 when nothing relevant was found) or
 `{"state": "skipped"}` when the search failed, finished too late to be used or was
