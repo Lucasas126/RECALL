@@ -18,7 +18,7 @@ One list of ideas and planned work, with what is already done kept separate. Imp
 ### tools
 
 - **File tools v2** for every source: paginated reads with line numbers and text extraction for PDF/Office files; regex content search and glob file search; `patch` (unique find-and-replace with tolerant matching, returning a diff); a stale-write guard.
-- **Terminal follow-ups** (phase 1 is [done](#done)): a background `process` tool (start, poll, wait, kill); LLM-assisted smart approvals (a small model classifies borderline commands instead of the pattern lists); a per-chat "always allow" for a command or pattern; a Docker backend that creates a per-agent sandbox container itself; approval cards in the web UI (the API and events exist, the bundled UI does not draw them yet).
+- **Terminal follow-ups** (phase 1 is [done](#done)): a background `process` tool (start, poll, wait, kill); LLM-assisted smart approvals (a small model classifies borderline commands instead of the pattern lists); a per-chat "always allow" for a command or pattern; a Docker backend that creates a per-agent sandbox container itself.
 - **Server admin agent** for the home Proxmox server, built on the terminal feature: Proxmox API through an MCP server, SSH as a dedicated sudo user, read-only commands free and state changes approved by the user, its own agent only for the owner, an audit log, read-only dreams for health review. Risk: AdGuard on that server is the DHCP/DNS of the whole home network.
 - **PDF generation** and **image and graph generation** (possibly through an MCP server).
 - **Remote MCP servers** (streamable HTTP); Node.js and the Google Calendar sign-in in the Docker image ([MCP](../user-guide/mcp.md#runtime-behavior)).

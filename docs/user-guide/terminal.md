@@ -117,14 +117,26 @@ The tools are never built in [disposable chats](memory.md#disposable-chats).
 An approval is shown to the chat's owner while the reply waits:
 
 - **Web**: the `approval` event arrives on the message stream and `POST .../approvals/<id>` answers it
-  ([API](../reference/api.md#terminal-approvals)). The bundled web UI does not draw an approval card yet; clients that
-  speak the API can, and answers can also be given from Telegram.
+  ([API](../reference/api.md#terminal-approvals)). The bundled web UI draws a card for it
+  ([below](#in-the-web-ui)); answers can also be given from Telegram.
 - **Telegram**: a message with the command, working directory, reason and **Approve** / **Deny** buttons; the outcome is
   written onto the message when it closes.
 
 An approval is denied automatically after `terminal.approval_timeout_seconds` (default 300 s), when the reply is cancelled
 or interrupted, and when the service shuts down. Only the owner of the chat can answer. A denied action returns text telling
 the model not to retry or work around it. A `sandbox_patch` asks once for both its read and its write.
+
+### in the web UI
+
+- **Approval card**: when the agent asks, the chat shows a card with the command, the working directory, the reason and a
+  countdown to the automatic denial. A flagged action is titled "Dangerous command", any other "Approval required".
+  **Approve** and **Deny** answer it; once closed the card shows an outcome badge (approved, denied, timed out,
+  cancelled or expired).
+- **After a reload** the cards still waiting are restored. An approval resolved from Telegram shows up in the web card
+  within a few seconds.
+- **Agent form**: the **Terminal** block appears in the Tools tab once the terminal group is enabled. It picks one of
+  your backends (by name and type only), the working directory, the approvals mode, the command timeout and whether
+  dreams may use it. With no backends defined it explains how to add one.
 
 ### hardline: always refused, in every mode
 
