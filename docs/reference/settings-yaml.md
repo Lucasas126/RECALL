@@ -205,6 +205,20 @@ that share the API are `perplexity/pplx-decider-flash-v1.2`, `liquid/d1.1` and `
 out-of-range values stop the start-up. The per-user switch `orchestrator` and the `core_agent_id` live in the user's
 [preferences](user-yaml.md#preferences-api). Only the message text and the agents' ids, names and descriptions are sent.
 
+## terminal
+
+Framework-wide limits of the [terminal tool group](../user-guide/terminal.md); every key is optional and unknown keys stop the
+start-up:
+
+```yaml
+terminal:
+  approval_timeout_seconds: 300  # 5-86400; a pending approval is denied after this long
+  allow_local: false             # accept `type: local` backends (commands run on THIS host); trusted single-user installs only
+  default_timeout_seconds: 60    # 1-3600, must not exceed max_timeout_seconds
+  max_timeout_seconds: 600       # 1-3600; ceiling for any command timeout
+  max_output_chars: 20000        # 500-200000; ceiling for the output returned to the model
+```
+
 ## chat naming
 
 The root `settings.yaml` holds a framework-wide small model used to generate chat

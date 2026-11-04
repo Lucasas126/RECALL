@@ -169,6 +169,8 @@ read (scoped to the agent, existing guards apply):
   **read-only** in dreams, when configured and the `folders` dream tool group is
   enabled (see [user folders](#user-folders))
 - web search / retrieve when enabled
+- the [terminal sandbox](terminal.md#dream-mode), only when the agent sets `terminal.allow_in_dream: true` **and** lists
+  `terminal` in `dream.tools`; dream runs are unattended, so nothing is ever asked (manual denies, smart denies dangerous)
 
 write (only the agent's own files; everything else is refused):
 - `soul_edit` (replace or patch `SOUL.md`; snapshot to `soul_history/` first,

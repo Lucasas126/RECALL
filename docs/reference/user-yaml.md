@@ -13,7 +13,7 @@ Agent files are described in [agent.yaml](agent-yaml.md); framework-wide values 
 | `agents.lock`, `preferences.lock` | coordination files for atomic writes; never delete them between requests |
 
 Keys of `user.yaml`: `id`, `name`, `password_hash` (optional), `language`, `require_zdr`, `provider`, `embeddings_provider`
-(optional, falls back to `provider`), `agents`, `models`, `openrouter`, `ollama` and `claude_subscription`. Unknown keys inside
+(optional, falls back to `provider`), `agents`, `models`, `openrouter`, `ollama`, `claude_subscription` and `terminal_backends`. Unknown keys inside
 the provider blocks are rejected.
 
 ## storage layout
@@ -246,6 +246,19 @@ The password is typed twice (hidden) or generated (`--generate`, 24 characters, 
 than 8 characters or trivially weak are refused, and an existing user is never overwritten. `set-password` rewrites
 only `password_hash`; YAML comments in the file are lost. See [deployment](../deployment/docker.md#users-and-passwords).
 
+## terminal backends
+
+`terminal_backends` maps a name (`^[a-z][a-z0-9_-]{0,31}$`) to a sandbox an agent's `terminal.backend` can use. Unknown keys
+are rejected; key files are paths, never inline secrets.
+
+| type | keys |
+| --- | --- |
+| `ssh` | `host` (name or address), `port` (default 22), `user`, `key_file`, `known_hosts_file` (all required except `port`); strict host-key checking and key-only login are always on |
+| `local` | `workdir`; refused unless `settings.yaml` sets `terminal.allow_local: true` |
+
+Check a backend with `python -m src.admin terminal-test --user <user_id> --backend <name>` (runs `echo ok; uname -sr`, 15 s
+timeout, prints the exit code and the redacted output, never the key). Setup walk-through: [terminal guide](../user-guide/terminal.md).
+
 ## example
 
 ```yaml
@@ -265,6 +278,8 @@ models:
   embeddings: openai/text-embedding-3-small
 # claude_subscription:                  # optional, advanced; see the Claude subscription guide
 #   claude_config_dir: /path/to/this-users-claude-login
+# terminal_backends:                    # optional; sandboxes the user's agents may run commands in (see below)
+#   sandbox: {type: ssh, host: 192.0.2.10, port: 22, user: agent, key_file: /app/.config/keys/sandbox_ed25519, known_hosts_file: /app/.config/keys/sandbox_known_hosts}
 ```
 
 A complete, working example lives in `.config/example_user/`.

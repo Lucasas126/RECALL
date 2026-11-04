@@ -32,9 +32,16 @@ The web **Agents** tab configures these groups for each agent:
   `folder_edit`, `folder_move` and `folder_delete`, refused on folders marked
   `read_only`.
 
+- `terminal`: `terminal` (shell command in the sandbox, foreground, with timeout), `sandbox_read` (numbered lines, paginated
+  by `offset`/`limit`), `sandbox_write` (atomic whole-file write), `sandbox_patch` (unique find-and-replace, whitespace-tolerant
+  fallback, `replace_all`, returns a unified diff) and `sandbox_search` (regex over contents, or a glob over file names with
+  `files=true`; at most 200 results). They act only on the sandbox filesystem and need the agent's `terminal` block and a
+  backend in the user's `terminal_backends`. Every call goes through the approval policy and is audited; output is
+  stripped, redacted and truncated. See the [terminal guide](../user-guide/terminal.md).
+
 In a [disposable chat](../user-guide/memory.md#disposable-chats) the write tools of
 `memory_edit`, `self` (`memory`, `skill_manage`, `soul_edit`) and `folders_edit` are
-removed, whatever the groups; the read tools stay.
+removed, whatever the groups, and the whole `terminal` group is not built; the read tools stay.
 
 Without `tool_groups`, agents get `memory_read`, `memory_edit`, `web` and
 `self`. `skill_view` is added whenever the agent has skills, even without
@@ -177,7 +184,8 @@ dream sessions get the review-queue tools (`dream_pending`, `dream_read_chat`,
 `dream_mark_reviewed`), the memory read tools, the edit tools (writes succeed
 only in `mind_palace`), the `self` tools, and optionally `folder_list`,
 `folder_read`, `folder_search` (read-only) and the web tools, per `dream.tools`.
-No MCP tools. See [dream mode](../user-guide/dream.md#dream-toolset).
+No MCP tools. The terminal tools are added only when the agent sets `terminal.allow_in_dream` and lists `terminal` in `dream.tools`;
+they never prompt in a dream (see [terminal](../user-guide/terminal.md#unattended-runs)). See [dream mode](../user-guide/dream.md#dream-toolset).
 
 ## web tools (Tavily)
 

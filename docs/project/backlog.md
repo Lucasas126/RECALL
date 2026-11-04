@@ -18,7 +18,7 @@ One list of ideas and planned work, with what is already done kept separate. Imp
 ### tools
 
 - **File tools v2** for every source: paginated reads with line numbers and text extraction for PDF/Office files; regex content search and glob file search; `patch` (unique find-and-replace with tolerant matching, returning a diff); a stale-write guard.
-- **Terminal tool group**, off by default and enabled per agent: a per-agent Docker sandbox (never inside the RECALL container, which holds `.env` and all users' data) and a local backend only for trusted single-user installs; an SSH backend; foreground commands with timeouts and truncated output, background jobs with poll/wait/kill; approval of dangerous commands through the web UI or Telegram buttons (manual / smart / off); child processes without provider keys and scrubbed output; not available in dream mode.
+- **Terminal follow-ups** (phase 1 is [done](#done)): a background `process` tool (start, poll, wait, kill); LLM-assisted smart approvals (a small model classifies borderline commands instead of the pattern lists); a per-chat "always allow" for a command or pattern; a Docker backend that creates a per-agent sandbox container itself; approval cards in the web UI (the API and events exist, the bundled UI does not draw them yet).
 - **Server admin agent** for the home Proxmox server, built on the terminal feature: Proxmox API through an MCP server, SSH as a dedicated sudo user, read-only commands free and state changes approved by the user, its own agent only for the owner, an audit log, read-only dreams for health review. Risk: AdGuard on that server is the DHCP/DNS of the whole home network.
 - **PDF generation** and **image and graph generation** (possibly through an MCP server).
 - **Remote MCP servers** (streamable HTTP); Node.js and the Google Calendar sign-in in the Docker image ([MCP](../user-guide/mcp.md#runtime-behavior)).
@@ -39,6 +39,7 @@ One list of ideas and planned work, with what is already done kept separate. Imp
 
 ## done
 
+- Terminal tool group, phase 1: `terminal`, `sandbox_read`, `sandbox_write`, `sandbox_patch` and `sandbox_search` against an SSH sandbox (or a local backend on trusted installs), foreground commands with timeouts, approvals (manual / smart / off) through the API and Telegram buttons, a hardline blocklist, redacted and truncated output, an audit file, unattended behaviour for dreams, and `python -m src.admin terminal-test` ([terminal guide](../user-guide/terminal.md)).
 - Telegram orchestrator: a decision model (OpenRouter Decisions API, alpha) picks the agent for a message that starts a new chat, with override buttons ([Telegram](../user-guide/telegram.md#telegram-orchestrator-automatic-agent-choice)).
 - Video input: models with image input but no video get sampled frames plus transcribed audio ([files and media](../user-guide/files-and-media.md#video-input)).
 - Message timestamps and `[AUDIO]` / `[VIDEO]` tags in the model context ([files and media](../user-guide/files-and-media.md#message-tags-and-timestamps)).

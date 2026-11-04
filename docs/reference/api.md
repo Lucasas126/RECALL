@@ -13,7 +13,7 @@ plus an optional `"code"` (see [error codes](#error-codes)).
 | models | `GET /api/providers/status`, `GET /api/models/catalog`, `GET /api/models`, `GET`/`POST /api/models/favorites`, `DELETE /api/models/favorites/<model_id>` ([models and providers](../user-guide/models-and-providers.md)) |
 | agents | `GET`/`POST /api/agents`, `GET`/`PUT`/`DELETE /api/agents/<agent_id>`, `GET /api/tool-groups`, `GET /api/agents/<agent_id>/index`, `POST /api/agents/<agent_id>/index/reindex` (table below) |
 | MCP | `GET /api/mcp`, `GET /api/mcp/<server_id>/tools`, `POST /api/mcp/<server_id>/connect`, `DELETE /api/mcp/<server_id>/connection` ([MCP servers](../user-guide/mcp.md)) |
-| chats | `GET /api/chats`, `GET`/`POST /api/agents/<agent_id>/chats`, `POST .../chats/<chat_id>/disposable`, `GET`/`DELETE .../chats/<chat_id>`, `GET .../chats/<chat_id>/models`, `PUT .../model`, `PUT .../reasoning-effort`, `PUT .../title`, `POST .../chats/<chat_id>/messages` (SSE, see [architecture](../architecture/overview.md#web-steering)) |
+| chats | `GET /api/chats`, `GET`/`POST /api/agents/<agent_id>/chats`, `POST .../chats/<chat_id>/disposable`, `GET`/`DELETE .../chats/<chat_id>`, `GET .../chats/<chat_id>/models`, `PUT .../model`, `PUT .../reasoning-effort`, `PUT .../title`, `POST .../chats/<chat_id>/messages` (SSE, see [architecture](../architecture/overview.md#web-steering)), `GET .../chats/<chat_id>/approvals`, `POST .../chats/<chat_id>/approvals/<approval_id>` ([terminal approvals](#terminal-approvals)) |
 | dream and soul | `.../dream/settings\|status\|start\|cancel\|sessions`, `.../soul` (the response also carries `max_chars`, the application-wide SOUL limit, and `default`, the default SOUL.md template); `.../memories/<target>` returns its `limit` from settings.yaml, `.../soul/history`, `.../memories/<target>` ([dream mode](../user-guide/dream.md#web-api)) |
 
 ## providers and model catalog API
@@ -93,6 +93,45 @@ converts the chat in either direction and returns its summary. Becoming disposab
 indexed chunks and excludes it from Dream; becoming normal counts it again from the start.
 A chat with an active or queued reply returns `409` (`agent_busy`); an unknown chat is `404`
 and a non-boolean value `422`. See [disposable chats](../user-guide/memory.md#disposable-chats).
+
+## Terminal approvals
+
+Agents with the [terminal tool group](../user-guide/terminal.md) pause a reply while an action waits for the user. Two extra
+SSE events travel on `POST .../chats/<chat_id>/messages` (same framing as the others: `event`, `data` as JSON, `id` = the
+generation id):
+
+```
+event: approval
+data: {"id": "9f2c1a7be034", "tool": "terminal", "command": "rm -rf build", "cwd": "~/workspace", "reason": "recursive delete", "risk": "dangerous", "timeout_seconds": 300, "expires_at": 1767225900.5, "chat_id": "20261104-101500-a1b2c3", "agent_id": "aria"}
+
+event: approval_resolved
+data: {"id": "9f2c1a7be034", "decision": "approved", "reason": "approved"}
+```
+
+`risk` is `dangerous` (flagged by the policy) or `manual` (the agent's approvals are `manual`). `tool` is `terminal`,
+`sandbox_read`, `sandbox_write`, `sandbox_patch` or `sandbox_search`; `command` is the command line or a short description of the
+file operation. `decision` is `approved` or `denied`; `reason` is `approved`, `denied by user`, `timed out`, `cancelled` or
+`service shutdown`. The stream stays open and silent between the two events, and the reply resumes by itself afterwards.
+
+`GET /api/agents/<agent_id>/chats/<chat_id>/approvals` returns the chat's pending approvals (same objects as the `approval`
+event; `[]` when none), for clients that connect after the event was sent.
+
+`POST /api/agents/<agent_id>/chats/<chat_id>/approvals/<approval_id>` with `{"decision": "approve" | "deny"}` answers one:
+
+```json
+{"status": "approved"}
+```
+
+(`"denied"` for `deny`). Answering again with the same user is safe and returns the original outcome.
+
+| status | when |
+| --- | --- |
+| `200` | answered (or already answered by this user) |
+| `403` | the approval belongs to another user |
+| `404` | unknown, expired, timed-out or cancelled approval, or the chat/agent is not the user's (`code: "unknown_approval"` for the first group) |
+| `422` | `decision` is missing or not exactly `approve` / `deny` |
+
+Telegram answers the same approvals with inline buttons.
 
 ## Editing a message
 
