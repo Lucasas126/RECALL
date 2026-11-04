@@ -30,7 +30,7 @@ class TelegramActionFormattingTests(unittest.TestCase):
                 content.append("reasoning", thinking)
                 content.add_action(action)
                 content.append("text", "**Answer**")
-                text, entities = _generation_message(content.parts, "**Notice**\n\n")
+                text, entities = _generation_message(content.parts)
                 self.assertIn(actions, text)
                 italic = next(entity for entity in entities if entity.type == MessageEntity.ITALIC)
                 prefix = text[:text.index(actions)]
@@ -127,10 +127,13 @@ class TelegramActionFormattingTests(unittest.TestCase):
 
 
 class TelegramActionStreamingTests(unittest.IsolatedAsyncioTestCase):
+    agent_name = "Aria"
+
     async def send_events(self, events: list[ChatEvent]) -> AsyncMock:
         service = Mock()
         service.send.return_value = iter(events)
         service.get_preferences.return_value = {"show_thinking": True, "language": "en"}
+        service.list_agents.return_value = [{"id": "test-agent", "name": self.agent_name}]
         state = TelegramBotState(service)
         state.sessions[123] = TelegramSession("test-user", "test-agent", "test-chat")
         update = SimpleNamespace(
@@ -187,13 +190,47 @@ class TelegramActionStreamingTests(unittest.IsolatedAsyncioTestCase):
         final_text = stream.finish.await_args.args[0][0][0]
         expected = ["Before", ">first()", "After", "Explanation", ">second()", "Final"]
         self.assertEqual(sorted(expected, key=final_text.index), expected)
-        self.assertEqual(stream.update.await_args_list[-1].args[0], final_text)
+        self.assertEqual(stream.update.await_args_list[-1].args[0], final_text.replace("Aria\n\n", ""))
 
     async def test_reply_without_actions_is_unchanged(self) -> None:
         stream = await self.send_events([ChatEvent("text", "**Answer**")])
         text, entities = stream.finish.await_args.args[0][0]
-        self.assertEqual(text, "Answer")
-        self.assertEqual([entity.type for entity in entities], [MessageEntity.BOLD])
+        self.assertEqual(text, "Aria\n\nAnswer")
+        self.assertEqual(
+            [(entity.type, entity.offset, entity.length) for entity in entities],
+            [(MessageEntity.BOLD, 0, 4), (MessageEntity.BOLD, 6, 6)],
+        )
+        for call in stream.update.await_args_list:  # drafts never carry the agent name
+            self.assertNotIn("Aria", call.args[0])
+        self.assertNotIn("New chat started", text)
+
+    async def test_agent_name_goes_before_the_answer_not_inside_the_thinking(self) -> None:
+        stream = await self.send_events([ChatEvent("reasoning", "Pondering"), ChatEvent("text", "Answer")])
+        text, entities = stream.finish.await_args.args[0][0]
+        self.assertLess(text.index("Pondering"), text.index("Aria"))
+        self.assertLess(text.index("Aria"), text.index("Answer"))
+        quote = next(e for e in entities if e.type == MessageEntity.EXPANDABLE_BLOCKQUOTE)
+        self.assertLessEqual(quote.offset + quote.length, text.index("Aria"))
+        bold = next(e for e in entities if e.type == MessageEntity.BOLD)
+        self.assertEqual((bold.offset, bold.length), (text.index("Aria"), 4))
+
+    async def test_name_with_markdown_characters_and_emoji_keeps_exact_entities(self) -> None:
+        self.agent_name = "my_*agent*_ 😀"
+        stream = await self.send_events([ChatEvent("text", "Hi")])
+        text, entities = stream.finish.await_args.args[0][0]
+        self.assertTrue(text.startswith("my_*agent*_ 😀\n\nHi"))
+        bold = entities[0]
+        self.assertEqual((bold.type, bold.offset, bold.length), (MessageEntity.BOLD, 0, _utf16_len(self.agent_name)))
+
+    async def test_long_reply_splits_under_the_limit_with_the_name_only_on_the_first_message(self) -> None:
+        stream = await self.send_events([ChatEvent("text", "a" * 9000)])
+        messages = stream.finish.await_args.args[0]
+        self.assertGreater(len(messages), 2)
+        self.assertTrue(all(_utf16_len(text) <= 4096 for text, _ in messages))
+        self.assertTrue(messages[0][0].startswith("Aria\n\n"))
+        self.assertFalse(any("Aria" in text for text, _ in messages[1:]))
+        self.assertEqual(messages[0][1][0].offset, 0)
+        self.assertEqual("".join(text for text, _ in messages), "Aria\n\n" + "a" * 9000)
 
 
 if __name__ == "__main__":

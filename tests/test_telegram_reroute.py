@@ -103,6 +103,43 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Second", text)
         self.assertNotIn("chat-of-agent-b", text)
         self.assertNotIn("panel", self.context.user_data)
+        entities = query.edit_message_text.await_args.kwargs["entities"]
+        self.assertEqual(self.formatted(text, entities, "bold"), ["Second"])
+        self.assertEqual(self.formatted(text, entities, "italic"), ["OpenRouter · llm/base"])
+
+    @staticmethod
+    def formatted(text: str, entities, kind: str) -> list[str]:
+        """The text covered by the entities of `kind` (offsets are UTF-16 units)."""
+        raw = text.encode("utf-16-le")
+        return [
+            raw[e.offset * 2:(e.offset + e.length) * 2].decode("utf-16-le") for e in entities if e.type == kind
+        ]
+
+    async def test_selectagent_is_the_picker_and_a_pick_never_resumes_the_old_agent_chat(self) -> None:
+        from src.telegram.bot import _prepare_message_session
+        await new_chat(self.update, self.context)  # /selectagent runs the same handler as /newchat
+        self.context.user_data["panel"].message_id = 55
+        query, update = self.query(self.markup_buttons()[1].callback_data, 55)
+        await panel_callback(update, self.context)
+        self.assertEqual((self.session.agent_id, self.session.chat_id), ("agent-b", "chat-of-agent-b"))
+        self.assertIsNotNone(self.session.last_message_at)
+        # a restart creates a fresh session from the saved preference: the latest chat is the new one
+        self.service.latest_chat.return_value = {
+            "id": "chat-of-agent-b", "agent_id": "agent-b", "title": "x", "turns": 0, "updated": self.ago(seconds=5),
+        }
+        restarted = TelegramSession("test-user", self.preferences["agent_id"])
+        _prepare_message_session(restarted, self.service)
+        self.assertEqual((restarted.agent_id, restarted.chat_id), ("agent-b", "chat-of-agent-b"))
+
+    async def test_confirmation_markup_survives_special_characters_in_names_and_models(self) -> None:
+        self.service.list_agents.return_value = [{"id": "agent-a", "name": "my_*agent*_ [x]"}]
+        self.service.get_chat.return_value = {
+            "model": {"id": "llm/a_b*c", "provider": "OpenRouter"}, "model_source": "agent",
+        }
+        await new_chat(self.update, self.context)
+        call = self.message.reply_text.await_args
+        self.assertEqual(self.formatted(call.args[0], call.kwargs["entities"], "bold"), ["my_*agent*_ [x]"])
+        self.assertEqual(self.formatted(call.args[0], call.kwargs["entities"], "italic"), ["OpenRouter · llm/a_b*c"])
 
     async def test_newchat_cancel_changes_nothing(self) -> None:
         await new_chat(self.update, self.context)
@@ -127,8 +164,11 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
         self.service.create_chat.assert_called_once_with("test-user", "agent-a")
         self.assertEqual(self.session.chat_id, "chat-of-agent-a")
         text = self.message.reply_text.await_args.args[0]
-        self.assertIn("New chat created with", text)
-        self.assertIn("Model: OpenRouter", text)
+        self.assertIn("New chat created with First.", text)
+        self.assertIn("Model: OpenRouter · llm/base (Agent default)", text)
+        entities = self.message.reply_text.await_args.kwargs["entities"]
+        self.assertEqual(self.formatted(text, entities, "bold"), ["First"])
+        self.assertEqual(self.formatted(text, entities, "italic"), ["OpenRouter · llm/base"])
         self.assertIn("Agent default", text)
         self.assertNotIn("choose a model", text)
         self.assertNotIn("chat-of", text)
@@ -192,7 +232,6 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
         self.service.discard_chat.assert_called_once_with("test-user", "agent-a", "chat-of-agent-a")
         self.assertEqual((self.session.agent_id, self.session.chat_id), ("agent-a", "old-chat"))
         self.assertEqual(generation.await_args.args[2:4], ("hello there", []))
-        self.assertFalse(generation.await_args.kwargs["new_chat_notice"])
         self.assertIn("Old topic", query.edit_message_text.await_args.args[0])
         self.assertIsNone(self.session.pending_reroute)
         # a second tap is told the option expired
@@ -234,7 +273,6 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
         self.service.create_chat.assert_called_with("test-user", "agent-b")
         self.assertEqual((self.session.agent_id, self.session.chat_id), ("agent-b", "chat-of-agent-b"))
         self.assertEqual(generation.await_args.args[2:4], ("hello there", []))
-        self.assertTrue(generation.await_args.kwargs["new_chat_notice"])
         self.assertIsNone(self.session.pending_reroute)
 
     async def test_tap_after_the_grace_period_is_expired(self) -> None:
@@ -258,7 +296,6 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.sleep(0.3)
         generation.assert_called_once()
         self.assertEqual(generation.await_args.args[2:4], ("hello there", []))
-        self.assertTrue(generation.await_args.kwargs["new_chat_notice"])
         edit = self.context.bot.edit_message_text.await_args.kwargs
         self.assertEqual((edit["message_id"], edit["reply_markup"]), (55, None))
         self.assertEqual(edit["text"], "Answering in a new chat with First.")
@@ -274,9 +311,6 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
             await text_message(self.update, self.context)
             await _drain()
         self.assertEqual([call.args[2] for call in generation.await_args_list], ["hello there", "second"])
-        self.assertEqual(
-            [call.kwargs["new_chat_notice"] for call in generation.await_args_list], [True, False],
-        )
         self.assertIsNone(self.session.pending_reroute)
         self.assertEqual(self.session.chat_id, "chat-of-agent-a")
         self.assertTrue(record.timer.cancelled() or record.timer.done())
@@ -298,7 +332,6 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
         self.message.reply_text.assert_not_called()
         self.service.create_chat.assert_not_called()
         generation.assert_called_once()
-        self.assertFalse(generation.await_args.kwargs["new_chat_notice"])
 
     async def test_restart_resume_counts_a_running_reply_as_active(self) -> None:
         self.session.chat_id, self.session.last_message_at = None, None

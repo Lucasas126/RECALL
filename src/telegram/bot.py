@@ -5,6 +5,7 @@ import base64
 import json
 import mimetypes
 import os
+import re
 import secrets
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -65,7 +66,6 @@ class TelegramSession:
     agent_id: str
     chat_id: str | None = None
     last_message_at: datetime | None = None
-    pending_new_chat_notice: bool = False
     language: str = "en"
     pending_reroute: "_Reroute | None" = None
 
@@ -161,9 +161,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     await update.effective_message.reply_text(
         "Available commands:\n\n"
-        "/settings — Thinking, language, active agent, and chat reasoning effort\n"
+        "/settings — Thinking, language, new chat agent, and chat reasoning effort\n"
         "/newchat — Start a new chat (you pick the agent; also /new)\n"
-        "/selectagent — Choose the active agent\n"
+        "/selectagent — Choose the agent for a new chat\n"
         "/agent — Show the active agent\n"
         "/selectmodel — Choose among your favorite models (star them in the web UI)\n"
         "/model — Show the model selected for the current chat\n"
@@ -372,7 +372,7 @@ def _panel_view(
         tail = [_panel_button(
             panel, _msg(session, "✖ Cancel (keep current chat)" if session.chat_id else "✖ Cancel"), "close",
         )]
-    if panel.view in ("agents", "select_agent", *_CREATE_VIEWS):
+    if panel.view in ("agents", *_CREATE_VIEWS):
         rows = [
             [_panel_button(
                 panel, f"{'✅ ' if agent['id'] == session.agent_id else ''}{agent['name']} ({agent['id']})",
@@ -383,7 +383,7 @@ def _panel_view(
         title = {
             "new_chat": "Choose the agent for the new chat:",
             "reroute_agent": "Choose the agent to answer your message in a new chat:",
-        }.get(panel.view, "Choose the agent for new and incoming messages:")
+        }.get(panel.view, "Choose the agent for the new chat:")
         return _msg(session, title), InlineKeyboardMarkup([*rows, tail])
     if panel.view in _CHAT_VIEWS:
         chat = service.get_chat_models(session.user_id, panel.agent_id, panel.target_chat)
@@ -426,12 +426,6 @@ def _panel_view(
         label = "Use agent default" if chat.get("agent_default_model") else "Use user default"
         rows.insert(0, [_panel_button(panel, _msg(session, label), "inherit")])
     return f"{header}\n\n{body}", InlineKeyboardMarkup([*rows, tail])
-
-
-def _switch_agent(service: ChatService, session: TelegramSession, agent_id: str) -> None:
-    service.update_preferences(session.user_id, UserPreferences(agent_id=agent_id))
-    session.agent_id = agent_id
-    session.chat_id = None
 
 
 def _apply_panel_action(
@@ -478,15 +472,11 @@ def _apply_panel_action(
     elif kind == "pick" and argument.isdigit() and int(argument) < len(panel.items):
         selected = panel.items[int(argument)]["id"]
         if panel.view == "agents":
-            _switch_agent(service, session, selected)
+            return _start_agent_chat(service, session, panel.items[int(argument)])
         elif panel.view == "llm":
             service.update_preferences(session.user_id, UserPreferences(default_llm_model=selected))
         elif panel.view == "stt":
             service.update_preferences(session.user_id, UserPreferences(default_stt_model=selected))
-        elif panel.view == "select_agent":
-            _switch_agent(service, session, selected)
-            return _msg(session, "✅ Agent selected: {agent_id}\nUse /newchat to create a chat for this agent.",
-                        agent_id=selected)
         elif panel.view == "chat_llm":
             chosen = service.set_chat_model(session.user_id, panel.agent_id, panel.target_chat, selected)
             return _lines(
@@ -500,9 +490,14 @@ def _apply_panel_action(
     return None
 
 
-async def _edit_panel(query: CallbackQuery, text: str, markup: InlineKeyboardMarkup | None) -> None:
+async def _edit_panel(
+    query: CallbackQuery, text: str, markup: InlineKeyboardMarkup | None, *, markdown: bool = False,
+) -> None:
+    extra = {}
+    if markdown:
+        text, extra["entities"] = _convert_markdown(text)
     try:
-        await query.edit_message_text(text, reply_markup=markup)
+        await query.edit_message_text(text, reply_markup=markup, **extra)
     except BadRequest as exc:
         if "not modified" not in str(exc).lower():
             raise
@@ -587,6 +582,8 @@ async def panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 with suppress(TelegramError):
                     await query.edit_message_reply_markup(reply_markup=None)
             return
+        # picking an agent creates its chat: the confirmation is Markdown (bold agent, italic model)
+        markdown = action.startswith("pick:") and panel.view in ("agents", *_CREATE_VIEWS)
         if action.startswith("pick:") and panel.view in _CREATE_VIEWS:
             final = await _pick_create_agent(update, context, session, panel, action)
         else:
@@ -599,7 +596,7 @@ async def panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await query.answer()
     if final is not None:
         context.user_data.pop("panel", None)
-        await _edit_panel(query, final, None)
+        await _edit_panel(query, final, None, markdown=markdown)
     else:
         await _edit_panel(query, *view)
 
@@ -635,48 +632,51 @@ async def select_model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await _open_panel(update, context, text, markup, panel)
 
 
-async def select_agent(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    state: TelegramBotState = context.application.bot_data["state"]
-    session = _session(update, state)
-    if session is None:
-        await _unauthorized(update)
-        return
-    panel = _new_panel(update, "select_agent")
-    try:
-        panel.items = state.service.list_agents(session.user_id)
-    except ServiceError as exc:
-        logger.warning("Could not load Telegram agents: %s", exc)
-        await update.effective_message.reply_text(_msg(session, "I could not load your agents right now."))
-        return
-    if not panel.items:
-        await update.effective_message.reply_text(_msg(session, "No agents are configured for this user."))
-        return
-    text, markup = _panel_view(state.service, session, panel)
-    await _open_panel(update, context, text, markup, panel)
+def _md_escape(text: str) -> str:
+    """Neutralize Markdown specials so names and ids cannot break the surrounding bold/italic markers."""
+    return re.sub(r"([\\`*_{}\[\]()#+\-.!~>|=])", r"\\\1", text)
 
 
-def _create_session_chat(session: TelegramSession, service: ChatService) -> dict:
-    preferences = service.get_preferences(session.user_id)
-    agent_id = preferences["agent_id"]
+async def _reply_markdown(message, text: str) -> None:
+    """Reply with Markdown converted to Telegram entities."""
+    plain, entities = _convert_markdown(text)
+    await message.reply_text(plain, entities=entities)
+
+
+def _create_session_chat(session: TelegramSession, service: ChatService, agent_id: str | None = None) -> dict:
+    """Create a chat and point the session at it; `agent_id` (a user pick) also becomes the saved preference.
+
+    Every path that changes the active agent goes through here, so the session never keeps a chat of the
+    previous agent nor an empty chat id that a restart could resume from the old agent.
+    """
     if agent_id is None:
-        raise InputError("No agents are configured for this user.")
+        agent_id = service.get_preferences(session.user_id)["agent_id"]
+        if agent_id is None:
+            raise InputError("No agents are configured for this user.")
+    else:
+        service.update_preferences(session.user_id, UserPreferences(agent_id=agent_id))
     chat = service.create_chat(session.user_id, agent_id)
-    session.agent_id = agent_id
-    session.chat_id = chat["id"]
-    session.pending_new_chat_notice = True
+    session.agent_id, session.chat_id = agent_id, chat["id"]
+    session.last_message_at = datetime.now(timezone.utc)
     return chat
+
+
+def _start_agent_chat(service: ChatService, session: TelegramSession, agent: dict) -> str:
+    """Switch to `agent` with a fresh chat; returns the Markdown confirmation."""
+    chat = _create_session_chat(session, service, agent["id"])
+    return _new_chat_text(service, session, agent["name"], agent["id"], chat["id"])
 
 
 def _new_chat_text(
     service: ChatService, session: TelegramSession, agent_name: str, agent_id: str, chat_id: str,
 ) -> str:
-    """The confirmation of a new chat: its agent and the LLM it will use (agent or user default)."""
-    text = _msg(session, "New chat created with {agent}.", agent=agent_name)
+    """The Markdown confirmation of a new chat: its agent (bold) and the LLM it will use (italic)."""
+    text = _msg(session, "New chat created with **{agent}**.", agent=_md_escape(agent_name))
     try:
         chat = service.get_chat(session.user_id, agent_id, chat_id)
         model = chat["model"]
         text += "\n" + _msg(
-            session, "Model: {model_id}", model_id=_with_provider(model.get("provider"), model["id"]),
+            session, "Model: _{model_id}_", model_id=_md_escape(_with_provider(model.get("provider"), model["id"])),
         ) + f" ({_msg(session, _SOURCE_LABELS[_model_source(chat)])})"
     except (ServiceError, ValueError, KeyError, OSError) as exc:
         logger.warning("Could not read the new chat's model: %s", exc)
@@ -693,14 +693,12 @@ async def _create_chat_now(update: Update, state: TelegramBotState, session: Tel
             _msg(session, "Could not create a chat: {error}", error=error_message(session.language, exc)),
         )
         return
-    session.last_message_at = datetime.now(timezone.utc)
-    session.pending_new_chat_notice = True
     agent_name = next(
         (a["name"] for a in state.service.list_agents(session.user_id) if a["id"] == session.agent_id),
         session.agent_id,
     )
-    await update.effective_message.reply_text(
-        _new_chat_text(state.service, session, agent_name, session.agent_id, chat["id"]),
+    await _reply_markdown(
+        update.effective_message, _new_chat_text(state.service, session, agent_name, session.agent_id, chat["id"]),
     )
 
 
@@ -737,13 +735,7 @@ async def _pick_create_agent(
         raise InputError("Unknown menu option. Run the command again.")
     agent = panel.items[int(argument)]
     if panel.view == "new_chat":
-        service = state.service
-        service.update_preferences(session.user_id, UserPreferences(agent_id=agent["id"]))
-        chat = service.create_chat(session.user_id, agent["id"])
-        session.agent_id, session.chat_id = agent["id"], chat["id"]
-        session.last_message_at = datetime.now(timezone.utc)
-        session.pending_new_chat_notice = True
-        return _new_chat_text(service, session, agent["name"], agent["id"], chat["id"])
+        return _start_agent_chat(state.service, session, agent)
     record = session.pending_reroute
     if record is None or record.token != panel.reroute_token:
         raise InputError("This option expired.")
@@ -773,7 +765,7 @@ async def _start_pending(context: ContextTypes.DEFAULT_TYPE, session: TelegramSe
     if record.timer is not None and record.timer is not asyncio.current_task():
         record.timer.cancel()
     text, attachments, record.attachments = record.text, record.attachments, []
-    asyncio.create_task(_send_generation(record.update, context, text, attachments, new_chat_notice=True))
+    asyncio.create_task(_send_generation(record.update, context, text, attachments))
     if record.message_id:
         with suppress(TelegramError):
             await context.bot.edit_message_text(
@@ -832,7 +824,7 @@ def _last_activity(session: TelegramSession, service: ChatService, chat: dict | 
     return max(moments) if moments else None
 
 
-def _prepare_message_session(session: TelegramSession, service: ChatService) -> bool:
+def _prepare_message_session(session: TelegramSession, service: ChatService) -> None:
     """Pick the chat for an incoming message: continue/resume the active one or start a new idle chat.
 
     The idle time is measured from the real last activity (the persisted chat, not only memory), so a bot
@@ -855,9 +847,6 @@ def _prepare_message_session(session: TelegramSession, service: ChatService) -> 
         if previous is not None:
             session.pending_reroute = _Reroute(secrets.token_hex(4), *previous, created["id"], session.agent_id)
     session.last_message_at = now
-    notice = session.pending_new_chat_notice or starts_new_chat
-    session.pending_new_chat_notice = False
-    return notice
 
 
 async def _flush_reroute(context: ContextTypes.DEFAULT_TYPE, session: TelegramSession) -> None:
@@ -868,7 +857,7 @@ async def _flush_reroute(context: ContextTypes.DEFAULT_TYPE, session: TelegramSe
 
 async def _launch_generation(
     update: Update, context: ContextTypes.DEFAULT_TYPE, session: TelegramSession,
-    text: str, attachments: list[dict], notice: bool,
+    text: str, attachments: list[dict],
 ) -> None:
     """Start the reply as a background task, or announce an idle new chat and wait out the grace period."""
     record = session.pending_reroute
@@ -882,7 +871,7 @@ async def _launch_generation(
             _arm_grace(context, session, record, _REROUTE_GRACE_SECONDS)
             return
         session.pending_reroute, record.attachments = None, []  # no buttons could be shown: answer at once
-    asyncio.create_task(_send_generation(update, context, text, attachments, new_chat_notice=notice))
+    asyncio.create_task(_send_generation(update, context, text, attachments))
 
 
 async def _reroute_pending(
@@ -920,21 +909,20 @@ async def _reroute_pending(
         raise
     session.agent_id, session.chat_id = agent_id, chat_id
     session.last_message_at = datetime.now(timezone.utc)
-    session.pending_new_chat_notice = False
     text, attachments, record.attachments = record.text, record.attachments, []
     if record.message_id:
         with suppress(TelegramError):
             await context.bot.edit_message_reply_markup(
                 chat_id=record.chat_id, message_id=record.message_id, reply_markup=None,
             )
-    asyncio.create_task(_send_generation(update, context, text, attachments, new_chat_notice=created))
+    asyncio.create_task(_send_generation(update, context, text, attachments))
     if created:
-        return _msg(session, "🔀 New chat with {agent}: your message was sent there.", agent=agent_id)
-    return _msg(session, "↩ Continuing {title}: your message was sent there.", title=title)
+        return _msg(session, "🔀 New chat with **{agent}**: your message was sent there.", agent=_md_escape(agent_id))
+    return _msg(session, "↩ Continuing {title}: your message was sent there.", title=_md_escape(str(title)))
 
 
 async def reroute_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Buttons under the 'New chat started' notice: continue the previous chat or change the agent."""
+    """Buttons under the 'It has been a while' message: continue the previous chat or change the agent."""
     query = update.callback_query
     state: TelegramBotState = context.application.bot_data["state"]
     session = _session(update, state)
@@ -976,7 +964,7 @@ async def reroute_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.answer(error_message(session.language, exc)[:200], show_alert=True)
         return
     await query.answer()
-    await _edit_panel(query, text, None)
+    await _edit_panel(query, text, None, markdown=True)
 
 
 def _price_key(value: str | None) -> tuple[int, Decimal]:
@@ -1039,10 +1027,10 @@ def _shift_entities(entities: list[MessageEntity], offset: int) -> list[MessageE
 
 
 def _generation_message(
-    parts: list[tuple[str, str]], notice: str = "", *, show_thinking: bool = True,
+    parts: list[tuple[str, str]], *, show_thinking: bool = True,
 ) -> tuple[str, list[MessageEntity]]:
     """Render reasoning, text and actions in their original event order."""
-    text, entities = _convert_markdown(notice) if notice else ("", [])
+    text, entities = "", []
     quote_start: int | None = None
     for kind, content in parts:
         if kind == "reasoning" and not show_thinking:
@@ -1069,7 +1057,7 @@ def _generation_message(
         else:
             plain, part_entities = _convert_markdown(content)
             entities.extend(_shift_entities(part_entities, _utf16_len(text)))
-            text += plain
+            text += plain + ("\n\n" if kind == "agent" else "")
     if quote_start is not None and _utf16_len(text) > quote_start:
         entities.append(MessageEntity(
             type=MessageEntity.EXPANDABLE_BLOCKQUOTE,
@@ -1213,10 +1201,18 @@ def _format_actions(actions: list[dict]) -> str:
 
 
 def _final_messages(
-    parts: list[tuple[str, str]], notice: str = "", *, show_thinking: bool = True,
+    parts: list[tuple[str, str]], *, show_thinking: bool = True, agent_name: str | None = None,
 ) -> list[tuple[str, list[MessageEntity]]]:
-    """Split the rendered timeline without discarding text or entity formatting."""
-    text, entities = _generation_message(parts, notice, show_thinking=show_thinking)
+    """Split the rendered timeline without discarding text or entity formatting.
+
+    With `agent_name` (final messages only, never drafts) the reply starts with the agent's name in bold,
+    on its own line right before the first text of the answer (after any thinking or action lines).
+    """
+    if agent_name is not None:
+        first = next((index for index, (kind, _) in enumerate(parts) if kind == "text"), None)
+        if first is not None:
+            parts = [*parts[:first], ("agent", f"**{_md_escape(agent_name)}**"), *parts[first:]]
+    text, entities = _generation_message(parts, show_thinking=show_thinking)
     messages: list[tuple[str, list[MessageEntity]]] = []
     start = offset = 0
     while start < len(text):
@@ -1391,13 +1387,19 @@ async def _offer_reroute(
     record.chat_id, record.message_id = update.effective_chat.id, sent.message_id
 
 
+def _agent_name(service: ChatService, user_id: str, agent_id: str) -> str:
+    """The agent's display name, falling back to its id when it cannot be read."""
+    try:
+        return next((a["name"] for a in service.list_agents(user_id) if a["id"] == agent_id), agent_id)
+    except (ServiceError, OSError, ValueError, KeyError):
+        return agent_id
+
+
 async def _send_generation(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     text: str,
     attachments: list[dict],
-    *,
-    new_chat_notice: bool = False,
 ) -> None:
     state: TelegramBotState = context.application.bot_data["state"]
     session = _session(update, state)
@@ -1414,7 +1416,7 @@ async def _send_generation(
         preferences = state.service.get_preferences(user_id)
         show_thinking = preferences["show_thinking"]
         language = preferences["language"]
-        notice = message(language, "**_New chat started_**\n\n") if new_chat_notice else ""
+        agent_name = _agent_name(state.service, user_id, agent_id)
         # Sending may transcribe audio first; keep that blocking work off the event loop.
         events = await asyncio.to_thread(
             state.service.send,
@@ -1432,7 +1434,7 @@ async def _send_generation(
                 content.append(
                     "text", message(language, "\n\n_[Interrupted — your latest message is being processed.]_"),
                 )
-                await stream.finish(_final_messages(content.parts, notice, show_thinking=show_thinking))
+                await stream.finish(_final_messages(content.parts, show_thinking=show_thinking, agent_name=agent_name))
                 return
             if event.kind in ("text", "reasoning"):
                 content.append(event.kind, event.text)
@@ -1444,12 +1446,12 @@ async def _send_generation(
                 content.append("notice", event.text)
             else:
                 continue
-            preview = _final_messages(content.parts, notice, show_thinking=show_thinking)
+            preview = _final_messages(content.parts, show_thinking=show_thinking)
             if preview:
                 await stream.update(*preview[-1])
         if not any(kind == "text" for kind, _ in content.parts):
             content.append("text", message(language, "_(The model returned no text.)_"))
-        await stream.finish(_final_messages(content.parts, notice, show_thinking=show_thinking))
+        await stream.finish(_final_messages(content.parts, show_thinking=show_thinking, agent_name=agent_name))
     except Exception as exc:
         logger.exception("Telegram generation failed")
         await stream.finish([(
@@ -1465,14 +1467,14 @@ async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
     await _flush_reroute(context, session)
     try:
-        new_chat_notice = _prepare_message_session(session, state.service)
+        _prepare_message_session(session, state.service)
     except (PreferencesError, ServiceError, ValueError, OSError) as exc:
         logger.warning("Could not prepare Telegram chat: %s", exc)
         await update.effective_message.reply_text(
             _msg(session, "Could not prepare the chat: {error}", error=error_message(session.language, exc)),
         )
         return
-    await _launch_generation(update, context, session, update.effective_message.text or "", [], new_chat_notice)
+    await _launch_generation(update, context, session, update.effective_message.text or "", [])
 
 
 async def media_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1485,8 +1487,8 @@ async def media_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     try:
         attachment = await _download_attachment(update.effective_message, context.bot)
         text = update.effective_message.caption or ""
-        new_chat_notice = _prepare_message_session(session, state.service)
-        await _launch_generation(update, context, session, text, [attachment], new_chat_notice)
+        _prepare_message_session(session, state.service)
+        await _launch_generation(update, context, session, text, [attachment])
     except (TelegramError, PreferencesError, ServiceError, ValueError, OSError) as exc:
         await update.effective_message.reply_text(
             _msg(session, "Attachment rejected: {error}", error=error_message(session.language, exc)),
@@ -1532,7 +1534,7 @@ def build_application(
     application.bot_data["commands"] = [
         BotCommand("settings", "Thinking, language, agent, and reasoning effort"),
         BotCommand("newchat", "New chat (choose the agent)"),
-        BotCommand("selectagent", "Choose the active agent"),
+        BotCommand("selectagent", "Choose the agent for a new chat"),
         BotCommand("agent", "Show the active agent"),
         BotCommand("selectmodel", "Choose a favorite model"),
         BotCommand("model", "Show the current model"),
@@ -1556,11 +1558,10 @@ def build_application(
     application.add_handler(CommandHandler("settings", settings_command))
     application.add_handler(CallbackQueryHandler(panel_callback, pattern=rf"^{_PANEL_CALLBACK}:"))
     application.add_handler(CallbackQueryHandler(reroute_callback, pattern=rf"^{_REROUTE_CALLBACK}:"))
-    application.add_handler(CommandHandler(["newchat", "new"], new_chat))
+    application.add_handler(CommandHandler(["newchat", "new", "selectagent"], new_chat))
     application.add_handler(CommandHandler("selectmodel", select_model))
     application.add_handler(CommandHandler("model", show_model))
     application.add_handler(CommandHandler("stt", show_stt))
-    application.add_handler(CommandHandler("selectagent", select_agent))
     application.add_handler(CommandHandler("agent", show_agent))
     application.add_handler(CommandHandler("dream", dream_command))
     application.add_handler(

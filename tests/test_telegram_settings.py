@@ -15,7 +15,7 @@ from src.service.chat import AgentBusy, ChatEvent
 from src.telegram.bot import (
     TelegramBotState, TelegramSession, _edit_panel, _final_messages, _generation_message,
     _prepare_message_session, _send_generation, new_chat, panel_callback,
-    refresh_language, select_agent, select_model, settings_command, text_message,
+    refresh_language, select_model, settings_command, text_message,
 )
 
 
@@ -168,14 +168,18 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.preferences["default_stt_model"], "stt/10")
         self.assertEqual(self.update.effective_message.reply_text.await_count, 2)
 
-    async def test_agent_choice_switches_active_agent_and_returns_to_settings(self) -> None:
+    async def test_agent_choice_in_settings_starts_a_chat_with_that_agent(self) -> None:
         await self.open_panel()
         await self.press("agents")
-        await self.press(self.action("Second (agent-b)"))
+        query = await self.press(self.action("Second (agent-b)"))
         self.assertEqual(self.preferences["agent_id"], "agent-b")
-        self.assertEqual(self.session.agent_id, "agent-b")
-        self.assertIsNone(self.session.chat_id)
-        self.assertIn("Active agent: Second", self.text)
+        self.assertEqual((self.session.agent_id, self.session.chat_id), ("agent-b", "new-chat"))
+        self.service.create_chat.assert_called_once_with("test-user", "agent-b")
+        self.assertIn("New chat created with Second.", self.text)
+        entities = query.edit_message_text.await_args.kwargs["entities"]
+        bold = next(e for e in entities if e.type == "bold")
+        self.assertEqual(self.text[bold.offset:bold.offset + bold.length], "Second")
+        self.assertNotIn("panel", self.context.user_data)
         self.service.send.assert_not_called()
 
     async def test_closing_removes_buttons_and_panel_state(self) -> None:
@@ -301,13 +305,12 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
         query.edit_message_text.assert_not_awaited()
         self.assertIn("panel", self.context.user_data)
 
-    async def test_selectagent_switches_and_persists_shared_selection(self) -> None:
-        await self.open_panel(select_agent)
+    async def test_selectagent_picker_creates_a_chat_and_persists_the_agent(self) -> None:
+        await self.open_panel(new_chat)  # /selectagent is registered on the /newchat handler
         await self.press(self.action("Second (agent-b)"))
         self.assertEqual(self.preferences["agent_id"], "agent-b")
-        self.assertEqual(self.session.agent_id, "agent-b")
-        self.assertIsNone(self.session.chat_id)
-        self.assertIn("agent-b", self.text)
+        self.assertEqual((self.session.agent_id, self.session.chat_id), ("agent-b", "new-chat"))
+        self.assertIn("Second", self.text)
         self.assertNotIn("panel", self.context.user_data)
 
     async def test_closing_a_selector_only_removes_its_buttons(self) -> None:
@@ -334,12 +337,12 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
     async def test_current_chat_stays_on_its_agent_until_idle_timeout(self) -> None:
         self.preferences["agent_id"] = "agent-b"
         self.session.last_message_at = datetime.now(timezone.utc)
-        self.assertFalse(_prepare_message_session(self.session, self.service))
+        _prepare_message_session(self.session, self.service)
         self.service.get_preferences.assert_not_called()
         self.service.create_chat.assert_not_called()
         self.assertEqual(self.session.agent_id, "agent-a")
         self.session.last_message_at -= timedelta(hours=2)
-        self.assertTrue(_prepare_message_session(self.session, self.service))
+        _prepare_message_session(self.session, self.service)
         self.service.create_chat.assert_called_once_with("test-user", "agent-b")
         self.assertEqual(self.session.agent_id, "agent-b")
 
