@@ -1,14 +1,39 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from contextlib import contextmanager
 from typing import Awaitable, Callable, Generator, Iterator, TypeVar
 
 import httpx
+import requests
 
 from src.providers.cancellation import CancellationToken
 
 _T = TypeVar("_T")
+
+_local = threading.local()
+
+
+def http_session() -> requests.Session:
+    """A keep-alive `requests` session for this thread (sessions are not shared across threads).
+
+    Short calls such as embeddings reuse one TLS connection instead of opening a new one each time,
+    which saves the DNS+TCP+TLS handshake (roughly 60-100 ms per call to OpenRouter).
+    """
+    session = getattr(_local, "session", None)
+    if session is None:
+        session = _local.session = requests.Session()
+    return session
+
+
+def post_json(url: str, **kwargs) -> requests.Response:
+    """POST over this thread's keep-alive session; one retry on a connection the server had already closed."""
+    try:
+        return http_session().post(url, **kwargs)
+    except requests.ConnectionError:
+        http_session().close()
+        return http_session().post(url, **kwargs)
 
 
 def _run(

@@ -12,7 +12,7 @@ from src.providers.cancellation import CancellationToken, GenerationCancelled
 from src.providers.provider import LLMProvider, format_completion
 from src.providers.catalog import list_openrouter_models
 from src.providers.catalog import list_openrouter_transcription_models
-from src.providers.transport import post_chat, stream_chat
+from src.providers.transport import post_chat, post_json, stream_chat
 from src.utils.i18n import UserMessageError
 from src.utils.logger import get_logger
 
@@ -391,7 +391,7 @@ class OpenRouterProvider(LLMProvider):
         }
         payload = {"model": model, "input": list(input)}
         logger.debug("openrouter embeddings request; payload=%s", payload)
-        response = requests.post(
+        response = post_json(
             "https://openrouter.ai/api/v1/embeddings",
             json=payload,
             headers=headers,
