@@ -412,10 +412,11 @@ class DreamConfig(BaseModel):
 
 
 class MemoryLimits(BaseModel):
-    """Character limits of the memory files injected in every system prompt."""
+    """Application-wide character limits of SOUL.md and of the memory files injected in every system prompt."""
 
     model_config = ConfigDict(extra="forbid")
 
+    soul_chars: int = Field(default=15_000, ge=1_000, le=100_000, strict=True)
     memory_chars: int = Field(default=2500, ge=100, le=50_000, strict=True)
     user_chars: int = Field(default=2500, ge=100, le=50_000, strict=True)
 
@@ -462,7 +463,6 @@ class AgentConfig(BaseModel):
     chat_config: ChatConfig = ChatConfig()
     dream: DreamConfig = Field(default_factory=DreamConfig)
     folders: list[FolderConfig] = Field(default_factory=list, max_length=20)  # user folders, each a source
-    memory_limits: MemoryLimits = Field(default_factory=MemoryLimits)
 
     @model_validator(mode="before")
     @classmethod
@@ -472,6 +472,9 @@ class AgentConfig(BaseModel):
                 "`vault` was replaced by `folders` (a list of name/path entries); "
                 "move the path to `folders: [{name: vault, path: ...}]`"
             )
+        # legacy: the size limits moved to settings.yaml (memory_limits); old agent files still carry the key
+        if isinstance(data, dict) and "memory_limits" in data:
+            data = {key: value for key, value in data.items() if key != "memory_limits"}
         return data
 
     @field_validator("folders")
@@ -509,7 +512,6 @@ class ResolvedAgent(BaseModel):
     associative_execution: AssociativeExecution = "parallel"
     dream: DreamConfig = Field(default_factory=DreamConfig)
     folders: list[FolderConfig] = Field(default_factory=list)
-    memory_limits: MemoryLimits = Field(default_factory=MemoryLimits)
     claude_subscription: ClaudeSubscriptionConfig = Field(default_factory=ClaudeSubscriptionConfig)
     openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)  # key env var already resolved for a main OpenRouter
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)

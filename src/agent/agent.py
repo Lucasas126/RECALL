@@ -154,7 +154,7 @@ class Agent:
         # per-agent access to the data plane (mind palace, conversations, own files, user folders)
         self.sources = sources or SourceRegistry.for_agent(config.user_id, config.id, **chat_folder_options(config))
         # SOUL, memories, skills index and questions, frozen for this chat's lifetime
-        self.profile = profile or AgentProfile(limits=config.memory_limits)
+        self.profile = profile or AgentProfile()
         # semantic index over the indexed sources; updated in the background, never on a turn's path
         self.index = VectorIndex.for_agent(
             config.user_id, config.id, self.sources,
@@ -268,7 +268,7 @@ class Agent:
         config = load_agent(user_id, agent_id, check_agent_model=False)
         provider = main_provider(config)
         sources = SourceRegistry.for_agent(config.user_id, config.id, **chat_folder_options(config))
-        profile = load_profile(sources, config.memory_limits)
+        profile = load_profile(sources)
         logger.debug(
             "loaded agent user=%s agent=%s provider=%s model=%s",
             config.user_id, config.id, config.provider_name, config.models.chat,

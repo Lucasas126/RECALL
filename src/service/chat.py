@@ -25,17 +25,17 @@ from src.config.favorites import ModelFavorites
 from src.config.loader import agent_default_model, load_agent, load_agent_config, load_user, user_models
 from src.config.model_refs import CLAUDE_SUBSCRIPTION, OPENROUTER, PROVIDERS, is_claude_subscription, model_name, provider_of
 from src.config.models import (
-    AgentConfig, DreamConfig, FolderConfig, MemoryLimits, ReasoningEffort, ResolvedAgent, UserConfig,
+    AgentConfig, DreamConfig, FolderConfig, ReasoningEffort, ResolvedAgent, UserConfig,
 )
 from src.agent.tool_groups import DEFAULT_TOOL_GROUPS, TOOL_GROUP_CATALOG
 from src.config.preferences import PreferencesError, UserPreferences, UserPreferencesStore
 from src.config.zdr import chat_zdr, ensure_zdr_compatible, zdr_required
 from src.config.settings import (
     CHAT_NAMING, CONFIG_DIR, DATA_DIR, MCP, PDF, SPEECH_TO_TEXT, TAVILY, TELEGRAM_ALLOWED_USERS_ENV,
-    VIDEO_DECOMPOSITION, WEB_PUBLIC_URL,
+    VIDEO_DECOMPOSITION, WEB_PUBLIC_URL, memory_limits,
 )
 from src.core.index import VectorIndex
-from src.core.sources.agent_files import SOUL_MAX_CHARS, AgentFilesSource, MemoryTarget
+from src.core.sources.agent_files import AgentFilesSource, MemoryTarget
 from src.core.sources.conversations import DEFAULT_DISPOSABLE_RETENTION_DAYS, ConversationsSource
 from src.core.sources.registry import SourceRegistry
 from src.providers.cancellation import CancellationToken, GenerationCancelled
@@ -454,7 +454,12 @@ class ChatService:
     def get_preferences(self, user_id: str) -> dict:
         """Read current user-wide preferences, including configuration-derived defaults."""
         user = self._user(user_id)
-        return self._resolve_preferences(user, self._preferences.get(user_id)).model_dump()
+        return self._preferences_body(self._resolve_preferences(user, self._preferences.get(user_id)))
+
+    @staticmethod
+    def _preferences_body(preferences: UserPreferences) -> dict:
+        """Preferences plus the application-wide size limits (settings.yaml) the interface needs for its counters."""
+        return {**preferences.model_dump(), "limits": memory_limits().model_dump(mode="json")}
 
     def language(self, user_id: str) -> Literal["en", "es"]:
         """Read the current alert language without changing cached agents or chat state."""
@@ -474,7 +479,7 @@ class ChatService:
         saved = self._preferences.update(
             user_id, changes, validate=lambda preferences: self._resolve_preferences(user, preferences),
         )
-        return self._resolve_preferences(user, saved).model_dump()
+        return self._preferences_body(self._resolve_preferences(user, saved))
 
     def _resolve_preferences(self, user: UserConfig, saved: UserPreferences) -> UserPreferences:
         resolved = UserPreferences.model_validate({
@@ -1367,14 +1372,13 @@ class ChatService:
         config = self._agent_config(user_id, agent_id)
         return {
             "dream": config.dream.model_dump(mode="json"),
-            "memory_limits": config.memory_limits.model_dump(mode="json"),
             "default_prompt": DEFAULT_DREAM_PROMPT,
         }
 
     def update_dream_settings(
-        self, user_id: str, agent_id: str, dream: DreamConfig, memory_limits: MemoryLimits,
+        self, user_id: str, agent_id: str, dream: DreamConfig,
     ) -> dict:
-        """Save the dream block and memory limits; idle cached chats pick them up when rebuilt."""
+        """Save the dream block; idle cached chats pick them up when rebuilt."""
         user = self._owned_agent(user_id, agent_id)
         if dream.model is not None and dream.model != self._agent_config(user_id, agent_id).dream.model:
             provider, _ = provider_settings.canonical_reference(user, dream.model)
@@ -1382,7 +1386,7 @@ class ChatService:
         slot = self._slot(user_id, agent_id)
         with slot.lock:
             config = self._agent_config(user_id, agent_id)
-            updated = config.model_copy(update={"dream": dream, "memory_limits": memory_limits})
+            updated = config.model_copy(update={"dream": dream})
             self._agents.update(user_id, agent_id, AgentConfig.model_validate(updated.model_dump()))
             with slot.state:
                 for chat_id in [chat for chat in slot.agents if not self._chat_busy(slot, chat)]:
@@ -1392,7 +1396,7 @@ class ChatService:
     def get_soul(self, user_id: str, agent_id: str) -> dict:
         self._owned_agent(user_id, agent_id)
         content = self._agent_files(user_id, agent_id).soul_text()
-        return {"content": content, "chars": len(content), "max_chars": SOUL_MAX_CHARS, "default": default_soul()}
+        return {"content": content, "chars": len(content), "max_chars": memory_limits().soul_chars, "default": default_soul()}
 
     def update_soul(self, user_id: str, agent_id: str, content: str) -> dict:
         """Replace SOUL.md (the previous version goes to the history); applies to new chats."""
@@ -1423,7 +1427,7 @@ class ChatService:
 
     def get_memory(self, user_id: str, agent_id: str, target: MemoryTarget) -> dict:
         self._owned_agent(user_id, agent_id)
-        limits = self._agent_config(user_id, agent_id).memory_limits
+        limits = memory_limits()
         files = self._agent_files(user_id, agent_id)
         content = files.memory_text(target)
         return {
@@ -1435,11 +1439,11 @@ class ChatService:
     def update_memory(self, user_id: str, agent_id: str, target: MemoryTarget, content: str) -> dict:
         """Replace MEMORY.md or USER.md; entries are separated by a line holding only `§`."""
         self._owned_agent(user_id, agent_id)
-        limits = self._agent_config(user_id, agent_id).memory_limits
+        limits = memory_limits()
         limit = limits.memory_chars if target == "memory" else limits.user_chars
         if len(content) > limit:
             raise InputError(
-                "the {target} memory cannot exceed {limit} characters; shorten it or raise memory_limits",
+                "the {target} memory cannot exceed {limit} characters; shorten it; the limit is set in settings.yaml (memory_limits)",
                 target=target, limit=limit,
             )
         files = self._agent_files(user_id, agent_id)

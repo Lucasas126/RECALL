@@ -9,12 +9,12 @@ from typing import Literal
 
 import yaml
 
+from src.config.settings import memory_limits
 from src.core.sources.base import Source, scan_files
 from src.utils.files import atomic_write_text, exclusive_file_lock
 from src.utils.i18n import InputError
 
 SOUL_FILE = "SOUL.md"
-SOUL_MAX_CHARS = 15000
 SOUL_HISTORY_KEEP = 5
 MEMORY_DELIMITER = "\n§\n"
 MemoryTarget = Literal["memory", "user"]
@@ -115,8 +115,9 @@ class AgentFilesSource(Source):
 
     def write_soul(self, content: str) -> bool:
         """Replace SOUL.md, saving the previous version to `soul_history/` first; False when unchanged."""
-        if len(content) > SOUL_MAX_CHARS:
-            raise InputError("SOUL.md cannot exceed {limit} characters", limit=SOUL_MAX_CHARS)
+        limit = memory_limits().soul_chars
+        if len(content) > limit:
+            raise InputError("SOUL.md cannot exceed {limit} characters", limit=limit)
         with self._lock():
             current = self.soul()
             if current == content:

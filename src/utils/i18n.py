@@ -386,7 +386,7 @@ _SPANISH = {
     "unknown SOUL version: {version}": "Versión de SOUL desconocida: {version}",
     "invalid SOUL version: {version}": "Versión de SOUL no válida: {version}",
     "SOUL.md cannot exceed {limit} characters": "SOUL.md no puede superar {limit} caracteres",
-    "the {target} memory cannot exceed {limit} characters; shorten it or raise memory_limits": "la memoria {target} no puede superar {limit} caracteres; acórtala o aumenta memory_limits",
+    "the {target} memory cannot exceed {limit} characters; shorten it; the limit is set in settings.yaml (memory_limits)": "la memoria {target} no puede superar {limit} caracteres; acórtala; el límite se define en settings.yaml (memory_limits)",
     "folder '{name}' not found: {path}; fix `folders` in the agent configuration": "No se ha encontrado la carpeta '{name}': {path}; corrige `folders` en la configuración del agente",
     "Folders read-only": "Carpetas solo lectura",
     "Folders read and edit": "Carpetas lectura y edición",

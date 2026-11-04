@@ -18,6 +18,11 @@ index:
 agent:
   max_tool_hops: 5          # max tool round-trips before forcing a final answer
 
+memory_limits:
+  soul_chars: 15000         # maximum characters of an agent's SOUL.md (1000-100000)
+  memory_chars: 2500        # maximum characters of an agent's MEMORY.md, injected in every prompt (100-50000)
+  user_chars: 2500          # maximum characters of an agent's USER.md, injected in every prompt (100-50000)
+
 web:
   host: 127.0.0.1           # interface the web ui binds to
   port: 8000

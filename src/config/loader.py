@@ -138,7 +138,6 @@ def load_agent(user_id: str, agent_id: Optional[str] = None, *, check_agent_mode
         associative_execution=agent.chat_config.associative_execution,
         dream=agent.dream,
         folders=agent.folders,
-        memory_limits=agent.memory_limits,
         claude_subscription=user.claude_subscription,
         openrouter=user.openrouter_settings(),
         ollama=user.ollama,

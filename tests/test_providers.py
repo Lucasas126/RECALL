@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from auth_helpers import TEST_PASSWORD_HASH, login
 from provider_helpers import CLAUDE_LOGGED_IN, CLAUDE_LOGGED_OUT, CLAUDE_NOT_FOUND, isolate_providers
 from src.config.model_refs import model_name, prefix_of, reference, split_reference
-from src.config.models import ClaudeSubscriptionConfig, DreamConfig, MemoryLimits, OllamaConfig, OpenRouterConfig, UserConfig
+from src.config.models import ClaudeSubscriptionConfig, DreamConfig, OllamaConfig, OpenRouterConfig, UserConfig
 from src.core.sources.conversations import ChatModel
 from src.providers.catalog import OpenRouterModel, OpenRouterTranscriptionModel
 from src.providers.claude_subscription import ClaudeCodeLoggedOut, ClaudeCodeMissing
@@ -342,7 +342,7 @@ class ProvidersApiTests(unittest.TestCase):
         with self.assertRaisesRegex(InputError, "Provider not available: Claude subscription"):
             self.service.set_chat_model("user-one", "agent-a", chat_id, "claude_subscription:opus", zdr=True)
         with self.assertRaisesRegex(InputError, "Provider not available: Claude subscription"):
-            self.service.update_dream_settings("user-one", "agent-a", DreamConfig(model="claude_subscription:sonnet"), MemoryLimits())
+            self.service.update_dream_settings("user-one", "agent-a", DreamConfig(model="claude_subscription:sonnet"))
         # the Spanish UI gets the same fix in Spanish
         self.client.patch("/api/preferences", json={"language": "es"})
         spanish = self.client.patch("/api/preferences", json={"default_llm_model": "claude_subscription:sonnet"})

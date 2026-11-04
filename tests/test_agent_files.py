@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from src.agent.dream import dream_folder_options
 from src.agent.tools import build_tools, chat_folder_options
 from src.agent.toolsets.self_files import MemoryOperationError, apply_memory_operations
-from src.config.models import AgentConfig, ChatConfig, DreamConfig, FolderConfig, MemoryLimits, ModelsConfig, ResolvedAgent
+from src.config.models import AgentConfig, ChatConfig, DreamConfig, FolderConfig, ModelsConfig, ResolvedAgent
 from src.core.sources.registry import SourceRegistry
 from src.utils.i18n import InputError
 
@@ -44,7 +44,7 @@ class SoulTests(AgentFilesFixture):
     def test_missing_soul_is_an_empty_personality_and_is_not_created(self) -> None:
         self.assertIsNone(self.files.soul())
         self.assertEqual(self.files.soul_text(), "")
-        self.assertEqual(load_profile(self.sources, MemoryLimits()).soul, "")
+        self.assertEqual(load_profile(self.sources).soul, "")
         self.assertFalse((self.agent_dir / "SOUL.md").exists())
 
     def test_history_keeps_the_last_five_versions_and_restores(self) -> None:
@@ -97,8 +97,14 @@ class SoulTests(AgentFilesFixture):
 
 class MemoryToolTests(AgentFilesFixture):
     def memory(self, limit: int = 120):
-        config = _config(memory_limits=MemoryLimits(memory_chars=max(100, limit), user_chars=100))
-        return self.tools(["self"], config)["memory"]
+        from unittest.mock import patch
+
+        from src.config.models import MemoryLimits
+
+        patcher = patch("src.config.settings.MEMORY_LIMITS", MemoryLimits(memory_chars=max(100, limit), user_chars=100))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return self.tools(["self"], _config())["memory"]
 
     def test_add_patch_remove_follow_entry_semantics(self) -> None:
         entries = apply_memory_operations([], [{"action": "add", "content": "Likes tea"}])
@@ -190,7 +196,7 @@ class PromptAssemblyTests(AgentFilesFixture):
             "questions.md", "# Questions\n- [x] answered one\n- first?\n  - why: curious\n- [ ] second?\n- third?\n- fourth?\n",
         )
         self.files.write_soul("I am the soul.")
-        profile = load_profile(self.sources, MemoryLimits())
+        profile = load_profile(self.sources)
         self.assertEqual(profile.questions, ["first?", "second?", "third?"])
         prompt = system_prompt(profile, ["## Connected services (MCP)\n\nnotes"])
         positions = [prompt.index(part) for part in (
@@ -213,7 +219,7 @@ class PromptAssemblyTests(AgentFilesFixture):
 
         def build() -> Agent:
             with patch("src.agent.agent.VectorIndex.for_agent"):
-                profile = load_profile(self.sources, config.memory_limits)
+                profile = load_profile(self.sources)
                 return Agent(config, provider, sources=self.sources, profile=profile)
 
         first = build()

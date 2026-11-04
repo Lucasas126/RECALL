@@ -142,8 +142,7 @@ function translateInterface() {
     ["agent-folder-add", "Add folder"], ["index-title", "Memory index"], ["index-reindex", "Reindex"],
     ["index-rebuild", "Rebuild from scratch"],
     ["index-hint", "Reindex scans every source now, folders included, and embeds only what changed. Rebuilding embeds everything again."],
-    ["dream-limits-legend", "Memory limits"], ["dream-memory-chars-label", "MEMORY.md characters"],
-    ["dream-user-chars-label", "USER.md characters"], ["dream-prompt-legend", "Dream prompt"],
+    ["dream-prompt-legend", "Dream prompt"],
     ["dream-prompt-hint", "Empty uses the built-in prompt, shown as the placeholder."],
     ["dream-prompt-copy", "Edit a copy of the default"], ["dream-prompt-reset", "Reset to default"],
     ["dream-notify-label", "Notify me on Telegram when a session ends"], ["dream-save", "Save dream settings"],
@@ -904,8 +903,8 @@ function agentFormBody() {
     id: state.agentForm.originalId ?? agentIdFromName(name),
     name,
     description: $("agent-description").value.trim(),
-    // edited in the Dream tab; sent back unchanged so saving the agent does not reset them
-    ...(saved ? { dream: saved.dream, memory_limits: saved.memory_limits } : {}),
+    // edited in the Dream tab; sent back unchanged so saving the agent does not reset it
+    ...(saved ? { dream: saved.dream } : {}),
     folders: agentFoldersBody(),
     chat_config: {
       model: $("agent-model").value.trim() || null,  // null follows the user's default model
@@ -1030,6 +1029,8 @@ $("agent-delete").addEventListener("click", async () => {
 
 function applyPreferences(preferences) {
   state.preferences = preferences;
+  // application-wide size limits (settings.yaml) arrive with the preferences
+  if (preferences.limits) $("agent-prompt").maxLength = preferences.limits.soul_chars;
   $("messages").classList.toggle("hide-thinking", !preferences.show_thinking);
   translateInterface();
   updateModelControls();
@@ -3077,8 +3078,6 @@ function fillDreamSettings(settings) {
   $("dream-max-minutes").value = dream.max_minutes;
   $("dream-tool-web").checked = dream.tools.includes("web");
   $("dream-tool-folders").checked = dream.tools.includes("folders");
-  $("dream-memory-chars").value = settings.memory_limits.memory_chars;
-  $("dream-user-chars").value = settings.memory_limits.user_chars;
   $("dream-prompt").value = dream.prompt;
   $("dream-prompt").placeholder = settings.default_prompt;
   $("dream-notify").checked = dream.notify_telegram;
@@ -3116,10 +3115,6 @@ function dreamSettingsBody() {
       prompt: $("dream-prompt").value.trim() ? $("dream-prompt").value : "",
       notify_telegram: $("dream-notify").checked,
     },
-    memory_limits: {
-      memory_chars: Number($("dream-memory-chars").value),
-      user_chars: Number($("dream-user-chars").value),
-    },
   };
 }
 
@@ -3140,7 +3135,7 @@ async function saveDreamSettings(event) {
     fillDreamSettings(settings);
     // keep the agent form's copy current, so saving the agent later does not revert these fields
     const agent = state.agentConfigs.find((item) => item.id === agentId);
-    if (agent) Object.assign(agent, { dream: settings.dream, memory_limits: settings.memory_limits });
+    if (agent) Object.assign(agent, { dream: settings.dream });
     // the memory limits shown in the Soul & memory tab may have changed
     state.dream.loaded.delete("soul");
     $("dream-status-text").textContent = tr("Dream settings saved.");

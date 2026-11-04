@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Annotated, Callable, Optional
 
 from src.agent.tooling import tool
 from src.agent.toolsets.common import mark_written
+from src.config.settings import memory_limits
 from src.core.sources.agent_files import SKILL_FILE, join_memory
 from src.utils.i18n import InputError
 
@@ -71,7 +72,7 @@ def build_self_tools(agent: Agent) -> list[Callable[..., str]]:
     sources = agent.sources
 
     def limit(target: str) -> int:
-        limits = agent.config.memory_limits
+        limits = memory_limits()
         return limits.memory_chars if target == "memory" else limits.user_chars
 
     @tool

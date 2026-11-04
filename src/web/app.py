@@ -15,7 +15,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from src.config.agents import AgentConflict
 from src.config.favorites import FavoriteModelId, FavoritesError
-from src.config.models import AgentConfig, DreamConfig, MemoryLimits, ReasoningEffort
+from src.config.models import AgentConfig, DreamConfig, ReasoningEffort
 from src.core.sources.agent_files import MemoryTarget
 from src.config.preferences import PreferencesError, UserPreferences
 from src.core.sources.conversations import ChatMetadataError
@@ -81,7 +81,6 @@ class ChatTitleIn(BaseModel):
 
 class DreamSettingsIn(BaseModel):
     dream: DreamConfig
-    memory_limits: MemoryLimits = Field(default_factory=MemoryLimits)
 
 
 class ReindexIn(BaseModel):
@@ -376,7 +375,7 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
 
     @app.put("/api/agents/{agent_id}/dream/settings")
     def update_dream_settings(agent_id: str, body: DreamSettingsIn, user_id: str = Depends(current_user)):
-        return service.update_dream_settings(user_id, agent_id, body.dream, body.memory_limits)
+        return service.update_dream_settings(user_id, agent_id, body.dream)
 
     # ------------------------------------------------------------------ vector index
 

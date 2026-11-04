@@ -131,6 +131,7 @@ class DreamApiTests(unittest.TestCase):
         self.assertFalse(settings["dream"]["enabled"])
         self.assertEqual(settings["dream"]["tools"], ["web", "folders"])
         self.assertNotIn("vault", settings)
+        self.assertNotIn("memory_limits", settings)
         self.assertIn("## Dream session", settings["default_prompt"])
         both = {**settings["dream"], "every_hours": 6, "daily_at": "04:00"}
         self.assertEqual(self.client.put(f"{self.base}/dream/settings", json={"dream": both}).status_code, 422)
@@ -138,14 +139,15 @@ class DreamApiTests(unittest.TestCase):
         self.assertEqual(self.client.put(f"{self.base}/dream/settings", json={"dream": renamed}).status_code, 422)
         body = {
             "dream": {**settings["dream"], "enabled": True, "daily_at": "04:00", "notify_telegram": True},
-            "memory_limits": {"memory_chars": 3000, "user_chars": 1000},
+            "memory_limits": {"memory_chars": 3000, "user_chars": 1000},  # an old client may still send it: ignored
         }
         saved = self.client.put(f"{self.base}/dream/settings", json=body)
         self.assertEqual(saved.status_code, 200, saved.text)
         stored = yaml.safe_load((self.config_dir / "ana" / "agents" / "aria.yaml").read_text(encoding="utf-8"))
         self.assertEqual(stored["dream"]["daily_at"], "04:00")
         self.assertNotIn("vault", stored)
-        self.assertEqual(stored["memory_limits"]["memory_chars"], 3000)
+        self.assertNotIn("memory_limits", stored)
+        self.assertNotIn("memory_limits", saved.json())
         status = self.client.get(f"{self.base}/dream/status").json()
         self.assertEqual(status["schedule"]["daily_at"], "04:00")
         self.assertIsNotNone(status["schedule"]["next_run"])
@@ -173,7 +175,7 @@ class DreamApiTests(unittest.TestCase):
     def test_max_minutes_is_saved_through_the_settings_api(self) -> None:
         settings = self.client.get(f"{self.base}/dream/settings").json()
         self.assertEqual(settings["dream"]["max_minutes"], 5)
-        body = {"dream": {**settings["dream"], "max_minutes": 12}, "memory_limits": settings["memory_limits"]}
+        body = {"dream": {**settings["dream"], "max_minutes": 12}}
         self.assertEqual(self.client.put(f"{self.base}/dream/settings", json=body).json()["dream"]["max_minutes"], 12)
         body["dream"]["max_minutes"] = 0
         self.assertEqual(self.client.put(f"{self.base}/dream/settings", json=body).status_code, 422)

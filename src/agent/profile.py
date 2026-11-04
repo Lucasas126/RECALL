@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass, field
 
 from src.config.models import MemoryLimits
+from src.config.settings import memory_limits
 from src.core.sources.agent_files import SkillInfo, join_memory
 from src.core.sources.registry import SourceRegistry
 
@@ -21,7 +22,7 @@ class AgentProfile:
     user: list[str] = field(default_factory=list)
     skills: list[SkillInfo] = field(default_factory=list)
     questions: list[str] = field(default_factory=list)
-    limits: MemoryLimits = field(default_factory=MemoryLimits)
+    limits: MemoryLimits = field(default_factory=memory_limits)
 
 
 def open_questions(text: str, limit: int = MAX_PROMPT_QUESTIONS) -> list[str]:
@@ -36,7 +37,7 @@ def open_questions(text: str, limit: int = MAX_PROMPT_QUESTIONS) -> list[str]:
     return found
 
 
-def load_profile(sources: SourceRegistry, limits: MemoryLimits) -> AgentProfile:
+def load_profile(sources: SourceRegistry) -> AgentProfile:
     """Read SOUL, memories, skill index and open questions; a missing SOUL.md is an empty personality."""
     files = sources.agent_files()
     palace = sources.mind_palace()
@@ -47,7 +48,7 @@ def load_profile(sources: SourceRegistry, limits: MemoryLimits) -> AgentProfile:
         user=files.memory_entries("user"),
         skills=files.skills(),
         questions=open_questions(questions),
-        limits=limits,
+        limits=memory_limits(),
     )
 
 

@@ -221,10 +221,17 @@ class UserPreferencesWebTests(unittest.TestCase):
         self.url = "/api/preferences"
         self.path = self.root / "user-one" / "preferences.json"
 
+    @staticmethod
+    def _plain(body: dict) -> dict:
+        """The preferences without the read-only application `limits` object."""
+        limits = body["limits"]
+        assert set(limits) == {"soul_chars", "memory_chars", "user_chars"}
+        return {key: value for key, value in body.items() if key != "limits"}
+
     def test_defaults_use_yaml_language_and_first_owned_agent(self) -> None:
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {
+        self.assertEqual(self._plain(response.json()), {
             "show_thinking": True, "language": "es", "agent_id": "agent-a",
             "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo",
             "associative_max_matches": None, "disposable_retention_days": None,
@@ -239,7 +246,7 @@ class UserPreferencesWebTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(telegram.get_preferences("user-one"), response.json())
         telegram.update_preferences("user-one", UserPreferences(show_thinking=False))
-        self.assertEqual(self.client.get(self.url).json(), {
+        self.assertEqual(self._plain(self.client.get(self.url).json()), {
             "show_thinking": False, "language": "en", "agent_id": "agent-b",
             "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo",
             "associative_max_matches": None, "disposable_retention_days": None,
@@ -250,7 +257,7 @@ class UserPreferencesWebTests(unittest.TestCase):
         self.client.patch(self.url, json={"show_thinking": False})
         self.users["user-one"].language = "en-US"
         self.users["user-one"].agents.reverse()
-        self.assertEqual(self.client.get(self.url).json(), {
+        self.assertEqual(self._plain(self.client.get(self.url).json()), {
             "show_thinking": False, "language": "en", "agent_id": "agent-b",
             "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo",
             "associative_max_matches": None, "disposable_retention_days": None,
@@ -280,14 +287,14 @@ class UserPreferencesWebTests(unittest.TestCase):
     def test_preferences_are_scoped_to_cookie_user(self) -> None:
         self.client.patch(self.url, json={"language": "en", "show_thinking": False, "agent_id": "agent-b"})
         login(self.client, "user-two")
-        self.assertEqual(self.client.get(self.url).json(), {
+        self.assertEqual(self._plain(self.client.get(self.url).json()), {
             "show_thinking": True, "language": "en", "agent_id": "agent-c",
             "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo",
             "associative_max_matches": None, "disposable_retention_days": None,
         })
         self.client.patch(self.url, json={"language": "es"})
         login(self.client, "user-one")
-        self.assertEqual(self.client.get(self.url).json(), {
+        self.assertEqual(self._plain(self.client.get(self.url).json()), {
             "show_thinking": False, "language": "en", "agent_id": "agent-b",
             "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo",
             "associative_max_matches": None, "disposable_retention_days": None,
@@ -299,7 +306,7 @@ class UserPreferencesWebTests(unittest.TestCase):
             with self.subTest(agent=agent):
                 response = self.client.patch(self.url, json={"agent_id": agent, "show_thinking": False})
                 self.assertEqual(response.status_code, 404)
-                self.assertEqual(self.service.get_preferences("user-one"), {
+                self.assertEqual(self._plain(self.service.get_preferences("user-one")), {
                     "show_thinking": True, "language": "en", "agent_id": "agent-a",
                     "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo",
             "associative_max_matches": None, "disposable_retention_days": None,

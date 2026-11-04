@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 
 from src.config.models import (
-    AssociativeMemoryConfig, ChatNamingConfig, ClaudeLoginSettings, IndexConfig, McpSettings, PdfConfig, PromptCacheConfig, SpeechToTextConfig, TavilyConfig,
+    AssociativeMemoryConfig, ChatNamingConfig, ClaudeLoginSettings, IndexConfig, McpSettings, MemoryLimits, PdfConfig, PromptCacheConfig, SpeechToTextConfig, TavilyConfig,
     VideoDecompositionConfig,
 )
 
@@ -42,6 +42,16 @@ INDEX_FILE_TYPES = set(INDEX.file_types)         # files searched by the text to
 
 # ------------------------------------------------------------------ agent
 AGENT_MAX_TOOL_HOPS = _agent["max_tool_hops"]    # max tool round-trips per turn
+
+# ------------------------------------------------------------------ memory size limits
+# application-wide maximum sizes of SOUL.md, MEMORY.md and USER.md (not configurable per user or agent)
+MEMORY_LIMITS = MemoryLimits.model_validate(_raw.get("memory_limits") or {})
+
+
+def memory_limits() -> MemoryLimits:
+    """The configured character limits of SOUL.md, MEMORY.md and USER.md (read from settings.yaml at start-up)."""
+    return MEMORY_LIMITS
+
 
 # ------------------------------------------------------------------ web
 # interface the web ui binds to; RECALL_WEB_HOST overrides it (the Docker image sets 0.0.0.0)
