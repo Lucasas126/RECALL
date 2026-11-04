@@ -847,7 +847,11 @@ ZDR flag instead (the only option for Ollama-only setups); `question_only` uses
 neither. If the env var is unset or the query request fails, the error is logged, the
 turn continues without associative memory and the indicator shows "skipped".
 `context_messages` (0-100) is how many recent messages the query model sees,
-`top_n` (1-20) the fragments injected, and `score_threshold` (0-1) the minimum similarity.
+`top_n` (1-20) the application default for the maximum fragments injected per turn, and
+`score_threshold` (0-1) the minimum similarity. Each user can override the maximum in the web
+Settings (`associative_max_matches` in their `preferences.json`, integer 1-20; empty or absent follows
+`top_n`); a change applies from the next message. `score_threshold` is application-only and cannot be
+set per user.
 Each fragment is shown with its address and heading path (or chat title and date) and
 up to 400 characters of its text, cut at a sentence end when possible. Chunks of the
 chat being answered are never suggested: that chat is already in the context.

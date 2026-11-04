@@ -101,7 +101,8 @@ nothing while rebuilding: pick the simpler, documented).
 ## associative results
 
 - exclude chunks from the current chat;
-- keep `top_n` and `score_threshold`; show each hit with its address and up to
+- keep `top_n` (the application default for the maximum, overridable per user in Settings with
+  `associative_max_matches`, 1-20) and the application-only `score_threshold`; show each hit with its address and up to
   ~400 characters (was 200), cut at a sentence boundary when possible.
 
 ## web UI
