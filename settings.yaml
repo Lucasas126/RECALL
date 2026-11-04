@@ -43,6 +43,15 @@ speech_to_text:
   # zdr: false  # optional override of the user's require_zdr (user.yaml) for transcription; unset follows it
   language: null  # optional ISO-639-1 code; null enables provider auto-detection
 
+claude_subscription:
+  # Who may use the Claude Code CLI's DEFAULT login (the login of the OS account running RECALL) when they have no
+  # claude_config_dir of their own in user.yaml. Users with their own folder always use it. Empty = nobody: every
+  # user must configure their own login folder. Anthropic's terms do not allow sharing one login between people, so
+  # list only the person whose login it is. Example: default_login_users: [<user_id>]
+  # RECALL_CLAUDE_DEFAULT_LOGIN_USERS (comma-separated ids, process environment) replaces this list, so the id can
+  # stay out of this tracked file. See docs/claude-subscription.md.
+  default_login_users: []
+
 prompt_cache:
   enabled: true                     # mark Claude prompts on OpenRouter with cache breakpoints (see docs/config.md)
   anthropic_providers: [Amazon Bedrock]  # preferred OpenRouter routes for Claude; other routes stay as fallback

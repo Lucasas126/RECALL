@@ -60,6 +60,10 @@ class ModelReferenceTests(unittest.TestCase):
 
 
 class RoutingTests(unittest.TestCase):
+    def setUp(self) -> None:
+        from provider_helpers import allow_every_default_login
+        allow_every_default_login(self)
+
     def settings(self, **changes) -> dict:
         return {"main": "openrouter", "main_api_key": "main-key", "openrouter": OpenRouterConfig(),
                 "ollama": OllamaConfig(), "claude": ClaudeSubscriptionConfig()} | changes
@@ -68,7 +72,7 @@ class RoutingTests(unittest.TestCase):
         provider = provider_for("ollama", **self.settings(ollama=OllamaConfig(host="http://box:11434")))
         self.assertEqual(provider.base_url, "http://box:11434")
         self.assertEqual(provider.own_model("ollama:llama3:8b"), "llama3:8b")
-        self.assertEqual(provider_for("claude_subscription", **self.settings()).name, "claude_subscription")
+        self.assertEqual(provider_for("claude_subscription", user_id="u", **self.settings()).name, "claude_subscription")
         from src.providers.ollama import is_ollama_cloud
         self.assertTrue(is_ollama_cloud("ollama:glm-4.7:cloud"))
         self.assertTrue(is_ollama_cloud("gpt-oss:120b-cloud"))

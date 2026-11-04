@@ -38,7 +38,7 @@ class ErrorCodeTests(unittest.TestCase):
         expected = {
             "no_api_key": "missing_api_key", "unreachable": "provider_unreachable",
             "cli_missing": "claude_not_installed", "logged_out": "claude_not_logged_in",
-            "unknown": "provider_unavailable",
+            "unknown": "provider_unavailable", "no_own_login": "claude_no_own_login",
         }
         for reason, code in expected.items():
             with self.subTest(reason=reason):

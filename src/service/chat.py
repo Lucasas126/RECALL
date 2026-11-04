@@ -1062,7 +1062,7 @@ class ChatService:
             if is_claude_subscription(CHAT_NAMING.model):
                 ensure_zdr_compatible(CHAT_NAMING.model, zdr, "chat_naming")
                 # runs with the requesting user's own Claude login, never another user's
-                provider = claude_subscription_provider(user.claude_subscription, purpose="chat_naming.model")
+                provider = claude_subscription_provider(user.claude_subscription, user_id=user.id, purpose="chat_naming.model")
                 reply = provider.invoke(messages, CHAT_NAMING.model, stream=False, zdr=zdr)
             else:
                 api_key = os.environ.get(CHAT_NAMING.api_key, "").strip()

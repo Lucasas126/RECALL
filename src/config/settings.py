@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 
 from src.config.models import (
-    AssociativeMemoryConfig, ChatNamingConfig, IndexConfig, McpSettings, PdfConfig, PromptCacheConfig, SpeechToTextConfig, TavilyConfig,
+    AssociativeMemoryConfig, ChatNamingConfig, ClaudeLoginSettings, IndexConfig, McpSettings, PdfConfig, PromptCacheConfig, SpeechToTextConfig, TavilyConfig,
     VideoDecompositionConfig,
 )
 
@@ -85,6 +85,15 @@ CHAT_NAMING = ChatNamingConfig.model_validate(_raw.get("chat_naming", {}))
 
 # ------------------------------------------------------------------ mcp servers
 MCP = McpSettings.model_validate(_raw.get("mcp", {}))
+
+# ------------------------------------------------------------------ claude subscription: who may use the default login
+# RECALL_CLAUDE_DEFAULT_LOGIN_USERS (comma-separated user ids), when set, replaces the yaml list: a local override
+# that keeps personal user ids out of the tracked settings.yaml.
+_claude = dict(_raw.get("claude_subscription") or {})
+_claude_env = os.environ.get("RECALL_CLAUDE_DEFAULT_LOGIN_USERS")
+if _claude_env is not None and _claude_env.strip():
+    _claude["default_login_users"] = [part.strip() for part in _claude_env.split(",") if part.strip()]
+CLAUDE_LOGIN = ClaudeLoginSettings.model_validate(_claude)
 
 # ------------------------------------------------------------------ associative memory
 ASSOC = AssociativeMemoryConfig.model_validate(_raw.get("associative_memory", {}))
