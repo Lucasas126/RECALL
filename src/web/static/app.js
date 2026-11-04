@@ -1454,7 +1454,7 @@ async function deleteChat(chat) {
 
 function modelPolicy(model) {
   if (!model) return "";
-  if (model.provider === "claude_subscription") return tr("Claude subscription (experimental), not ZDR");
+  if (model.provider === "claude_subscription") return tr("Claude subscription, not ZDR");
   if (model.provider === "ollama") return tr(/cloud$/.test(model.id) ? "Ollama cloud model, not ZDR" : "Local Ollama model");
   return model.zdr !== false ? "ZDR required" : "ZDR not required";
 }
@@ -1471,7 +1471,7 @@ function updateModelControls() {
     $("model-policy").textContent += ` · ${tr(state.modelOverride === null ? "User default" : "Chat override")}`;
   }
   updateReasoningEffortControls();
-  $("model-policy").classList.toggle("privacy-warning", (openrouter && !required) || claude);
+  $("model-policy").classList.toggle("privacy-warning", openrouter && !required);
   $("model-refresh").disabled = state.modelLoading || state.modelBusy;
   $("model-close").disabled = state.modelBusy;
   const zdrApplies = state.modelProvider === "openrouter";

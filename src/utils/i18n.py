@@ -24,7 +24,7 @@ _SPANISH = {
     "Run `claude auth login`": "Ejecuta `claude auth login`",
     "Claude Code login unknown": "Sesión de Claude Code desconocida",
     "No provider is available for this kind of model.": "Ningún proveedor está disponible para este tipo de modelo.",
-    "Claude subscription (experimental), not ZDR": "Suscripción de Claude (experimental), sin ZDR",
+    "Claude subscription, not ZDR": "Suscripción de Claude, sin ZDR",
     "Experimental: uses your own Claude Code login. Not ZDR.": "Experimental: usa tu propio inicio de sesión de Claude Code. Sin ZDR.",
     "Counts against your Claude plan limits; no per-token price.": "Cuenta para los límites de tu plan de Claude; sin precio por token.",
     "{provider} cannot serve this kind of model.": "{provider} no puede servir este tipo de modelo.",

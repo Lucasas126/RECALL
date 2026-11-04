@@ -645,7 +645,7 @@ enabled, `claude_subscription:haiku`, `:sonnet` and `:opus` are listed in their 
 group whatever the ZDR filter, labelled experimental and not ZDR, without per-token
 prices. Choosing one stores the chat override as
 `{"provider": "claude_subscription", "id": "claude_subscription:sonnet", "zdr": false}`
-and the composer shows "Claude subscription (experimental), not ZDR". The default
+and the composer shows a plain "Claude subscription, not ZDR" (no warning style; the *experimental* note lives on the picker tab only). The default
 LLM picker and the Dream tab's **Browse** use this dialog; Telegram `/selectmodel`
 and the default model in `/settings` list the user's favorites from all available
 providers instead (no search). The default STT picker lists OpenRouter only. Telegram never says
