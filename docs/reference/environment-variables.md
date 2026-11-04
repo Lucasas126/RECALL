@@ -15,6 +15,7 @@ environment and, for the normal entry points, from the ignored `.env` file. Exce
 | `GOOGLE_OAUTH_CREDENTIALS` | path of the Google OAuth client JSON for the Google Calendar MCP server |
 | `RECALL_WEB_HOST` | overrides `web.host`; read from the process environment, not from `.env` (Docker sets `0.0.0.0`) |
 | `RECALL_PUBLIC_URL` | overrides `web.public_url` (links in Telegram dream notifications); process environment only |
+| `RECALL_TELEGRAM_CHAT_IDLE_MINUTES` | overrides `telegram.chat_idle_minutes`: any positive number of minutes, fractions allowed (e.g. `1` to test the idle flow); process environment only |
 | `RECALL_CLAUDE_COMMAND` | path of the `claude` executable ([Claude subscription](../user-guide/claude-subscription.md)) |
 | `CLAUDE_CONFIG_DIR` | used by the `claude` CLI itself to choose a login folder; RECALL passes the user's `claude_subscription.claude_config_dir` |
 | `USER_ID`, `AGENT_ID` | which user and agent the terminal client `cli.py` opens (read from `.env`) |

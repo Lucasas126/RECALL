@@ -27,26 +27,32 @@ Telegram provides `/help`,
 `/help` prints the same command list in the chat.
 Operational notices and errors use the user's saved English/Spanish preference;
 the native command descriptions and `/help` text remain English.
-Telegram creates a chat automatically on the first message after the bot
-restarts, and after one hour without a user message. The first assistant
+Telegram resumes your most recently active chat (of any agent) when you write
+within `telegram.chat_idle_minutes` (default 60; the local environment variable
+`RECALL_TELEGRAM_CHAT_IDLE_MINUTES` overrides it) of its last activity, even
+right after the bot restarts. It creates a new chat when the last activity is
+older than that or there is no chat yet. The first assistant
 message in each automatically created chat begins with bold-italic
 `New chat started`.
 `/newchat` (also `/new`) opens a picker with your agents (the current one is
 marked ✅) and **✖ Cancel (keep current chat)**. Choosing an agent saves it as
 the active agent, creates a chat with it and closes the picker; Cancel changes
 nothing. With only one agent the chat is created directly.
-When a message starts a new chat because of the one-hour idle time (not after
-`/newchat`, and not for the very first chat), the message is still answered
-immediately in the new chat, and a short message with two buttons is sent just
-before the reply: **↩ Continue previous chat** and **🔀 Change agent**. The
-first switches to the previous chat (and its agent) and replays your message
-there; the second opens the agent picker and replays the message in a fresh
-chat with the chosen agent. Either way the auto-created chat is cancelled and
-deleted, and the buttons are removed. After a bot restart the previous chat is
-the most recently active one across agents. The buttons work once and expire
-after 10 minutes or as soon as you send another message (a tap then answers
-"This option expired."). The pending message, including downloaded
-attachments, is kept in memory only until then.
+When a message starts a new chat because of the idle time (not after
+`/newchat`, and not for the very first chat), the bot does not answer at once:
+it creates the new chat and sends a short message with two buttons,
+**↩ Continue previous chat** and **🔀 Change agent**, saying it will answer in
+8 seconds. A tap acts immediately: the first switches to the previous chat (and
+its agent) and replays your message there; the second opens the agent picker
+(giving you 60 seconds) and replays the message in a fresh chat with the chosen
+agent. Either way the auto-created chat, still empty, is deleted and the
+buttons are removed, so you get exactly one answer. If you do not tap, after
+the 8 seconds the bot answers in the new chat and the message becomes
+"Answering in a new chat with ..." without buttons. If you send another message
+during the wait, the pending one is answered first in the new chat and the new
+one follows. A tap after that answers "This option expired.". The pending
+message, including downloaded attachments, is kept in memory only during the
+wait.
 `/selectmodel` and `/selectagent` open the same kind of inline
 panel as `/settings`: buttons send callbacks instead of chat messages, and the
 bot edits the panel in place for pagination. Choosing an option saves it and

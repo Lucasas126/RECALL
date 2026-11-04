@@ -12,7 +12,7 @@ web UI and the Telegram bot after editing it. In Docker you can mount your own c
 | `agent` | `max_tool_hops` (default 5): tool round-trips before a final answer is forced | here |
 | `memory_limits` | `soul_chars` (15000), `memory_chars` (2500), `user_chars` (2500): maximum sizes of SOUL.md, MEMORY.md and USER.md | [memory limits](#memory-limits) |
 | `web` | `host`, `port`, `session_secret_env`, `public_url` | [web authentication](#web-authentication) |
-| `telegram` | `allowed_users_env` (default `TELEGRAM_ALLOWED_USERS`) | [Telegram](../user-guide/telegram.md#telegram-access) |
+| `telegram` | `allowed_users_env` (default `TELEGRAM_ALLOWED_USERS`), `chat_idle_minutes` (default `60`, 1-10080; `RECALL_TELEGRAM_CHAT_IDLE_MINUTES` overrides it) | [Telegram](../user-guide/telegram.md#telegram-access) |
 | `video`, `pdf`, `speech_to_text` | frame sampling, OCR and transcription defaults | [files and media](../user-guide/files-and-media.md) |
 | `prompt_cache` | `enabled`, `anthropic_providers`, `trim_slack_percent` | [prompt caching](#prompt-caching) |
 | `tavily` | `api_key` (variable name), `timeout_seconds`, `max_content_chars` | [shared web access](#shared-web-access-tavily) |
