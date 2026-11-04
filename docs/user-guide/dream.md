@@ -241,6 +241,15 @@ same behavior in Telegram and in the web chat input (the web chat endpoint
 answers them itself, as an SSE `text` event followed by `done`; they are not
 sent to the model nor stored in the chat):
 
+- in Telegram the same commands are the one-word `/dream`, `/dreamstart` and
+  `/dreamcancel` (`/dream start|cancel` as text also work there); the web chat
+  keeps `/dream start|cancel`, and hints name the command of the channel you use.
+  the Telegram `/dream` reply is formatted: bold title (`💤 Dream · <agent>`),
+  labelled lines (last session with outcome emoji and date, schedule and next
+  run, pending chats, a running line while a session runs) and the last
+  session's summary as a block quote that keeps its paragraphs and lists (cut at
+  a paragraph or sentence near 1500 characters with "… (full summary in the web
+  UI)"; omitted when empty).
 - `/dream`: last session (when, status, short summary), whether a schedule is
   set and when the next run is, and a hint: "use `/dream start` to start a new
   session".
@@ -363,8 +372,10 @@ it in the web UI (Agents -> agent name -> Dream sessions -> session date, the
 date as listed there). when the web UI's public address is configured
 (`web.public_url` or `RECALL_PUBLIC_URL`, see [config](../reference/settings-yaml.md#web-authentication)),
 the message adds `Open it: <public_url>/#agents/<agent_id>/dreams/<session_id>`;
-it is sent as plain text, so Telegram makes the URL clickable (LAN addresses
-too). the link opens the session directly, after the login form when needed. the message goes to every Telegram id mapped
+it is sent with Telegram formatting (bold title with the outcome emoji and agent
+name, an excerpt of the session summary of up to 600 characters as a block
+quote, omitted when empty; plain text if formatting is rejected) and the URL is
+a real link (LAN addresses too). the link opens the session directly, after the login form when needed. the message goes to every Telegram id mapped
 to the user in `TELEGRAM_ALLOWED_USERS` (private chat ids equal user ids), via
 the Bot API with `TELEGRAM_BOT_TOKEN`; without a token it is skipped, and send
 failures are logged without affecting the session.
