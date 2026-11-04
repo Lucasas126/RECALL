@@ -308,6 +308,7 @@ details.action, details.thinking { border-left: 2px solid var(--line); padding-l
 #chat-effort { padding-right: 6px; }
 #model-policy { font-size: .78em; color: var(--muted); max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #model-policy:empty { display: none; }
+#chat-controls > #model-policy { margin-left: auto; max-width: none; flex-shrink: 1; min-width: 0; }  /* provider/source hint at the far right, where there is room */
 @media (max-width: 800px) {
   #composer { margin-inline: 10px; }
   #model-policy:not(.privacy-warning) { display: none; }

@@ -62,7 +62,6 @@
         <div id="chat-controls">
           <span id="chat-model-label">Chat model</span>
           <button id="model-picker" type="button" disabled aria-haspopup="dialog">No chat selected</button>
-          <span id="model-policy"></span>
           <label id="chat-effort-label">
             <span id="chat-effort-text">Reasoning effort</span>
             <select id="chat-effort" disabled>
@@ -76,6 +75,7 @@
             </select>
           </label>
           <span id="effort-policy"></span>
+          <span id="model-policy"></span>
         </div>
         <textarea id="input" rows="2" placeholder="Write a message…" disabled></textarea>
         <input id="file-input" type="file" accept="image/*,video/*,audio/*,application/pdf,.pdf" multiple hidden>
@@ -129,6 +129,18 @@
                 </span>
                 <span id="agent-model-hint" class="model-note">Empty follows your default model. A model chosen inside a chat still takes precedence.</span>
               </label>
+              <label>
+                <span id="agent-effort-label">Reasoning effort</span>
+                <select id="agent-effort">
+                  <option value="" id="agent-effort-default">Default</option>
+                  <option value="minimal">minimal</option>
+                  <option value="low">low</option>
+                  <option value="medium">medium</option>
+                  <option value="high">high</option>
+                  <option value="xhigh">xhigh</option>
+                  <option value="max">max</option>
+                </select>
+              </label>
               <label class="model-filter"><input id="agent-stream" type="checkbox">
                 <span id="agent-stream-label">Stream replies</span></label>
               <label class="model-filter"><input id="agent-memory" type="checkbox">
@@ -150,18 +162,6 @@
                 <select id="agent-associative-execution">
                   <option value="parallel" id="agent-associative-parallel">In parallel with the reply</option>
                   <option value="sequential" id="agent-associative-sequential">Before the reply</option>
-                </select>
-              </label>
-              <label>
-                <span id="agent-effort-label">Reasoning effort</span>
-                <select id="agent-effort">
-                  <option value="" id="agent-effort-default">Default</option>
-                  <option value="minimal">minimal</option>
-                  <option value="low">low</option>
-                  <option value="medium">medium</option>
-                  <option value="high">high</option>
-                  <option value="xhigh">xhigh</option>
-                  <option value="max">max</option>
                 </select>
               </label>
               <label class="model-filter"><input id="agent-tokens-enabled" type="checkbox">
