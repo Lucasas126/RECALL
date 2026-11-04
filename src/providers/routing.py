@@ -11,7 +11,7 @@ from src.providers.provider import LLMProvider, ProviderUnavailable, get_provide
 
 def provider_for(
     name: str, *, main: str, main_api_key: str, openrouter: OpenRouterConfig, ollama: OllamaConfig,
-    claude: ClaudeSubscriptionConfig, purpose: str = "this model",
+    claude: ClaudeSubscriptionConfig, user_id: str | None = None, purpose: str = "this model",
 ) -> LLMProvider:
     """The provider `name` with the user's settings; raises ProviderUnavailable when it cannot be used.
 
@@ -19,7 +19,7 @@ def provider_for(
     its key variable set, Claude Code reports a missing install or login when it runs, Ollama when it is down.
     """
     if name == CLAUDE_SUBSCRIPTION:
-        return claude_subscription_provider(claude, purpose=purpose)
+        return claude_subscription_provider(claude, user_id=user_id, purpose=purpose)
     settings = {OPENROUTER: openrouter, OLLAMA: ollama}.get(name)
     if settings is None:
         raise ValueError(f"unknown provider {name!r} for {purpose}")

@@ -42,12 +42,14 @@ test("errorInfo maps codes to actions and never invents one for unknown codes", 
   const { errorInfo } = helpers();
   assert.equal(errorInfo("no_agents").action, "create-agent");
   assert.equal(errorInfo("no_agents").label, "Create an agent");
-  for (const code of ["missing_api_key", "provider_unreachable", "claude_not_installed", "provider_unavailable", "model_unavailable", "rate_limited"]) {
+  for (const code of ["missing_api_key", "provider_unreachable", "claude_not_installed", "claude_no_own_login", "provider_unavailable", "model_unavailable", "rate_limited"]) {
     assert.equal(errorInfo(code).action, "choose-model", code);
   }
   const loggedOut = errorInfo("claude_not_logged_in");
   assert.equal(loggedOut.command, "claude auth login");
   assert.equal(loggedOut.action, "choose-model");  // a command is shown, never run by a button
+  assert.equal(errorInfo("claude_no_own_login").command, undefined);  // nothing the user can run: the administrator sets it up
+  assert.match(errorInfo("claude_no_own_login").hint, /administrator/);
   assert.equal(errorInfo("agent_busy").action, undefined);
   assert.equal(errorInfo("unknown_chat").action, "new-chat");
   assert.equal(errorInfo("mcp_not_connected").action, "open-settings");

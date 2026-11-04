@@ -94,6 +94,10 @@ claude_subscription:      # advanced options only, see claude-subscription.md
   timeout_seconds: 300
 ```
 
+Who may use the CLI's default login (no `claude_config_dir`) is a server-wide
+setting, `claude_subscription.default_login_users: [<user_id>]` in `settings.yaml`
+(empty by default = nobody; see [claude subscription](../user-guide/claude-subscription.md)).
+
 The blocks have no `enabled` key (the strict schema rejects it). A model whose
 provider is not available fails with `provider not available: <provider>: <what to
 fix>`: choosing it in a picker or the Dream tab is refused with the same message in

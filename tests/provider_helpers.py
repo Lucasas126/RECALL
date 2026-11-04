@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from src.providers.ollama import OllamaUnavailable
@@ -16,16 +17,36 @@ CLAUDE_LOGGED_OUT = {
 }
 
 
+class _Everyone(list):
+    """A default-login user list that contains every user id (the fixtures' stand-in for a permissive owner list)."""
+
+    def __contains__(self, item) -> bool:
+        return True
+
+
+def set_default_login_users(testcase, users) -> None:
+    """Make `users` (a list of ids) the users allowed to use Claude Code's default login for one test."""
+    login = patch("src.config.settings.CLAUDE_LOGIN", SimpleNamespace(default_login_users=users))
+    login.start()
+    testcase.addCleanup(login.stop)
+
+
+def allow_every_default_login(testcase) -> None:
+    set_default_login_users(testcase, _Everyone())
+
+
 def isolate_providers(
     testcase, *, openrouter_key: str | None = "test-key", variable: str = "OPENROUTER_API_KEY",
-    claude: dict | None = None, ollama: list[str] | None = None,
+    claude: dict | None = None, ollama: list[str] | None = None, default_login_users=None,
 ) -> dict:
     """Make provider availability deterministic for one test, never touching the network or a real `claude`.
 
     OpenRouter is available when `openrouter_key` is set (None unsets the variable); Claude Code follows the
     `claude` status dict (default: not installed); Ollama serves the `ollama` model names (default: unreachable).
+    Every user may use the default Claude login unless `default_login_users` (a list of ids) says otherwise.
     Returns the started mocks (`claude`, `ollama`) so a test can change them.
     """
+    set_default_login_users(testcase, _Everyone() if default_login_users is None else default_login_users)
     environment = patch.dict(os.environ)
     environment.start()
     testcase.addCleanup(environment.stop)

@@ -33,7 +33,7 @@ A provider is **available** when the server can use it, checked on the server:
 | --- | --- | --- |
 | OpenRouter | its API key environment variable is set (never read back) | `API key variable not set` |
 | Ollama | the server answers at its host | `Ollama not reachable` |
-| Claude subscription | the `claude` CLI is found and `claude auth status` says it is logged in | `Claude Code not installed` / ``Run `claude auth login` `` |
+| Claude subscription | the user has their own `claude_config_dir` or is listed in `claude_subscription.default_login_users` (`settings.yaml`), the `claude` CLI is found and `claude auth status` says it is logged in | `Claude Code not installed` / ``Run `claude auth login` `` |
 
 Slow checks (Ollama, Claude Code) are cached for 60 seconds per server, so opening
 the picker does not start the CLI each time; the key check is a plain lookup. The

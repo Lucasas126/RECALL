@@ -18,6 +18,7 @@ from src.config.model_refs import (
 from src.config.models import UserConfig
 from src.providers.catalog import CatalogUnavailable, list_openrouter_models, list_openrouter_transcription_models
 from src.providers.claude_subscription.catalog import catalog_entries as claude_catalog_entries
+from src.providers.claude_subscription.login import NO_OWN_LOGIN_CODE, NO_OWN_LOGIN_MESSAGE, login_allowed
 from src.providers.claude_subscription.status import cli_status
 from src.providers.ollama import OllamaUnavailable, is_ollama_cloud, list_ollama_models, ollama_host
 from src.utils.i18n import InputError
@@ -58,8 +59,10 @@ def _ollama(user: UserConfig) -> dict:
 
 
 def _claude(user: UserConfig) -> dict:
-    status = cli_status(user.claude_subscription)
     main = user.provider.name
+    if not login_allowed(user.id, user.claude_subscription):  # before any CLI process is started
+        return _row(CLAUDE_SUBSCRIPTION, main, available=False, reason="no_own_login")
+    status = cli_status(user.claude_subscription)
     if not status["cli_found"]:
         return _row(CLAUDE_SUBSCRIPTION, main, available=False, reason="cli_missing", detail=status["hint"])
     if status["logged_in"] is None:
@@ -102,7 +105,7 @@ class ProviderAvailability:
             OPENROUTER: lambda: _openrouter(user),
             OLLAMA: lambda: self._cached((OLLAMA, main, user.ollama.host), lambda: _ollama(user)),
             CLAUDE_SUBSCRIPTION: lambda: self._cached(
-                (CLAUDE_SUBSCRIPTION, main, claude.claude_config_dir, claude.command), lambda: _claude(user)),
+                (CLAUDE_SUBSCRIPTION, user.id, main, claude.claude_config_dir, claude.command), lambda: _claude(user)),
         }
         names = providers_for(capability)
         with ThreadPoolExecutor(max_workers=len(names) or 1) as pool:
@@ -129,6 +132,8 @@ def unavailable(row: dict) -> InputError:
         return InputError("Provider not available: {provider}. The server at {host} did not answer. "
                           "Check that it is running, or choose another model.",
                           code="provider_unreachable", provider=label, host=row["detail"])
+    if reason == "no_own_login":
+        return InputError(NO_OWN_LOGIN_MESSAGE, code=NO_OWN_LOGIN_CODE)
     if reason == "cli_missing":
         return InputError("Provider not available: {provider}. Claude Code is not installed on the computer running RECALL.",
                           code="claude_not_installed", provider=label)

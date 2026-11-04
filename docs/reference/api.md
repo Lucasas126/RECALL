@@ -50,6 +50,7 @@ message. Errors render as a dismissable card (`role="alert"`) in the transcript,
 | `missing_api_key` | the provider's API key variable is not set on the server | Choose another model |
 | `provider_unreachable` | the Ollama/provider server did not answer | Choose another model |
 | `claude_not_installed` | Claude Code is not installed | Choose another model |
+| `claude_no_own_login` | the user has no `claude_config_dir` and is not listed in `default_login_users` (checked in the picker and before every Claude request) | hint to ask the administrator + Choose another model (no button sets it up) |
 | `claude_not_logged_in` | Claude Code is not logged in | hint with `claude auth login` (shown, never run) + Choose another model |
 | `provider_unavailable` | Claude Code did not report its login state | Choose another model |
 | `model_unavailable` | the model is not in the provider's catalog/installed | Choose another model |

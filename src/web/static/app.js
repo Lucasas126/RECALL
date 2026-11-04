@@ -232,6 +232,9 @@ function errorInfo(code) {
     case "claude_not_installed":
       return { title: tr("Claude Code is not installed"),
         hint: tr("Install Claude Code on the computer running RECALL, or use another model."), ...chooseModel };
+    case "claude_no_own_login":  // no button: only the administrator can set this up
+      return { title: tr("No Claude login of your own"),
+        hint: tr("Ask the administrator to set up your own Claude login folder, or use another model."), ...chooseModel };
     case "claude_not_logged_in":
       return { title: tr("Claude Code is not logged in"),
         hint: tr("Run this command on the computer running RECALL, then send your message again:"),
@@ -1159,6 +1162,7 @@ function providerReason(provider) {
     case "unreachable": return tr("Ollama not reachable");
     case "cli_missing": return tr("Claude Code not installed");
     case "logged_out": return tr("Run `claude auth login`");
+    case "no_own_login": return tr("No Claude login of your own");
     default: return tr("Claude Code login unknown");
   }
 }

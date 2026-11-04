@@ -30,7 +30,7 @@ from src.providers.catalog import OpenRouterModel
 from src.service.chat import ChatService
 from src.web.app import create_app
 from auth_helpers import TEST_PASSWORD_HASH, login
-from provider_helpers import CLAUDE_LOGGED_IN, CLAUDE_LOGGED_OUT, isolate_providers
+from provider_helpers import CLAUDE_LOGGED_IN, CLAUDE_LOGGED_OUT, allow_every_default_login, isolate_providers
 
 FAKE = str(Path(__file__).with_name("fake_claude.py"))
 TOOLS = [{"type": "function", "function": {
@@ -268,7 +268,8 @@ class ClaudeSubscriptionConfigTests(unittest.TestCase):
     def test_provider_takes_the_advanced_options_and_has_no_enabled_switch(self) -> None:
         with self.assertRaises(ValidationError):
             ClaudeSubscriptionConfig(enabled=True)
-        provider = claude_subscription_provider(ClaudeSubscriptionConfig(claude_config_dir="~/c", command="/opt/claude"))
+        provider = claude_subscription_provider(ClaudeSubscriptionConfig(claude_config_dir="~/c", command="/opt/claude"),
+                                                user_id="u")
         self.assertEqual((provider.config_dir, provider.command, provider.telemetry), ("~/c", ["/opt/claude"], False))
 
     def test_user_chat_model_accepts_references_but_not_for_embeddings_or_stt(self) -> None:
@@ -347,6 +348,9 @@ class ClaudeSubscriptionConfigTests(unittest.TestCase):
 
 
 class ClaudeSubscriptionWiringTests(unittest.TestCase):
+    def setUp(self) -> None:
+        allow_every_default_login(self)
+
     def _config(self, **claude) -> ResolvedAgent:
         return ResolvedAgent(
             user_id="u", id="a", name="A", models=ModelsConfig(), provider_name="openrouter", api_key="k",
@@ -405,7 +409,7 @@ class ClaudeSubscriptionWiringTests(unittest.TestCase):
                 patch.object(service, "_user", return_value=user), patch.object(chat, "CHAT_NAMING", naming), \
                 patch.object(chat, "claude_subscription_provider", return_value=provider) as factory:
             service._name_chat("u", "a", "c")
-        factory.assert_called_once_with(user.claude_subscription, purpose="chat_naming.model")
+        factory.assert_called_once_with(user.claude_subscription, user_id="u", purpose="chat_naming.model")
         self.assertEqual(provider.invoke.call_args.args[1], "claude_subscription:haiku")
         conversations.set_generated_title.assert_called_once_with("c", "A title")
 

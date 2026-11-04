@@ -278,6 +278,16 @@ class ClaudeSubscriptionConfig(BaseModel):
     timeout_seconds: int = Field(default=300, ge=10, le=3600, strict=True)  # longest silence from Claude Code
 
 
+class ClaudeLoginSettings(BaseModel):
+    """Server-wide rule for the Claude Code CLI's DEFAULT login (the OS account running RECALL), from settings.yaml."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # ids of the users allowed to use the default login when they have no `claude_config_dir` of their own;
+    # empty = nobody: every user must configure their own login folder
+    default_login_users: list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]] = Field(default_factory=list)
+
+
 class ModelsConfig(BaseModel):
     """User-owned inference and indexing model defaults."""
 
