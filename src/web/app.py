@@ -32,6 +32,7 @@ from src.service.chat import (
     UnknownUser,
 )
 from src.utils.logger import get_logger
+from src.terminal.approvals import ApprovalForbidden, ApprovalNotFound
 from src.utils.i18n import error_code, error_message, message, messages
 from src.config.settings import WEB_SESSION_SECRET_ENV
 
@@ -89,6 +90,10 @@ class ReindexIn(BaseModel):
 
 class TextIn(BaseModel):
     content: str = Field(max_length=50_000)
+
+
+class ApprovalIn(BaseModel):
+    decision: Literal["approve", "deny"]
 
 
 def _sse(event: str, data, generation_id: str = "") -> str:
@@ -162,9 +167,14 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
 
     @app.exception_handler(UnknownAgent)
     @app.exception_handler(UnknownChat)
+    @app.exception_handler(ApprovalNotFound)
     @app.exception_handler(UnknownDreamSession)
     def _not_found(request: Request, exc: ServiceError):
         return localized_error(request, 404, exc)
+
+    @app.exception_handler(ApprovalForbidden)
+    def _approval_forbidden(request: Request, exc: ApprovalForbidden):
+        return localized_error(request, 403, exc)
 
     @app.exception_handler(ValueError)
     def _bad_request(request: Request, exc: ValueError):
@@ -466,7 +476,10 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
                     if event.kind == "interrupted":
                         data = {"content": event.text, **(event.data or {})}
                     else:
-                        data = event.data if event.kind in ("tool", "memory") else event.text
+                        data = (
+                            event.data if event.kind in ("tool", "memory", "approval", "approval_resolved")
+                            else event.text
+                        )
                     yield _sse(event.kind, data, generation_id)
             except Exception as e:  # the response has started: report the failure in-band
                 logger.exception("reply failed for %s/%s/%s", user_id, agent_id, chat_id)
@@ -477,6 +490,16 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
             stream(), media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
+
+    @app.get("/api/agents/{agent_id}/chats/{chat_id}/approvals")
+    def list_approvals(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):
+        return service.list_approvals(user_id, agent_id, chat_id)
+
+    @app.post("/api/agents/{agent_id}/chats/{chat_id}/approvals/{approval_id}")
+    def resolve_approval(
+        agent_id: str, chat_id: str, approval_id: str, body: ApprovalIn, user_id: str = Depends(current_user),
+    ):
+        return service.resolve_approval(user_id, agent_id, chat_id, approval_id, body.decision)
 
     # ------------------------------------------------------------------ frontend
 

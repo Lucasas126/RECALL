@@ -41,7 +41,8 @@ from src.providers.ollama import is_ollama_cloud
 from src.providers.telegram_notify import parse_allowed_users
 from src.service.chat import ChatEvent, ChatService, RouteDecision, ServiceError
 from src.utils.logger import get_logger
-from src.utils.i18n import InputError, error_message, message
+from src.terminal.approvals import ApprovalForbidden
+from src.utils.i18n import InputError, UserMessageError, error_message, message
 
 logger = get_logger("telegram")
 _MODELS_PER_PAGE = 10
@@ -52,6 +53,8 @@ _MAX_TELEGRAM_MESSAGE_CHARS = 4_090
 _CHAT_IDLE_TIMEOUT = timedelta(minutes=TELEGRAM_CHAT_IDLE_MINUTES)  # telegram.chat_idle_minutes
 _PANEL_CALLBACK = "p"
 _REROUTE_CALLBACK = "r"
+_APPROVAL_CALLBACK = "ap"
+_APPROVAL_COMMAND_CHARS = 900
 # seconds the answer waits after an idle new chat is announced, so the user can still pick another place;
 # opening the agent picker gives the user more time
 _REROUTE_GRACE_SECONDS = 8
@@ -104,6 +107,7 @@ class _Reroute:
 class TelegramBotState:
     service: ChatService
     sessions: dict[int, TelegramSession] = field(default_factory=dict)
+    approvals: dict[str, "_ApprovalCard"] = field(default_factory=dict)  # pending approval id -> its message
 
 
 @dataclass
@@ -1536,6 +1540,110 @@ async def _offer_reroute(
     record.chat_id, record.message_id = update.effective_chat.id, sent.message_id
 
 
+@dataclass
+class _ApprovalCard:
+    """The Telegram message that asks for one approval."""
+
+    user_id: str
+    agent_id: str
+    chat_id: str
+    telegram_chat_id: int
+    message_id: int
+    body: str  # Markdown shown above the outcome line
+
+
+def _approval_text(language: str, data: dict) -> str:
+    command = str(data.get("command", ""))
+    if len(command) > _APPROVAL_COMMAND_CHARS:
+        command = command[:_APPROVAL_COMMAND_CHARS] + "…"
+    command = command.replace("```", "``\u200b`")
+    risk = message(language, "dangerous") if data.get("risk") == "dangerous" else message(language, "needs your approval")
+    lines = [
+        message(language, "🔐 *Approval needed* ({risk})", risk=risk),
+        "```\n" + command + "\n```",
+        message(language, "Working directory: {cwd}", cwd=_md_escape(str(data.get("cwd", "")))),
+    ]
+    if data.get("reason"):
+        lines.append(message(language, "Reason: {reason}", reason=_md_escape(str(data["reason"]))))
+    lines.append(message(language, "It is denied automatically after {seconds} s.", seconds=int(data.get("timeout_seconds", 0))))
+    return "\n".join(lines)
+
+
+def _approval_outcome(language: str, decision: str, reason: str) -> str:
+    if decision == "approved":
+        return message(language, "✅ Approved")
+    if reason == "timed out":
+        return message(language, "⌛ Denied: timed out")
+    if reason == "cancelled":
+        return message(language, "⏹ Denied: the reply was cancelled")
+    if reason == "service shutdown":
+        return message(language, "⏹ Denied: the service is shutting down")
+    return message(language, "❌ Denied")
+
+
+async def _send_approval(context: ContextTypes.DEFAULT_TYPE, state: TelegramBotState, session: TelegramSession,
+                         telegram_chat_id: int, data: dict, language: str) -> None:
+    """Ask for an approval with [Approve][Deny] buttons; the reply stream simply waits."""
+    approval_id = str(data["id"])
+    body = _approval_text(language, data)
+    plain, entities = _convert_markdown(body)
+    markup = InlineKeyboardMarkup([[
+        InlineKeyboardButton(message(language, "✅ Approve"), callback_data=f"{_APPROVAL_CALLBACK}:{approval_id}:y"),
+        InlineKeyboardButton(message(language, "❌ Deny"), callback_data=f"{_APPROVAL_CALLBACK}:{approval_id}:n"),
+    ]])
+    sent = await context.bot.send_message(telegram_chat_id, plain, entities=entities, reply_markup=markup)
+    state.approvals[approval_id] = _ApprovalCard(
+        session.user_id, session.agent_id, session.chat_id, telegram_chat_id, sent.message_id, body,
+    )
+
+
+async def _close_approval(bot, state: TelegramBotState, approval_id: str, decision: str, reason: str,
+                          language: str) -> None:
+    """Show the outcome on the approval message and drop its buttons (idempotent)."""
+    card = state.approvals.pop(approval_id, None)
+    if card is None:
+        return
+    plain, entities = _convert_markdown(card.body + "\n\n" + _approval_outcome(language, decision, reason))
+    with suppress(TelegramError):
+        await bot.edit_message_text(
+            plain, chat_id=card.telegram_chat_id, message_id=card.message_id, entities=entities, reply_markup=None,
+        )
+
+
+async def approval_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """[Approve]/[Deny] under an approval message."""
+    query = update.callback_query
+    state: TelegramBotState = context.application.bot_data["state"]
+    session = _session(update, state)
+    if session is None:
+        await query.answer()
+        await _unauthorized(update)
+        return
+    parts = (query.data or "").split(":")
+    approval_id, choice = (parts + ["", ""])[1:3]
+    card = state.approvals.get(approval_id)
+    if card is None or choice not in ("y", "n") or query.message is None or query.message.message_id != card.message_id:
+        await query.answer(_msg(session, "This approval expired."), show_alert=True)
+        with suppress(TelegramError):
+            await query.edit_message_reply_markup(reply_markup=None)
+        return
+    if card.user_id != session.user_id:
+        await query.answer(_msg(session, "Only the chat's owner can answer this."), show_alert=True)
+        return
+    try:
+        outcome = await asyncio.to_thread(
+            state.service.resolve_approval, card.user_id, card.agent_id, card.chat_id, approval_id,
+            "approve" if choice == "y" else "deny",
+        )
+    except (UserMessageError, ValueError) as exc:  # expired between the tap and now, or not the owner
+        await query.answer(error_message(session.language, exc), show_alert=True)
+        if not isinstance(exc, ApprovalForbidden):  # someone else's tap changes nothing: the card stays open
+            await _close_approval(context.bot, state, approval_id, "denied", "timed out", session.language)
+        return
+    await query.answer()
+    await _close_approval(context.bot, state, approval_id, outcome["status"], "", session.language)
+
+
 def _agent_name(service: ChatService, user_id: str, agent_id: str) -> str:
     """The agent's display name, falling back to its id when it cannot be read."""
     try:
@@ -1593,6 +1701,15 @@ async def _send_generation(
                 content.add_action(event.data)
             elif event.kind == "notice":
                 content.append("notice", event.text)
+            elif event.kind == "approval" and event.data:
+                await _send_approval(context, state, session, chat.id, event.data, language)
+                continue
+            elif event.kind == "approval_resolved" and event.data:
+                await _close_approval(
+                    context.bot, state, str(event.data.get("id")), str(event.data.get("decision")),
+                    str(event.data.get("reason", "")), language,
+                )
+                continue
             else:
                 continue
             preview = _final_messages(content.parts, show_thinking=show_thinking)
@@ -1709,6 +1826,7 @@ def build_application(
     application.add_handler(CommandHandler("settings", settings_command))
     application.add_handler(CallbackQueryHandler(panel_callback, pattern=rf"^{_PANEL_CALLBACK}:"))
     application.add_handler(CallbackQueryHandler(reroute_callback, pattern=rf"^{_REROUTE_CALLBACK}:"))
+    application.add_handler(CallbackQueryHandler(approval_callback, pattern=rf"^{_APPROVAL_CALLBACK}:"))
     application.add_handler(CommandHandler(["newchat", "new", "selectagent"], new_chat))
     application.add_handler(CommandHandler("selectmodel", select_model))
     application.add_handler(CommandHandler("model", show_model))
