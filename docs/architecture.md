@@ -93,13 +93,17 @@ Status: implemented.
 The provider layer fetches OpenRouter's public model and ZDR endpoint catalogs;
 `ChatService` scopes catalog access and persistent favorites to the current
 user. The web channel exposes these operations as HTTP and a searchable model
-selector. Every OpenRouter chat inference request independently receives the
+selector. ZDR is an optional user policy (`require_zdr` in `user.yaml`, off by
+default; one helper in `src/config/zdr.py` resolves it for every feature). When
+it applies, every OpenRouter chat inference request independently receives the
 chat's ZDR routing preference, including auxiliary memory queries and transport
-retries. ZDR is required unless that chat explicitly opted out during model
-selection; the selector resets its filter to checked each time it opens.
+retries; when it does not, no `provider.zdr` field is sent and catalogs are not
+filtered. A chat follows the user's setting unless it stored its own flag during
+model selection; the selector resets its checkbox to the user's setting each time
+it opens.
 Telegram's `/selectmodel` reads the same user favorites, pins available favorites
 before the price-sorted remainder, and marks them with stars without expanding
-the ZDR catalog or exposing favorite mutations in the bot.
+the catalog or exposing favorite mutations in the bot.
 
 Model selection is a nullable chat override stored through `ConversationsSource`,
 not a mutation of user defaults or a direct filesystem operation in the channel.

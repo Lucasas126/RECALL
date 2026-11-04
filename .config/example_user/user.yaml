@@ -1,4 +1,5 @@
 id: johndoe
+# require_zdr: true  # optional: only use zero-data-retention routes (OpenRouter); off by default. See docs/config.md
 # password_hash: "$argon2id$..."
 models:
   chat: openai/gpt-4o-mini

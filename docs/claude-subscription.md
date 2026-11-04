@@ -134,20 +134,27 @@ Rules:
   each request runs with the **requesting user's** Claude settings and login. When
   Claude Code is not installed or not logged in, the associative search is skipped
   for that turn (indicator "skipped") and the chat keeps its title; both are logged.
-- These two settings must say `zdr: false` explicitly when they use a
-  `claude_subscription:` model; with `zdr: true` `settings.yaml` fails to load.
-  A chat that selects a subscription model is stored with `zdr: false`.
+- These two settings need no ZDR setting to use a `claude_subscription:` model.
+  Zero data retention is optional and off by default (`require_zdr` in `user.yaml`,
+  see [config](config.md#zero-data-retention-is-a-user-policy)); the privacy of the
+  Anthropic account (for example opting out of training) is managed in that account.
+  Only when ZDR is required does a subscription model conflict: `settings.yaml`
+  fails to load with `chat_naming.zdr: true` or `associative_memory.zdr: true` and a
+  subscription model, and a user with `require_zdr: true` fails to load with a clear
+  error naming the setting to change (`zdr: false`) while those features use one.
+  A chat that selects a subscription model stores no `zdr` flag, or `zdr: false`
+  while the user requires ZDR.
 - `claude_subscription` cannot be the main `provider` or `embeddings_provider`, and
   `models.embeddings`/`models.stt` reject `claude_subscription:` references: Claude
   Code has no embeddings or speech-to-text, so those stay on OpenRouter (or Ollama
   for embeddings). The STT picker never lists Claude models.
 - In the web model pickers, subscription models are listed on their own
-  **Claude subscription** tab, labelled *experimental, not ZDR*; the ZDR checkbox
+  **Claude subscription** tab, labelled *experimental*; the ZDR checkbox
   only applies to the OpenRouter tab. They have no per-token price; they count
   against the plan limits. Telegram (no provider tabs; its list merges the
-  available providers)
-  shows them with 🧪 and reports "Not ZDR (Claude subscription, experimental)"
-  instead of "ZDR: enabled".
+  available providers) shows them with 🧪. A user who requires ZDR also sees
+  *not ZDR* labels (and Telegram reports "Not ZDR (Claude subscription,
+  experimental)" instead of "ZDR: enabled"); otherwise there is no ZDR wording.
 
 ## privacy and telemetry
 

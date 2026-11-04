@@ -23,6 +23,7 @@ each **user** picks a provider by name and (for cloud providers) brings their ow
 ```yaml
 # user.yaml
 language: en                         # language for user-facing capability errors
+require_zdr: false                   # optional, off by default: only use zero-data-retention routes (see below)
 provider:
   name: openrouter                    # selects the provider implementation
   api_key: OPENROUTER_LUCAS_API_KEY   # env var NAME holding the key; omit for local providers
@@ -80,8 +81,9 @@ A provider is **available** when the server can use it, checked on the server:
 
 Slow checks (Ollama, Claude Code) are cached for 60 seconds per server, so opening
 the picker does not start the CLI each time; the key check is a plain lookup. The
-Claude tab is labelled *experimental, not ZDR*. The ZDR checkbox appears for
-OpenRouter only; Ollama and Claude subscription models do not use it. Telegram has
+Claude tab is labelled *experimental* (and *experimental, not ZDR* when the user
+requires ZDR). The ZDR checkbox appears for OpenRouter only; Ollama and Claude
+subscription models do not use it. Telegram has
 no provider switcher: its list is the user's favorites from all available
 providers, each line tagged with its provider.
 
@@ -366,11 +368,14 @@ supports audio input.
 
 The transcription model is a single user setting, the **Default STT model** in
 web **Settings** or Telegram `/settings`; it is shared by all chats and agents.
-The initial default is `openai/whisper-large-v3-turbo`, with ZDR required.
-The model must have an active ZDR transcription endpoint when
-`speech_to_text.zdr` is `true`; otherwise audio requests fail explicitly.
+The initial default is `openai/whisper-large-v3-turbo`. When ZDR applies
+(`speech_to_text.zdr`, else the user's `require_zdr`) the model must have an
+active ZDR transcription endpoint and requests carry `provider: {"zdr": true}`;
+otherwise audio requests fail explicitly. Without ZDR the plain public
+transcription catalog is used and no `provider` field is sent.
 OpenRouter's current transcription catalog can be queried through
-`GET /api/speech-to-text/models?q=<query>&zdr=true`. Telegram `/stt` shows the
+`GET /api/speech-to-text/models?q=<query>&zdr=true`; without `zdr` the endpoint follows
+that policy. Telegram `/stt` shows the
 current default.
 
 Run the polling process locally with `uv run python run_telegram.py`. Polling
@@ -480,8 +485,9 @@ models:
 
 Persistent user preferences can override `default_llm_model` and
 `default_stt_model`; null restores the corresponding user YAML value.
-Setting an LLM default validates the current ZDR chat catalog; setting an STT
-default validates the transcription catalog under the framework routing policy.
+Setting an LLM default validates the chat catalog under the user's ZDR policy
+(`require_zdr`); setting an STT default validates the transcription catalog under
+the speech-to-text policy.
 Defaults are independent of agent selection. Embeddings remain a user YAML
 setting, not an editable inference preference.
 
@@ -511,8 +517,8 @@ files are no longer read and are removed with their chat.
 
 Both channels expose user defaults: Telegram `/settings` saves model choices
 immediately; web **Settings** stages choices until **Save settings**, including
-when no chat is open. Their selectors require ZDR; web chat LLM overrides can
-still select other routing policies.
+when no chat is open. Their selectors follow the user's ZDR policy; web chat LLM
+overrides can still select the other policy.
 
 Telegram `/selectmodel` and the web composer's chat model selector change only
 the current chat. The STT default is changed only in **Settings** (web or Telegram). **Use user default** clears the
@@ -533,37 +539,44 @@ provider.
 
 ### openrouter model catalog and zero data retention
 
-OpenRouter chat requests default to `provider: {"zdr": true}`. This applies
-to streaming, non-streaming, transport retries and auxiliary chat calls such as
+ZDR is optional and off by default (`require_zdr: false`, see
+[above](#zero-data-retention-is-a-user-policy)). While it is off, RECALL sends no
+`provider.zdr` field at all (neither `true` nor `false`), so the OpenRouter account's
+own policy decides, and it uses the plain public catalog and base prices.
+
+When ZDR applies (`require_zdr: true`, a feature's own `zdr: true`, or a chat that
+opted in) OpenRouter chat requests carry `provider: {"zdr": true}`. This applies to
+streaming, non-streaming, transport retries and auxiliary chat calls such as
 associative-memory query generation. OpenRouter must reject requests with no
 eligible ZDR route; RECALL never relaxes it automatically after a failure.
-A chat can explicitly opt out by selecting a model with the selector's ZDR
-checkbox unchecked, which persists `zdr: false` for that chat and sends
-`provider: {"zdr": false}`. The flag is passed per request, including auxiliary
-queries and retries; it is not mutable state shared by providers or chats.
-New chats and old metadata without the flag still require ZDR. OpenRouter
-account/guardrail policies can still require ZDR even when a chat opts out.
+A chat can deviate from the user's setting by selecting a model with the selector's
+ZDR checkbox changed, which persists `zdr: true` or `zdr: false` for that chat. The
+flag is passed per request, including auxiliary queries and retries; it is not
+mutable state shared by providers or chats. New chats and old metadata without the
+flag follow the user's `require_zdr`; metadata with a flag keeps it. Only a choice
+that differs from the user's setting is stored. OpenRouter account/guardrail
+policies can still require ZDR even when ZDR is off in RECALL.
 Ollama accepts but ignores this routing preference; embeddings are unchanged.
 
 The web backend exposes `GET /api/models?q=<name-or-id>&zdr=true` for the current user:
 the chat rows of `GET /api/models/catalog` (see [providers](#providers)), merged
-over the available providers; `zdr` filters only the OpenRouter rows. It fetches
+over the available providers; `zdr` filters only the OpenRouter rows and defaults to
+the user's `require_zdr` when omitted. It fetches
 the public `/api/v1/models` and `/api/v1/endpoints/zdr` catalogs without sending
 credentials, conversation content or the search term to OpenRouter. Results
 contain `id`, `name`, `description`, sorted, deduplicated `zdr_providers`, and
 `pricing: {"prompt": "0.1", "completion": "0.5"}`.
 Prices are decimal strings in **USD per million input/output tokens**,
 calculated independently as the minimum known nonnegative base price among
-that model's active ZDR routes when `zdr=true`, not an unrestricted cheaper route.
-With `zdr=false`, prices come from the public model catalog's base pricing.
+that model's active ZDR routes when ZDR applies, not an unrestricted cheaper route.
+Without ZDR, prices come from the public model catalog's base pricing.
 Missing or negative (unknown/dynamic) upstream prices become `null`, displayed
 as unavailable rather than free. Zero is a valid free price. The selector
 shows both rates with a "from" label, including in the favorites view.
 These are indicative base rates, not a quote: routing, context-length tiers,
 caching, account discounts and additional charges can change the final cost.
-Only text-output models are returned, sorted by name. By default, an active
-(`status: 0`) ZDR endpoint is also required; `zdr=false` explicitly includes
-models without one. `zdr_providers` always describes known active ZDR routes,
+Only text-output models are returned, sorted by name. When ZDR applies, an active
+(`status: 0`) ZDR endpoint is also required; otherwise models without one are included. `zdr_providers` always describes known active ZDR routes,
 not the actual route a later request will use. Search matches model names or IDs, case-insensitively.
 An empty result is valid; failed or invalid upstream responses produce an
 explicit HTTP 502, never an unfiltered fallback. The catalog is fetched on
@@ -580,21 +593,23 @@ by this integration.
 
 The **Chat model** control in the web composer (above the message box) opens a
 model selector, grouped by provider (main provider first, each group labelled), with name/ID
-search, ZDR provider names and a Refresh button. A star beside the search
+search, ZDR provider names (while ZDR applies) and a Refresh button. A star beside the search
 field toggles Favorites only; its filled/highlighted state means the filter
-is active. ZDR remains visible, and capability checkboxes live in the collapsed
+is active. The ZDR checkbox remains visible, and capability checkboxes live in the collapsed
 **Filters** disclosure with an active-filter count. Closing it keeps filters
 applied; each selector opening collapses it again. **Information** holds the
-longer policy/capability notes; the non-ZDR retention warning remains visible
-whenever ZDR is unchecked. The favorites toggle supports Enter/Space and exposes
+longer policy/capability notes; the non-ZDR retention warning appears only when
+the user requires ZDR and unchecks the box. The favorites toggle supports Enter/Space and exposes
 its pressed state to assistive technology; both disclosures use native keyboard
 controls.
-The **ZDR only** checkbox is checked on every opening,
-regardless of the current chat's policy or a previous search. Unchecking it
-fetches the unrestricted text-model catalog and shows a retention warning.
+The **ZDR only** checkbox opens in the user's policy (unchecked unless
+`require_zdr` is true), regardless of the current chat's policy or a previous
+search. Checking it fetches the ZDR-filtered catalog; when the user requires ZDR,
+unchecking it fetches the unrestricted catalog and shows a retention warning.
 Editing the search text does not reset the checkbox. Opening the selector or
 changing its filter does not change the chat's policy: choosing a model does.
-The composer shows "ZDR required" or "ZDR not required" for the current chat.
+The composer shows no ZDR text while the user does not require it and the chat has not
+opted in; otherwise it shows "ZDR required" or "ZDR not required" for the current chat.
 Saved favorites appear first, and reopening the selector defaults to favorites when
 any exist. Favorites missing from the current catalog are visible but cannot
 be selected; they can still be removed. The browser keeps the catalog until
@@ -608,7 +623,7 @@ currency strings. Unknown prices always sort last, including when descending;
 zero-priced models are valid. Price and name modes do not pin favorites first.
 Ties sort by name, then ID. Sorting combines with search and Favorites only
 without changing ZDR or chat settings. The choice lasts until logout/reload;
-ZDR still resets to checked whenever the selector opens.
+ZDR still resets to the user's policy whenever the selector opens.
 
 Capability checkboxes filter for **Tools**, **Image input** and **Reasoning**.
 All selected capabilities must match. Tools requires `tools`; reasoning requires
@@ -640,25 +655,28 @@ fails with an error naming the setting.
 
 The **ZDR only** filter applies to OpenRouter rows. Ollama rows have no per-token
 price; they are local models except Ollama cloud models (tags ending in `cloud`),
-which run on Ollama's servers and are labelled cloud and not ZDR. With the experimental [Claude subscription](claude-subscription.md)
-enabled, `claude_subscription:haiku`, `:sonnet` and `:opus` are listed in their own
-group whatever the ZDR filter, labelled experimental and not ZDR, without per-token
-prices. Choosing one stores the chat override as
+which run on Ollama's servers and are labelled cloud (and not ZDR when the user requires ZDR). With the experimental [Claude subscription](claude-subscription.md)
+available, `claude_subscription:haiku`, `:sonnet` and `:opus` are listed in their own
+group whatever the ZDR filter, labelled experimental (and not ZDR when the user requires ZDR), without per-token
+prices. Choosing one stores the chat override without a `zdr` flag, or as
 `{"provider": "claude_subscription", "id": "claude_subscription:sonnet", "zdr": false}`
-and the composer shows a plain "Claude subscription, not ZDR" (no warning style; the *experimental* note lives on the picker tab only). The default
+when the user requires ZDR. The composer shows "Claude subscription" (plus ", not ZDR" when the user requires ZDR; no warning style, and the *experimental* note lives on the picker tab only). The default
 LLM picker and the Dream tab's **Browse** use this dialog; Telegram `/selectmodel`
 and the default model in `/settings` list the user's favorites from all available
-providers instead (no search). The default STT picker lists OpenRouter only. Telegram never says
-"ZDR: enabled" for a Claude subscription model; it says "Not ZDR (Claude
-subscription, experimental)" (or the Spanish equivalent).
+providers instead (no search). The default STT picker lists OpenRouter only. Telegram says nothing about ZDR unless the user requires it (or the chat opted in);
+then it never says "ZDR: enabled" for a Claude subscription model but "Not ZDR (Claude
+subscription, experimental)" (or the Spanish equivalent). Its lists tag Claude rows
+with 🧪 and "plan" ("plan, no ZDR" when the user requires ZDR).
 
 `GET /api/agents/<agent_id>/chats/<chat_id>` includes
-`"model": {"provider": "openrouter", "id": "vendor/model", "zdr": true}` (the override or
-user default). `PUT` to that chat's `/model` endpoint with
+`"model": {"provider": "openrouter", "id": "vendor/model", "zdr": true, "require_zdr": false}`
+(the override or user default; `zdr` is the effective flag and `require_zdr` the user's
+setting). `PUT` to that chat's `/model` endpoint with
 `{"model_id": "vendor/model", "zdr": true}` validates the exact ID against the
-live catalog with that filter and persists both fields through the conversations
-source. Omission of `zdr` defaults to true; JSON opt-out requires the actual
-boolean `false`, not a string or null. Changing models or routing policy is
+live catalog with that filter and persists the model, and the flag when it differs
+from the user's setting, through the conversations source. Omission of `zdr` (or
+null) follows the user's setting; an explicit choice requires the actual boolean,
+not a string. Changing models or routing policy is
 disabled while the agent has active or queued replies; direct callers receive
 HTTP 409. It never interrupts or changes the model of an in-flight reply.
 Reopening/switching chats restores their own model and invalidates the cached
@@ -700,15 +718,15 @@ They belong to the user, not an individual agent or browser, and survive
 restarts. IDs retain insertion order; adding/removing an existing/missing
 favorite is idempotent. Telegram reads this same list every time `/selectmodel`
 opens and offers only the favorites present in the current catalog (starred, with
-their provider named). Retired or non-ZDR favorites, and those of an unavailable
+their provider named). Retired or (when ZDR is required) non-ZDR favorites, and those of an unavailable
 provider, are not selectable in Telegram. Favorite additions/removals remain web-only; the web
 selector can also be used from a mobile browser. The backend provides:
 
 - `GET /api/models/favorites`: saved model IDs.
 - `POST /api/models/favorites` with `{"model_id": "vendor/model", "zdr": true}`: add a model
-  only if the user's chat provider is OpenRouter and its exact ID is currently
-  in the catalog under that filter. Explicit `zdr: false` permits favoriting a
-  model without ZDR routes; it does not change any chat's routing policy.
+  only if its exact ID is currently in the catalog under that filter (`zdr` defaults
+  to the user's `require_zdr`). `zdr: false` permits favoriting a model without ZDR
+  routes; it does not change any chat's routing policy.
 - `DELETE /api/models/favorites/vendor/model`: remove an ID, even if it is
   no longer available or the user has switched providers.
 
@@ -790,15 +808,16 @@ associative_memory:
   score_threshold: 0.25
   query_model: openai/gpt-4o-mini
   api_key: OPENROUTER_API_KEY
-  zdr: true
+  # zdr: true   # optional override of the user's require_zdr
 ```
 
 `query_model` is an OpenRouter model ID (or a `claude_subscription:<model>`
-reference, which runs with the requesting user's own Claude login and needs
-`zdr: false`; see [claude subscription](claude-subscription.md)) and `zdr` restricts routing to zero data
-retention providers. `api_key` names the env var holding the shared OpenRouter key.
+reference, which runs with the requesting user's own Claude login; see
+[claude subscription](claude-subscription.md)) and the optional `zdr` overrides the
+user's `require_zdr` for these requests (true restricts routing to zero data
+retention providers; unset follows the user). `api_key` names the env var holding the shared OpenRouter key.
 Set `query_model: null` to propose the query with each chat's own provider, model and
-ZDR choice instead (the only option for Ollama-only setups); `question_only` uses
+ZDR flag instead (the only option for Ollama-only setups); `question_only` uses
 neither. If the env var is unset or the query request fails, the error is logged, the
 turn continues without associative memory and the indicator shows "skipped".
 `context_messages` (0-100) is how many recent messages the query model sees,
@@ -947,14 +966,15 @@ titles. Like Tavily, it uses one shared key referenced by env var name:
 chat_naming:
   model: openai/gpt-4o-mini
   api_key: OPENROUTER_API_KEY
-  zdr: true
+  # zdr: true   # optional override of the user's require_zdr
   min_messages: 5
 ```
 
 `model` is an OpenRouter model ID (or a `claude_subscription:<model>` reference,
-which runs with the requesting user's own Claude login and needs `zdr: false`; see
-[claude subscription](claude-subscription.md)), `zdr` restricts routing to zero data retention
-providers, and `min_messages` (1-1000) is the number of user and assistant messages
+which runs with the requesting user's own Claude login; see
+[claude subscription](claude-subscription.md)), the optional `zdr` overrides the user's
+`require_zdr` (true restricts routing to zero data retention providers; unset follows
+the user), and `min_messages` (1-1000) is the number of user and assistant messages
 required before a title is generated. Behavior:
 
 - the title is generated once, after the reply that reaches `min_messages`, and stored
@@ -1011,12 +1031,30 @@ account in Settings > Connections (credentials are stored in
 `chat_config.mcp`. Shared values such as the Google OAuth client path come from
 environment variables (`GOOGLE_OAUTH_CREDENTIALS`). See [MCP servers](mcp.md).
 
+### zero data retention is a user policy
+
+`require_zdr` (boolean, default `false`) in `user.yaml` is the one switch for
+[zero data retention](#openrouter-model-catalog-and-zero-data-retention). It is the
+default of every ZDR-aware feature: new chats, the model picker's checkbox when it
+opens, default-model validation, Telegram's lists, chat naming, the associative-memory
+query model, dream and speech-to-text. RECALL does not force or label ZDR: the
+privacy of an account is managed in the provider (for example OpenRouter's
+account-wide ZDR setting, or Anthropic's training opt-out), and a user who does not
+care simply uses any model. A user who wants the guarantee sets `require_zdr: true`.
+
+The per-feature `zdr` keys (`chat_naming.zdr`, `associative_memory.zdr`,
+`speech_to_text.zdr` in `settings.yaml`) remain valid as overrides; when unset they
+inherit `require_zdr`. A chat's stored `zdr` flag overrides it too (see
+[choosing a model per chat](#choosing-a-model-per-chat)). The decision lives in
+`src/config/zdr.py`.
+
 ## config files
 
 ```yaml
 # <user_id>/user.yaml
 id: user-a
 name: User A
+require_zdr: false                   # optional; true requires zero-data-retention routes everywhere
 provider:
   name: openrouter
   api_key: OPENROUTER_LUCAS_API_KEY   # omit for local providers (ollama)

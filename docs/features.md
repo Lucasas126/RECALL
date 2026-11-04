@@ -14,6 +14,7 @@
 - ~~Separate and group all tools: web search, obsidian read only, obsidian read+edit, etc. All groups should be exposed and available to select for all agents, and should be configured in the agent tab in the web interface. This will allow users to easily manage and configure tool access for different agents, so not all agents have the same tools.~~
 - ~~Add Google Calendar integration.~~ (through MCP, see [mcp.md](mcp.md))
 - ~~prompt caching for Claude on OpenRouter, with cache usage in the debug panel~~ (see [config.md](config.md#prompt-caching))
+- ~~make zero data retention an optional user policy (`require_zdr`, off by default) instead of forcing it~~ (see [config.md](config.md#zero-data-retention-is-a-user-policy))
 - ~~allow claude suscription to be used, similarly to how its implemented in other agent frameworks with and sdk~~ (experimental, chosen in the model picker's provider tabs; see [claude-subscription.md](claude-subscription.md))
 
 ## Automation and behavior

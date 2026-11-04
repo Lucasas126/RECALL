@@ -30,14 +30,15 @@ and queued chats are protected from empty-chat pruning. See
 
 Each chat may also have a `<chat_id>.model.json` sidecar, managed only through
 `ConversationsSource.model_selection` and `set_model`. It stores
-`{"provider": "openrouter", "id": "vendor/model", "zdr": true}` separately from message
+`{"provider": "openrouter", "id": "vendor/model"}` (plus `"zdr": true|false` when the
+chat's policy differs from the user's `require_zdr`) separately from message
 history, so selecting a model does not add a turn or create another chat.
 A `<chat_id>.title.json` sidecar (`{"title": "..."}`) stores the chat title once the
 chat reaches `chat_naming.min_messages` or the user renames it (`rename`); `summary` uses it
 instead of the first user message, and a generated title never replaces an existing one.
-Missing metadata means the current user's LLM default with ZDR required;
-old sidecars without `zdr` also default to true. Explicit false is per chat
-and persists across restarts. Invalid metadata is an
+Missing metadata means the current user's LLM default; sidecars without `zdr`
+follow the user's `require_zdr`, and a stored flag is per chat and persists
+across restarts. Invalid metadata is an
 explicit error, not a fallback. Writes are atomic and use the source's path
 validation. Deleting/pruning a chat removes its sidecar. These `.json` files are
 not indexed by the default `txt`, `md`, `jsonl` extension filter.
