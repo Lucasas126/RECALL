@@ -663,6 +663,22 @@ def _create_session_chat(session: TelegramSession, service: ChatService) -> dict
     return chat
 
 
+def _new_chat_text(
+    service: ChatService, session: TelegramSession, agent_name: str, agent_id: str, chat_id: str,
+) -> str:
+    """The confirmation of a new chat: its agent and the LLM it will use (agent or user default)."""
+    text = _msg(session, "New chat created with {agent}.", agent=agent_name)
+    try:
+        chat = service.get_chat(session.user_id, agent_id, chat_id)
+        model = chat["model"]
+        text += "\n" + _msg(
+            session, "Model: {model_id}", model_id=_with_provider(model.get("provider"), model["id"]),
+        ) + f" ({_msg(session, _SOURCE_LABELS[_model_source(chat)])})"
+    except (ServiceError, ValueError, KeyError, OSError) as exc:
+        logger.warning("Could not read the new chat's model: %s", exc)
+    return text
+
+
 async def _create_chat_now(update: Update, state: TelegramBotState, session: TelegramSession) -> None:
     """Create a chat for the preferred agent and confirm it (the single-agent /newchat)."""
     try:
@@ -675,9 +691,12 @@ async def _create_chat_now(update: Update, state: TelegramBotState, session: Tel
         return
     session.last_message_at = datetime.now(timezone.utc)
     session.pending_new_chat_notice = True
+    agent_name = next(
+        (a["name"] for a in state.service.list_agents(session.user_id) if a["id"] == session.agent_id),
+        session.agent_id,
+    )
     await update.effective_message.reply_text(
-        _msg(session, "New chat created: {chat_id}\nYou can now choose a model or send your first message.",
-             chat_id=chat["id"]),
+        _new_chat_text(state.service, session, agent_name, session.agent_id, chat["id"]),
     )
 
 
@@ -720,8 +739,7 @@ async def _pick_create_agent(
         session.agent_id, session.chat_id = agent["id"], chat["id"]
         session.last_message_at = datetime.now(timezone.utc)
         session.pending_new_chat_notice = True
-        return _msg(session, "New chat created with {agent}: {chat_id}\nYou can now choose a model or send your first message.",
-                    agent=agent["name"], chat_id=chat["id"])
+        return _new_chat_text(service, session, agent["name"], agent["id"], chat["id"])
     record = session.pending_reroute
     if record is None or record.token != panel.reroute_token:
         raise InputError("This option expired.")

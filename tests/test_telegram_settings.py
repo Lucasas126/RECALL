@@ -32,6 +32,7 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
             {"id": "agent-a", "name": "First"}, {"id": "agent-b", "name": "Second"},
         ]
         self.service.create_chat.return_value = {"id": "new-chat"}
+        self.service.get_chat.return_value = {"model": {"id": "llm/base", "provider": "OpenRouter"}, "model_source": "agent"}
         self.service.get_chat_models.return_value = {
             "model": {"id": "llm/base", "zdr": True}, "model_override": None,
             "stt_model": "stt/base", "stt_model_override": None,

@@ -23,6 +23,7 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.service.create_chat.side_effect = lambda user, agent: {"id": f"chat-of-{agent}"}
         self.service.chat_summary.return_value = {"id": "old-chat", "title": "Old topic", "turns": 4}
+        self.service.get_chat.return_value = {"model": {"id": "llm/base", "provider": "OpenRouter"}, "model_source": "agent"}
         self.service.update_preferences.side_effect = (
             lambda user, changes: self.preferences.update(changes.model_dump(exclude_unset=True))
         )
@@ -86,7 +87,7 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.preferences["agent_id"], "agent-b")
         text = query.edit_message_text.await_args.args[0]
         self.assertIn("Second", text)
-        self.assertIn("chat-of-agent-b", text)
+        self.assertNotIn("chat-of-agent-b", text)
         self.assertNotIn("panel", self.context.user_data)
 
     async def test_newchat_cancel_changes_nothing(self) -> None:
@@ -111,7 +112,12 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
         await new_chat(self.update, self.context)
         self.service.create_chat.assert_called_once_with("test-user", "agent-a")
         self.assertEqual(self.session.chat_id, "chat-of-agent-a")
-        self.assertIn("New chat created", self.message.reply_text.await_args.args[0])
+        text = self.message.reply_text.await_args.args[0]
+        self.assertIn("New chat created with", text)
+        self.assertIn("Model: OpenRouter", text)
+        self.assertIn("Agent default", text)
+        self.assertNotIn("choose a model", text)
+        self.assertNotIn("chat-of", text)
         self.assertNotIn("panel", self.context.user_data)
 
     # ------------------------------------------------------------------ idle auto-new-chat
