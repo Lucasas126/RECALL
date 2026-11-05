@@ -5,7 +5,7 @@ import threading
 from datetime import datetime
 from time import perf_counter
 from contextlib import ExitStack, closing
-from typing import Iterator, Optional, Union
+from typing import Callable, Iterator, Optional, Union
 
 import src.providers.openrouter  # noqa: F401  (registers the openrouter provider)
 import src.providers.ollama  # noqa: F401  (registers the ollama provider)
@@ -16,6 +16,7 @@ from src.agent import associative
 from src.agent.profile import AgentProfile, load_profile, system_prompt
 from src.agent.tool_groups import DISPOSABLE_BLOCKED_TOOLS
 from src.agent.tools import build_tools, chat_folder_options
+from src.agent.toolsets.delegate import delegate_notice, worker_prompt
 from src.agent.toolsets.terminal import terminal_notice
 from src.agent.toolsets.mcp import build_mcp_tools
 from src.config.loader import load_agent
@@ -23,6 +24,7 @@ from src.config.models import ModelsConfig, ResolvedAgent
 from src.config.settings import AGENT_MAX_TOOL_HOPS, PROMPT_CACHE, TAVILY
 from src.config.zdr import chat_zdr
 from src.core.index import VectorIndex
+from src.core.sources.conversations import ChatTask
 from src.core.timeline import TimelineBuilder
 from src.core.sources.registry import SourceRegistry
 from src.utils.logger import get_logger
@@ -166,7 +168,12 @@ class Agent:
         # addresses the tools of the current turn wrote, indexed with the turn's exchange after the reply
         self._written: set[str] = set()
         # a disposable chat (decided by its stored flag) cannot change the agent's persistent state
-        self._disposable = chat_id is not None and self.sources.conversations().is_disposable(chat_id)
+        # the hidden chat of a subagent task is also disposable and carries its grant and worker prompt (stored mark)
+        self._disposable, self._task = self._chat_kind(chat_id)
+        # called with (input tokens, output tokens) after each model call; the task manager's token watchdog
+        self.usage_hook: Callable[[int, int], None] | None = None
+        if self._task is not None:
+            self._become_worker(self._task)
         self._base_tool_specs, self._base_tool_handlers = self._build_base_tools()
         self._tool_specs, self._tool_handlers = list(self._base_tool_specs), dict(self._base_tool_handlers)
         # MCP notes appended to the system prompt; refreshed with the MCP tools at each turn
@@ -178,14 +185,36 @@ class Agent:
             config.user_id, config.id, config.provider_name, config.models.chat,
         )
 
+    def _chat_kind(self, chat_id: Optional[str]) -> tuple[bool, ChatTask | None]:
+        """Whether the chat is disposable and, for a subagent task's chat, its stored mark."""
+        if chat_id is None:
+            return False, None
+        conversations = self.sources.conversations()
+        task = conversations.task_mark(chat_id)
+        return task is not None or conversations.is_disposable(chat_id), task
+
+    def _become_worker(self, task: ChatTask) -> None:
+        """Turn this agent into the ephemeral worker of a task: the parent's prompt, no memory, no MCP, no search."""
+        self.profile = AgentProfile(soul=worker_prompt(task.instructions))
+        self.config.associative_memory = "off"
+        self.config.mcp = {}
+
     def _build_base_tools(self) -> tuple[list[dict], dict]:
         config = self.config
-        if not (config.tools and (config.tool_groups or self.profile.skills)):
+        groups = config.tool_groups
+        if self._task is not None:  # only the groups the parent granted, and only if this agent has them too
+            groups = [group for group in (groups or []) if group in self._task.groups]
+        if not (config.tools and (groups or self.profile.skills)):
             return [], {}
         return build_tools(
-            self, TavilyClient.from_config(TAVILY), config.tool_groups, config.allow, config.deny,
+            self, TavilyClient.from_config(TAVILY), groups, config.allow, config.deny,
             skill_view=bool(self.profile.skills), disposable=self._disposable,
         )
+
+    def _report_usage(self, api_usage) -> None:
+        """Tell the usage hook (a task's token watchdog) what one model call used."""
+        if self.usage_hook is not None and api_usage:
+            self.usage_hook(api_usage.get("prompt_tokens") or 0, api_usage.get("completion_tokens") or 0)
 
     def open_chat(self, chat_id: Optional[str] = None) -> str:
         """Switch to a chat (a new empty one when None), rebuilding the context from its history."""
@@ -194,9 +223,14 @@ class Agent:
             chat_id = conversations.create()
         elif not conversations.exists_chat(chat_id):
             raise FileNotFoundError(f"chat not found: {chat_id}")
-        disposable = conversations.is_disposable(chat_id)
+        disposable, task = self._chat_kind(chat_id)
+        if self._task is not None and task != self._task:
+            raise ValueError("an agent built for a subagent task cannot open another chat")
         if disposable != self._disposable:  # another chat kind: rebuild the tools (the prompt is rebuilt below)
             self._disposable = disposable
+            if task is not None:
+                self._task = task
+                self._become_worker(task)
             self._base_tool_specs, self._base_tool_handlers = self._build_base_tools()
             self._tool_specs, self._tool_handlers = list(self._base_tool_specs), dict(self._base_tool_handlers)
         selection = conversations.model_selection(chat_id)
@@ -295,8 +329,10 @@ class Agent:
         blocks = []
         if self._associative_parallel():
             blocks.append(_ASSOC_NOTICE)
-        if self._disposable:
+        if self._disposable and self._task is None:
             blocks.append(_DISPOSABLE_NOTICE)
+        if "task_start" in self._tool_handlers and (notice := delegate_notice(self.config)):
+            blocks.append(notice)
         if "terminal" in self._tool_handlers and (notice := terminal_notice(self.config)):
             blocks.append(notice)
         if self._mcp_notes:
@@ -555,6 +591,7 @@ class Agent:
                         raise
                     paused = True
                 self._model_spans.append((model_started_at, perf_counter()))
+                self._report_usage(api_usage)
                 if not paused:
                     break
                 partial = reply
@@ -654,6 +691,7 @@ class Agent:
                 zdr=self.zdr_required,
             )
             self._model_spans.append((model_started_at, perf_counter()))
+            self._report_usage(result.get("usage"))
             reasoning = result.get("reasoning") or ""
             reply = result.get("response") or ""
             tool_calls = result.get("tool_calls")

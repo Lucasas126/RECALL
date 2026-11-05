@@ -152,6 +152,7 @@ def load_agent(user_id: str, agent_id: Optional[str] = None, *, check_agent_mode
         dream=agent.dream,
         folders=agent.folders,
         terminal=agent.terminal,
+        delegation=agent.delegation,
         terminal_backends=terminal_backends,
         claude_subscription=user.claude_subscription,
         openrouter=user.openrouter_settings(),

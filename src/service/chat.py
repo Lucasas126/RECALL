@@ -61,6 +61,7 @@ from src.service.dream import (
     STATUS_EMOJI, STATUS_SUMMARY_CHARS, DreamDependencies, DreamManager, format_local_time, md_escape,
     parse_dream_command, summary_block,
 )
+from src.service.tasks import TaskManager
 from src.terminal.approvals import ApprovalBroker, ApprovalNotFound
 from src.terminal.context import RunContext, run_context
 from src.utils.logger import get_logger
@@ -336,6 +337,7 @@ class ChatService:
         self._cleanup_stop = threading.Event()
         self._last_cleanup = 0.0
         self._approvals = ApprovalBroker(TERMINAL.approval_timeout_seconds)
+        self._tasks = TaskManager(self, DATA_DIR)  # subagent tasks launched by the `delegate` tools
 
     @staticmethod
     def _build_index(config: ResolvedAgent, sources: SourceRegistry) -> VectorIndex:
@@ -465,6 +467,7 @@ class ChatService:
     def close(self) -> None:
         """Stop background resources such as MCP server processes and the dream scheduler."""
         self._cleanup_stop.set()
+        self._tasks.shutdown()  # running subagent tasks end as cancelled (their partial work stays in the hidden chats)
         self._approvals.close()  # tools waiting for an approval are denied so their threads can end
         if self._cleanup_thread is not None:
             self._cleanup_thread.join(5)
@@ -913,6 +916,20 @@ class ChatService:
             sleep(0.02)
         self.delete_chat(user_id, agent_id, chat_id)
 
+    def cancel_chat_run(self, user_id: str, agent_id: str, chat_id: str) -> None:
+        """Cancel the chat's active reply and drop its queued ones, keeping the chat (what a task stop uses)."""
+        slot = self._slot(user_id, agent_id)
+        with slot.state:
+            self._discard_replies(slot, chat_id)
+
+    def _remove_task_chat(self, user_id: str, agent_id: str, chat_id: str) -> None:
+        """Delete a task's hidden chat that never ran (a launch that failed half-way); errors are logged, not raised."""
+        try:
+            with self._slot(user_id, agent_id).lock:
+                self._conversations(user_id, agent_id).delete_chat(chat_id)
+        except Exception:
+            logger.warning("could not remove task chat %s/%s/%s", user_id, agent_id, chat_id, exc_info=True)
+
     def create_chat(self, user_id: str, agent_id: str, *, disposable: bool = False, origin: str = "web") -> dict:
         """Create a chat, discarding any other unused empty ones so they never pile up.
 
@@ -934,6 +951,8 @@ class ChatService:
         """
         conversations = self._conversations(user_id, agent_id)
         self._load(conversations, chat_id)
+        if conversations.is_task_chat(chat_id):
+            raise InputError("a task chat is internal and cannot be converted to a normal chat")
         slot = self._slot(user_id, agent_id)
         with slot.state:
             if self._chat_busy(slot, chat_id):
@@ -1173,6 +1192,8 @@ class ChatService:
         with slot.state:
             if self._chat_busy(slot, chat_id):
                 raise AgentBusy("cannot delete a chat while it has an active or queued reply")
+        if self._tasks.chat_in_use(user_id, chat_id):  # a running subagent task's parent or hidden chat (any process)
+            raise AgentBusy("cannot delete a chat while it has an active or queued reply")
         with slot.lock:
             try:
                 conversations.delete_chat(chat_id)
@@ -1522,7 +1543,7 @@ class ChatService:
             context = RunContext(
                 user_id, agent_id, chat_id, self._approvals,
                 lambda kind, data, run=run: run.events.put(ChatEvent(kind, data=data, generation_id=run.generation_id)),
-                run.cancellation,
+                run.cancellation, tasks=self._tasks,
             )
             try:
                 with run_context(context):
@@ -1572,6 +1593,8 @@ class ChatService:
                 self._preferences.get(user_id).associative_max_matches,
             )
         agent.config.language = self.language(user_id)
+        task = self._conversations(user_id, agent_id).task_mark(run.chat_id)
+        agent.usage_hook = self._tasks.usage_hook(user_id, task.task_id) if task is not None else None  # token watchdog
         try:
             result = agent.invoke(
                 run.text, stream=run.stream, cancellation=run.cancellation,
@@ -1607,7 +1630,8 @@ class ChatService:
             if agent.last_latency_report:
                 report += "\n\n" + agent.last_latency_report
             yield ChatEvent("usage", report, generation_id=run.generation_id)
-        self._name_chat(user_id, agent_id, run.chat_id)
+        if task is None:  # a task's hidden chat is never named: that would be one more model call per task
+            self._name_chat(user_id, agent_id, run.chat_id)
 
     def _name_chat(self, user_id: str, agent_id: str, chat_id: str) -> None:
         """Generate a title once a chat reaches the configured length; request failures are logged, not raised."""

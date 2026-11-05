@@ -229,6 +229,25 @@ inside it. It has no effect on SSH backends.
 backend without editing the tracked file); see [environment variables](environment-variables.md). A local backend gives its agent
 the whole host: inside Docker, every user's `/app/.config` and `/app/data` ([security notes](../deployment/security.md#terminal-sandbox)).
 
+## subagents
+
+Framework-wide limits of the [delegate tool group](../user-guide/delegation.md) (a worker agent in a hidden chat); every key is optional and unknown keys
+stop the start-up. An agent's [`delegation` block](agent-yaml.md#delegation) can only lower them. Depth is fixed at 1 (a worker cannot launch tasks).
+
+```yaml
+subagents:
+  max_parallel_per_parent: 3     # 1-10; tasks running at once for one parent chat
+  max_parallel_per_user: 4       # 1-20; tasks running at once for one user
+  max_launches_per_turn: 5       # 1-50; task_start calls in one parent turn
+  timeout_seconds: 600           # 10-3600; wall clock of one task
+  max_tokens: 200000             # 1000-5000000; input + output tokens of one task (counted after each model call)
+  result_max_chars: 8000         # 500-100000; longest result text handed back to the parent
+  rate_limit_cooldown_seconds: 300  # 60-86400; after a provider rate limit (429) no task starts for this long
+```
+
+A provider rate limit fails the task (reason `rate_limit`) and blocks launches for the cooldown; it is never retried. The same numbers are stated to the agent in
+the `task_start` description and its system prompt.
+
 ## chat naming
 
 The root `settings.yaml` holds a framework-wide small model used to generate chat

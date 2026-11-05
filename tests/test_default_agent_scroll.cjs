@@ -38,12 +38,12 @@ test("default_agent_id is a nullable General setting; picking the first-agent op
 
 test("nearBottom is true at the bottom and within the slack", () => {
   assert.equal(api.nearBottom(1000, 600, 400), true);
-  assert.equal(api.nearBottom(1000, 530, 400), true);
-  assert.equal(api.nearBottom(1000, 520, 400), true);
+  assert.equal(api.nearBottom(1000, 580, 400), true);
+  assert.equal(api.nearBottom(1000, 570, 400), true);
 });
 
 test("nearBottom is false once scrolled up past the slack", () => {
-  assert.equal(api.nearBottom(1000, 519, 400), false);
+  assert.equal(api.nearBottom(1000, 569, 400), false);
   assert.equal(api.nearBottom(1000, 0, 400), false);
 });
 

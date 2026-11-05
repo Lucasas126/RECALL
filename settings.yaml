@@ -122,3 +122,14 @@ terminal:
   max_timeout_seconds: 600       # ceiling for any command timeout
   max_output_chars: 20000        # ceiling for the output returned to the model
   protected_paths: []            # extra glob patterns (repo-relative or absolute) a `local` backend may never read or use; see docs/user-guide/terminal.md
+
+# Subagents (the `delegate` tool group, see docs/user-guide/delegation.md): a parent agent hands a task to a short-lived worker
+# in a hidden chat. An agent's `delegation` block can only lower these numbers. Depth is fixed at 1: a worker cannot launch tasks.
+subagents:
+  max_parallel_per_parent: 3     # tasks running at once for one parent chat
+  max_parallel_per_user: 4       # tasks running at once for one user
+  max_launches_per_turn: 5       # task_start calls in one parent turn
+  timeout_seconds: 600           # wall clock of one task (10-3600)
+  max_tokens: 200000             # input + output tokens of one task
+  result_max_chars: 8000         # longest result text handed back to the parent
+  rate_limit_cooldown_seconds: 300  # after a provider rate limit (429) no task starts for this long (60-86400)

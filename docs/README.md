@@ -20,6 +20,7 @@ Documentation map. The root [README](../README.md) gives the short pitch; [AGENT
 - [MCP servers](user-guide/mcp.md): external services such as Google Calendar.
 - [RECALL knowledge](user-guide/recall-knowledge.md): the built-in, read-only skill that tells each agent how RECALL works, and its per-agent switch.
 - [Terminal sandbox](user-guide/terminal.md): commands and file edits in an SSH sandbox, with approvals and an audit file.
+- [Delegating tasks](user-guide/delegation.md): the `delegate` tool group, a worker in a hidden chat with limits (phase 1: synchronous).
 - [Admin CLI](user-guide/admin-cli.md): `python -m src.admin` for users, agents, templates (the setup guide) and credentials (`set-secret`).
 
 ## reference

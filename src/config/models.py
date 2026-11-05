@@ -430,6 +430,50 @@ class TerminalSettings(BaseModel):
         return self
 
 
+class SubagentSettings(BaseModel):
+    """Framework-wide subagent limits (settings.yaml `subagents:`); an agent's `delegation` block can only lower them.
+
+    Depth is fixed at 1: a subagent cannot launch tasks.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_parallel_per_parent: int = Field(default=3, ge=1, le=10, strict=True)  # running tasks of one parent chat
+    max_parallel_per_user: int = Field(default=4, ge=1, le=20, strict=True)  # running tasks of one user
+    max_launches_per_turn: int = Field(default=5, ge=1, le=50, strict=True)  # task_start calls in one parent turn
+    timeout_seconds: int = Field(default=600, ge=10, le=3600, strict=True)  # wall clock of one task
+    max_tokens: int = Field(default=200_000, ge=1_000, le=5_000_000, strict=True)  # input + output tokens of one task
+    result_max_chars: int = Field(default=8000, ge=500, le=100_000, strict=True)  # result text returned to the parent
+    rate_limit_cooldown_seconds: int = Field(default=300, ge=60, le=86_400, strict=True)  # no launches after a 429
+
+
+class AgentDelegationConfig(BaseModel):
+    """An agent's `delegate` tool group: switch, grantable groups and limits (each can only lower the application's)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(default=True, strict=True)  # false switches the tools off without removing the group
+    allowed_groups: list[str] = Field(default_factory=lambda: ["web"])  # groups the agent may grant a task (web only)
+    max_parallel: Optional[int] = Field(default=None, ge=1, le=10, strict=True)  # per parent chat; None = application's
+    timeout_seconds: Optional[int] = Field(default=None, ge=10, le=3600, strict=True)
+    max_tokens: Optional[int] = Field(default=None, ge=1_000, le=5_000_000, strict=True)
+
+    @field_validator("allowed_groups")
+    @classmethod
+    def _grantable(cls, value: list[str]) -> list[str]:
+        from src.agent.tool_groups import DELEGATE_GRANTABLE_GROUPS
+
+        if len(set(value)) != len(value):
+            raise ValueError("delegation.allowed_groups must not contain duplicates")
+        bad = sorted(set(value) - set(DELEGATE_GRANTABLE_GROUPS))
+        if bad:
+            raise ValueError(
+                f"delegation.allowed_groups: {', '.join(bad)} cannot be granted to a task "
+                f"(grantable: {', '.join(DELEGATE_GRANTABLE_GROUPS)})"
+            )
+        return value
+
+
 class UserConfig(BaseModel):
     id: str
     name: str
@@ -584,6 +628,13 @@ class AgentConfig(BaseModel):
     dream: DreamConfig = Field(default_factory=DreamConfig)
     folders: list[FolderConfig] = Field(default_factory=list, max_length=20)  # user folders, each a source
     terminal: Optional[AgentTerminalConfig] = None  # required by the `terminal` tool group
+    delegation: Optional[AgentDelegationConfig] = None  # the `delegate` tool group; defaults when the group is selected
+
+    @model_validator(mode="after")
+    def _delegate_group_has_a_block(self) -> "AgentConfig":
+        if "delegate" in (self.chat_config.tool_groups or ()) and self.delegation is None:
+            self.delegation = AgentDelegationConfig()  # the web form cannot send the block: the defaults apply
+        return self
 
     @model_validator(mode="after")
     def _dream_terminal_opt_in(self) -> "AgentConfig":
@@ -641,6 +692,7 @@ class ResolvedAgent(BaseModel):
     dream: DreamConfig = Field(default_factory=DreamConfig)
     folders: list[FolderConfig] = Field(default_factory=list)
     terminal: Optional[AgentTerminalConfig] = None
+    delegation: Optional[AgentDelegationConfig] = None
     # the user's backends named by `terminal.backends` that resolved, by name; empty = the tools are not built
     terminal_backends: dict[str, TerminalBackendConfig] = Field(default_factory=dict)
     claude_subscription: ClaudeSubscriptionConfig = Field(default_factory=ClaudeSubscriptionConfig)

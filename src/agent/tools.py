@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable
 
+from src.agent.toolsets.delegate import build_delegate_tools
 from src.agent.toolsets.editing import build_edit_tools
 from src.agent.toolsets.memory import build_memory_tools
 from src.agent.toolsets.self_files import build_self_tools
@@ -24,6 +25,7 @@ _ORDER = (
     "folder_write", "folder_append", "folder_edit", "folder_move", "folder_delete",
     "web_search", "web_retrieve",
     "terminal", "sandbox_read", "sandbox_write", "sandbox_patch", "sandbox_search",
+    "task_start",
 )
 
 
@@ -68,6 +70,8 @@ def build_tools(
         base_tools.extend(build_web_tools(web_client))
     if "terminal" in selected and not disposable:
         base_tools.extend(build_terminal_tools(agent.config))
+    if "delegate" in selected:  # a disposable chat (and so a task's own chat) never launches tasks: DISPOSABLE_BLOCKED_TOOLS
+        base_tools.extend(build_delegate_tools(agent.config))
     tools_by_name = {
         func.tool_spec["function"]["name"]: func
         for func in base_tools

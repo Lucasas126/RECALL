@@ -173,7 +173,7 @@ class DisposableToolTests(unittest.TestCase):
         self.assertEqual(
             DISPOSABLE_BLOCKED_TOOLS,
             WRITE_TOOLS | {"folder_write", "folder_append", "folder_edit", "folder_move", "folder_delete"}
-            | TERMINAL_TOOLS,
+            | TERMINAL_TOOLS | {"task_start"},  # a disposable chat cannot launch tasks either
         )
 
     def test_a_disposable_chat_never_builds_the_terminal_tools(self) -> None:
