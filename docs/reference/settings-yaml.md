@@ -243,6 +243,9 @@ subagents:
   max_tokens: 200000             # 1000-5000000; input + output tokens of one task (counted after each model call)
   result_max_chars: 8000         # 500-100000; longest result text handed back to the parent
   rate_limit_cooldown_seconds: 300  # 60-86400; after a provider rate limit (429) no task starts for this long
+  max_followups: 5               # 0-50; task_send follow-ups per task
+  max_auto_wakes: 3              # 1-20; parent turns started by a task result in a row, without a user message in between (the rest are held)
+  wake_debounce_seconds: 1.5     # 0-30; results ending within this window are delivered as one message
 ```
 
 A provider rate limit fails the task (reason `rate_limit`) and blocks launches for the cooldown; it is never retried. The same numbers are stated to the agent in

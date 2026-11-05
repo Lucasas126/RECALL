@@ -279,6 +279,10 @@ class _MessageRun:
     attachments: list[dict]
     stream: Optional[bool]
     continuation: bool = False
+    source: Optional[str] = None  # "task" for a wake turn written by the system, not the user
+    meta: Optional[dict] = None  # persisted on the user turn (source, task_ids)
+    blocks: Optional[list[str]] = None  # a wake turn's task blocks: later results merge into a queued wake
+    frame: Optional[Callable[[list[str]], str]] = None  # composes `text` from `blocks`
     generation_id: str = field(default_factory=lambda: uuid4().hex)
     cancellation: CancellationToken = field(default_factory=CancellationToken)
     events: _RunFeed = field(default_factory=_RunFeed)
@@ -477,6 +481,7 @@ class ChatService:
 
     def start_dream_scheduler(self, interval_seconds: float = 60.0) -> None:
         """Run scheduled dream sessions from this process (the web and Telegram processes both may)."""
+        self._tasks.recover()  # failed owner_lost tasks, results still waiting for their wake
         self._dream.start_scheduler(interval_seconds)
         if self._cleanup_thread is None:  # hourly removal of expired disposable chats, beside the dream scheduler
             self._cleanup_stop.clear()
@@ -1027,6 +1032,7 @@ class ChatService:
                     k: t[k] for k in (
                         "role", "content", "ts", "reasoning", "actions", "timeline", "interrupted",
                         "associative_matches", "associative_skipped", "usage", "usage_report",
+                        "source", "task_ids",  # a wake turn: a subagent result, not written by the user
                     )
                     if t.get(k) is not None
                 },
@@ -1192,7 +1198,8 @@ class ChatService:
         with slot.state:
             if self._chat_busy(slot, chat_id):
                 raise AgentBusy("cannot delete a chat while it has an active or queued reply")
-        if self._tasks.chat_in_use(user_id, chat_id):  # a running subagent task's parent or hidden chat (any process)
+        self._tasks.cancel_for_parent(user_id, chat_id)  # tasks launched from this chat end; their results are orphaned
+        if self._tasks.chat_in_use(user_id, chat_id):  # a running subagent task's hidden chat, or a task of another process
             raise AgentBusy("cannot delete a chat while it has an active or queued reply")
         with slot.lock:
             try:
@@ -1261,10 +1268,14 @@ class ChatService:
                                 raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from e
                             slot.agents.pop(chat_id, None)  # its context still holds the removed turns
                     self._enqueue(user_id, agent_id, slot, chat_id, run)
-                    return self._events(run, run.events.subscribe())
+                    events = self._events(run, run.events.subscribe())
+                    break
             if monotonic() > deadline:
                 raise AgentBusy("the chat is still replying; try again in a moment")
             sleep(0.02)
+        self._tasks.release_held(user_id, agent_id, chat_id)  # results held back by max_auto_wakes now follow this reply
+        return events
+
 
     @staticmethod
     def _discard_replies(slot: _AgentSlot, chat_id: str) -> bool:
@@ -1294,22 +1305,77 @@ class ChatService:
             raise ApprovalNotFound("unknown or expired approval: {approval_id}", approval_id=approval_id)
         return {"status": self._approvals.resolve(approval_id, user_id, decision)}
 
-    def _enqueue(self, user_id: str, agent_id: str, slot: _AgentSlot, chat_id: str, run: _MessageRun) -> None:
-        """Queue a run behind the chat's replies (steering the unfinished one); the caller holds `slot.state`."""
+    def send_system(
+        self, user_id: str, agent_id: str, chat_id: str, text: str, *, source: str, meta: Optional[dict] = None,
+        steer: bool = False, frame: Optional[Callable[[list[str]], str]] = None,
+    ) -> None:
+        """Write a system-originated turn (a subagent task result) into a chat and schedule a generation for it.
+
+        The turn is stored with the user role and `source` / `meta` (for example `task_ids`), so the model reads it in
+        context and the UI can render it apart from the user's own messages. With `steer=False` (the wake default)
+        the run queues behind the chat's active reply and never cancels it. With a `frame`, `text` is one block and
+        the turn is `frame(blocks)`: a block that arrives while an earlier wake is still queued is merged into it
+        (one generation for several results), and a block whose task ids are already queued is dropped.
+        Raises UnknownChat when the chat does not exist (any more). Returns at once; follow the reply with `follow`.
+        """
+        conversations = self._conversations(user_id, agent_id)
+        slot = self._slot(user_id, agent_id)
+        meta = dict(meta or {}, source=source)
+        with slot.state:
+            try:
+                exists = conversations.exists_chat(chat_id)
+            except ValueError:
+                exists = False
+            if not exists:
+                raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id)
+            if frame is not None:
+                ids = list(meta.get("task_runs") or [])  # "<task id>:<follow-up number>": one delivery per run of a task
+                for queued in (*slot.pending.get(chat_id, ()), slot.active.get(chat_id)):
+                    if queued is None or queued.source != source or queued.meta is None:
+                        continue
+                    if ids and all(run_id in (queued.meta.get("task_runs") or []) for run_id in ids):
+                        return  # already queued or generating: delivery is idempotent
+                for queued in slot.pending.get(chat_id, ()):
+                    if (
+                        queued.source == source and queued.blocks is not None and queued.meta is not None
+                        and not queued.cancellation.is_cancelled()
+                    ):
+                        queued.blocks.append(text)
+                        queued.text = frame(queued.blocks)
+                        for key in ("task_ids", "task_runs"):
+                            queued.meta[key] = [*(queued.meta.get(key) or []), *(meta.get(key) or [])]
+                        return
+            run = _MessageRun(
+                chat_id, frame([text]) if frame else text, [], None, source=source, meta=meta,
+                blocks=[text] if frame else None, frame=frame,
+            )
+            self._enqueue(user_id, agent_id, slot, chat_id, run, steer=steer)
+
+    def _enqueue(
+        self, user_id: str, agent_id: str, slot: _AgentSlot, chat_id: str, run: _MessageRun, *, steer: bool = True,
+    ) -> None:
+        """Queue a run behind the chat's replies; the caller holds `slot.state`.
+
+        A user message (`steer=True`) steers: it cancels the unfinished reply and the queued runs of the chat and
+        continues the turn. With `steer=False` (a task wake) it only appends and cancels nothing.
+        """
         pending = slot.pending.setdefault(chat_id, deque())
         same_chat = list(range(len(pending)))
         active = slot.active.get(chat_id)
-        if active is not None and active.chat_id == chat_id:
-            run.continuation = active.cancellation.cancel()
-        for index in same_chat:
-            pending[index].cancellation.cancel()
-            run.continuation = True
-        if same_chat:
-            pending.insert(same_chat[-1] + 1, run)
-        elif run.continuation:
-            pending.appendleft(run)
-        else:
+        if not steer:
             pending.append(run)
+        else:
+            if active is not None and active.chat_id == chat_id:
+                run.continuation = active.cancellation.cancel()
+            for index in same_chat:
+                pending[index].cancellation.cancel()
+                run.continuation = True
+            if same_chat:
+                pending.insert(same_chat[-1] + 1, run)
+            elif run.continuation:
+                pending.appendleft(run)
+            else:
+                pending.append(run)
         if chat_id not in slot.workers:
             worker = threading.Thread(
                 target=self._work, args=(user_id, agent_id, slot, chat_id), daemon=True,
@@ -1598,7 +1664,7 @@ class ChatService:
         try:
             result = agent.invoke(
                 run.text, stream=run.stream, cancellation=run.cancellation,
-                continuation=run.continuation, attachments=run.attachments,
+                continuation=run.continuation, attachments=run.attachments, meta=run.meta,
             )
             if memory := agent.memory_event():  # a search that already finished (replies that are not streamed)
                 yield ChatEvent("memory", data=memory, generation_id=run.generation_id)

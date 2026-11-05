@@ -42,16 +42,23 @@ The web **Agents** tab configures these groups for each agent:
   stripped, redacted and truncated. See the [terminal guide](../user-guide/terminal.md).
 
 <a id="delegate"></a>
-- `delegate`: `task_start(goal, context, instructions, tools, model, timeout_s, wait)` runs a task in a hidden worker chat and returns JSON
-  with `id`, `status` (`done`, `failed`, `cancelled`, `timed_out`), `reason`, the capped `result` and `tokens`. `instructions` is the worker's
-  system prompt (written by the calling agent, no inherited SOUL); `tools` can only name `web`, and only if the agent has it; `wait` must be
-  `true` in this phase (`wait=false` returns `error: asynchronous tasks arrive later; use wait=true`). The description states the limits
-  (3 running tasks per chat, 4 per user, 10 minutes and 200 000 tokens per task, 8000 result characters, depth 1) and errors name the limit
-  hit. Needs the group in `tool_groups`; the `delegation` block is optional. See the [delegation guide](../user-guide/delegation.md).
+- `delegate`: seven tools, all returning compact JSON (or `error: ...` text), only for the chat that launched the task.
+  - `task_start(goal, context, instructions, tools, model, timeout_s, wait=false, wake=true)` runs a task in a hidden worker chat. By default it returns `{id, status: "running"}` at once and the
+    result arrives later as a message in the chat (a *wake* turn, see the [delegation guide](../user-guide/delegation.md#results-wake-the-agent)); `wait=true` blocks and returns the result (`id`,
+    `status` `done|failed|cancelled|timed_out`, `reason`, capped `result`, `tokens`); `wake=false` records the result silently (fire-and-forget). `instructions` is the worker's system prompt (no inherited SOUL);
+    `tools` can only name `web`, and only if the agent has it. The description states the limits (3 running tasks per chat, 4 per user, 10 minutes and 200 000 tokens per task, 8000 result characters, depth 1).
+  - `task_list(status="")`: one line per task of this chat, `id status [unread] age title`.
+  - `task_result(id, full=false)`: the capped result, or with `full` the worker's whole final answer (up to 50 000 characters); status only while it runs. Marks the result consumed.
+  - `task_steer(id, text)`: correct a *running* task; its reply is interrupted (partial kept) and continues with the correction.
+  - `task_send(id, text)`: continue a `done`, `timed_out` or `failed` task (not `owner_lost`, not `cancelled`) in its worker chat with its full context; fresh timeout and token budget, counts against the
+    parallel limits, at most 5 follow-ups per task (`subagents.max_followups`), ends with a new wake.
+  - `task_stop(id)`: stop a running task, partial result kept (no wake).
+  - `task_wait(ids, timeout_s=60)`: block until every task ended or the timeout (**at most 120 s**; a user message steering the parent ends the wait). Returns `{done: [...], running: [ids]}`; results read here are consumed (no wake).
+  Needs the group in `tool_groups`; the `delegation` block is optional. Limit errors name the limit hit. See the [delegation guide](../user-guide/delegation.md).
 
 In a [disposable chat](../user-guide/memory.md#disposable-chats) the write tools of
 `memory_edit`, `self` (`memory`, `skill_manage`, `soul_edit`) and `folders_edit` are
-removed, whatever the groups, and the whole `terminal` group and `task_start` are not built; the read tools stay.
+removed, whatever the groups, and the whole `terminal` group and the `delegate` tools are not built; the read tools stay.
 
 Without `tool_groups`, agents get `memory_read`, `memory_edit`, `web` and
 `self`. `skill_view` is added whenever the agent has skills, even without

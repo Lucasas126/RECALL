@@ -383,6 +383,7 @@ class Agent:
         self, user_input: str, stream: Optional[bool] = None,
         cancellation: CancellationToken | None = None,
         *, continuation: bool = False, attachments: Optional[list[dict]] = None,
+        meta: Optional[dict] = None,
     ) -> Union[str, Iterator[tuple[str, str | dict]]]:
         """Send a user message and return the reply, updating conversation memory.
 
@@ -423,7 +424,7 @@ class Agent:
                 cancellation.raise_if_cancelled()
         except GenerationCancelled:
             self.messages.append({"role": "user", "content": self._stamped(user_content, ts)})
-            self._log_turn("user", user_content, ts=ts)
+            self._log_turn("user", user_content, ts=ts, **(meta or {}))
             if not continuation:
                 self._trim_context()
             self._remember_interrupted("", "")
@@ -435,7 +436,7 @@ class Agent:
                 self, list(self.messages[1:]), user_input, chat_id=self.chat_id,
             ).start()
         self.messages.append({"role": "user", "content": self._stamped(user_content, ts)})
-        self._log_turn("user", user_content, ts=ts)
+        self._log_turn("user", user_content, ts=ts, **(meta or {}))  # `meta`: source/task_ids of a wake turn
         if not continuation:
             self._trim_context()
         self._refresh_mcp_tools()

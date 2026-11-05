@@ -23,7 +23,7 @@ from src.config.models import (
 from src.config.settings import SUBAGENTS
 from src.core.sources.conversations import ChatTask, ConversationsSource
 from src.providers.cancellation import CancellationToken, GenerationCancelled
-from src.service.tasks import FINAL_STATES, TaskStore, is_rate_limit
+from src.service.tasks import FINAL_STATES, TaskManager, TaskStore, is_rate_limit, wake_block
 from src.terminal.context import RunContext, run_context
 
 LIMITS = TaskLimits(
@@ -170,7 +170,10 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(config.delegation, AgentDelegationConfig())
         self.assertIn("delegate", TOOL_GROUP_TOOLS)
         self.assertIn("task_start", DISPOSABLE_BLOCKED_TOOLS)
-        self.assertEqual(TOOL_GROUP_TOOLS["delegate"], ("task_start",))
+        self.assertEqual(
+            TOOL_GROUP_TOOLS["delegate"],
+            ("task_start", "task_list", "task_result", "task_steer", "task_send", "task_stop", "task_wait"),
+        )
         with self.assertRaises(ValueError):
             AgentConfig(id="a", name="A", delegation={"depth": 2})
 
@@ -206,7 +209,16 @@ class SubagentFixture(steering.SteeringFixture):
         self.child_calls = 0
         self.child_systems: list[str] = []
         self.release_child = threading.Event()
+        self.parent_mode = "task"  # "answer": the parent just answers (wake and user turns) instead of launching a task
+        self.parent_seen: list[str] = []
+        self.parent_gate: threading.Event | None = None  # holds a user reply open (mid-reply tests)
+        self.parent_started = threading.Event()
+        self.wake_gate: threading.Event | None = None  # holds a wake reply open
+        self.wake_started = threading.Event()
+        self.child_context_sizes: list[int] = []
+        self.parent_contexts: list[list[str]] = []
         super().setUp()
+        self.addCleanup(lambda: [g.set() for g in (self.parent_gate, self.wake_gate) if g is not None])
         self.addCleanup(self.release_child.set)
         self.addCleanup(self._wait_tasks)
         self.manager = self.service._tasks
@@ -236,7 +248,17 @@ class SubagentFixture(steering.SteeringFixture):
             if "worker agent" in system:
                 self.child_calls += 1
                 self.child_systems.append(system)
-                goal = re.search(r"Goal:\n(.*)", next(m for m in reversed(messages) if m["role"] == "user")["content"]).group(1)
+                self.child_context_sizes.append(len(messages))
+                user_text = next(m for m in reversed(messages) if m["role"] == "user")["content"]
+                if "Correction from the parent agent:" in user_text:
+                    yield "content", "CORRECTED: " + user_text.split("Correction from the parent agent:\n", 1)[1].strip()
+                    yield {"usage": {"prompt_tokens": 10, "completion_tokens": 5}}
+                    return
+                if "Follow-up from the parent agent:" in user_text:
+                    yield "content", "RESULT for: follow-up " + user_text.split("Follow-up from the parent agent:\n", 1)[1].strip()
+                    yield {"usage": {"prompt_tokens": 10, "completion_tokens": 5}}
+                    return
+                goal = re.search(r"Goal:\n(.*)", user_text).group(1)
                 if self.child_behavior == "limit":
                     raise RuntimeError("Claude plan limit or rate limit reached: five hour window")
                 yield "content", f"RESULT for: {goal}"
@@ -255,9 +277,27 @@ class SubagentFixture(steering.SteeringFixture):
                 yield "content", "Parent saw: " + latest["content"]
                 yield {"usage": {"prompt_tokens": 20, "completion_tokens": 8}}
                 return
+            if self.parent_mode == "answer" or "[RECALL task result" in str(latest["content"]):
+                self.parent_seen.append(str(latest["content"]))
+                self.parent_contexts.append([str(m["content"]) for m in messages])
+                text = re.sub(r"^\[[^\]]*\] ?", "", str(latest["content"]))
+                gate, started = (self.wake_gate, self.wake_started) if text.startswith("[RECALL") else (self.parent_gate, self.parent_started)
+                if gate is not None:
+                    started.set()
+                    yield "content", "Partial"
+                    if not gate.wait(5):
+                        raise RuntimeError("test parent was not released")
+                    cancellation.raise_if_cancelled()
+                if text.startswith("[RECALL"):
+                    yield "content", "Report: " + ", ".join(re.findall(r"^task (\w+) ", text, re.M))
+                else:
+                    yield "content", "Answer: " + text
+                yield {"usage": {"prompt_tokens": 20, "completion_tokens": 8}}
+                return
             yield {"tool_calls": [{
                 "id": "call-1", "name": "task_start",
-                "arguments": {"goal": "find X", "context": "some facts", "instructions": "You are a poet.", "tools": []},
+                "arguments": {"goal": "find X", "context": "some facts", "instructions": "You are a poet.", "tools": [],
+                              "wait": True},
             }], "usage": {"prompt_tokens": 20, "completion_tokens": 8}}
 
         return respond
@@ -271,7 +311,7 @@ class SubagentFixture(steering.SteeringFixture):
         values = dict(
             limits=limits, grantable=["web"], goal="find X", context="", instructions="", groups=[], model="", timeout_s=0,
         )
-        return self.manager.launch(parent or self.parent(), **{**values, **overrides})
+        return self.manager.launch(parent or self.parent(), **{**values, "wake": False, **overrides})
 
     def run_task(self, parent: RunContext | None = None, *, limits: TaskLimits = LIMITS, **overrides) -> dict:
         values = dict(
@@ -314,14 +354,17 @@ class TaskStartToolTests(SubagentFixture):
         self.assertEqual(source.task_mark(child).instructions, "You are a poet.")
         self.assertEqual(source.origin(child), "task")
 
-    def test_asynchronous_mode_is_not_available_yet(self) -> None:
+    def test_asynchronous_mode_returns_the_id_at_once(self) -> None:
+        self.child_behavior = "slow"
         agent = self._factory("user-one", "agent-one", self.chat)
         handler = agent._tool_handlers["task_start"]
         with patch("src.agent.toolsets.delegate.current_run", return_value=self.parent()):
-            self.assertEqual(handler(goal="x", wait=False), "error: asynchronous tasks arrive later; use wait=true")
+            started = json.loads(handler(goal="x"))
+        self.assertEqual((started["status"], started["wake"]), ("running", True))
         with patch("src.agent.toolsets.delegate.current_run", return_value=None):
             self.assertTrue(handler(goal="x").startswith("error: delegation is not available"))
-        self.assertEqual(self.manager.store.list("user-one"), [])
+        self.assertEqual(len(self.manager.store.list("user-one")), 1)
+        self.release_child.set()
 
     def test_the_tool_and_the_system_prompt_state_the_limits(self) -> None:
         agent = self._factory("user-one", "agent-one", self.chat)
@@ -515,7 +558,7 @@ class LimitErrorTests(SubagentFixture):
         with self.assertRaises(TaskError) as caught:
             self.launch(limits=limits)
         self.assertEqual(
-            str(caught.exception), "limit reached: 1 running task(s) in this chat; wait for one to finish, then launch again",
+            str(caught.exception), "limit reached: 1 running task(s) in this chat; wait for one to finish (task_wait), then launch again",
         )
         self.release_child.set()
         first.done.wait(5)
@@ -572,17 +615,17 @@ class LimitErrorTests(SubagentFixture):
 
     def test_a_running_task_keeps_its_chats_from_being_deleted(self) -> None:
         self.child_behavior = "slow"
-        live = self.launch()
+        live = self.launch(wake=True)
         child = self.record(live.task_id)["child"]["chat_id"]
         sleep(0.2)
         from src.service.chat import AgentBusy
 
         with self.assertRaises(AgentBusy):
             self.service.delete_chat("user-one", "agent-one", child)
-        with self.assertRaises(AgentBusy):
-            self.service.delete_chat("user-one", "agent-one", self.chat)
-        self.release_child.set()
-        live.done.wait(5)
+        # deleting the PARENT chat cancels its running tasks instead of refusing (their results are orphaned)
+        self.service.delete_chat("user-one", "agent-one", self.chat)
+        self.assertTrue(live.done.is_set())
+        self.assertEqual((self.record(live.task_id)["status"], self.record(live.task_id)["wake"]["state"]), ("cancelled", "orphaned"))
         self.service.delete_chat("user-one", "agent-one", child)
 
 

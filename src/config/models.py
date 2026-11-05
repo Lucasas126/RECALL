@@ -445,6 +445,9 @@ class SubagentSettings(BaseModel):
     max_tokens: int = Field(default=200_000, ge=1_000, le=5_000_000, strict=True)  # input + output tokens of one task
     result_max_chars: int = Field(default=8000, ge=500, le=100_000, strict=True)  # result text returned to the parent
     rate_limit_cooldown_seconds: int = Field(default=300, ge=60, le=86_400, strict=True)  # no launches after a 429
+    max_followups: int = Field(default=5, ge=0, le=50, strict=True)  # task_send follow-ups per task
+    max_auto_wakes: int = Field(default=3, ge=1, le=20, strict=True)  # wake-started parent turns in a row without a user message
+    wake_debounce_seconds: float = Field(default=1.5, ge=0, le=30)  # results ending within this window share one wake
 
 
 class AgentDelegationConfig(BaseModel):

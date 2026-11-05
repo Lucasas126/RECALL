@@ -133,3 +133,6 @@ subagents:
   max_tokens: 200000             # input + output tokens of one task
   result_max_chars: 8000         # longest result text handed back to the parent
   rate_limit_cooldown_seconds: 300  # after a provider rate limit (429) no task starts for this long (60-86400)
+  max_followups: 5               # task_send follow-ups per task
+  max_auto_wakes: 3              # parent turns started by a task result in a row, without a user message in between
+  wake_debounce_seconds: 1.5     # results ending within this window are delivered as one message

@@ -31,7 +31,7 @@ Paths are relative to the repository root. In Docker the same tree sits under `/
 | `src/agent/toolsets/folders.py` | the `folder_*` tools |
 | `src/agent/toolsets/web.py` | `web_search`, `web_retrieve` |
 | `src/agent/toolsets/terminal.py` | terminal tools and the prompt notice for them |
-| `src/agent/toolsets/delegate.py` | `task_start`, the delegation limits and the prompt notice for them |
+| `src/agent/toolsets/delegate.py` | the seven `task_*` tools, the delegation limits and the prompt notice for them |
 | `src/agent/toolsets/mcp.py` | MCP tools |
 | `src/agent/toolsets/dream.py` | dream review-queue tools |
 | `src/agent/associative.py` | associative-memory query and fragment formatting |
