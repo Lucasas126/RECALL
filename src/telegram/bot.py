@@ -1802,6 +1802,9 @@ def _task_status_text(language: str, status: str) -> str:
 
 def _task_line(language: str, record: dict, agent_name: str) -> str:
     """The one-line status of a task for the start and end messages."""
+    target = record.get("target") or {}
+    if target.get("kind") == "agent":  # an existing agent runs it: name it instead of the launching chat's agent
+        agent_name = str(target.get("name") or target.get("agent_id") or agent_name)
     values = {"title": record.get("title") or record.get("id", ""), "agent": agent_name, "elapsed": _task_elapsed(record)}
     status = record.get("status")
     if status == "running":

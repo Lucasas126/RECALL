@@ -16,6 +16,8 @@ has the dream tabs (**Soul & memory**, **Dream**, **Dream sessions**, see [dream
 Reasoning is on by default for new agents (and for agent files that omit `reasoning`); turn it off in **Basic > Model and reasoning > Reasoning**.
 Models without reasoning support ignore the request. When it is off, the composer's effort selector reads **Disabled in this agent**.
 
+The **Delegation** section of the Tools tab appears while the **Delegate** tool group is ticked: whether the agent may hand tasks to workers, which tool groups workers may get, the parallel, timeout and token limits (each with its default and a reset button), and the agents it may hand tasks to, each with **Can write its own memory**. See [delegation](delegation.md).
+
 ## defaults and reset
 
 Every setting in the agent form (the Basic, Tools and Dream tabs) is one row: its name and a short help line, the control, a muted

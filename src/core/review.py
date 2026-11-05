@@ -51,7 +51,7 @@ class ReviewQueue:
 
     def pending(self) -> list[dict]:
         """Pending chats, oldest unreviewed turn first: id, title, turn counts and first new turn time."""
-        existing = set(self._conversations.chats())
+        existing = set(self._conversations.chats(include_internal=True))  # a `remember` task chat is hidden but reviewable
         disposable = self._conversations.disposable_chats()
         stale = set(self._state.state()["chats"]) - existing
         if stale:

@@ -191,13 +191,19 @@ class Agent:
             return False, None
         conversations = self.sources.conversations()
         task = conversations.task_mark(chat_id)
-        return task is not None or conversations.is_disposable(chat_id), task
+        # a `remember` task chat (existing agent writing its own memory) is hidden but ordinary, not disposable
+        return (task is not None and not task.remember) or conversations.is_disposable(chat_id), task
 
     def _become_worker(self, task: ChatTask) -> None:
         """Turn this agent into the ephemeral worker of a task: the parent's prompt, no memory, no MCP, no search."""
-        self.profile = AgentProfile(soul=worker_prompt(task.instructions))
-        self.config.associative_memory = "off"
-        self.config.mcp = {}
+        if task.kind == "agent":  # an existing agent keeps its own SOUL, memories, skills and settings (read-only unless `remember`)
+            self.config.mcp = {}
+            if task.remember:  # it may write its own memory, nothing else about itself
+                self.config.deny = [*(self.config.deny or []), "soul_edit", "skill_manage"]
+        else:
+            self.profile = AgentProfile(soul=worker_prompt(task.instructions))
+            self.config.associative_memory = "off"
+            self.config.mcp = {}
         cfg = self.config.terminal
         if cfg is not None and "terminal" in task.groups:
             # only the granted backends the parent has, every one on manual approvals (a child never gets `off`/`smart`)

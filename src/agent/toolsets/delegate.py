@@ -90,13 +90,20 @@ def delegate_notice(config: ResolvedAgent) -> str | None:
         return None
     limits = task_limits(delegation)
     grantable = [group for group in delegation.allowed_groups if group in (config.tool_groups or ())]
-    return DELEGATE_NOTICE.format(
+    agents = (
+        "\n\nExisting agents you may hand a task to with `agent` (they keep their own personality, model and settings; "
+        "give them everything in `goal` and `context`, they cannot see this chat): "
+        + ", ".join(f"{t.agent}{' (writes its own memory)' if t.remember else ''}" for t in delegation.targets) + "."
+        if delegation.targets else ""
+    )
+    notice = DELEGATE_NOTICE.format(
         parallel=limits.max_parallel_per_parent, user_parallel=limits.max_parallel_per_user,
         launches=limits.max_launches_per_turn, minutes=limits.timeout_seconds // 60 or 1,
         tokens=f"{limits.max_tokens:,}".replace(",", " "), chars=limits.result_max_chars,
         grantable=", ".join(grantable) or "none available", cooldown=limits.rate_limit_cooldown_seconds // 60,
         followups=limits.max_followups,
     )
+    return notice + agents
 
 
 WORKER_PROMPT = (
@@ -119,7 +126,19 @@ def granted_backends(config: ResolvedAgent) -> list[str]:
     return [name for name in config.terminal.backends if name in config.terminal_backends]
 
 
-def _task_start_description(limits: TaskLimits, grantable: list[str], backends: list[str] | None = None) -> str:
+def _task_start_description(
+    limits: TaskLimits, grantable: list[str], backends: list[str] | None = None, targets: list[str] | None = None,
+) -> str:
+    agents = (
+        f" `agent` hands the task to one of the user's existing agents ({', '.join(targets)}) instead of a fresh worker: it "
+        "keeps its own personality, model and settings (`instructions` and `model` are ignored), sees `goal` and `context` "
+        "as a message from you, and gets only the groups in `tools` that it has itself."
+        if targets else ""
+    )
+    return _task_start_base(limits, grantable, backends) + agents
+
+
+def _task_start_base(limits: TaskLimits, grantable: list[str], backends: list[str] | None = None) -> str:
     terminal = (
         f" `backends` grants the worker terminal backends ({', '.join(backends)}): it gets the terminal tools, every "
         "command asks the user for approval in this chat (manual mode, whatever your own mode), and a command that "
@@ -148,6 +167,8 @@ def build_delegate_tools(config: ResolvedAgent) -> list[Callable[..., str]]:
     parent_groups = set(config.tool_groups or ())
     grantable = [g for g in delegation.allowed_groups if g in parent_groups and g in DELEGATE_GRANTABLE_GROUPS]
     grantable_backends = granted_backends(config)
+    targets = [{"agent": target.agent, "remember": target.remember} for target in delegation.targets]
+    target_ids = [target["agent"] for target in targets]
 
     @tool
     def task_start(
@@ -160,6 +181,7 @@ def build_delegate_tools(config: ResolvedAgent) -> list[Callable[..., str]]:
         timeout_s: Annotated[int, "seconds before the task is stopped; 0 = the default limit"] = 0,
         wait: Annotated[bool, "block until the worker ends and return its result; default: return the id at once"] = False,
         wake: Annotated[bool, "tell this chat when it ends; false = fire-and-forget (read it with task_result)"] = True,
+        agent: Annotated[str, "id of an existing agent to run the task as (see the allowed ones); empty = a fresh worker"] = "",
     ) -> str:
         """Run a task in a separate worker agent."""
         run = current_run()
@@ -169,6 +191,7 @@ def build_delegate_tools(config: ResolvedAgent) -> list[Callable[..., str]]:
             limits=limits, grantable=grantable, goal=goal, context=context, instructions=instructions,
             groups=list(tools or []), model=model, timeout_s=timeout_s,
             backends=list(backends or []), grantable_backends=list(grantable_backends),
+            agent=agent, targets=targets, parent_name=config.name,
         )
         try:
             if wait:
@@ -179,7 +202,12 @@ def build_delegate_tools(config: ResolvedAgent) -> list[Callable[..., str]]:
             return f"error: {exc}"
         return json.dumps(result, ensure_ascii=False)
 
-    task_start.tool_spec["function"]["description"] = _task_start_description(limits, grantable, grantable_backends)
+    task_start.tool_spec["function"]["description"] = _task_start_description(limits, grantable, grantable_backends, target_ids)
+    props = task_start.tool_spec["function"]["parameters"]["properties"]
+    if target_ids:
+        props["agent"]["enum"] = ["", *target_ids]
+    else:  # no existing agent can be named: the parameter would only cost tokens
+        props.pop("agent", None)
     if grantable:
         task_start.tool_spec["function"]["parameters"]["properties"]["tools"]["items"]["enum"] = grantable
     if grantable_backends:

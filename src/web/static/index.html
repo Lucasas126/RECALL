@@ -264,6 +264,61 @@
               <p id="agent-terminal-dream-hint" class="model-note terminal-warning">Dream sessions run unattended: with this on, an agent whose dream tools include the terminal can run commands on its backends without you watching.</p>
               <p id="agent-terminal-error" class="error" role="alert"></p>
             </fieldset>
+            <fieldset id="agent-delegation" class="agent-terminal" hidden disabled>
+              <legend id="agent-delegation-legend">Delegation</legend>
+              <div class="setting-row">
+                <div class="setting-main">
+                  <label class="model-filter"><input id="agent-delegation-enabled" type="checkbox"> <span id="agent-delegation-enabled-label">Delegation enabled</span></label>
+                  <p id="agent-delegation-enabled-hint" class="model-note">Switches the task tools off without removing the group.</p>
+                </div>
+                <div class="setting-control"><button type="button" class="icon-btn setting-reset">↺</button></div>
+                <p class="setting-default model-note"></p>
+              </div>
+              <div class="setting-row">
+                <div class="setting-main">
+                  <span id="agent-delegation-groups-label">Tool groups a task may be given</span>
+                  <div id="agent-delegation-groups" class="model-capabilities"></div>
+                </div>
+                <div class="setting-control"><button type="button" class="icon-btn setting-reset">↺</button></div>
+                <p class="setting-default model-note"></p>
+              </div>
+              <div class="setting-row">
+                <div class="setting-main">
+                  <label for="agent-delegation-parallel" id="agent-delegation-parallel-label">Parallel tasks per chat</label>
+                  <p id="agent-delegation-parallel-hint" class="model-note">Can only lower the application's limit. Empty uses the application's limit.</p>
+                </div>
+                <div class="setting-control"><input id="agent-delegation-parallel" type="text" inputmode="numeric" autocomplete="off" data-number data-step="1"><button type="button" class="icon-btn setting-reset">↺</button></div>
+                <p class="setting-default model-note"></p>
+                <p class="setting-error error" role="alert"></p>
+              </div>
+              <div class="setting-row">
+                <div class="setting-main">
+                  <label for="agent-delegation-timeout" id="agent-delegation-timeout-label">Time limit per task</label>
+                </div>
+                <div class="setting-control"><input id="agent-delegation-timeout" type="text" inputmode="numeric" autocomplete="off" data-number data-unit="seconds" data-step="30"><button type="button" class="icon-btn setting-reset">↺</button></div>
+                <p class="setting-default model-note"></p>
+                <p class="setting-error error" role="alert"></p>
+              </div>
+              <div class="setting-row">
+                <div class="setting-main">
+                  <label for="agent-delegation-tokens" id="agent-delegation-tokens-label">Token limit per task</label>
+                </div>
+                <div class="setting-control"><input id="agent-delegation-tokens" type="text" inputmode="numeric" autocomplete="off" data-number data-unit="tokens" data-step="10000"><button type="button" class="icon-btn setting-reset">↺</button></div>
+                <p class="setting-default model-note"></p>
+                <p class="setting-error error" role="alert"></p>
+              </div>
+              <div class="setting-row">
+                <div class="setting-main">
+                  <span id="agent-delegation-targets-label">Agents it may hand tasks to</span>
+                  <p id="agent-delegation-targets-hint" class="model-note">Without any, it can only use fresh workers. An agent that can write its own memory keeps what it learns from the task.</p>
+                  <p id="agent-delegation-no-agents" class="model-note" hidden>You have no other agents.</p>
+                  <div id="agent-delegation-targets" class="terminal-backends"></div>
+                </div>
+                <div class="setting-control"><button type="button" class="icon-btn setting-reset">↺</button></div>
+                <p class="setting-default model-note"></p>
+              </div>
+              <p id="agent-delegation-error" class="error" role="alert"></p>
+            </fieldset>
           </div>
           <div id="agent-panel-mcp" class="agent-panel" hidden>
             <p id="agent-mcp-note" class="model-note">MCP servers act on each user's own account. Connect accounts in Settings &gt; Connections.</p>

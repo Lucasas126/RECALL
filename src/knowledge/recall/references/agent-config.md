@@ -97,6 +97,7 @@ MCP entry fields: `tools` (list; omitted means all of the server's tools), `read
 | `delegation.max_parallel` | running tasks per chat, 1-10; can only lower `settings.yaml` (3) |
 | `delegation.timeout_seconds` | per task, 10-3600; can only lower it (600) |
 | `delegation.max_tokens` | input + output per task; can only lower it (200000) |
+| `delegation.targets` | other agents of the same user it may hand tasks to: `{agent, remember}`; see `references/delegation-targets.md` (empty) |
 
 ## User yaml (`.config/<user_id>/user.yaml`; set by the admin, mostly not in the UI)
 

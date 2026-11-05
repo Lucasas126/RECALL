@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from src.agent.toolsets.delegate import (
     MAX_CONTEXT_CHARS, MAX_GOAL_CHARS, MAX_INSTRUCTIONS_CHARS, TaskError, TaskLimits,
 )
+from src.agent.tool_groups import DEFAULT_TOOL_GROUPS
 from src.config.settings import SUBAGENTS
 from src.core.sources.conversations import ChatTask
 from src.providers.cancellation import GenerationCancelled
@@ -254,6 +255,7 @@ class _LiveTask:
     timeout_s: int
     lock: NonBlockingFileLock
     parent_chat: str = ""
+    parent_agent: str = ""  # the launching agent; `agent_id` above is the agent whose chat runs the worker (the target's)
     base_in: int = 0  # tokens of earlier runs of this task (task_send): the budget below counts only this run
     base_out: int = 0
     turn_floor: int = 0  # turns the worker chat had before this run: the answer is read after them
@@ -346,7 +348,7 @@ class TaskManager:
         record = self.store.get(user_id, task.task_id) or {}
         target = record.get("target") or {}
         kind = target.get("kind", "ephemeral")
-        worker = "ephemeral" if kind == "ephemeral" else str(target.get("agent_id") or "agent")
+        worker = "ephemeral" if kind == "ephemeral" else str(target.get("name") or target.get("agent_id") or "agent")
         context.approval_target = (agent_id, chat_id)
         context.task = {"id": task.task_id, "title": task.title or record.get("title") or task.task_id, "kind": kind, "worker": worker}
         context.interactive = not task.unattended
@@ -375,6 +377,7 @@ class TaskManager:
         self, parent: RunContext, *, config: Any, limits: TaskLimits, grantable: list[str], goal: str, context: str,
         instructions: str, groups: list[str], model: str, timeout_s: int,
         backends: list[str] | None = None, grantable_backends: list[str] | None = None,
+        agent: str = "", targets: list[dict] | None = None, parent_name: str = "",
     ) -> dict:
         """Launch a task and block until it ends (phase 1's `task_start(wait=true)`); returns the result summary.
 
@@ -383,7 +386,7 @@ class TaskManager:
         live = self.launch(
             parent, limits=limits, grantable=grantable, goal=goal, context=context, instructions=instructions,
             groups=groups, model=model, timeout_s=timeout_s, wake=False,
-            backends=backends, grantable_backends=grantable_backends,
+            backends=backends, grantable_backends=grantable_backends, agent=agent, targets=targets, parent_name=parent_name,
         )
         try:
             while not live.done.wait(0.2):
@@ -402,6 +405,7 @@ class TaskManager:
         self, parent: RunContext, *, limits: TaskLimits, grantable: list[str], goal: str, context: str,
         instructions: str, groups: list[str], model: str, timeout_s: int, wake: bool = True,
         backends: list[str] | None = None, grantable_backends: list[str] | None = None,
+        agent: str = "", targets: list[dict] | None = None, parent_name: str = "",
     ) -> _LiveTask:
         """Check every limit and the grant, create the record and the hidden chat, and start the worker.
 
@@ -423,6 +427,20 @@ class TaskManager:
                 f"{', '.join(grantable) or 'none'} (never more than you have, and never delegate, memory, files or the terminal)"
             )
         backends = list(dict.fromkeys(backends or []))
+        target = self._resolve_target(parent, (agent or "").strip(), targets) if (agent or "").strip() else None
+        if target is not None:  # an existing agent: its own SOUL (`instructions` is ignored) and its groups ∩ the grant
+            instructions = ""
+            groups = [group for group in groups if group in target["groups"]]
+            if backends:
+                if "terminal" not in target["groups"]:
+                    raise TaskError(f"agent '{target['id']}' has no terminal; do not grant it backends")
+                if bad := [name for name in backends if name not in target["backends"]]:
+                    raise TaskError(
+                        f"agent '{target['id']}' has no backend {', '.join(bad)}; its backends: "
+                        f"{', '.join(target['backends']) or 'none'}"
+                    )
+            if target["remember"]:  # it keeps its own memory tools: that is what lets it write its own memory
+                groups = [*groups, *(group for group in ("memory_read", "memory_edit", "self") if group in target["groups"])]
         if backends:  # a terminal grant: only backends the parent has, and only with the parent's own terminal group
             if bad := [name for name in backends if name not in (grantable_backends or [])]:
                 raise TaskError(
@@ -455,8 +473,12 @@ class TaskManager:
         record = {
             "id": task_id, "user_id": user_id,
             "parent": {"agent_id": parent.agent_id, "chat_id": parent.chat_id},
-            "depth": 1, "target": {"kind": "ephemeral", "agent_id": parent.agent_id},
-            "child": {"agent_id": parent.agent_id, "chat_id": None},
+            "depth": 1,
+            "target": (
+                {"kind": "agent", "agent_id": target["id"], "name": target["name"], "remember": target["remember"]}
+                if target is not None else {"kind": "ephemeral", "agent_id": parent.agent_id}
+            ),
+            "child": {"agent_id": target["id"] if target is not None else parent.agent_id, "chat_id": None},
             "title": _title(goal), "goal": goal, "grant": {"groups": groups, "backends": backends},
             "limits": {"timeout_s": timeout_s, "max_tokens": limits.max_tokens},
             "status": "running", "reason": None, "created_at": _now(), "started_at": _now(), "ended_at": None,
@@ -465,14 +487,23 @@ class TaskManager:
             "wake": {"state": "pending" if wake else "none"},
         }
         lock = self.store.run_lock(user_id, task_id)
+        if target is not None and target["remember"]:
+            self._check_idle(user_id, target)
         with self.store.lock(user_id):
             self._check_capacity(user_id, record["parent"], limits)
+            if target is not None:
+                self._check_target(parent, target)
             lock.acquire()
             self.store.save(record)
         parent.task_launches += 1
-        live = _LiveTask(user_id, task_id, parent.agent_id, "", limits, timeout_s, lock, parent_chat=parent.chat_id)
+        child_agent = record["child"]["agent_id"]
+        live = _LiveTask(
+            user_id, task_id, child_agent, "", limits, timeout_s, lock, parent_chat=parent.chat_id, parent_agent=parent.agent_id,
+        )
         try:
-            chat_id = self._create_child_chat(parent, task_id, groups, instructions, model, backends, record["title"])
+            chat_id = self._create_child_chat(
+                parent, task_id, groups, instructions, model, backends, record["title"], target=target, parent_name=parent_name,
+            )
         except Exception as exc:
             self._finish(live, "failed", reason="launch_error", error=str(exc)[:300])
             raise TaskError(str(exc)) if not isinstance(exc, TaskError) else exc
@@ -481,9 +512,63 @@ class TaskManager:
         with self._guard:
             self._live[(user_id, task_id)] = live
         text = f"Task {task_id}\n\nGoal:\n{goal}" + (f"\n\nContext:\n{context}" if context else "")
+        if target is not None:  # the message of an existing agent says who asks, so it does not take the task for the user's words
+            text = f"Task from {parent_name or parent.agent_id} ({user_id})\n\n{text}"
         self._emit("task_started", user_id, task_id=task_id, agent_id=parent.agent_id, chat_id=parent.chat_id, status="running")
         self._start_threads(live, text)
         return live
+
+    def _resolve_target(self, parent: RunContext, agent_id: str, targets: list[dict] | None) -> dict:
+        """Check that `agent_id` is a delegation target of the parent and one of the SAME user's agents; read its groups.
+
+        There is no user parameter anywhere: the agent is looked up under the parent's own user, so another user's
+        agent cannot even be named. The target's tool groups and terminal backends come from its own configuration.
+        """
+        service = self._service
+        if agent_id == parent.agent_id:
+            raise TaskError("an agent cannot delegate to itself; leave `agent` empty for an ephemeral worker")
+        allowed = {str(item["agent"]): bool(item.get("remember")) for item in (targets or [])}
+        if agent_id not in allowed:
+            raise TaskError(
+                f"agent '{agent_id}' is not one of your delegation targets ({', '.join(allowed) or 'none configured'}); "
+                "the user adds targets in your agent settings"
+            )
+        try:
+            service._owned_agent(parent.user_id, agent_id)
+            config = service._agent_config(parent.user_id, agent_id)
+        except Exception:
+            raise TaskError(f"agent '{agent_id}' is not available (it was deleted or is not one of this user's agents)") from None
+        chat = config.chat_config
+        groups = [] if not chat.tools else list(DEFAULT_TOOL_GROUPS if chat.tool_groups is None else chat.tool_groups)
+        backends = list(config.terminal.backends) if config.terminal is not None and "terminal" in groups else []
+        return {"id": config.id, "name": config.name, "groups": groups, "backends": backends, "remember": allowed[agent_id]}
+
+    def _check_target(self, parent: RunContext, target: dict) -> None:
+        """Refuse cycles and unsafe `remember` launches; the caller holds the store lock (records are read, not saved)."""
+        user_id = parent.user_id
+        running = [r for r in self.store.list(user_id) if r["status"] not in FINAL_STATES]
+        for record in running:  # A -> B while B's chat waits on a task run by A: both would wait on each other
+            if record["parent"]["agent_id"] == target["id"] and record["child"]["agent_id"] == parent.agent_id:
+                raise TaskError(
+                    f"cycle refused: agent '{target['id']}' is waiting for a task that '{parent.agent_id}' is running; "
+                    "do the work yourself or tell the user"
+                )
+        if not target["remember"]:
+            return
+        # memory files are edited without a cross-chat lock: a `remember` task runs only while nothing else of that agent runs
+        if any((r.get("target") or {}).get("remember") and r["child"]["agent_id"] == target["id"] for r in running):
+            raise TaskError(f"agent '{target['id']}' already runs a task that writes its memory; wait for it to finish")
+
+    def _check_idle(self, user_id: str, target: dict) -> None:
+        """A `remember` task needs its agent idle (called without the store lock: replies take the slot lock, then the store's)."""
+        slot = self._service._slot(user_id, target["id"])
+        with slot.state:
+            busy = bool(slot.active or slot.pending)
+        if busy:
+            raise TaskError(
+                f"agent '{target['id']}' is replying in another chat and this task may write its memory; "
+                "memory writes are not safe in parallel: try again when it is idle"
+            )
 
     def _start_threads(self, live: _LiveTask, text: str) -> None:
         for target, name in ((self._drive, "task"), (self._watch, "task-watch")):
@@ -508,15 +593,20 @@ class TaskManager:
 
     def _create_child_chat(
         self, parent: RunContext, task_id: str, groups: list[str], instructions: str, model: str,
-        backends: list[str] | None = None, title: str = "",
+        backends: list[str] | None = None, title: str = "", *, target: dict | None = None, parent_name: str = "",
     ) -> str:
         service = self._service
-        conversations = service._conversations(parent.user_id, parent.agent_id)
+        # the worker chat lives under the agent that runs it: the parent's for an ephemeral worker, else the target's
+        owner_agent = target["id"] if target is not None else parent.agent_id
+        conversations = service._conversations(parent.user_id, owner_agent)
         mark = ChatTask(
             task_id=task_id, parent_agent_id=parent.agent_id, parent_chat_id=parent.chat_id, depth=1,
             groups=groups, instructions=instructions, created_at=_now(), backends=list(backends or []), title=title,
+            kind="agent" if target is not None else "ephemeral", remember=bool(target and target["remember"]),
         )
         chat_id = conversations.create(origin=_CHILD_ORIGIN, task=mark)
+        if target is not None:  # an existing agent keeps its own model, provider and reasoning settings
+            return chat_id
         try:
             if model.strip():  # validated like a chat's own model choice (provider usable, listed, ZDR policy)
                 service.set_chat_model(parent.user_id, parent.agent_id, chat_id, model.strip())
@@ -617,7 +707,7 @@ class TaskManager:
         self.store.update(live.user_id, live.task_id, change)
         if won:
             self._emit(
-                "task_finished", live.user_id, task_id=live.task_id, agent_id=live.agent_id, chat_id=live.parent_chat,
+                "task_finished", live.user_id, task_id=live.task_id, agent_id=live.parent_agent or live.agent_id, chat_id=live.parent_chat,
                 status=status, reason=reason,
             )
         with live.guard:
@@ -632,7 +722,7 @@ class TaskManager:
         except OSError:  # another process probing it right now; the file is harmless
             pass
         if won and won[0]["wake"].get("state") == "pending":
-            self._schedule_wake(live.user_id, live.agent_id, live.parent_chat)
+            self._schedule_wake(live.user_id, live.parent_agent or live.agent_id, live.parent_chat)
 
     # ------------------------------------------------------------------ watchdog, usage, stopping
 
@@ -909,6 +999,8 @@ class TaskManager:
         if (until := self.store.blocked_until(user_id)) is not None:
             raise TaskError(f"rate limit: no new work until {until:%H:%M}; do not retry")
         agent_id, chat_id = record["child"]["agent_id"], record["child"]["chat_id"]
+        if (record.get("target") or {}).get("remember"):  # its memory writes are only safe while that agent is otherwise idle
+            self._check_idle(user_id, {"id": agent_id})
         conversations = self._service._conversations(user_id, agent_id)
         try:
             turns = conversations.load(chat_id)
@@ -941,6 +1033,7 @@ class TaskManager:
         live = _LiveTask(
             user_id, record["id"], agent_id, chat_id, limits, timeout_s, lock, parent_chat=record["parent"]["chat_id"],
             base_in=usage.get("in") or 0, base_out=usage.get("out") or 0, turn_floor=len(turns),
+            parent_agent=record["parent"]["agent_id"],
         )
         with self._guard:
             self._live[(user_id, record["id"])] = live
@@ -1143,7 +1236,10 @@ class TaskManager:
         out = {
             "id": record["id"], "title": record.get("title") or "",
             "goal": record.get("goal", "") if full else (record.get("goal") or "")[:300],
-            "target": {"kind": target.get("kind", "ephemeral"), "agent_id": target.get("agent_id")},
+            "target": {
+                "kind": target.get("kind", "ephemeral"), "agent_id": target.get("agent_id"),
+                "name": target.get("name"), "remember": bool(target.get("remember")),
+            },
             "status": record.get("status"), "reason": record.get("reason"),
             "started_at": started, "ended_at": ended, "elapsed_s": elapsed,
             "usage": {"in": usage.get("in") or 0, "out": usage.get("out") or 0},

@@ -530,6 +530,7 @@ class ChatService:
         user = self._user(user_id)
         self._check_mcp(config)
         self._check_folders(config.folders)
+        self._check_delegation_targets(user, config)
         config = self._check_agent_model(user, config, None)
         created = self._agents.create(user_id, config)
         files = self._agent_files(user_id, created.id)
@@ -542,6 +543,7 @@ class ChatService:
         user = self._owned_agent(user_id, agent_id)
         self._check_mcp(config)
         self._check_folders(config.folders)
+        self._check_delegation_targets(user, config)
         config = self._check_agent_model(user, config, self._agent_config(user_id, agent_id).chat_config.model)
         slot = self._slot(user_id, agent_id)
         with slot.state:
@@ -553,6 +555,7 @@ class ChatService:
         if updated.id != agent_id:
             self._forget_slot(user_id, agent_id)
             self._replace_preferred_agent(user_id, agent_id, updated.id)
+            self._retarget_delegation(user_id, agent_id, updated.id)
         return self._agent_view(user_id, updated)
 
     def delete_agent(self, user_id: str, agent_id: str) -> None:
@@ -567,6 +570,7 @@ class ChatService:
                 slot.agents.clear()
         self._forget_slot(user_id, agent_id)
         self._replace_preferred_agent(user_id, agent_id, None)
+        self._retarget_delegation(user_id, agent_id, None)
 
     def _agent_config(self, user_id: str, agent_id: str) -> AgentConfig:
         key = (user_id, agent_id)
@@ -608,6 +612,39 @@ class ChatService:
             self._config_problems[key] = details
             logger.error("invalid configuration %s on disk; keeping the previous good one: %s", name, details)
         return details
+
+    def _check_delegation_targets(self, user: UserConfig, config: AgentConfig) -> None:
+        """Every delegation target must be another agent of this same user."""
+        if config.delegation is None:
+            return
+        unknown = [target.agent for target in config.delegation.targets if target.agent not in user.agents]
+        if unknown:
+            raise InputError(
+                "delegation.targets lists agents that are not yours: {agents}. Targets must be other agents of this user.",
+                agents=", ".join(unknown),
+            )
+
+    def _retarget_delegation(self, user_id: str, old_id: str, new_id: str | None) -> None:
+        """An agent was renamed (`new_id`) or deleted (None): follow it in every other agent's delegation targets."""
+        try:
+            configs = self._agents.list_agents(user_id)
+        except Exception:
+            logger.warning("could not update delegation targets of %s after '%s' changed", user_id, old_id, exc_info=True)
+            return
+        for config in configs:
+            delegation = config.delegation
+            if delegation is None or not any(target.agent == old_id for target in delegation.targets):
+                continue
+            targets = [
+                target.model_copy(update={"agent": new_id}) if target.agent == old_id else target
+                for target in delegation.targets if new_id is not None or target.agent != old_id
+            ]
+            try:
+                self._agents.update(user_id, config.id, config.model_copy(update={
+                    "delegation": delegation.model_copy(update={"targets": targets}),
+                }))
+            except Exception:
+                logger.warning("could not update delegation targets of %s/%s", user_id, config.id, exc_info=True)
 
     def _replace_preferred_agent(self, user_id: str, old_id: str, new_id: str | None) -> None:
         preferences = self._preferences.get(user_id)

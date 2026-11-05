@@ -57,6 +57,29 @@ without the group.
   "latest chat", is not pruned while empty, is not reviewed by Dream and not indexed, and is removed after the disposable-chat retention
   period. A disposable chat cannot launch tasks.
 
+## Handing a task to another agent
+
+A fresh worker is not the only choice: an agent can hand a task to **another agent of the same user** (for example the assistant asking Orion),
+with `task_start(agent="<id>")`. It is opt-in and explicit:
+
+- **Allowlist.** The agent's `delegation.targets` lists the agents it may use; empty (the default) means fresh workers only. Pick them
+  in the agent editor (Tools tab, **Delegation** section, shown while the Delegate group is ticked) or in the yaml
+  ([reference](../reference/agent-yaml.md#delegation)). A target must be another agent of the same user; there is no way to name another user's agent.
+  If a target is renamed or deleted, the lists that name it follow (renamed) or drop it (deleted).
+- **It runs as that agent.** Its own SOUL, model, provider and settings; `instructions` and `model` are ignored. It sees `goal` and `context`
+  as a message that starts with `Task from <agent name> (<user>)`, and nothing else of the launching chat. Its tool groups are the ones the
+  launcher grants in `tools` (only `web`) **that the target has itself**; the terminal only on backends both agents have, always on manual approvals.
+  MCP services are never available to a task.
+- **Where it lives.** The hidden worker chat is stored under the **target** agent (not the launcher) and the task card, the approval
+  attribution and the Telegram status line show the target's name instead of "ephemeral".
+- **Memory.** By default the task is excluded from learning and the target cannot write memory, like a fresh worker. With **Can write its own memory**
+  (`remember: true` on that target) the worker chat is a hidden but ordinary chat of the target: Dream may review it, and the target keeps its own
+  `memory_read`/`memory_edit`/`self` memory tools (never `soul_edit` or `skill_manage`) and writes to **its own** memory. Because memory
+  files are not locked against concurrent edits across chats, such a task is refused while the target is replying in another chat
+  (or already runs another memory-writing task), and the same applies to `task_send` follow-ups.
+- **No loops.** Depth stays 1: a task never launches tasks. An agent cannot delegate to itself, and `A -> B` is refused while `B` is
+  waiting on a task that `A` is running. Per-user and per-chat limits still apply, and the target may be busy in another chat (each chat has its own worker).
+
 ## Terminal and approvals
 
 `task_start` takes `backends`: the [terminal backends](terminal.md#backends) to hand to the worker. Naming a backend grants the worker the
