@@ -789,6 +789,12 @@ _SPANISH = {
     "the application's limit": "el límite de la aplicación",
     "none": "ninguno",
     "delegation.targets lists agents that are not yours: {agents}. Targets must be other agents of this user.": "delegation.targets incluye agentes que no son tuyos: {agents}. Los destinos deben ser otros agentes de este usuario.",
+    # subagents (cross-process)
+    "status: queued": "estado: en cola",
+    "status: awaiting approval (answer it in {channel})": "estado: esperando aprobación (respóndela en {channel})",
+    "✏️ Correction queued for task {id}: it runs in the web process and applies it within seconds.": "✏️ Corrección en cola para la tarea {id}: se ejecuta en el proceso web y la aplicará en unos segundos.",
+    "Awaiting approval (answer it in the web)": "Esperando aprobación (respóndela en la web)",
+    "Awaiting approval (answer it in Telegram)": "Esperando aprobación (respóndela en Telegram)",
 }
 
 

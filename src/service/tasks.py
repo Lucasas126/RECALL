@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from time import monotonic, sleep
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Iterable
 
 from src.agent.toolsets.delegate import (
     MAX_CONTEXT_CHARS, MAX_GOAL_CHARS, MAX_INSTRUCTIONS_CHARS, TaskError, TaskLimits,
@@ -50,6 +50,8 @@ TASK_ID_RE = re.compile(r"^[0-9a-f]{12}$")
 STATES = ("queued", "running", "done", "failed", "cancelled", "timed_out")
 FINAL_STATES = frozenset({"done", "failed", "cancelled", "timed_out"})
 TITLE_CHARS = 80
+COMMAND_KINDS = ("stop", "steer", "send")  # what the process that does not execute a task may ask of its executor
+COMMAND_LOG = 20  # outcomes of commands kept in the record
 _CHILD_ORIGIN = "task"
 _WATCH_GRACE_SECONDS = 5.0  # how long the watchdog waits for a stopped worker before it ends the task itself
 
@@ -172,6 +174,41 @@ class TaskStore:
         if not TASK_ID_RE.match(task_id):
             raise TaskError(f"unknown task: {task_id!r}")
         return self.folder(user_id) / f"{task_id}.json"
+
+    # ---- the commands inbox: a process that does not execute a task asks its executor through this file
+    def command_path(self, user_id: str, task_id: str) -> Path:
+        self._path(user_id, task_id)  # validates the id
+        return self.folder(user_id) / f"{task_id}.cmd.jsonl"
+
+    def enqueue(self, user_id: str, task_id: str, kind: str, text: str = "") -> str:
+        """Append a command (`stop`, `steer`, `send`) for the executor of a task; returns the command id."""
+        command = {"id": secrets.token_hex(4), "kind": kind, "text": text, "at": _now(), "from": os.getpid()}
+        path = self.command_path(user_id, task_id)
+        with self.lock(user_id):
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(command, ensure_ascii=False) + "\n")
+        return command["id"]
+
+    def take_commands(self, user_id: str, task_id: str) -> list[dict]:
+        """Remove and return the pending commands of a task, oldest first (each is applied at most once)."""
+        path = self.command_path(user_id, task_id)
+        if not path.exists():
+            return []
+        with self.lock(user_id):
+            try:
+                raw = path.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                return []
+            path.unlink(missing_ok=True)
+        commands = []
+        for line in raw.splitlines():
+            try:
+                command = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(command, dict) and command.get("kind") in COMMAND_KINDS:
+                commands.append(command)
+        return commands
 
     def _read(self, path: Path) -> dict | None:
         try:
@@ -298,9 +335,18 @@ class TaskManager:
 
     poll_seconds = 0.25  # watchdog cadence (a test shortens it)
 
-    def __init__(self, service: "ChatService", data_dir: Path) -> None:
+    command_poll_seconds = 1.0  # the executor looks at its live tasks' inboxes this often (only while it has live tasks)
+    wake_poll_every = 2  # the wake/recovery scan runs every this many command ticks (~2 s)
+
+    def __init__(self, service: "ChatService", data_dir: Path, origins: Iterable[str] = ()) -> None:
         self._service = service
         self.store = TaskStore(data_dir)
+        # chat origins (`web`, `telegram`) this process drives; empty (tests, CLI) = no cross-process role: results of
+        # tasks it runs are delivered by itself as before and its poller claims nothing
+        self.origins = frozenset(origins)
+        self.process_id = f"{os.getpid()}-{secrets.token_hex(3)}"  # claims are made in this name (two services may share a pid)
+        self._poller: threading.Thread | None = None
+        self._poll_stop = threading.Event()
         self._live: dict[tuple[str, str], _LiveTask] = {}
         self._guard = threading.Lock()
         self._listeners: list[Callable[[dict], None]] = []
@@ -361,7 +407,13 @@ class TaskManager:
                 live = self._live.get((user_id, task.task_id))
             if live is not None:
                 live.approval_wait(on)
+                count = live.waits
+                try:  # mirrored so the OTHER process can say "awaiting approval (answer it in <channel>)"; never relayed (decision 6)
+                    self.store.update(user_id, task.task_id, lambda r: r.update(awaiting_approval=count, approval_channel=channel))
+                except Exception:
+                    logger.warning("could not mirror the approval state of task %s", task.task_id, exc_info=True)
 
+        channel = self.origin_of(user_id, agent_id, chat_id)
         context.approval_emit = emit
         context.approval_wait = waiting
         return context
@@ -699,6 +751,7 @@ class TaskManager:
             record["usage"] = {"in": live.base_in + live.tokens_in, "out": live.base_out + live.tokens_out}
             record["result"] = {"text": capped, "truncated": truncated} if text else None
             record["error"] = {"code": reason, "message": error} if error else None
+            record["awaiting_approval"] = 0
             if status == "cancelled":  # the one who stopped it knows: no wake (a deleted parent leaves an orphan)
                 if record["wake"].get("state") in ("pending", "held"):
                     record["wake"] = {"state": "orphaned" if reason == "parent_deleted" else "none"}
@@ -721,8 +774,11 @@ class TaskManager:
             live.lock.path.unlink(missing_ok=True)
         except OSError:  # another process probing it right now; the file is harmless
             pass
-        if won and won[0]["wake"].get("state") == "pending":
-            self._schedule_wake(live.user_id, live.parent_agent or live.agent_id, live.parent_chat)
+        parent_agent = live.parent_agent or live.agent_id
+        if won and won[0]["wake"].get("state") == "pending" and self.serves(live.user_id, parent_agent, live.parent_chat):
+            self._schedule_wake(live.user_id, parent_agent, live.parent_chat)  # else the process of the chat's origin claims it
+        if self.store.command_path(live.user_id, live.task_id).exists():  # commands that arrived as the task ended
+            self.apply_commands(live.user_id, live.task_id, limits=live.limits)
 
     # ------------------------------------------------------------------ watchdog, usage, stopping
 
@@ -776,9 +832,163 @@ class TaskManager:
         with self._guard:
             live = self._live.get((user_id, task_id))
         if live is None:
+            record = self.store.get(user_id, task_id)
+            if record is not None and record["status"] == "running" and self._elsewhere(user_id, task_id):
+                self.store.enqueue(user_id, task_id, "stop")  # its executor (another process) applies it
+                return True
             return False
         self._request_stop(live, reason)
         return True
+
+    # ------------------------------------------------------------------ cross-process: origins, commands inbox, poller
+
+    def origin_of(self, user_id: str, agent_id: str, chat_id: str) -> str:
+        """The channel (`web`, `telegram`) that drives a chat; `web` when it cannot be read."""
+        try:
+            return self._service._conversations(user_id, agent_id).origin(chat_id)
+        except Exception:
+            return "web"
+
+    def serves(self, user_id: str, agent_id: str, chat_id: str) -> bool:
+        """Whether this process delivers wakes to the chat: it serves the chat's origin (no origins declared = all)."""
+        return not self.origins or self.origin_of(user_id, agent_id, chat_id) in self.origins
+
+    def _is_live(self, user_id: str, task_id: str) -> bool:
+        with self._guard:
+            return (user_id, task_id) in self._live
+
+    def _elsewhere(self, user_id: str, task_id: str) -> bool:
+        """Whether another process holds the task's run lock, that is, executes it (this one does not)."""
+        probe = self.store.run_lock(user_id, task_id)
+        if probe.acquire():
+            probe.release()
+            return False
+        return True
+
+    def _queue(self, user_id: str, record: dict, kind: str, text: str = "") -> dict:
+        """Hand a command to the executor of a task that runs in the other process."""
+        command = self.store.enqueue(user_id, record["id"], kind, text)
+        return {
+            "id": record["id"], "status": "queued", "command": command,
+            "note": "the task runs in another process (web or Telegram); it applies the command within a few seconds",
+        }
+
+    def command_outcome(self, user_id: str, task_id: str, command_id: str) -> dict | None:
+        """What the executor did with a queued command (`applied`, `rejected` with a note), None while it is pending."""
+        record = self.store.get(user_id, task_id) or {}
+        return next((c for c in record.get("commands") or [] if c.get("id") == command_id), None)
+
+    def apply_commands(self, user_id: str, task_id: str, *, limits: TaskLimits) -> int:
+        """Apply (once) the commands other processes queued for a task this process executes (or just finished)."""
+        applied = 0
+        for command in self.store.take_commands(user_id, task_id):
+            kind, text = command["kind"], str(command.get("text") or "")
+            status, note = "applied", ""
+            try:
+                if kind == "stop":
+                    if not self._is_live(user_id, task_id):
+                        raise TaskError("the task has already ended")
+                    self.stop(user_id, task_id)
+                elif kind == "steer":
+                    self.steer(user_id, task_id, text)
+                else:
+                    self.send(user_id, task_id, text, limits=limits)
+            except TaskError as exc:
+                status, note = "rejected", str(exc)
+            except Exception as exc:
+                logger.exception("could not apply command %s to task %s", kind, task_id)
+                status, note = "failed", str(exc)[:200]
+            entry = {"id": command.get("id"), "kind": kind, "status": status, "note": note, "at": _now()}
+
+            def log(record: dict, entry: dict = entry) -> None:
+                record["commands"] = [*(record.get("commands") or []), entry][-COMMAND_LOG:]
+
+            self.store.update(user_id, task_id, log, final_ok=True)
+            applied += status == "applied"
+        return applied
+
+    def poll_commands(self) -> int:
+        """One pass over the inboxes of the tasks this process executes; cheap when nothing was queued."""
+        with self._guard:
+            lives = list(self._live.values())
+        return sum(
+            self.apply_commands(live.user_id, live.task_id, limits=live.limits)
+            for live in lives if self.store.command_path(live.user_id, live.task_id).exists()
+        )
+
+    def _users(self) -> list[str]:
+        try:
+            return [path.parent.name for path in self.store._data_dir.glob("*/.tasks") if path.is_dir()]
+        except OSError:
+            return []
+
+    @staticmethod
+    def _wake_due(record: dict) -> bool:
+        """A finished task whose result still has to reach the parent: pending, or claimed so long ago the claimant is gone."""
+        wake = record.get("wake") or {}
+        if wake.get("state") == "pending":
+            return True
+        return wake.get("state") == "claimed" and (_seconds_between(wake.get("claimed_at"), _now()) or 0) > CLAIM_STALE_SECONDS
+
+    def poll_wakes(self) -> int:
+        """One pass of the wake and recovery duties; returns the number of parent chats a delivery was attempted for.
+
+        Crash recovery: a task whose executor is gone fails as `owner_lost`. Wake claim: results of tasks (executed
+        by any process) whose parent chat has an origin this process serves are delivered here; the claim in
+        `_deliver` is atomic under the store lock, so two processes never deliver the same result.
+        """
+        attempted = 0
+        for user_id in self._users():
+            with self.store.lock(user_id):
+                self._fail_dead(user_id)
+                records = self.store.list(user_id)
+            if not self.origins:
+                continue
+            keys = {
+                (user_id, r["parent"]["agent_id"], r["parent"]["chat_id"])
+                for r in records if r["status"] in FINAL_STATES and self._wake_due(r)
+            }
+            for key in sorted(keys):
+                with self._guard:
+                    if self._closed:
+                        return attempted
+                    if key in self._timers:  # this process is about to deliver it after the debounce window
+                        continue
+                if not self.serves(*key):
+                    continue
+                try:
+                    self._deliver(*key)
+                    attempted += 1
+                except Exception:
+                    logger.exception("could not deliver task results to chat %s", key)
+        return attempted
+
+    def start_poller(self) -> None:
+        """Start the daemon thread that polls inboxes (every second, only with live tasks) and wakes (every ~2 s)."""
+        if self._poller is not None:
+            return
+        self._poll_stop.clear()
+
+        def loop() -> None:
+            tick = 0
+            while not self._poll_stop.wait(self.command_poll_seconds):
+                tick += 1
+                try:
+                    if self._live:
+                        self.poll_commands()
+                    if tick % self.wake_poll_every == 0:
+                        self.poll_wakes()
+                except Exception:
+                    logger.warning("the task poller failed", exc_info=True)
+
+        self._poller = threading.Thread(target=loop, daemon=True, name="task-poller")
+        self._poller.start()
+
+    def stop_poller(self) -> None:
+        self._poll_stop.set()
+        poller, self._poller = self._poller, None
+        if poller is not None and poller is not threading.current_thread():
+            poller.join(5)
 
     def shutdown(self) -> None:
         """Stop every running task of this process (service shutdown); wakes that did not flush yet are dropped
@@ -823,8 +1033,9 @@ class TaskManager:
                     "task_finished", user_id, task_id=record["id"], agent_id=record["parent"]["agent_id"],
                     chat_id=record["parent"]["chat_id"], status="failed", reason="owner_lost",
                 )
-                if record.get("wake", {}).get("state") == "pending":  # the parent still has to be told
-                    self._schedule_wake(user_id, record["parent"]["agent_id"], record["parent"]["chat_id"])
+                parent = record["parent"]
+                if record.get("wake", {}).get("state") == "pending" and self.serves(user_id, parent["agent_id"], parent["chat_id"]):
+                    self._schedule_wake(user_id, parent["agent_id"], parent["chat_id"])  # the parent still has to be told (else its origin's process does it)
 
     # ------------------------------------------------------------------ the asynchronous tools
 
@@ -940,6 +1151,8 @@ class TaskManager:
         with self._guard:
             live = self._live.get((user_id, record["id"]))
         if live is None:
+            if self._elsewhere(user_id, record["id"]):  # the other process (web or Telegram) executes it: ask through its inbox
+                return self._queue(user_id, record, "stop")
             raise TaskError(f"task {record['id']} does not run in this process; it cannot be stopped from here")
         self._request_stop(live, "stopped")
         live.done.wait(_WATCH_GRACE_SECONDS + 1)
@@ -957,6 +1170,8 @@ class TaskManager:
         record = self._record(user_id, task_id, owner)
         with self._guard:
             live = self._live.get((user_id, record["id"]))
+        if live is None and record["status"] == "running" and self._elsewhere(user_id, record["id"]):
+            return self._queue(user_id, record, "steer", text)
         if record["status"] != "running" or live is None or live.stop_reason is not None:
             raise TaskError(
                 f"task {record['id']} is not running here (status: {record['status']}); "
@@ -990,6 +1205,8 @@ class TaskManager:
         if len(text) > MAX_GOAL_CHARS:
             raise TaskError(f"text is too long ({len(text)} characters, at most {MAX_GOAL_CHARS})")
         record = self._record(user_id, task_id, owner)
+        if record["status"] == "running" and not self._is_live(user_id, record["id"]) and self._elsewhere(user_id, record["id"]):
+            return self._queue(user_id, record, "send", text)  # a finished task is continued here; a running one by its executor
         if record["status"] not in ("done", "timed_out", "failed") or record.get("reason") == "owner_lost":
             hint = "use task_steer" if record["status"] == "running" else "start a new task instead"
             raise TaskError(f"task {record['id']} cannot be continued (status: {record['status']}"
@@ -1136,7 +1353,7 @@ class TaskManager:
                     record["wake"] = {"state": "held", "at": _now()}
                     held += 1
                 else:
-                    record["wake"] = {"state": "claimed", "claimed_at": _now()}
+                    record["wake"] = {"state": "claimed", "claimed_at": _now(), "claimed_by": self.process_id}
                     claimed.append(record)
                 self.store.save(record)
         return claimed, held
@@ -1183,19 +1400,15 @@ class TaskManager:
     def recover(self) -> None:
         """Run at service start: fail tasks whose executor is gone (`owner_lost`) and deliver results still waiting
         for their wake (a restart between the end of a task and its delivery)."""
-        root = self.store._data_dir
-        try:
-            users = [path.parent.name for path in root.glob("*/.tasks") if path.is_dir()]
-        except OSError:
-            return
-        for user_id in users:
+        for user_id in self._users():
             with self.store.lock(user_id):
                 self._fail_dead(user_id)
                 records = self.store.list(user_id)
             for record in records:
                 state = record.get("wake", {}).get("state")
-                if record["status"] in FINAL_STATES and state in ("pending", "held", "claimed"):
-                    self._schedule_wake(user_id, record["parent"]["agent_id"], record["parent"]["chat_id"])
+                parent = record["parent"]
+                if record["status"] in FINAL_STATES and state in ("pending", "held", "claimed") and self.serves(user_id, parent["agent_id"], parent["chat_id"]):
+                    self._schedule_wake(user_id, parent["agent_id"], parent["chat_id"])
 
     def summary(self, record: dict) -> dict:
         """What the parent's tool call returns: id, status, the result text and why a task did not finish."""
@@ -1233,6 +1446,13 @@ class TaskManager:
         except ValueError:
             elapsed = None
         target = record.get("target") or {}
+        awaiting, elsewhere = 0, None
+        if record.get("status") not in FINAL_STATES:
+            if self._is_live(record.get("user_id", ""), record["id"]):
+                awaiting = self.awaiting_approval(record.get("user_id", ""), record["id"])
+            elif awaiting := int(record.get("awaiting_approval") or 0):  # the executor is the other process: mirrored, never relayed
+                channel = record.get("approval_channel") or "web"
+                elsewhere = channel if channel not in self.origins else None
         out = {
             "id": record["id"], "title": record.get("title") or "",
             "goal": record.get("goal", "") if full else (record.get("goal") or "")[:300],
@@ -1248,9 +1468,8 @@ class TaskManager:
             "result_preview": text[:300], "result_truncated": bool(result.get("truncated")),
             "error": (record.get("error") or {}).get("message"),
             "backends": list((record.get("grant") or {}).get("backends") or []),
-            "awaiting_approval": (
-                self.awaiting_approval(record.get("user_id", ""), record["id"]) if record.get("status") not in FINAL_STATES else 0
-            ),
+            "awaiting_approval": awaiting, "approval_elsewhere": elsewhere,
+            "commands": list((record.get("commands") or [])[-5:]),
         }
         if full:
             out["result"] = text[:FULL_RESULT_CHARS]

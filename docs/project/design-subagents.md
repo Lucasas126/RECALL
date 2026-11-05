@@ -1,6 +1,6 @@
 # design: asynchronous subagents and messages between agents
 
-Status: **phase 1 is implemented (see the [delegation guide](../user-guide/delegation.md)); everything else here is design only.** Every "today" statement was checked against the code on branch `docs/subagents-design`; every name marked *(new)* is a proposal, not an existing API. Backlog items served: "Subagents" and "Messages between agents" in [the backlog](backlog.md#from-the-replica-report-2026-11-05) (items 4 and 5), and the foundation of items 2 (scheduled jobs / proactive Telegram) and the "agent-to-agent delegation" line of the orchestrator follow-ups.
+Status: **phases 1, 2, 3, 4 (cross-process: commands inbox for stop/steer/send, wake claim by the origin's process, crash recovery in the poller, no approval relay) and 5 are implemented (see the [delegation guide](../user-guide/delegation.md)); the rest here is design only.** Every "today" statement was checked against the code on branch `docs/subagents-design`; every name marked *(new)* is a proposal, not an existing API. Backlog items served: "Subagents" and "Messages between agents" in [the backlog](backlog.md#from-the-replica-report-2026-11-05) (items 4 and 5), and the foundation of items 2 (scheduled jobs / proactive Telegram) and the "agent-to-agent delegation" line of the orchestrator follow-ups.
 
 ## 1. goals and non-goals
 

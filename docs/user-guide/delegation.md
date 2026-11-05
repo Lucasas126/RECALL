@@ -149,4 +149,8 @@ When a task is launched from a Telegram chat (or from the chat Telegram currentl
 - `/task <id> <text>`: corrects a running task; its current generation is interrupted, the partial reply is kept and your text is appended.
 
 When a worker with a terminal grant needs approval, the bot sends it to the agent's Telegram chat with the usual **Approve** / **Deny** buttons and the
-line *Task <title> (ephemeral) wants to run:*; the message closes with the outcome. Only the user the task belongs to can stop, correct or approve. The bot only sees tasks that run in its own process, so a task started from the web UI is managed there.
+line *Task <title> (ephemeral) wants to run:*; the message closes with the outcome. Only the user the task belongs to can stop, correct or approve.
+
+### Web and Telegram are two programs
+
+The web app and the Telegram bot run as separate processes. A task runs in the one that runs the chat's reply, and both show the tasks of a chat. **Stop** and corrections work from either side: if the task runs in the other program, the command is queued and applied within a few seconds (Telegram says *queued*). Continuing a finished task (`task_send`) works from either. When a task ends, the message that wakes the agent is delivered by the program that owns the chat (a chat created in Telegram wakes in Telegram, a web chat in the web), even if the other program ran the task. If the program that ran a task stops, the next poll (a couple of seconds) marks the task `failed` / `owner_lost` and the owning program tells the agent. **Approvals are not forwarded**: a command that needs your approval is asked in the channel of the program that runs the task; the other channel only shows *awaiting approval (answer it in Web)* (or Telegram).

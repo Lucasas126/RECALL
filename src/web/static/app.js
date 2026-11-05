@@ -3309,7 +3309,7 @@ function thinkingSegment() {
 
 // ---- task cards: pure helpers (loaded without the DOM by tests/test_task_cards.cjs)
 const TASK_FINAL = ["done", "failed", "cancelled", "timed_out"];
-const TASK_STATUS_LABELS = { running: "Running", done: "Done", failed: "Failed", cancelled: "Cancelled", timed_out: "Timed out", awaiting_approval: "Awaiting approval" };
+const TASK_STATUS_LABELS = { running: "Running", done: "Done", failed: "Failed", cancelled: "Cancelled", timed_out: "Timed out", awaiting_approval: "Awaiting approval", awaiting_approval_web: "Awaiting approval (answer it in the web)", awaiting_approval_telegram: "Awaiting approval (answer it in Telegram)" };
 
 // The line above the command of an approval asked by a subagent task: "Task <title> (ephemeral|<agent>) wants to run:".
 // `translate` (tr in the page) maps the English template and its values to the user's language; '' for a normal approval.
@@ -3321,7 +3321,10 @@ function approvalTaskLabel(approval, translate = (template, values) => template.
 
 // The status a task card shows: a running task whose worker waits for the user's approval says so.
 function taskDisplayStatus(record) {
-  return record?.status === "running" && Number(record?.awaiting_approval) > 0 ? "awaiting_approval" : (record?.status ?? "");
+  if (record?.status !== "running" || !(Number(record?.awaiting_approval) > 0)) return record?.status ?? "";
+  // a task run by the other process (web or Telegram) asks there: approvals are never relayed across channels
+  const elsewhere = record?.approval_elsewhere;
+  return elsewhere === "web" || elsewhere === "telegram" ? `awaiting_approval_${elsewhere}` : "awaiting_approval";
 }
 
 function taskIsFinal(status) {
@@ -3392,7 +3395,7 @@ function taskCardState(record, action, nowMs, listed = false) {
     ephemeral: !(kind === "agent" && agent),
     status,
     statusLabel: taskStatusLabel(taskDisplayStatus(record) || status),
-    awaitingApproval: taskDisplayStatus(record) === "awaiting_approval",
+    awaitingApproval: taskDisplayStatus(record).startsWith("awaiting_approval"),
     elapsed: formatElapsed(taskElapsed(record, nowMs)),
     tokens: (record?.usage?.in ?? 0) + (record?.usage?.out ?? 0),
     running,

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from queue import SimpleQueue
 from time import monotonic, sleep
-from typing import Callable, Iterator, Literal, Optional
+from typing import Callable, Iterable, Iterator, Literal, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -322,7 +322,10 @@ class ChatService:
     def __init__(
         self, agent_factory: AgentFactory | None = None, mcp: McpManager | None = None,
         dream: DreamManager | None = None, index_factory: IndexFactory | None = None,
+        origins: Iterable[str] = (),
     ):
+        """`origins`: the chat origins this process drives (`web`, `telegram`); it delivers the wake of a subagent task
+        for chats of those origins, whichever process ran the task. Empty (tests, CLI) = no cross-process role."""
         self._index_factory = index_factory or self._build_index
         self._mcp = mcp or McpManager(MCP, CONFIG_DIR)
         self._agent_factory = agent_factory or (
@@ -346,7 +349,7 @@ class ChatService:
         self._cleanup_stop = threading.Event()
         self._last_cleanup = 0.0
         self._approvals = ApprovalBroker(TERMINAL.approval_timeout_seconds)
-        self._tasks = TaskManager(self, DATA_DIR)  # subagent tasks launched by the `delegate` tools
+        self._tasks = TaskManager(self, DATA_DIR, origins)  # subagent tasks launched by the `delegate` tools
 
     @staticmethod
     def _build_index(config: ResolvedAgent, sources: SourceRegistry) -> VectorIndex:
@@ -476,6 +479,7 @@ class ChatService:
     def close(self) -> None:
         """Stop background resources such as MCP server processes and the dream scheduler."""
         self._cleanup_stop.set()
+        self._tasks.stop_poller()
         self._tasks.shutdown()  # running subagent tasks end as cancelled (their partial work stays in the hidden chats)
         self._approvals.close()  # tools waiting for an approval are denied so their threads can end
         if self._cleanup_thread is not None:
@@ -484,9 +488,15 @@ class ChatService:
         self._dream.stop()
         self._mcp.close()
 
+    def start_task_poller(self) -> None:
+        """Recover tasks now, then poll: commands queued by the other process for tasks run here (1 s), results to
+        deliver to chats of the origins this process serves and tasks whose executor died (2 s)."""
+        self._tasks.recover()  # failed owner_lost tasks, results still waiting for their wake
+        self._tasks.start_poller()
+
     def start_dream_scheduler(self, interval_seconds: float = 60.0) -> None:
         """Run scheduled dream sessions from this process (the web and Telegram processes both may)."""
-        self._tasks.recover()  # failed owner_lost tasks, results still waiting for their wake
+        self.start_task_poller()
         self._dream.start_scheduler(interval_seconds)
         if self._cleanup_thread is None:  # hourly removal of expired disposable chats, beside the dream scheduler
             self._cleanup_stop.clear()
