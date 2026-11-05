@@ -61,6 +61,8 @@ class PanelApiTests(base.AsyncFixture):
     def test_status_filter_and_limit(self) -> None:
         self.child_behavior = "slow"
         running = self.launch(wake=False)
+        # the stub reads `child_behavior` when the worker's model call starts: switch only after the slow one is inside it
+        self.assertTrue(base.until(lambda: "".join(running.partial).startswith("RESULT")))
         self.child_behavior = "ok"
         done = self.launch(wake=False)
         self.assertTrue(base.until(lambda: done.done.is_set()))
