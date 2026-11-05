@@ -176,10 +176,7 @@ function translateInterface() {
   }
   $("new-disposable-chat").title = tr("New disposable chat");
   $("new-disposable-chat").setAttribute("aria-label", tr("New disposable chat"));
-  for (const button of document.querySelectorAll(".nav-toggle")) {
-    button.title = tr("Menu");
-    button.setAttribute("aria-label", tr("Menu"));
-  }
+  syncNavToggles();
 }
 
 function tokenPrice(value) {
@@ -376,13 +373,42 @@ $("logout").addEventListener("click", async () => {
 
 // ------------------------------------------------------------------ navigation drawer (narrow screens)
 
+// Wide screens collapse the sidebar (remembered per browser); narrow screens open the drawer.
+const PANEL_KEY = "panelCollapsed";
+function readPanelCollapsed(storage) {
+  try { return storage.getItem(PANEL_KEY) === "1"; } catch { return false; }
+}
+function writePanelCollapsed(storage, collapsed) {
+  try { storage.setItem(PANEL_KEY, collapsed ? "1" : "0"); } catch { /* private mode: keep it for this page only */ }
+}
+const narrowScreen = window.matchMedia("(max-width: 800px)");
+function syncNavToggles() {
+  const collapsed = document.documentElement.classList.contains("panel-collapsed");
+  const open = document.body.classList.contains("nav-open");
+  const label = narrowScreen.matches ? tr("Menu") : tr(collapsed ? "Show panel" : "Hide panel");
+  for (const button of document.querySelectorAll(".nav-toggle")) {
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    button.setAttribute("aria-expanded", String(narrowScreen.matches ? open : !collapsed));
+  }
+}
+function setPanel(collapsed) {
+  document.documentElement.classList.toggle("panel-collapsed", collapsed);
+  writePanelCollapsed(localStorage, collapsed);
+  syncNavToggles();
+}
 function setNav(open) {
   document.body.classList.toggle("nav-open", open);
-  for (const button of document.querySelectorAll(".nav-toggle")) button.setAttribute("aria-expanded", String(open));
+  syncNavToggles();
 }
 for (const button of document.querySelectorAll(".nav-toggle")) {
-  button.addEventListener("click", () => setNav(!document.body.classList.contains("nav-open")));
+  button.addEventListener("click", () => {
+    if (narrowScreen.matches) setNav(!document.body.classList.contains("nav-open"));
+    else setPanel(!document.documentElement.classList.contains("panel-collapsed"));
+  });
 }
+narrowScreen.addEventListener("change", () => { setNav(false); });
+syncNavToggles();
 $("nav-scrim").addEventListener("click", () => setNav(false));
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") setNav(false); });
 // choosing a chat or agent, or starting a new one, closes the drawer

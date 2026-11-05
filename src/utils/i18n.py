@@ -255,6 +255,8 @@ _SPANISH = {
     "Alerts and errors": "Avisos y errores",
     "Save settings": "Guardar ajustes",
     "Menu": "Menú",
+    "Hide panel": "Ocultar panel",
+    "Show panel": "Mostrar panel",
     "Log out": "Cerrar sesión",
     "Switch theme": "Cambiar tema",
     "Theme": "Tema",

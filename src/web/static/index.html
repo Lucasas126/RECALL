@@ -8,6 +8,8 @@
   <script>
     // apply the saved theme before first paint to avoid a flash
     (() => { const t = localStorage.getItem("theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; })();
+    // and the collapsed state of the left panel
+    try { if (localStorage.getItem("panelCollapsed") === "1") document.documentElement.classList.add("panel-collapsed"); } catch (e) {}
   </script>
   <link rel="stylesheet" href="/static/style.css">
 </head>
