@@ -115,6 +115,19 @@ class TerminalSession:
             return True, "", "approved"
         return False, f"Denied: the user did not approve this action ({outcome.reason}). {DENIED_HINT}", f"denied:{outcome.reason}"
 
+    def approval_note(self, decision: str) -> str:
+        """One short line for the model: how a command that ran was authorized (so it knows whether the user saw it)."""
+        if decision.startswith("approved"):
+            return "[approved by the user]"
+        if decision == "auto:off":
+            return "[approvals off]"
+        if decision == "auto:smart":
+            run = current_run()
+            if self.unattended or run is None or not run.interactive:
+                return "[ran without approval: smart mode, nobody attached to approve]"
+            return "[ran without approval: smart mode, normal command]"
+        return ""
+
     # ------------------------------------------------------------------ execution
     def run(
         self, tool: str, display: str, command: str, *, cwd: str | None = None, timeout: int | float | None = None,
@@ -144,6 +157,7 @@ class TerminalSession:
         started = time.monotonic()
         result = self.backend.run(command, cwd, self.timeout_for(timeout), stdin)
         elapsed = time.monotonic() - started
+        result.approval = self.approval_note(decision)
         self._audit(tool, display, cwd, decision, result.exit_code, elapsed, timed_out=result.timed_out)
         logger.info(
             "terminal %s/%s [%s] %s exit=%s decision=%s %.1fs: %s",

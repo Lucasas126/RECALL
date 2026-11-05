@@ -21,7 +21,7 @@ Limits: foreground only; killed at the timeout (agent-wide `terminal.timeout_sec
 | `smart` | only dangerous actions |
 | `off` | nothing; the hardline still applies |
 
-The user sees an approval card in the web chat or buttons in Telegram, and only the owner of the chat can answer. A pending approval is denied automatically after `terminal.approval_timeout_seconds` (default 300), when the reply is cancelled, or when the service shuts down.
+The user sees an approval card in the web chat or buttons in Telegram, and only the owner of the chat can answer. The first line of a `terminal` result says how it was authorized: `[approved by the user]`, `[ran without approval: smart mode, normal command]` (or `... nobody attached to approve]` when unattended) or `[approvals off]`, so you know whether the user saw it. A pending approval is denied automatically after `terminal.approval_timeout_seconds` (default 300), when the reply is cancelled, or when the service shuts down.
 
 ## Hardline and dangerous
 
@@ -29,7 +29,7 @@ Refused whatever anyone approves (the hardline): recursive `rm` of `/`, `~` or s
 
 ## Protected paths (local backend)
 
-On a `local` backend, `terminal` and the `sandbox_*` tools refuse, in every approval mode and in unattended runs, the SSH private keys of all users' backends (`key_file`, usually `.config/keys/`), `.config/secrets.env`, `.env` files, Claude login `.credentials.json`, `/proc/*/environ` and the extra patterns in `settings.yaml` `terminal.protected_paths`. The text `Denied: protected path: ...` means this: nobody can approve it, so do not retry, rephrase, glob, copy, archive or script around it; tell the user instead. Public keys (`*.pub`), `known_hosts`, `user.yaml` and the directory listing of `keys/` stay allowed; recursive tools (`tar`, `grep -r`, `cp -r`, `find -exec`) may not start at a folder that contains protected files, so name narrower paths. SSH backends are not affected. Audit decision: `denied:protected`.
+On a `local` backend, `terminal` and the `sandbox_*` tools refuse, in every approval mode and in unattended runs, the SSH private keys of all users' backends (`key_file`, usually `.config/keys/`), `.config/secrets.env`, `.env` files, Claude login `.credentials.json`, `/proc/*/environ` and the extra patterns in `settings.yaml` `terminal.protected_paths`. The text `Denied: protected path: ...` means this: nobody can approve it, so do not retry, rephrase, glob, copy, archive or script around it; tell the user instead. Public keys (`*.pub`), `known_hosts`, `user.yaml` and the directory listing of `keys/` stay allowed; recursive tools (`tar`, `grep -r`, `cp -r`, `find -exec`) may not start at a folder that contains protected files, so name narrower paths. A glob is resolved against the real files (relative to the working directory and earlier `cd`s) and refused only when an actual match is protected; the denial names it. A glob that cannot be resolved (variables, substitutions) is refused only if it could match a protected name such as `*.env` or `keys/*`. SSH backends are not affected. Audit decision: `denied:protected`.
 
 ## When a command is denied
 

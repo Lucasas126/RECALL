@@ -15,7 +15,7 @@ The limits are set in `settings.yaml` for every user and agent. Memory entries a
 
 ## Frozen prompt per chat
 
-The system prompt is built when a chat starts: SOUL, then memories, skills index and open questions, then notices (associative memory, disposable chat, terminal, MCP). Your edits reach the files at once but only new chats see them; the tool results say so. Do not expect to see your own change in this conversation.
+The system prompt is built when a chat starts: SOUL, then memories, skills index and open questions, then notices (associative memory, disposable chat, terminal, MCP). Your edits reach the files at once but only new chats see them; the tool results say so. Do not expect to see your own change in this conversation. The last line of the profile blocks, `Profile loaded <time>; SOUL <n> chars, <k> skills (own) + built-in recall`, tells you when this chat's profile was read: changes apply to new chats, so compare it with the time of an edit.
 
 ## Associative memory
 

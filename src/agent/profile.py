@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from dataclasses import dataclass, field
 
 from src.config.models import MemoryLimits
@@ -23,6 +24,7 @@ class AgentProfile:
     skills: list[SkillInfo] = field(default_factory=list)
     questions: list[str] = field(default_factory=list)
     limits: MemoryLimits = field(default_factory=memory_limits)
+    loaded_at: str = ""  # ISO time of the read; empty for a hand-built profile (no loaded line in the prompt)
 
 
 def open_questions(text: str, limit: int = MAX_PROMPT_QUESTIONS) -> list[str]:
@@ -49,6 +51,7 @@ def load_profile(sources: SourceRegistry, *, recall_knowledge: bool = True) -> A
         skills=files.skills(include_builtin=recall_knowledge),
         questions=open_questions(questions),
         limits=memory_limits(),
+        loaded_at=datetime.now().astimezone().isoformat(timespec="seconds"),
     )
 
 
@@ -92,6 +95,11 @@ def profile_blocks(profile: AgentProfile) -> list[str]:
             "Ask at most one, and only when it fits naturally in the conversation; never interrupt a task "
             "for it. When the user answers, remove or annotate the question in `mind_palace:questions.md` "
             f"(if you can edit it) and save what you learned.\n\n{items}"
+        )
+    if profile.loaded_at:
+        recall = " + built-in recall" if builtin else ""
+        blocks.append(
+            f"Profile loaded {profile.loaded_at}; SOUL {len(profile.soul)} chars, {len(own)} skills (own){recall}"
         )
     return blocks
 

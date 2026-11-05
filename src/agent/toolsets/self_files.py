@@ -121,13 +121,20 @@ def build_self_tools(agent: Agent) -> list[Callable[..., str]]:
     @tool
     def skill_view(
         name: Annotated[str, "the skill name from the skills index"],
-        file_path: Annotated[str, "optional supporting file inside the skill, e.g. references/notes.md"] = "",
+        file_path: Annotated[str, "optional supporting file, e.g. references/notes.md; a folder (references/) lists its files"] = "",
     ) -> str:
-        """Load a skill's full SKILL.md (or one of its supporting files) before following it."""
+        """Load a skill's full SKILL.md (or one of its supporting files, or the file list of a folder) before following it."""
         files = sources.agent_files()
         if name == BUILTIN_SKILL and not agent.config.recall_knowledge:
             raise FileNotFoundError(f"skill not found: {name}")
         if file_path:
+            folder = file_path.replace("\\", "/").strip().strip("/")
+            listing = files.skill_files(name)
+            if file_path.strip().endswith(("/", "\\")) or (folder and folder not in listing and any(f.startswith(folder + "/") for f in listing)):
+                inside = [f for f in listing if not folder or f.startswith(folder + "/")]
+                if not inside:
+                    raise FileNotFoundError(f"no files in {folder or 'the skill'}/ of skill {name}")
+                return f"[files in {folder or name}/]\n" + "\n".join(inside)
             return files.read_skill_file(name, file_path)
         text = files.skill_text(name)
         extra = files.skill_files(name)

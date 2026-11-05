@@ -49,6 +49,7 @@ _MAX_SCAN_BYTES = 262_144
 _MAX_WALK = 500
 _MAX_DEPTH = 4
 _GLOB_CHARS = re.compile(r"[*?\[]")
+_MAX_GLOB_MATCHES = 5000
 
 # obvious references inside a command line (checked on the raw text, so quoting tricks do not matter)
 _REF_KEYS = re.compile(r"(?:^|[\s'\"=:/])keys/([^\s'\";|&)<>]+)")
@@ -155,12 +156,44 @@ class ProtectedPaths:
         return False
 
     def glob_reason(self, pattern: str, cwd: str = ".") -> str | None:
-        """Why a glob word could expand to a protected file, else None."""
-        absolute = _fold(os.path.normpath(_absolute(pattern, cwd)))
-        probes = list(self.concrete) + ["/proc/self/environ", "/proc/1/environ"]
-        for probe in probes:
-            if fnmatch.fnmatchcase(probe, absolute):
-                return self._rule(probe) or "a protected file"
+        """Why a glob word expands to a protected file, else None.
+
+        On the local backend the glob is resolved against the real filesystem (like the shell: `*` skips dotfiles) and
+        refused only when an actual match is protected; the message names that match.
+        """
+        absolute = _absolute(pattern, cwd)
+        try:
+            matches = globlib.glob(absolute)[:_MAX_GLOB_MATCHES]
+        except (OSError, ValueError):
+            matches = []
+        for match in matches:
+            why = self.reason(match, cwd)
+            if why:
+                return f"{match} ({why})"
+        folded = _fold(os.path.normpath(absolute))
+        for probe in ("/proc/self/environ", "/proc/1/environ"):  # not on every host's disk: match by name
+            if fnmatch.fnmatchcase(probe, folded):
+                return f"{probe} (a process environment)"
+        return None
+
+    def name_pattern_reason(self, pattern: str) -> str | None:
+        """For a glob that cannot be resolved (variables, substitutions): refuse only when it could match a protected
+        NAME (`*.env`, `.env*`, `*_ed25519`, `keys/*`); never bare `*`, `*/` or `*.md`."""
+        parts = [p for p in pattern.replace("\\", "/").split("/") if p]
+        if not parts:
+            return None
+        last = parts[-1]
+        if KEYS_DIR_NAME in parts[:-1] and _GLOB_CHARS.search(last):
+            return f"the pattern {pattern} would expand to files in a keys directory"
+        if len(re.sub(r"[*?\[\]!^-]", "", last)) < 3:  # too little literal text to point at a secret
+            return None
+        names = {".env", "secrets.env", ".credentials.json", *PRIVATE_KEY_NAMES}
+        names.update(c.rsplit("/", 1)[-1] for c in self.concrete)
+        for name in sorted(names):
+            if not name or name.endswith(".pub") or name in PUBLIC_NAMES:
+                continue
+            if fnmatch.fnmatchcase(_fold(name), _fold(last)) and not (last.startswith("*") and name.startswith(".")):
+                return f"the pattern {pattern} could match {name}, a protected file name"
         return None
 
     def search_excludes(self) -> tuple[list[str], list[str]]:
@@ -193,14 +226,16 @@ class ProtectedPaths:
         if why:
             return why
         segments, inner = split_command(command)
+        here = cwd
         for segment in segments:
             words = _tokens(segment.text)
-            why = self._words(words, _redirect_targets(segment), cwd, depth)
+            why = self._words(words, _redirect_targets(segment), here, depth)
             if why:
                 return why
+            here = _after_cd(words, here)
         if depth < _MAX_DEPTH:
             for text in inner:
-                why = self._command(text, cwd, depth + 1)
+                why = self._command(text, here, depth + 1)
                 if why:
                     return why
         return None
@@ -247,7 +282,9 @@ class ProtectedPaths:
             return None
         name = os.path.basename(words[0])
         args = words[1:]
-        for word in words:
+        for index, word in enumerate(words):
+            if index == 0 and "/" not in word and not _GLOB_CHARS.search(word):
+                continue  # a bare command name is found on PATH, not in the working directory
             why = self._word(word, cwd)
             if why:
                 return why
@@ -283,11 +320,14 @@ class ProtectedPaths:
             return None
         home = os.path.expanduser("~")
         text = re.sub(r"^\$\{?HOME\}?(?=/|$)", lambda _m: home, text)
-        if "$" in text or "SUBST" == text:
-            return None
+        unresolved = "$" in text or "SUBST" == text or (bool(_GLOB_CHARS.search(text)) and "SUBST" in text)
         if _GLOB_CHARS.search(text):
+            if unresolved or (isinstance(cwd, _UnknownCwd) and not _is_abs(text)):
+                return self.name_pattern_reason(text)
             why = self.glob_reason(text, cwd)
-            return f"the pattern {text} can match {why}" if why else None
+            return f"the pattern {text} expands to {why}" if why else None
+        if unresolved:
+            return None
         why = self.reason(text, cwd)
         return f"{text} is {why}" if why else None
 
@@ -333,6 +373,23 @@ class ProtectedPaths:
             except OSError:
                 continue
         return None
+
+
+class _UnknownCwd(str):
+    """A working directory that a `cd` with a variable or substitution made unknowable (relative globs cannot be resolved)."""
+
+
+def _after_cd(words: list[str], cwd: str) -> str:
+    """The directory after a simple `cd <dir>` segment, as far as it can be determined."""
+    if not words or words[0] != "cd":
+        return cwd
+    operands = [w for w in words[1:] if w not in ("-L", "-P", "--")]
+    if len(operands) != 1:
+        return cwd if not operands else _UnknownCwd(cwd)
+    target = operands[0]
+    if "$" in target or "SUBST" in target or _GLOB_CHARS.search(target) or target == "-":
+        return _UnknownCwd(cwd)
+    return os.path.normpath(_absolute(target, cwd))
 
 
 def _glob_hits_path(pattern: str, path: str) -> bool:

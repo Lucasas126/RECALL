@@ -62,7 +62,7 @@ class TerminalToolTests(ToolFixture):
     def test_result_format_and_cwd(self) -> None:
         backend = FakeBackend(lambda c, cwd, t, s: Result(2, "out\n", "boom\n"))
         text = self.build(backend)["terminal"]("make", timeout=7, workdir="~/proj")
-        self.assertEqual(text, "exit code: 2\nstdout:\nout\n\nstderr:\nboom\n")
+        self.assertEqual(text, "[approvals off]\nexit code: 2\nstdout:\nout\n\nstderr:\nboom\n")
         call = backend.calls[0]
         self.assertEqual((call.command, call.cwd, call.timeout), ("make", "~/proj", 7.0))
 
@@ -70,7 +70,7 @@ class TerminalToolTests(ToolFixture):
         backend = FakeBackend(lambda *a: Result(None, timed_out=True))
         self.assertIn("timed out after 60s", self.build(backend)["terminal"]("sleep 999"))
         backend = FakeBackend(lambda *a: Result(0))
-        self.assertEqual(self.build(backend)["terminal"]("true"), "exit code: 0\n(no output)")
+        self.assertEqual(self.build(backend)["terminal"]("true"), "[approvals off]\nexit code: 0\n(no output)")
 
     def test_output_is_redacted_and_truncated(self) -> None:
         secret = "sk-or-" + "a1b2c3d4" * 4
@@ -79,6 +79,20 @@ class TerminalToolTests(ToolFixture):
         self.assertNotIn(secret, text)
         self.assertIn(REDACTED, text)
         self.assertIn("characters omitted", text)
+
+    def test_result_starts_with_the_approval_outcome(self) -> None:
+        self.assertTrue(self.build(FakeBackend(), "off")["terminal"]("ls").startswith("[approvals off]\nexit code: 0"))
+        smart = self.build(FakeBackend(), "smart")["terminal"]
+        self.assertTrue(smart("ls").startswith("[ran without approval: smart mode, nobody attached to approve]\n"))
+        responder = Responder(ApprovalBroker())
+        with run_context(responder.context()):
+            self.assertTrue(smart("ls").startswith("[ran without approval: smart mode, normal command]\n"))
+        manual = self.build(FakeBackend(), "manual")["terminal"]
+        with run_context(Responder(ApprovalBroker(), "approve").context()):
+            text = manual("ls")
+        self.assertTrue(text.startswith("[approved by the user]\nexit code: 0"), text)
+        with run_context(Responder(ApprovalBroker(), "deny").context()):
+            self.assertTrue(manual("ls").startswith("Denied:"))
 
     def test_hardline_never_reaches_the_backend(self) -> None:
         backend = FakeBackend()

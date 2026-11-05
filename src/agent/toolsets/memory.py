@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Annotated, Callable, Optional
 
 from src.agent.tooling import tool
@@ -10,6 +11,36 @@ if TYPE_CHECKING:
     from src.agent.agent import Agent
 
 _MAX_SEARCH_HITS = 50
+_MAX_SEARCH_LIMIT = 200
+_COUNT_CAP = 20_000  # stop counting here: the total is reported as '20000+'
+
+
+def _path_matcher(path: str):
+    """A predicate over 'source/relative/path' for a prefix (`skills/github/`) or a glob (`mind_palace/notes/**/*.md`)."""
+    path = path.strip().replace("\\", "/").lstrip("/")
+    if not path:
+        return lambda _full, _rel: True
+    if not re.search(r"[*?\[]", path):
+        return lambda full, rel: full.startswith(path) or rel.startswith(path)
+    out, i = [], 0
+    while i < len(path):
+        if path.startswith("**/", i):
+            out.append("(?:.*/)?")
+            i += 3
+        elif path.startswith("**", i):
+            out.append(".*")
+            i += 2
+        elif path[i] == "*":
+            out.append("[^/]*")
+            i += 1
+        elif path[i] == "?":
+            out.append("[^/]")
+            i += 1
+        else:
+            out.append(re.escape(path[i]))
+            i += 1
+    pattern = re.compile("".join(out) + r"\Z")
+    return lambda full, rel: bool(pattern.match(full) or pattern.match(rel))
 
 
 def build_memory_tools(agent: Agent) -> list[Callable[..., str]]:
@@ -42,23 +73,43 @@ def build_memory_tools(agent: Agent) -> list[Callable[..., str]]:
     def search(
         query: Annotated[str, "text to find (case-insensitive, literal match)"],
         source: Annotated[str, "source name; omit to search all sources"] = "",
+        path: Annotated[str, "only files under this prefix or glob, e.g. skills/github/ or mind_palace/**/*.md"] = "",
+        offset: Annotated[int, "matches to skip (paging)"] = 0,
+        limit: Annotated[int, "matches to return (default 50, max 200)"] = _MAX_SEARCH_HITS,
     ) -> str:
         """Find exact text matches across your memories (complements query_memory, which is semantic).
-        Returns each match as 'source:path:line'. Use it when you know the wording you're looking for."""
+        Returns each match as 'source:path:line' and says how many exist and how to get the next page."""
         needle = query.lower()
-        hits = []
+        offset = max(0, int(offset or 0))
+        limit = max(1, min(int(limit or _MAX_SEARCH_HITS), _MAX_SEARCH_LIMIT))
+        wanted = _path_matcher(path)
+        hits: list[str] = []
+        total = 0
         for src in readable_sources(sources, source):
             for rel in src.walk(INDEX_FILE_TYPES):
+                if not wanted(f"{src.name}/{rel}", rel):
+                    continue
                 try:
                     text = src.read(rel)
                 except OSError:
                     continue
                 for number, line in enumerate(text.splitlines(), 1):
                     if needle in line.lower():
-                        hits.append(f"[{src.name}:{rel}:{number}] {line.strip()}")
-                        if len(hits) >= _MAX_SEARCH_HITS:
-                            return "\n".join(hits) + f"\n... (stopped at {_MAX_SEARCH_HITS} matches)"
-        return "\n".join(hits) if hits else "no matches."
+                        if offset <= total < offset + limit:
+                            hits.append(f"[{src.name}:{rel}:{number}] {line.strip()}")
+                        total += 1
+                if total >= _COUNT_CAP:
+                    break
+        if not total:
+            return "no matches."
+        if not hits:
+            return f"no matches at offset {offset}: there are {total} in total."
+        count = f"{_COUNT_CAP}+" if total >= _COUNT_CAP else str(total)
+        last = offset + len(hits)
+        footer = f"showing {offset + 1}-{last} of {count} matches"
+        if last < total:
+            footer += f"; next page: offset={last}"
+        return "\n".join(hits) + f"\n... ({footer})"
 
     @tool
     def list_memories(

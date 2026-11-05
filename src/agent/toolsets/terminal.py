@@ -101,7 +101,8 @@ def build_terminal_tools(
         The user approves actions according to the agent's approval mode; some commands are blocked outright.
         If a command is denied or times out waiting for approval, do NOT retry it or rephrase it to get around
         the refusal: explain what you wanted to do and let the user decide. Each call starts a fresh shell.
-        Keep output small (head, tail, grep): long output is cut in the middle. The result starts with the exit code."""
+        Keep output small (head, tail, grep): long output is cut in the middle. The result starts with a one-line approval note
+        (e.g. [approved by the user]) and the exit code."""
         session, error = pick(backend)
         if session is None:
             return error
@@ -117,7 +118,7 @@ def build_terminal_tools(
             head = "the command could not be run"
         else:
             head = f"exit code: {result.exit_code}"
-        parts = [head]
+        parts = [result.approval, head] if result.approval else [head]
         if out.strip():
             parts.append("stdout:\n" + out)
         if err.strip():
