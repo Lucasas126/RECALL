@@ -22,6 +22,7 @@ from the repository root. Agents with a `local` terminal backend run it the same
 | `user set --user U --set path=value` | non-secret fields (`name`, `language`, `models.*`, `provider.name`, `provider.api_key` = a variable NAME, `terminal_backends.*`, ...) |
 | `set-secret NAME [--stdin]` | store a credential in `.config/secrets.env` |
 | `secret list` | credential names and whether they are set, never values |
+| `task run --user U --agent A --goal "..." [--context C] [--instructions I] [--notify AGENT:CHAT] [--wait]` | start an **unattended** [task](delegation.md#limits) with no parent chat (the entry point future scheduled jobs will use; for testing). It prints `task: <id>`; with `--wait` it blocks and prints the status, tokens and result. Without `--instructions` the task runs as agent `A` itself (its own SOUL, web tools and its own terminal; memory read-only); with them an ephemeral worker runs on `A`'s model. Manual and dangerous terminal actions are denied, `smart` normal ones run. The same limits and the daily token budget apply. `--notify` delivers the result to that chat as a wake; otherwise it only stays in the web Tasks panel. The task runs inside the command, so without `--wait` it stops when the command exits |
 | `terminal-test`, `route-test` | connection check of a backend / Telegram routing preview |
 
 ## Setting values

@@ -795,6 +795,19 @@ _SPANISH = {
     "✏️ Correction queued for task {id}: it runs in the web process and applies it within seconds.": "✏️ Corrección en cola para la tarea {id}: se ejecuta en el proceso web y la aplicará en unos segundos.",
     "Awaiting approval (answer it in the web)": "Esperando aprobación (respóndela en la web)",
     "Awaiting approval (answer it in Telegram)": "Esperando aprobación (respóndela en Telegram)",
+    # subagents (panel)
+    "Tasks": "Tareas",
+    "All": "Todas",
+    "Finished": "Terminadas",
+    "Filter tasks": "Filtrar tareas",
+    "No tasks to show.": "No hay tareas que mostrar.",
+    "Tasks today: {used} of {limit} tokens": "Tareas hoy: {used} de {limit} tokens",
+    "Tasks today: {used} tokens (no daily limit)": "Tareas hoy: {used} tokens (sin límite diario)",
+    "Daily task budget reached; it resets at midnight": "Límite diario de tareas alcanzado; se restablece a medianoche",
+    "from {agent} · {chat}": "desde {agent} · {chat}",
+    "(untitled chat)": "(chat sin título)",
+    "no parent chat": "sin chat de origen",
+    "scheduled": "programada",
 }
 
 

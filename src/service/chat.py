@@ -1357,12 +1357,48 @@ class ChatService:
         except TaskError as exc:
             raise UnknownTask("unknown task: {task_id}", task_id=task_id) from exc
 
-    def list_tasks(self, user_id: str, agent_id: str | None = None, chat_id: str | None = None) -> dict:
-        """The user's tasks, optionally those launched from one parent chat, plus whether that chat is about to get a wake."""
+    @property
+    def tasks(self) -> TaskManager:
+        """The subagent task manager (the admin CLI and, later, a scheduler start unattended tasks through it)."""
+        return self._tasks
+
+    def _label_tasks(self, user_id: str, tasks: list[dict]) -> None:
+        """Add `parent.agent_name` and `parent.title` (agent and chat names) so a cross-chat list can say where a task came from."""
+        agents: dict[str, str] = {}
+        titles: dict[tuple[str, str], str] = {}
+        for task in tasks:
+            parent = task["parent"]
+            key = (parent.get("agent_id") or "", parent.get("chat_id") or "")
+            if key[0] not in agents:
+                try:
+                    agents[key[0]] = self._agent_config(user_id, key[0]).name
+                except Exception:
+                    agents[key[0]] = key[0]
+            if key not in titles:
+                title = ""
+                if key[1]:
+                    try:
+                        title = self._conversations(user_id, key[0]).summary(key[1]).get("title") or ""
+                    except Exception:
+                        title = ""
+                titles[key] = title
+            parent["agent_name"], parent["title"] = agents[key[0]], titles[key]
+
+    def list_tasks(
+        self, user_id: str, agent_id: str | None = None, chat_id: str | None = None, status: str = "", limit: int = 0,
+    ) -> dict:
+        """The user's tasks, optionally those launched from one parent chat, plus whether that chat is about to get a wake.
+
+        `status` is `running` or `finished` (anything else: all); `limit` keeps the newest N. A list across chats is
+        labelled with the parent agent and chat names and carries today's token budget (`budget`: used, limit).
+        """
         if agent_id is not None:
             self._owned_agent(user_id, agent_id)
-        tasks = self._tasks.list_view(user_id, agent_id, chat_id)
+        tasks = self._tasks.list_view(user_id, agent_id, chat_id, status if status in ("running", "finished") else "", limit)
         out: dict = {"tasks": tasks}
+        if agent_id is None or chat_id is None:
+            self._label_tasks(user_id, tasks)
+            out["budget"] = self._tasks.budget(user_id)
         if agent_id is not None and chat_id is not None:
             out["active"] = self.chat_active(user_id, agent_id, chat_id)
             out["pending_wake"] = self._tasks.pending_wake(user_id, agent_id, chat_id)

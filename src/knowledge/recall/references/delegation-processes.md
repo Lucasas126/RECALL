@@ -22,6 +22,12 @@ A worker with a terminal grant asks for approval in the channel of the program t
 
 If the program that ran a task stops or crashes, the other program notices (its poll runs every ~2 s): the task becomes `failed` with reason `owner_lost` and the owning program wakes you with that result. Nothing is resumed or re-run; the worker's partial chat stays readable. A wake claimed by a program that then died is taken over after 60 s, and a result is never delivered twice.
 
+## Tasks panel, daily budget, unattended tasks
+
+- The web app has a **Tasks** button (sidebar footer) listing ALL the user's tasks across chats and agents, newest first (All / Running / Finished), each with status, title, worker, parent agent and chat (click to open it), elapsed time, tokens, and Stop / Steer / Open chat. It reads `GET /api/tasks` (optional `status=running|finished`, `limit`) and refreshes every ~3 s while something runs.
+- **Daily budget:** `subagents.daily_token_budget` (settings.yaml, default 1000000 in+out tokens, 0 = unlimited) is counted per user and local day from the task records, follow-ups included. When spent, `task_start` and `task_send` return `error: daily task budget reached (<used>/<budget> tokens today); it resets at midnight`: do not retry, tell the user. Running tasks are not cut. The panel shows today's usage.
+- **Unattended tasks** (no parent chat; the foundation for scheduled jobs, no scheduler or agent tool yet): `TaskManager.launch_unattended`, started today only by `python -m src.admin task run --user U --agent A --goal "..." [--wait]`. Nobody can approve, so manual and dangerous terminal actions are denied, `smart` normal commands run, protected paths are refused; same limits and budget. The result stays in the task record (panel row marked *scheduled*) or goes to `--notify AGENT:CHAT` as a wake.
+
 ## For admins
 
 `ChatService(origins=...)` declares which chat origins a process drives (`web.py` -> web, `run_telegram.py` -> Telegram); the poller (`ChatService.start_task_poller`, started with the dream scheduler) and the commands inbox (`data/<user>/.tasks/<id>.cmd.jsonl`) live in `src/service/tasks.py`. If only one program is running, chats of the other origin get their wakes when it starts.

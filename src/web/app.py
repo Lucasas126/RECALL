@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import AsyncIterator, Iterator, Literal, Optional
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -532,8 +532,11 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     # ------------------------------------------------------------------ subagent tasks
 
     @app.get("/api/tasks")
-    def list_tasks(agent: Optional[str] = None, chat: Optional[str] = None, user_id: str = Depends(current_user)):
-        return service.list_tasks(user_id, agent, chat)
+    def list_tasks(
+        agent: Optional[str] = None, chat: Optional[str] = None, status: str = "",
+        limit: int = Query(0, ge=0, le=500), user_id: str = Depends(current_user),
+    ):
+        return service.list_tasks(user_id, agent, chat, status, limit)
 
     @app.get("/api/tasks/{task_id}")
     def get_task(task_id: str, user_id: str = Depends(current_user)):

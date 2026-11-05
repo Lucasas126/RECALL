@@ -136,3 +136,4 @@ subagents:
   max_followups: 5               # task_send follow-ups per task
   max_auto_wakes: 3              # parent turns started by a task result in a row, without a user message in between
   wake_debounce_seconds: 1.5     # results ending within this window are delivered as one message
+  daily_token_budget: 1000000    # input + output tokens of ALL a user's tasks per local day; 0 = unlimited; over it no task starts until midnight
