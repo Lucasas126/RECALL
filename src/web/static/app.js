@@ -3254,7 +3254,23 @@ function findToolStep(steps, payload) {
 // The step after its final event: "failed" when the tool reported an error, else "done".
 function toolStepFinish(step, payload) {
   const { id: _id, ...action } = payload ?? {};
+  if (step.action?.taskId && !action.taskId) action.taskId = step.action.taskId;  // bound by a `task_started` event
   return { ...step, phase: payload?.error ? "failed" : "done", action };
+}
+
+// A `task_started` event ({task_id, goal}) names the task a still-running `task_start` step launched: binds it to the
+// oldest running, unbound task_start step with the same goal (else the oldest unbound one). {steps, index}; index -1 = none.
+function toolStepBindTask(steps, payload) {
+  const taskId = payload?.task_id;
+  if (typeof taskId !== "string" || !taskId) return { steps, index: -1 };
+  if (steps.some((step) => step.action?.taskId === taskId)) return { steps, index: -1 };  // a replayed duplicate
+  const goal = String(payload?.goal ?? "").replace(/\s+/g, " ").trim();
+  const open = (step) => step.phase === "running" && step.action?.name === "task_start" && !step.action.taskId;
+  const same = (step) => String(step.action?.arguments?.goal ?? "").replace(/\s+/g, " ").trim().slice(0, 300) === goal;
+  let index = steps.findIndex((step) => open(step) && same(step));
+  if (index < 0) index = steps.findIndex(open);
+  if (index < 0) return { steps, index: -1 };
+  return { steps: steps.map((step, i) => (i === index ? { ...step, action: { ...step.action, taskId } } : step)), index };
 }
 
 // A step still running when the stream ends or the turn is interrupted will not finish any more.
@@ -3441,8 +3457,21 @@ function isTaskStartAction(action) {
 
 // The task id a stored `task_start` step returned; null when the launch failed (no task exists).
 function taskActionId(action) {
-  const id = taskResultJson(action)?.id;
+  const id = taskResultJson(action)?.id ?? action?.taskId;  // `taskId`: bound by `task_started` while the call still runs
   return typeof id === "string" && id ? id : null;
+}
+
+// Fallback for a running `task_start` step that has no id: the newest running task of this chat with the same goal
+// (else title) that no other card shows. `records` are task records, `bound` the ids the other cards already hold.
+function taskUnboundMatch(records, bound, action) {
+  const args = action?.arguments && typeof action.arguments === "object" ? action.arguments : {};
+  const norm = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+  const goal = norm(args.goal);
+  if (!goal) return null;
+  const free = [...records].filter((r) => r && !bound.has(r.id) && !taskIsFinal(r.status));
+  const same = free.filter((r) => norm(r.goal) === goal || (r.goal && goal.startsWith(norm(r.goal))) || norm(r.title) === norm(goal.length > 80 ? `${goal.slice(0, 79)}…` : goal));
+  same.sort((a, b) => String(b.created_at ?? b.started_at ?? "").localeCompare(String(a.created_at ?? a.started_at ?? "")));
+  return same[0] ?? null;
 }
 
 // What a card shows: from the task record when known, else from the step itself. `listed` says that the chat's task
@@ -3741,13 +3770,18 @@ function taskCardStep(action) {
   taskCards.add(card);
   refreshTaskCard(card);
   if (action.pending) watchRunningStep(card);
-  if (card._taskId) ensureTaskPolling();
+  if (card._taskId || action.pending) ensureTaskPolling();  // a running step without an id is matched from the poll
   return card;
 }
 
 function refreshTaskCard(card) {
   const parts = card._parts;
-  const view = taskCardState(taskRecords.get(card._taskId), card._action, Date.now(), taskListed === chatKey(state.agentId, state.chatId));
+  const listed = taskListed === chatKey(state.agentId, state.chatId);
+  if (!card._taskId && card._action?.pending === true && listed) {  // no id yet: the newest running task of this chat with this goal
+    const bound = new Set([...taskCards].map((other) => other._taskId).filter(Boolean));
+    card._taskId = taskUnboundMatch(taskRecords.values(), bound, card._action)?.id ?? null;
+  }
+  const view = taskCardState(taskRecords.get(card._taskId), card._action, Date.now(), listed);
   card._taskId = view.id;
   card.dataset.status = view.status;
   card.classList.toggle("failed", view.status === "failed");
@@ -4681,6 +4715,19 @@ function addMessage(role, parent = state.view ?? $("messages")) {
         return toolStepStop(step);
       });
     },
+    // `task_started`: a task launched by a `task_start` that is still running (wait=true): bind its card to the id now.
+    taskStarted(p) {
+      const { steps, index } = toolStepBindTask(liveSteps, p);
+      if (index < 0) return;
+      liveSteps = steps;
+      const node = liveNodes[index];
+      if (node?._parts) {
+        node._action = steps[index].action;
+        node._taskId = p.task_id;
+        refreshTaskCard(node);
+        ensureTaskPolling();
+      }
+    },
     approval(approval) {
       showApproval(approval, (node) => addStep(node));
     },
@@ -5154,6 +5201,7 @@ function handleEvent(raw, request) {
   else if (event === "notice") reply.notice(payload);
   else if (event === "approval") reply.approval({ agent_id: request.agentId, chat_id: request.chatId, ...payload });
   else if (event === "approval_resolved") settleApproval(payload);
+  else if (event === "task_started") reply.taskStarted?.(payload);
   else if (event === "interrupted") reply.interrupted(payload);
   else if (event === "unavailable") request.unavailable = true;  // a task's live view: another process runs it
   else if (event === "error") {

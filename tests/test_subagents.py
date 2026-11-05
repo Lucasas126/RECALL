@@ -629,5 +629,29 @@ class LimitErrorTests(SubagentFixture):
         self.service.delete_chat("user-one", "agent-one", child)
 
 
+class TaskStartedEventTests(SubagentFixture):
+    def test_launch_announces_the_task_id_in_the_parent_stream_at_once(self) -> None:
+        seen: list[tuple[str, dict]] = []
+        parent = RunContext(
+            "user-one", "agent-one", self.chat, None, lambda kind, data: seen.append((kind, data)), CancellationToken(),
+            tasks=self.manager,
+        )
+        live = self.launch(parent)
+        live.done.wait(8)
+        self.assertEqual([kind for kind, _ in seen], ["task_started"])
+        data = seen[0][1]
+        self.assertEqual((data["task_id"], data["goal"]), (live.task_id, "find X"))
+        self.assertEqual(data["chat_id"], self.record(live.task_id)["child"]["chat_id"])
+
+    def test_a_wait_true_reply_streams_task_started_before_the_tool_result(self) -> None:
+        events = list(self._send("delegate"))
+        kinds = [e.kind for e in events]
+        self.assertIn("task_started", kinds)
+        self.assertLess(kinds.index("task_started"), kinds.index("tool"))
+        record = self.manager.store.list("user-one")[0]
+        started = next(e for e in events if e.kind == "task_started")
+        self.assertEqual(started.data["task_id"], record["id"])
+
+
 if __name__ == "__main__":
     unittest.main()

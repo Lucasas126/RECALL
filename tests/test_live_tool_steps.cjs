@@ -10,7 +10,7 @@ const live = source.slice(source.indexOf("function toolStepStart("), source.inde
 const tasks = source.slice(source.indexOf("// ---- task cards: pure helpers"), source.indexOf("// A wake turn: a subagent result"));
 const context = vm.createContext({});
 vm.runInContext(
-  `${live}\n${tasks}\nthis.apply = toolStepsApply; this.stop = toolStepStop; this.elapsed = toolStepElapsed; this.cardState = taskCardState;`,
+  `${live}\n${tasks}\nthis.apply = toolStepsApply; this.stop = toolStepStop; this.elapsed = toolStepElapsed; this.cardState = taskCardState; this.bind = toolStepBindTask; this.match = taskUnboundMatch;`,
   context,
 );
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -80,4 +80,33 @@ test("a task_start step that has not returned yet is a 'starting' card, not a fa
   const stopped = context.cardState(null, { ...started.steps[0].action, pending: false, stopped: true }, 5000, false);
   assert.equal(stopped.status, "stopped");
   assert.equal(stopped.error, "");
+});
+
+test("a task_started event binds the running task_start step to its task id, even before it returns", () => {
+  const goal = "find X";
+  let r = context.apply([], "tool_start", start("a", "task_start", { goal: "other", wait: true }), 1000);
+  r = context.apply(r.steps, "tool_start", start("b", "task_start", { goal, wait: true }), 1000);
+  const bound = context.bind(r.steps, { task_id: "aaaaaaaaaaaa", goal });
+  assert.equal(bound.index, 1);  // same goal wins over the older unbound step
+  assert.equal(bound.steps[1].action.taskId, "aaaaaaaaaaaa");
+  assert.equal(context.cardState(null, bound.steps[1].action, 0).id, "aaaaaaaaaaaa");
+  assert.equal(context.bind(bound.steps, { task_id: "aaaaaaaaaaaa", goal }).index, -1);  // replay: no double binding
+  const second = context.bind(bound.steps, { task_id: "bbbbbbbbbbbb", goal: "unknown" });
+  assert.equal(second.index, 0);  // no goal match: the oldest unbound one
+  // the id survives the final event
+  const done = context.apply(bound.steps, "tool", final("b", "task_start", { result: "not json" }), 2000);
+  assert.equal(done.steps[1].action.taskId, "aaaaaaaaaaaa");
+});
+
+test("a running task_start step without an id matches the newest free running task of the chat with its goal", () => {
+  const action = { name: "task_start", arguments: { goal: "find X" }, pending: true };
+  const records = [
+    { id: "old", status: "running", goal: "find X", created_at: "2026-01-01T00:00:00" },
+    { id: "new", status: "running", goal: "find X", created_at: "2026-01-02T00:00:00" },
+    { id: "fin", status: "done", goal: "find X", created_at: "2026-01-03T00:00:00" },
+    { id: "diff", status: "running", goal: "other", created_at: "2026-01-04T00:00:00" },
+  ];
+  assert.equal(context.match(records, new Set(), action).id, "new");
+  assert.equal(context.match(records, new Set(["new"]), action).id, "old");
+  assert.equal(context.match(records, new Set(["new", "old"]), action), null);
 });
