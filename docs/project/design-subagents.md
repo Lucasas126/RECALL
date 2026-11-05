@@ -260,6 +260,9 @@ Each phase ships and is tested alone. New test files follow the existing style (
 | 6 | Answer approvals from the other channel | No. An approval is shown in the channel of the parent chat only. The commands inbox of phase 4 stays for stop/steer/send, crash recovery and future jobs, but approvals are not relayed. |
 | 7 | Continue a finished child (new, design idea) | Yes: `task_send` (section 3). It does not exist in other agent frameworks; here it is cheap because the child chat persists. |
 
+| 8 | Steering a running task (design request) | The USER can steer a running task from RECALL too, not only the parent agent: the task card (web) and a Telegram button/command send a correction into the running child (same mechanism as `task_steer`: the child's current generation is interrupted, its partial reply kept, the correction appended, generation continues). Exposed as `POST /api/tasks/<id>/steer {text}` and Telegram `/task <id> <text>`; also `stop`. Phase 2 (same-process), cross-process via the commands inbox in phase 4. |
+| 9 | Wake vs. user collisions | other agent frameworks tends to cut the agent when a subagent result arrives mid-reply; RECALL does NOT cut it: the guarantees of section 5 apply (verify in tests). |
+
 **Agents must know the limits.** The limits are written in three places so the model does not have to find out by failing: (a) the `task_start` tool description states the numbers (3 running per parent, 10 minutes each, depth 1); (b) the `delegate` group adds a short notice to the system prompt in the same way the terminal group describes its backends; (c) the error returned when a limit is hit says which limit and what to do (`error: limit reached: 3 running tasks; wait for one to finish or use task_wait`). A knowledge-pack page `references/delegation.md` (tools, limits, wake behaviour, when not to delegate) and the user docs are deliverables of phase 1/2 (AGENTS.md rule).
 
 ## 12b. superseded open questions
