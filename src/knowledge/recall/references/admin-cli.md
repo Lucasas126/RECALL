@@ -27,6 +27,8 @@ python -m src.admin agent create --user ana --id travel --name Travel --set desc
 ```
 
 - A model is checked against the provider catalog like in the web UI, so a typo or an unavailable provider is refused with a message.
+- Values are parsed as YAML: wrap text containing `": "` (or starting with `[`, `{`, `#`, `*`, `&`) in quotes. Exceptions: when the target field is a plain string (`description`, `name`, ...) the value is taken raw, so `--set description="Veterinaria: salud y cuidado"` works as typed (one pair of surrounding quotes is stripped); if YAML parsing fails validation, the command retries once with the raw text. Lists, maps, booleans, numbers and optional fields (`null` clears them) keep YAML. `user set` works the same way.
+- The agent's DISPLAY NAME is `name` (web UI and Telegram): `agent set --user U --agent A --set name="NewName"`. It is separate from the SOUL, so a rename of an agent changes both (SOUL via `soul_edit`). The `id` is the folder/URL and normally stays.
 - `id` cannot be changed with `set`; use `rename`. A backend named in `terminal.backends` must exist in the user's `terminal_backends` (see `user set`).
 - The file is rewritten from the validated config: YAML comments are not kept.
 - `check` also warns (exit 0) about files in `agents/` that the user does not list, key variables that are not set in the CLI's own environment, and a terminal group without a usable backend.
@@ -63,10 +65,16 @@ NAME matches `^[A-Z][A-Z0-9_]{2,63}$`. A variable in the process environment win
 
 Pickup works by comparing the yaml (and the secrets file) with what the running agent was built from; the change is applied between replies, never in the middle of one. If a file is left INVALID the services keep the last good configuration, log an error and show a notice in the chat; fix the file and run `python -m src.admin agent check`.
 
+## Interpreter
+
+If `python -m src.admin` reports `ModuleNotFoundError` (for example `yaml`), the shell's `python` is not the app's. Use the project's virtualenv interpreter, relative to the repo root: `.venv/bin/python` on Linux, `.venv/Scripts/python` on Windows. In the Docker container `python` is the app's.
+
 ## Renaming
 
-`agent rename` moves the data folder, updates the user's agent list and the preferences that point at the old id, and keeps conversations, memories and skills. Do it when the agent has no reply in progress; the CLI cannot see a reply running in another process. Existing chats continue under the new id.
+Display name: `agent set --set name="NewName"` (no data moves). `agent rename` changes the `id`: renaming the id of the agent that is running the current chat moves its data and can break the open chat, so do it only when the user asks for the id, and tell him to open a new chat afterwards. `agent rename` moves the data folder, updates the user's agent list and the preferences that point at the old id, and keeps conversations, memories and skills. Do it when the agent has no reply in progress; the CLI cannot see a reply running in another process. Existing chats continue under the new id.
 
 ## Errors
+
+Run `python -m src.admin agent check` after every change.
 
 `error: ...` goes to stderr with exit code 1 and nothing is written. Typical causes: unknown key (typo: the models forbid extra keys), wrong type, an id that already exists, `agent busy` (wait for the reply), a missing folder in `folders`.

@@ -9,7 +9,7 @@ const source = readFileSync(path.join(__dirname, "..", "src", "web", "static", "
 const take = (name) => source.match(new RegExp(`function ${name}\\([\\s\\S]*?\\r?\\n\\}\\r?\\n`))[0];
 const names = [
   "approvalTitle", "formatCountdown", "approvalRemaining", "approvalOutcome", "approvalOutcomeLabel",
-  "approvalInitialState", "approvalActive", "approvalTransition",
+  "approvalInitialState", "approvalActive", "approvalTransition", "approvalSummary", "approvalStepIndex", "approvalPendingLabel", "textSegments",
   "terminalApprovalHint", "terminalBackendOptions", "terminalBackendRows", "terminalDefaultBackend", "buildTerminalConfig", "isTerminalError",
 ];
 const context = vm.createContext({ tr: (text, values = {}) => text.replace(/\{(\w+)\}/g, (_, key) => values[key]) });
@@ -168,4 +168,31 @@ test("isTerminalError spots save errors about the terminal block", () => {
   assert.equal(f.isTerminalError("Terminal backend missing"), true);
   assert.equal(f.isTerminalError("name is too long"), false);
   assert.equal(f.isTerminalError(null), false);
+});
+
+test("a settled card summarises as one line with the outcome, tool, backend and the first 60 characters", () => {
+  assert.equal(f.approvalSummary({ tool: "terminal", backend: "local", command: "ls -la" }, "approved"), "Approved: terminal [local] ls -la");
+  const long = f.approvalSummary({ tool: "terminal", backend: "ssh", command: `echo   ${"x".repeat(100)}\nnext` }, "denied");
+  assert.equal(long, `Denied: terminal [ssh] echo ${"x".repeat(55)}…`);
+  assert.equal(f.approvalSummary({ tool: "terminal", command: "pwd" }, "timed_out"), "Timed out: terminal pwd");
+});
+
+test("a restored approval matches the tool step with the same tool and command, else none", () => {
+  const steps = [{ name: "memory", command: "" }, { name: "terminal", command: "ls" }, { name: "terminal", command: "rm -rf /tmp/x" }];
+  assert.equal(f.approvalStepIndex(steps, { tool: "terminal", command: "rm -rf /tmp/x" }), 2);
+  assert.equal(f.approvalStepIndex(steps, { tool: "terminal", command: "ls" }), 1);
+  assert.equal(f.approvalStepIndex(steps, { tool: "terminal", command: "cat" }), -1);
+  assert.equal(f.approvalStepIndex(steps, { tool: "files", command: "ls" }), -1);
+  assert.equal(f.approvalStepIndex([], { tool: "terminal", command: "ls" }), -1);
+});
+
+test("the pending indicator counts approvals", () => {
+  assert.equal(f.approvalPendingLabel(1), "1 approval pending, jump to it");
+  assert.equal(f.approvalPendingLabel(3), "3 approvals pending, jump to it");
+});
+
+test("text is split at the steps so later text renders below them", () => {
+  assert.deepEqual(plain(f.textSegments("before after more", [0, 7, 13])), ["before ", "after ", "more"]);
+  assert.deepEqual(plain(f.textSegments("all", [0])), ["all"]);
+  assert.deepEqual(plain(f.textSegments("ab", [0, 2])), ["ab", ""]);
 });

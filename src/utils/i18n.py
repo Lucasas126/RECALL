@@ -622,6 +622,8 @@ _SPANISH = {
     "Resolved": "Resuelta",
     "Expired": "Expirada",
     "Time left": "Tiempo restante",
+    "1 approval pending, jump to it": "1 aprobación pendiente, ir a ella",
+    "{count} approvals pending, jump to it": "{count} aprobaciones pendientes, ir a ellas",
     "Reason": "Motivo",
     "This approval expired or was already answered.": "Esta aprobación ha caducado o ya se respondió.",
     "Could not send the answer: {error}": "No se pudo enviar la respuesta: {error}",

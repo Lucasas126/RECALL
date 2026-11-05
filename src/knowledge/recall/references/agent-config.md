@@ -19,7 +19,7 @@ Unknown keys are rejected in the agent yaml and in most blocks (except `chat_con
 | Field | Meaning (default) |
 | --- | --- |
 | `id` | `[A-Za-z0-9_-]{1,64}`, names the data folder |
-| `name` | 1-100 chars |
+| `name` | 1-100 chars; the DISPLAY NAME shown in the web UI and Telegram. Separate from the SOUL: when renaming an agent update both (`soul_edit` and `agent set --set name="New"`). The `id` is the folder/URL and normally stays |
 | `description` | 0-500 chars; shown in the agent list; read by the Telegram orchestrator, not by you |
 | `chat_config` | block below |
 | `dream` | block below |

@@ -17,9 +17,15 @@ Each recipe uses the `terminal` tool (one approval card per command) and `python
 
 ## Turn the guide into the user's main agent
 
-1. Pick the new id and name with the user: `python -m src.admin agent rename --user U --agent guide --new-id main --name "Main"`. The data folder moves with it; chats, memories and skills stay.
-2. Rewrite your own SOUL with `soul_edit`: new name and role, keep the rules about secrets, approvals and other users. Tell the user what changed.
-3. Decide with the user whether the main agent keeps the `terminal` group. If not: `python -m src.admin agent set --user U --agent main --set chat_config.tool_groups=[memory_read,memory_edit,web,self]` (the agent loses the terminal on its next message; do this last).
+1. Set the display name (what the web UI and Telegram show): `python -m src.admin agent set --user U --agent guide --set name="Main"`. The `name` in the yaml is separate from the SOUL, so changing only the SOUL leaves the old name in the UI.
+2. Rewrite your own SOUL with `soul_edit`: new name and role, keep the rules about secrets, approvals and other users. Tell the user what changed (SOUL and display name).
+3. Keep the `id` (folder and URL) unless the user asks for a new one. Renaming the id of the agent running the current chat moves its data and can break the open chat: only do it on request, with `python -m src.admin agent rename --user U --agent guide --new-id main`, and tell the user to open a new chat afterwards. The data folder moves with it; chats, memories and skills stay.
+4. Run `python -m src.admin agent check`.
+5. Decide with the user whether the main agent keeps the `terminal` group. If not: `python -m src.admin agent set --user U --agent main --set chat_config.tool_groups=[memory_read,memory_edit,web,self]` (the agent loses the terminal on its next message; do this last).
+
+## Rename an agent (display name)
+
+An agent's DISPLAY NAME is `name` in its yaml; the SOUL holds the personality and is separate. When asked to change an agent's name (including your own), update BOTH and tell the user: the SOUL with `soul_edit` and the display name with `python -m src.admin agent set --user U --agent A --set name="NewName"`, then run `python -m src.admin agent check`. The `id` normally stays.
 
 ## Add a folder
 

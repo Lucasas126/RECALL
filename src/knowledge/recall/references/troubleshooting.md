@@ -27,6 +27,14 @@ Each process run writes a new folder `logs/<YYYYmmdd_HHMMSS+zzzz>_<run>/` where 
 
 `GET /api/providers/status` returns each provider with `available` and, when it is not, a `reason` (`no_api_key`, `unreachable`, `cli_missing`, `logged_out`, `cli_unknown`); the model picker refuses an unavailable provider with the same message. A key variable that is unset on the server is the usual cause: the YAML holds only the variable's NAME. Never ask the user to paste a key into a chat.
 
+## `python -m src.admin` fails with a missing module
+
+`ModuleNotFoundError: No module named 'yaml'` (or another dependency) means the shell's `python` is not the app's. Use the project's virtualenv interpreter, relative to the repo root: `.venv/bin/python -m src.admin ...` on Linux, `.venv/Scripts/python -m src.admin ...` on Windows. In the container `python` is the app's.
+
+## `--set` says "Input should be a valid string"
+
+Values are parsed as YAML: wrap text containing `": "` in quotes. String fields such as `description` take the value raw in current versions.
+
 ## Agent will not load or save
 
 - Unknown keys are rejected in the agent yaml. A leftover `vault` key must become `folders: [{name: vault, path: ...}]`.

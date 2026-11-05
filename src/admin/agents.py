@@ -20,6 +20,7 @@ from __future__ import annotations
 import copy
 import re
 import sys
+import typing
 from pathlib import Path
 
 import yaml
@@ -57,8 +58,42 @@ def dump_yaml(data: object) -> str:
 # ------------------------------------------------------------------ dotted paths
 
 
-def parse_assignment(item: str) -> tuple[list[str], object]:
-    """`a.b.c=value` -> (['a','b','c'], parsed YAML value)."""
+_YAML_HINT = "values are parsed as YAML: wrap text containing \": \" (or starting with [, {, #, *, &) in quotes"
+
+
+def _field_type(model, parts: list[str]):
+    """The annotation of the field at the dotted path in a pydantic model, or None when it cannot be told
+    (unknown key, a list, a union that is not just Optional...)."""
+    current = model
+    for index, key in enumerate(parts):
+        while typing.get_origin(current) is typing.Annotated:
+            current = typing.get_args(current)[0]
+        if isinstance(current, type) and hasattr(current, "model_fields"):
+            field = current.model_fields.get(key)
+            if field is None:
+                return None
+            current = field.annotation
+        elif typing.get_origin(current) is dict:
+            current = typing.get_args(current)[1] if len(typing.get_args(current)) == 2 else None
+        else:
+            return None
+        if current is None:
+            return None
+    while typing.get_origin(current) is typing.Annotated:
+        current = typing.get_args(current)[0]
+    return current
+
+
+def _strip_quotes(raw: str) -> str:
+    text = raw.strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
+        return text[1:-1]
+    return text
+
+
+def parse_assignment(item: str, model=None, *, raw_text: bool = False) -> tuple[list[str], object]:
+    """`a.b.c=value` -> (['a','b','c'], value). The value is YAML, except for a string field of `model`
+    (taken raw, one pair of quotes stripped) and when `raw_text` forces the raw string."""
     path, sep, raw = item.partition("=")
     path = path.strip()
     if not sep or not path:
@@ -66,18 +101,20 @@ def parse_assignment(item: str) -> tuple[list[str], object]:
     parts = path.split(".")
     if any(not re.fullmatch(r"[A-Za-z0-9_-]+", part) for part in parts):
         raise AdminError(f"invalid path '{path}': use dotted keys such as terminal.backends.local.approvals")
+    if raw_text or (model is not None and _field_type(model, parts) is str):
+        return parts, _strip_quotes(raw)
     try:
         value = yaml.safe_load(raw)
     except yaml.YAMLError as exc:
-        raise AdminError(f"the value of '{path}' is not valid YAML ({describe_config_error(exc)}); quote it if needed") from exc
+        raise AdminError(f"the value of '{path}' is not valid YAML ({describe_config_error(exc)}); {_YAML_HINT}") from exc
     return parts, value
 
 
-def apply_assignments(data: dict, assignments: list[str]) -> dict:
+def apply_assignments(data: dict, assignments: list[str], model=None, *, raw_indexes: frozenset[int] = frozenset()) -> dict:
     """A deep copy of `data` with every `path=value` applied (intermediate maps are created)."""
     result = copy.deepcopy(data)
-    for item in assignments:
-        parts, value = parse_assignment(item)
+    for number, item in enumerate(assignments):
+        parts, value = parse_assignment(item, model, raw_text=number in raw_indexes)
         node = result
         for index, key in enumerate(parts[:-1]):
             child = node.get(key)
@@ -89,6 +126,27 @@ def apply_assignments(data: dict, assignments: list[str]) -> dict:
             node = child
         node[parts[-1]] = value
     return result
+
+
+def apply_validated(data: dict, assignments: list[str], model, validate):
+    """`validate(apply_assignments(...))`; when it fails, retries once with the raw text for the assignments whose YAML
+    value is not a string (a value like `a: b` that YAML turned into a map), and uses the first retry that validates."""
+    try:
+        return validate(apply_assignments(data, assignments, model))
+    except AdminError as first:
+        candidates = []
+        for i, item in enumerate(assignments):
+            try:
+                if not isinstance(parse_assignment(item, model)[1], str):
+                    candidates.append(i)
+            except AdminError:
+                candidates.append(i)
+        for attempt in [frozenset([i]) for i in candidates] + ([frozenset(candidates)] if len(candidates) > 1 else []):
+            try:
+                return validate(apply_assignments(data, assignments, model, raw_indexes=attempt))
+            except AdminError:
+                continue
+        raise AdminError(f"{first} ({_YAML_HINT})") from None
 
 
 def _paths(assignments: list[str]) -> list[str]:
@@ -196,7 +254,7 @@ def agent_create(service, user_id: str, agent_id: str, *, name: str | None, temp
         config, soul, chosen = agent_templates.build(template, agent_id, display)
     except ValueError as exc:
         raise AdminError(str(exc)) from exc
-    config = _validate_agent(apply_assignments(_clean(config), assignments))
+    config = apply_validated(_clean(config), assignments, AgentConfig, _validate_agent)
     previous = (_user_dir(user_id) / "user.yaml").read_text(encoding="utf-8")
     backend_added = False
     if chosen.needs_backend:
@@ -229,7 +287,7 @@ def agent_set(service, user_id: str, agent_id: str, assignments: list[str]) -> i
         if parse_assignment(item)[0][0] == "id":
             raise AdminError("the id cannot be changed with `agent set`; use `agent rename`.")
     current = _agent_data(service, user_id, agent_id)
-    updated = _validate_agent(apply_assignments(current, assignments))
+    updated = apply_validated(current, assignments, AgentConfig, _validate_agent)
     service.update_agent(user_id, agent_id, updated)
     print(f"Updated agent '{agent_id}': {', '.join(_paths(assignments))}. Applies on the next message.")
     return 0
@@ -370,7 +428,7 @@ def user_set(user_id: str, assignments: list[str]) -> int:
     if not assignments:
         raise AdminError("give at least one --set path=value")
     for item in assignments:
-        parts, value = parse_assignment(item)
+        parts, value = parse_assignment(item, UserConfig)
         if parts[0] in _PROTECTED_USER_PATHS:
             raise AdminError(f"'{parts[0]}' cannot be set here: {_PROTECTED_USER_PATHS[parts[0]]}.")
         if parts[-1] == "api_key" and (not isinstance(value, str) or not _ENV_NAME_RE.match(value) or redact(value) != value):
@@ -380,7 +438,7 @@ def user_set(user_id: str, assignments: list[str]) -> int:
     with exclusive_file_lock(_user_dir(user_id) / "agents.lock"):
         text = path.read_text(encoding="utf-8")
         raw = yaml.safe_load(text) or {}
-        _write_validated_user(path, text, apply_assignments(raw, assignments))
+        apply_validated(raw, assignments, UserConfig, lambda updated: _write_validated_user(path, text, updated))
     print(f"Updated user '{user_id}': {', '.join(_paths(assignments))}. Comments in user.yaml are not kept. "
           "Applies on the next message.")
     return 0

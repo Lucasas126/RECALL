@@ -2455,6 +2455,33 @@ function approvalOutcomeLabel(kind) {
   }
 }
 
+// One line for a settled card: "Approved: terminal [local] first 60 chars of the command".
+function approvalSummary(approval, kind) {
+  const command = String(approval?.command ?? "").replace(/\s+/g, " ").trim();
+  const short = command.length > 60 ? `${command.slice(0, 60)}…` : command;
+  const backend = approval?.backend ? ` [${approval.backend}]` : "";
+  return `${approvalOutcomeLabel(kind)}: ${approval?.tool ?? ""}${backend} ${short}`.trim();
+}
+
+// Position of the tool step an approval belongs to: same tool and the same command (the pending list cuts commands short).
+// `steps` is [{name, command}] in display order; -1 when none matches.
+function approvalStepIndex(steps, approval) {
+  const command = String(approval?.command ?? "");
+  return steps.findIndex((step) => step.name === approval?.tool && command !== ""
+    && (String(step.command ?? "") === command || String(step.command ?? "").startsWith(command)));
+}
+
+function approvalPendingLabel(count) {
+  return count === 1
+    ? tr("1 approval pending, jump to it")
+    : tr("{count} approvals pending, jump to it", { count });
+}
+
+// Splits a message's text at the given offsets: segment i is raw[starts[i]] up to raw[starts[i + 1]].
+function textSegments(raw, starts) {
+  return starts.map((start, i) => raw.slice(start, i + 1 < starts.length ? starts[i + 1] : undefined));
+}
+
 function approvalInitialState() {
   return { phase: "pending", kind: null, error: null, decision: null };
 }
@@ -2507,6 +2534,15 @@ function buildApprovalCard(entry) {
   const title = make("span", "approval-title", approvalTitle(approval));
   title.id = `approval-title-${approval.id}`;
   card.setAttribute("aria-labelledby", title.id);
+  const summary = make("button", "approval-summary");
+  summary.type = "button";
+  summary.hidden = true;
+  summary.setAttribute("aria-expanded", "false");
+  summary.addEventListener("click", () => {
+    const open = card.classList.toggle("collapsed") === false;
+    summary.setAttribute("aria-expanded", String(open));
+  });
+  const detail = make("div", "approval-detail");
   const countdown = make("span", "approval-countdown");
   countdown.setAttribute("role", "timer");
   countdown.title = tr("Time left");
@@ -2517,12 +2553,13 @@ function buildApprovalCard(entry) {
   // focusable so a long command can be scrolled with the keyboard
   const command = make("pre", "approval-command", approval.command ?? "");
   command.tabIndex = 0;
-  card.append(head, command);
+  detail.append(head, command);
+  card.append(summary, detail);
   for (const [label, value] of [[tr("Working directory"), approval.cwd], [tr("Reason"), approval.reason]]) {
     if (!value) continue;
     const row = make("p", "approval-meta");
     row.append(make("strong", null, `${label}: `), document.createTextNode(value));
-    card.append(row);
+    detail.append(row);
   }
   const approve = make("button", "primary", tr("Approve"));
   const deny = make("button", null, tr("Deny"));
@@ -2535,16 +2572,26 @@ function buildApprovalCard(entry) {
   status.setAttribute("role", "status");
   const error = make("p", "approval-error");
   error.setAttribute("role", "alert");
-  card.append(actions, status, error);
-  entry.nodes = { card, countdown, actions, approve, deny, status, error };
+  detail.append(actions, status, error);
+  entry.nodes = { card, summary, countdown, actions, approve, deny, status, error };
   return card;
 }
 
 function renderApproval(entry) {
   const { phase, kind, error, decision } = entry.state;
-  const { card, countdown, actions, approve, deny, status, error: errorNode } = entry.nodes;
+  const { card, summary, countdown, actions, approve, deny, status, error: errorNode } = entry.nodes;
   const active = approvalActive(entry.state);
   card.classList.toggle("resolved", !active);
+  summary.hidden = active;
+  if (!active) {
+    summary.textContent = approvalSummary(entry.data, kind);
+    // a settled card folds up once so long histories stay compact; the user can unfold it
+    if (!entry.folded) {
+      entry.folded = true;
+      card.classList.add("collapsed");
+    }
+  }
+  updateApprovalIndicator();
   card.dataset.outcome = kind ?? "";
   actions.hidden = !active;
   approve.disabled = deny.disabled = phase === "submitting";
@@ -2575,9 +2622,9 @@ function showApproval(approval, place) {
     id: approval.id, createdAt: Date.now(), state: approvalInitialState(),
     data: { agent_id: state.agentId, chat_id: state.chatId, ...approval },
   };
-  place(buildApprovalCard(entry));
-  renderApproval(entry);
+  place(buildApprovalCard(entry), entry.data);
   approvalEntries.set(entry.id, entry);
+  renderApproval(entry);
   if (!approvalTimer) approvalTimer = setInterval(approvalTimerTick, 1000);
   return entry;
 }
@@ -2620,19 +2667,46 @@ function approvalTimerTick() {
     return;
   }
   approvalTicks++;
+  updateApprovalIndicator();
   if (approvalTicks % 3 === 0) for (const [agentId, chatId] of chats.values()) syncApprovals(agentId, chatId);
 }
 
-function placeApprovalInView(node) {
+// Restored cards go into the last assistant message, before the tool step they belong to, else at its end; never at the top.
+function placeApprovalInView(node, approval) {
   if (!state.view) return;
-  let stack = state.view.querySelector(":scope > .approval-stack");
-  if (!stack) {
-    stack = document.createElement("div");
-    stack.className = "approval-stack";
-    state.view.append(stack);
-  }
-  stack.append(node);
+  const bubbles = [...state.view.querySelectorAll(":scope > .msg.assistant")].filter((el) => !el.classList.contains("error-only"));
+  const last = bubbles[bubbles.length - 1];
+  const reply = last ? replyViews.get(last) : null;
+  if (reply) reply.placeApproval(node, approval);
+  else state.view.append(node);
   scrollDown();
+}
+
+const replyViews = new WeakMap();
+
+// Small bar under the chat while any approval of this chat waits for an answer; it jumps to the first one.
+function updateApprovalIndicator() {
+  const pending = [...approvalEntries.values()].filter((entry) => approvalActive(entry.state)
+    && entry.data.agent_id === state.agentId && entry.data.chat_id === state.chatId && entry.nodes?.card.isConnected);
+  let bar = document.getElementById("approval-pending");
+  if (!pending.length) {
+    if (bar) bar.hidden = true;
+    return;
+  }
+  if (!bar) {
+    bar = document.createElement("button");
+    bar.id = "approval-pending";
+    bar.type = "button";
+    bar.setAttribute("role", "status");
+    bar.addEventListener("click", () => {
+      const first = [...approvalEntries.values()].find((entry) => approvalActive(entry.state) && entry.nodes?.card.isConnected);
+      first?.nodes.card.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+    $("messages").after(bar);
+  }
+  bar.hidden = false;
+  const label = approvalPendingLabel(pending.length);
+  if (bar.textContent !== label) bar.textContent = label;
 }
 
 // Loads a chat's pending approvals: draws the missing cards (current chat only) and settles cards the server no longer lists.
@@ -2663,12 +2737,14 @@ function forgetApprovals(agentId, chatId) {
   for (const [id, entry] of approvalEntries) {
     if (entry.data.agent_id === agentId && entry.data.chat_id === chatId) approvalEntries.delete(id);
   }
+  updateApprovalIndicator();
 }
 
 function resetApprovals() {
   approvalEntries.clear();
   clearInterval(approvalTimer);
   approvalTimer = null;
+  updateApprovalIndicator();
 }
 
 // ------------------------------------------------------------------ terminal settings (agent form)
@@ -2746,9 +2822,12 @@ function addMessage(role, parent = state.view ?? $("messages")) {
   el.className = `msg ${role}`;
   if (role === "assistant") el.dataset.author = currentAgentName();
   else if (role === "command") el.dataset.author = "RECALL";
-  const body = document.createElement("div");
+  let body = document.createElement("div");
   body.className = "body";
   let raw = "";
+  // The reply is a timeline: text before a step (tool call, approval card) stays above it, later text opens a new body below it.
+  const bodies = [body];
+  const starts = [0];
   let thinking = null;
   let thinkingRaw = "";
   let memoryIndicator = null;
@@ -2756,15 +2835,36 @@ function addMessage(role, parent = state.view ?? $("messages")) {
   let attachmentBox = null;
   el.append(body);
   parent.append(el);
-  function renderBody() {
+  function renderOne(target, text) {
     if (role === "assistant") {
-      body.innerHTML = DOMPurify.sanitize(marked.parse(raw, { breaks: true }));
-      for (const a of body.querySelectorAll("a")) {
+      target.innerHTML = DOMPurify.sanitize(marked.parse(text, { breaks: true }));
+      for (const a of target.querySelectorAll("a")) {
         a.target = "_blank";
         a.rel = "noopener noreferrer";
       }
     } else {
-      body.textContent = raw;
+      target.textContent = text;
+    }
+  }
+  function renderBody(all = false) {
+    if (all) {
+      const parts = textSegments(raw, starts);
+      bodies.forEach((target, i) => renderOne(target, parts[i]));
+    } else {
+      renderOne(body, raw.slice(starts[starts.length - 1]));
+    }
+  }
+  // Puts a step in the timeline at the current point: after the text so far, with fresh text below it.
+  function addStep(node) {
+    if (raw.length > starts[starts.length - 1]) {
+      const next = document.createElement("div");
+      next.className = "body";
+      body.after(node, next);
+      body = next;
+      bodies.push(body);
+      starts.push(raw.length);
+    } else {
+      el.insertBefore(node, body);
     }
   }
   function renderAttachmentNames(attachments) {
@@ -2781,7 +2881,7 @@ function addMessage(role, parent = state.view ?? $("messages")) {
       return item;
     }));
   }
-  return {
+  const view = {
     el,
     text(chunk) {
       if (Array.isArray(chunk)) {
@@ -2858,16 +2958,26 @@ function addMessage(role, parent = state.view ?? $("messages")) {
       const result = document.createElement("pre");
       result.textContent = a.result;
       item.append(summary, result);
-      el.insertBefore(item, body);
+      item.dataset.tool = a.name;
+      item.dataset.command = String(a.arguments?.command ?? "");
+      addStep(item);
     },
     approval(approval) {
-      showApproval(approval, (node) => el.insertBefore(node, body));
+      showApproval(approval, (node) => addStep(node));
+    },
+    // Restored pending card: before its tool step when one matches, else at the end of the message.
+    placeApproval(node, approval) {
+      const steps = [...el.querySelectorAll(":scope > details.action")];
+      const index = approvalStepIndex(steps.map((step) => ({ name: step.dataset.tool, command: step.dataset.command })), approval);
+      if (index >= 0) steps[index].before(node);
+      else el.append(node);
     },
     interrupted(snapshot = null) {
       this.settleMemory();
       if (snapshot) {
         raw = snapshot.content;
-        renderBody();
+        for (let i = starts.length - 1; i > 0; i--) if (starts[i] > raw.length) starts[i] = raw.length;
+        renderBody(true);
         thinkingRaw = "";
         if (thinking) thinking.lastChild.textContent = "";
         if (snapshot.reasoning) this.thinking(snapshot.reasoning);
@@ -2889,7 +2999,7 @@ function addMessage(role, parent = state.view ?? $("messages")) {
     error(source) {
       this.settleMemory();
       // with nothing streamed yet the card replaces the reply bubble; otherwise it follows the partial reply
-      const bare = !raw && !el.querySelector(".action, .thinking");
+      const bare = !raw && !el.querySelector(".action, .thinking, .approval-card");
       if (bare) el.classList.add("error-only");
       const card = errorCard(source, () => {
         card.remove();
@@ -2898,6 +3008,8 @@ function addMessage(role, parent = state.view ?? $("messages")) {
       el.append(card);
     },
   };
+  replyViews.set(el, view);
+  return view;
 }
 
 

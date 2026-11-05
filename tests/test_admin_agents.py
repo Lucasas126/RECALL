@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import yaml
@@ -40,7 +41,46 @@ class DottedPathTests(unittest.TestCase):
             agent_cli.apply_assignments({"a": 1}, ["a.b=2"])
 
 
+class RawStringValueTests(unittest.TestCase):
+    def test_string_fields_take_the_value_raw(self) -> None:
+        from src.config.models import AgentConfig
+        for value, expected in (("Veterinaria: salud y cuidado", "Veterinaria: salud y cuidado"),
+                                ("'Vet: a'", "Vet: a"), ('"x # y"', "x # y"), ("null", "null"), ("[a, b]", "[a, b]")):
+            with self.subTest(value=value):
+                data = agent_cli.apply_assignments({}, [f"description={value}"], AgentConfig)
+                self.assertEqual(data["description"], expected)
+
+    def test_other_types_keep_yaml(self) -> None:
+        from src.config.models import AgentConfig
+        data = agent_cli.apply_assignments({}, ["chat_config.tool_groups=[web, self]", "chat_config.stream=false",
+                                                "terminal.default_backend=null"], AgentConfig)
+        self.assertEqual(data["chat_config"]["tool_groups"], ["web", "self"])
+        self.assertIs(data["chat_config"]["stream"], False)
+        self.assertIsNone(data["terminal"]["default_backend"])
+
+    def test_unknown_type_falls_back_to_the_raw_string_when_yaml_does_not_validate(self) -> None:
+        def validate(data):
+            if not isinstance(data.get("x", {}).get("y"), str):
+                raise AdminError("y must be a string")
+            return data
+        result = agent_cli.apply_validated({}, ["x.y=Vet: care"], None, validate)
+        self.assertEqual(result["x"]["y"], "Vet: care")
+        with self.assertRaises(AdminError) as ctx:
+            agent_cli.apply_validated({}, ["x.y=[1, 2]"], None, lambda d: (_ for _ in ()).throw(AdminError("always bad")))
+        self.assertIn("parsed as YAML", str(ctx.exception))
+
+
 class AgentCliTests(AdminFixture):
+    def test_set_description_with_a_colon_works_for_agent_and_create(self) -> None:
+        code, out, err = self.run_cli(["agent", "set", "--user", "ana", "--agent", "bot", "--set",
+                                       "description=Veterinaria: salud y cuidado"])
+        self.assertEqual((code, err), (0, ""), out)
+        self.assertEqual(load_agent_config("ana", "bot").description, "Veterinaria: salud y cuidado")
+        code, out, err = self.run_cli(["agent", "create", "--user", "ana", "--id", "vet", "--set",
+                                       "description=\"Vet: care\""])
+        self.assertEqual((code, err), (0, ""), out)
+        self.assertEqual(load_agent_config("ana", "vet").description, "Vet: care")
+
     def test_list_and_show_print_the_loaded_yaml(self) -> None:
         code, out, _ = self.run_cli(["agent", "list", "--user", "ana"])
         self.assertEqual(code, 0)
@@ -207,6 +247,11 @@ class CheckCommandTests(AdminFixture):
 
 
 class UserCliTests(AdminFixture):
+    def test_set_takes_string_fields_raw(self) -> None:
+        code, out, err = self.run_cli(["user", "set", "--user", "ana", "--set", "name=Ana: la jefa"])
+        self.assertEqual((code, err), (0, ""), out)
+        self.assertEqual(load_user("ana").name, "Ana: la jefa")
+
     def test_show_never_prints_the_hash_and_shows_key_names(self) -> None:
         code, out, _ = self.run_cli(["user", "show", "--user", "ana"])
         self.assertEqual(code, 0)
@@ -230,7 +275,7 @@ class UserCliTests(AdminFixture):
     def test_refused_paths_and_invalid_values_leave_the_file_untouched(self) -> None:
         before = self.read("ana/user.yaml")
         for assignment in ("password_hash=x", "id=other", "agents=[]", "language=Klingon", "provider.api_key=sk-or-v1-abcdef0123456789",
-                           "provider.api_key=has space", "provider.name=nope", "models.chat=[1]"):
+                           "provider.api_key=has space", "provider.name=nope", "models=[1]"):
             with self.subTest(assignment=assignment):
                 code, out, err = self.run_cli(["user", "set", "--user", "ana", "--set", assignment])
                 self.assertEqual(code, 1)
@@ -249,6 +294,12 @@ class TemplateTests(unittest.TestCase):
             if re.fullmatch(r"[a-z]+_[a-z_]+", token):
                 self.assertIn(token, tools, token)
         self.assertIn("skill_view('recall')", guide.soul)
+        self.assertIn("agent check", guide.soul)
+        self.assertIn('--set name=', guide.soul)  # display name is `name`, separate from the SOUL
+        self.assertIn(".venv", guide.soul)
+        for page in ("recipes", "admin-cli", "agent-config"):
+            text = (Path(__file__).resolve().parents[1] / "src" / "knowledge" / "recall" / "references" / f"{page}.md").read_text(encoding="utf-8")
+            self.assertIn("DISPLAY NAME", text, page)
         for command in re.findall(r"python -m src\.admin ([a-z-]+(?: [a-z-]+)?)", guide.soul):
             head = command.split()[0]
             self.assertIn(head, {"agent", "user", "secret", "set-secret", "set-password", "create-user"}, command)
