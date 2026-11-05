@@ -32,6 +32,8 @@ class RunContext:
     approval_emit: Callable[[str, dict], None] | None = None
     # called with True when the run starts waiting for an approval and False when it stops (pauses a task's timeout)
     approval_wait: Callable[[bool], None] | None = None
+    # called before each approval request; returns a reason to DENY it without asking anyone (a task's approval cap)
+    approval_gate: Callable[[], str | None] | None = None
 
 
 _current: ContextVar[RunContext | None] = ContextVar("recall_terminal_run", default=None)
