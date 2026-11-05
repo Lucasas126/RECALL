@@ -3806,8 +3806,11 @@ function renderAgentsEmpty() {
     : "Select an agent to edit it, or create a new one.");
 }
 
-// The chat never follows streamed content by itself. Only `force` (sending, opening a chat, rendering its history)
-// moves the view to the bottom; otherwise the "Jump to latest" button shows while content extends below the viewport.
+// The chat follows streamed content only while the user is within the bottom margin (`stuck`). Scrolling up unsticks it
+// and nothing moves the view until the user comes back near the bottom or clicks "Jump to latest". `force` (sending,
+// opening a chat, rendering its history) always goes to the bottom and sticks.
+let stuckToBottom = true;
+
 function updateJumpLatest() {
   const box = $("messages");
   $("jump-latest").hidden = nearBottom(box.scrollHeight, box.scrollTop, box.clientHeight);
@@ -3815,13 +3818,19 @@ function updateJumpLatest() {
 
 function scrollDown(force = false) {
   const box = $("messages");
-  if (force) box.scrollTop = box.scrollHeight;
+  if (force) stuckToBottom = true;
+  if (stuckToBottom) box.scrollTop = box.scrollHeight;
   updateJumpLatest();
 }
 
-$("messages").addEventListener("scroll", updateJumpLatest, { passive: true });
-// tool steps, thinking and text streaming below the viewport also show the button
-new MutationObserver(updateJumpLatest).observe($("messages"), { childList: true, subtree: true, characterData: true });
+// only the user's own scrolling changes `stuckToBottom`: growing content does not fire a scroll event
+$("messages").addEventListener("scroll", () => {
+  const box = $("messages");
+  stuckToBottom = nearBottom(box.scrollHeight, box.scrollTop, box.clientHeight);
+  updateJumpLatest();
+}, { passive: true });
+// tool steps, thinking and text streaming in follow the bottom while stuck, otherwise show the button
+new MutationObserver(() => scrollDown()).observe($("messages"), { childList: true, subtree: true, characterData: true });
 $("jump-latest").addEventListener("click", () => scrollDown(true));
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
