@@ -322,6 +322,34 @@ function renderAgentBanner() {
     : name ? `Message ${name}...` : "Write a message...";
 }
 
+// ---- last open chat: #chat/<agent id>/<chat id> in the address bar, plus a per-user fallback in localStorage
+const LAST_CHAT_PREFIX = "lastChat:";
+const CHAT_ROUTE = /^#chat\/([^/]+)\/([^/]+)$/;
+function chatHash(agentId, chatId) {
+  return `chat/${encodeURIComponent(agentId)}/${encodeURIComponent(chatId)}`;
+}
+function parseChatHash(hash) {
+  const match = CHAT_ROUTE.exec(hash ?? "");
+  if (!match) return null;
+  try {
+    return { agentId: decodeURIComponent(match[1]), chatId: decodeURIComponent(match[2]) };
+  } catch { return null; }
+}
+function readLastChat(storage, userId) {
+  try {
+    const value = JSON.parse(storage.getItem(LAST_CHAT_PREFIX + userId));
+    return value && typeof value.agentId === "string" && typeof value.chatId === "string"
+      ? { agentId: value.agentId, chatId: value.chatId } : null;
+  } catch { return null; }
+}
+function writeLastChat(storage, userId, agentId, chatId) {
+  try { storage.setItem(LAST_CHAT_PREFIX + userId, JSON.stringify({ agentId, chatId })); } catch { /* private mode: the address bar still holds it */ }
+}
+function clearLastChat(storage, userId) {
+  try { storage.removeItem(LAST_CHAT_PREFIX + userId); } catch { /* nothing stored */ }
+}
+// ---- end last open chat
+
 async function showApp(user) {
   // read before showTab("chats") below drops the hash of the agents page
   const route = pendingRoute || location.hash;
@@ -340,7 +368,7 @@ async function showApp(user) {
     await refreshPreferences();
     if (session !== state.session) return;
     await selectAgent(state.preferences.agent_id);
-    if (session === state.session && state.agentId) await newChat();
+    if (session === state.session && state.agentId && !(await restoreChat(route))) await newChat();
     // a deep link (for example from a dream notification) opens its agent page after login
     if (session === state.session && route) await routeFromHash(route);
   } catch (err) {
@@ -368,6 +396,7 @@ $("login-form").addEventListener("submit", async (e) => {
 
 $("logout").addEventListener("click", async () => {
   await api("/api/logout", { method: "POST" });
+  if (state.user) clearLastChat(localStorage, state.user.id);
   showLogin();
 });
 
@@ -473,6 +502,34 @@ async function openChatFromList(chat) {
   await openChat(chat.id);
 }
 
+// Reopen the chat from the link or, failing that, the last one this user had open; false means start a new chat.
+async function restoreChat(route) {
+  const session = state.session;
+  const target = parseChatHash(route) ?? readLastChat(localStorage, state.user.id);
+  if (!target || !state.user.agents.some((a) => a.id === target.agentId)) return false;
+  try {
+    if (target.agentId !== state.agentId) {
+      await savePreferences({ agent_id: target.agentId });
+      if (session !== state.session) return true;
+      await selectAgent(target.agentId);
+    }
+    await openChat(target.chatId);
+    if (session !== state.session) return true;
+    if (state.chatId === target.chatId && state.agentId === target.agentId) return true;
+  } catch (err) {
+    if (session !== state.session) return true;
+  }
+  // the chat or agent is gone: forget it and fall back to a new chat
+  clearLastChat(localStorage, state.user.id);
+  return false;
+}
+
+// Keep the address bar and storage pointing at the open chat; a chat without turns is only linked, never stored.
+function rememberChat(agentId, chatId, hasTurns) {
+  setDreamHash(chatHash(agentId, chatId));
+  if (hasTurns && state.user) writeLastChat(localStorage, state.user.id, agentId, chatId);
+}
+
 // ------------------------------------------------------------------ agents tab
 
 function showTab(tab) {
@@ -487,7 +544,7 @@ function showTab(tab) {
   $("agent-new").hidden = !agents;
   if (agents) return loadAgentConfigs();
   stopDreamPoll();
-  setDreamHash(null);
+  setDreamHash(state.agentId && state.chatId ? chatHash(state.agentId, state.chatId) : null);
   return Promise.resolve();
 }
 
@@ -1763,6 +1820,7 @@ async function openChat(chatId) {
   state.chatId = chatId;
   state.chatInfo = data.chat;
   applyChatModels(data);
+  if ($("agents-view").hidden) rememberChat(agentId, chatId, data.messages.length > 0);
   const key = chatKey(agentId, chatId);
   if (isGenerating(agentId, chatId) && state.views.has(key)) {
     activateView(state.views.get(key));
@@ -1784,7 +1842,10 @@ async function openChat(chatId) {
 async function deleteChat(chat) {
   if (isGenerating(chat.agent_id, chat.id) || state.modelBusy || !confirm(tr("Delete \"{title}\"?", { title: chat.title || tr("New chat") }))) return;
   await api(`/api/agents/${chat.agent_id}/chats/${chat.id}`, { method: "DELETE" });
+  const remembered = readLastChat(localStorage, state.user.id);
+  if (remembered && remembered.chatId === chat.id) clearLastChat(localStorage, state.user.id);
   if (state.chatId === chat.id && state.agentId === chat.agent_id) {
+    if (parseChatHash(location.hash)?.chatId === chat.id) setDreamHash("");
     state.chatId = null;
     state.model = null;
     updateModelControls();
@@ -3218,6 +3279,7 @@ $("composer").addEventListener("submit", async (e) => {
 async function dispatchMessage(content, attachments, edit = null) {
   const key = chatKey(state.agentId, state.chatId);
   state.views.set(key, state.view);
+  rememberChat(state.agentId, state.chatId, true);
   if (edit) {
     while (edit.el.nextElementSibling) edit.el.nextElementSibling.remove();
     edit.el.remove();
