@@ -280,9 +280,25 @@ details.msg.task-wake { align-self: flex-start; padding: 6px 12px; border-style:
 #task-dialog[open] { display: flex; flex-direction: column; gap: 10px; }
 #task-dialog::backdrop { background: var(--backdrop); }
 .task-internal-banner { margin: 0; padding: 8px 12px; border: 1px solid var(--warn-line); border-left: 4px solid var(--warn); border-radius: 10px; background: var(--warn-bg); font-size: .9em; }
+#tasks-dialog { color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 12px; width: min(780px, calc(100vw - 32px)); height: min(640px, 85vh); padding: 16px; }
+#tasks-dialog[open] { display: flex; flex-direction: column; gap: 10px; }
+#tasks-dialog::backdrop { background: var(--backdrop); }
+.tasks-budget { margin: 0; color: var(--muted); font-size: .9em; }
+.tasks-budget.over { color: var(--danger); font-weight: 600; }
+.tasks-filter { display: flex; gap: 6px; flex-wrap: wrap; }
+.tasks-filter button { padding: 3px 12px; border-radius: 999px; font: inherit; font-size: .9em; }
+.tasks-filter button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+#tasks-list { flex: 1; min-height: 0; overflow-y: auto; margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.tasks-row { padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.tasks-row-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tasks-row-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tasks-row-meta { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px 10px; color: var(--muted); font-size: .9em; }
+.tasks-parent { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; text-align: left; }
+#tasks-open[aria-haspopup] { flex: none; }
 #task-dialog-messages { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
 @media (max-width: 800px) {
-  #task-dialog { width: calc(100vw - 16px); height: calc(100dvh - 16px); max-height: none; padding: 12px; }
+  #task-dialog, #tasks-dialog { width: calc(100vw - 16px); height: calc(100dvh - 16px); max-height: none; padding: 12px; }
+  .tasks-row-title { white-space: normal; }
   .task-card > summary { flex-wrap: wrap; white-space: normal; }
   .task-steer-form { flex-direction: column; }
 }

@@ -44,6 +44,7 @@
         <span id="user-avatar" aria-hidden="true"></span>
         <strong id="user-name"></strong>
         <button id="theme-toggle" type="button" class="icon-btn" title="Switch theme" aria-label="Switch theme"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button>
+        <button id="tasks-open" type="button" class="icon-btn" aria-haspopup="dialog" title="Tasks" aria-label="Tasks"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/></svg></button>
         <button id="settings-open" type="button" class="icon-btn" aria-haspopup="dialog" title="Settings" aria-label="Settings"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
         <button id="logout" type="button" class="icon-btn" title="Log out" aria-label="Log out"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></button>
       </div>
@@ -687,6 +688,22 @@
       </div>
     </div>
     <p id="settings-version" class="app-version"></p>
+  </dialog>
+
+  <dialog id="tasks-dialog" aria-labelledby="tasks-title">
+    <div class="model-heading">
+      <h2 id="tasks-title">Tasks</h2>
+      <button id="tasks-close" type="button" class="icon-btn" title="Close" aria-label="Close"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    </div>
+    <p id="tasks-budget" class="tasks-budget" role="status"></p>
+    <div id="tasks-filter" class="tasks-filter" role="group" aria-label="Filter tasks">
+      <button type="button" class="secondary" data-filter="all" aria-pressed="true">All</button>
+      <button type="button" class="secondary" data-filter="running" aria-pressed="false">Running</button>
+      <button type="button" class="secondary" data-filter="finished" aria-pressed="false">Finished</button>
+    </div>
+    <div id="tasks-error" class="task-error" role="alert" hidden></div>
+    <p id="tasks-empty" class="model-note" hidden>No tasks to show.</p>
+    <ul id="tasks-list"></ul>
   </dialog>
 
   <dialog id="task-dialog" aria-labelledby="task-dialog-title">

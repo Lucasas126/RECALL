@@ -8,6 +8,7 @@
     python -m src.admin agent list|show|create|set|rename|delete|check ...   (src/admin/agents.py)
     python -m src.admin user show|set --user <user_id> ...                   (src/admin/agents.py)
     python -m src.admin set-secret NAME [--stdin]  /  secret list            (src/admin/credentials.py)
+    python -m src.admin task run --user U --agent A --goal "..." [--wait]    (src/admin/tasks.py)
 
 Passwords are never accepted as arguments (shell history): they are typed twice with
 hidden input, or generated with --generate and printed once. Provider API keys are never
@@ -181,6 +182,9 @@ def _build_parser() -> argparse.ArgumentParser:
     from src.admin import agents as agent_commands  # lazy: agents imports this module
 
     agent_commands.add_parsers(sub)
+    from src.admin import tasks as task_commands  # lazy too: it imports this module
+
+    task_commands.add_parsers(sub)
     secret_set = sub.add_parser(
         "set-secret", help="store a credential in .config/secrets.env (hidden prompt or --stdin; never an argument)",
     )
@@ -282,6 +286,10 @@ def main(argv: list[str] | None = None) -> int:
         from src.admin import agents as agent_commands
 
         return agent_commands.run(args)
+    if args.command == "task":
+        from src.admin import tasks as task_commands
+
+        return task_commands.run(args)
     if args.command in ("set-secret", "secret"):
         from src.admin import credentials
 

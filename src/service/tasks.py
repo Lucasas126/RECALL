@@ -29,10 +29,12 @@ from pathlib import Path
 from time import monotonic, sleep
 from typing import TYPE_CHECKING, Any, Callable, Iterable
 
+from types import SimpleNamespace
+
 from src.agent.toolsets.delegate import (
-    MAX_CONTEXT_CHARS, MAX_GOAL_CHARS, MAX_INSTRUCTIONS_CHARS, TaskError, TaskLimits,
+    MAX_CONTEXT_CHARS, MAX_GOAL_CHARS, MAX_INSTRUCTIONS_CHARS, TaskError, TaskLimits, task_limits,
 )
-from src.agent.tool_groups import DEFAULT_TOOL_GROUPS
+from src.agent.tool_groups import DEFAULT_TOOL_GROUPS, DELEGATE_GRANTABLE_GROUPS
 from src.config.settings import SUBAGENTS
 from src.core.sources.conversations import ChatTask
 from src.providers.cancellation import GenerationCancelled
@@ -54,6 +56,14 @@ COMMAND_KINDS = ("stop", "steer", "send")  # what the process that does not exec
 COMMAND_LOG = 20  # outcomes of commands kept in the record
 _CHILD_ORIGIN = "task"
 _WATCH_GRACE_SECONDS = 5.0  # how long the watchdog waits for a stopped worker before it ends the task itself
+
+
+DAILY_KEEP_DAYS = 8  # days of per-day usage kept in a record (the budget only needs today)
+
+
+def _today() -> str:
+    """The user's local day (the server's local time zone), as `YYYY-MM-DD`."""
+    return datetime.now().astimezone().date().isoformat()
 
 
 def _now() -> str:
@@ -373,6 +383,8 @@ class TaskManager:
         return lambda: self._listeners.remove(listener) if listener in self._listeners else None
 
     def _emit(self, kind: str, user_id: str, **data: Any) -> None:
+        if "chat_id" in data and not data["chat_id"]:  # an unattended task without a parent chat: nobody to tell
+            return
         event = {"kind": kind, "user_id": user_id, **data}
         for listener in list(self._listeners):
             try:
@@ -417,6 +429,30 @@ class TaskManager:
         context.approval_emit = emit
         context.approval_wait = waiting
         return context
+
+    # ------------------------------------------------------------------ daily token budget
+
+    def tokens_today(self, user_id: str) -> int:
+        """Input + output tokens all of the user's tasks used on the local day (every run, follow-ups included)."""
+        if not self.store.folder(user_id, create=False).is_dir():
+            return 0
+        day = _today()
+        with self.store.lock(user_id):
+            records = self.store.list(user_id)
+        return sum(int((r.get("daily") or {}).get(day) or 0) for r in records)
+
+    def budget(self, user_id: str) -> dict:
+        """`{used, limit}` of today (`limit` 0 = unlimited)."""
+        return {"used": self.tokens_today(user_id), "limit": int(SUBAGENTS.daily_token_budget)}
+
+    def check_budget(self, user_id: str) -> None:
+        """Refuse to start any work once the day's token budget is spent (`subagents.daily_token_budget`, 0 = off)."""
+        limit = int(SUBAGENTS.daily_token_budget)
+        if limit <= 0:
+            return
+        used = self.tokens_today(user_id)
+        if used >= limit:
+            raise TaskError(f"daily task budget reached ({used}/{limit} tokens today); it resets at midnight")
 
     def awaiting_approval(self, user_id: str, task_id: str) -> int:
         """Approvals the worker of a task is waiting on right now (0 when none)."""
@@ -521,6 +557,7 @@ class TaskManager:
                 "Do the work yourself or tell the user; do not retry"
             )
 
+        self.check_budget(user_id)
         task_id = secrets.token_hex(6)
         record = {
             "id": task_id, "user_id": user_id,
@@ -569,6 +606,127 @@ class TaskManager:
         self._emit("task_started", user_id, task_id=task_id, agent_id=parent.agent_id, chat_id=parent.chat_id, status="running")
         self._start_threads(live, text)
         return live
+
+    def launch_unattended(
+        self, user_id: str, agent_id: str, goal: str, context: str = "", *, trigger: str = "schedule",
+        notify_chat: tuple[str, str] | None = None, instructions: str = "", groups: list[str] | None = None,
+        model: str = "", timeout_s: int = 0,
+    ) -> _LiveTask:
+        """Start a task WITHOUT a parent run (phase 7: the entry point a scheduler will call; nothing calls it yet but the admin CLI).
+
+        `agent_id` is one of the user's agents. Without `instructions` it runs the task as itself (its own SOUL; only
+        the web group and its own terminal are kept, memory stays read-only); with `instructions` an ephemeral worker
+        written by the caller runs on that agent's model. The run is `unattended`: manual and dangerous terminal actions
+        are denied, `smart` non-dangerous ones are allowed, protected and hardline ones are always refused. The same
+        limits, the rate-limit cooldown and the daily token budget apply. With `notify_chat=(agent_id, chat_id)` the
+        result is delivered there as a wake (the normal path); without it the result only stays in the record and the
+        task panel. Raises TaskError when it cannot start.
+        """
+        service = self._service
+        goal, context, instructions = (goal or "").strip(), (context or "").strip(), (instructions or "").strip()
+        if not goal:
+            raise TaskError("goal is empty; say what the worker must achieve")
+        for name, text, cap in (("goal", goal, MAX_GOAL_CHARS), ("context", context, MAX_CONTEXT_CHARS),
+                                ("instructions", instructions, MAX_INSTRUCTIONS_CHARS)):
+            if len(text) > cap:
+                raise TaskError(f"{name} is too long ({len(text)} characters, at most {cap}); shorten it")
+        try:
+            service._owned_agent(user_id, agent_id)  # owner check: the user's own agents only
+            config = service._agent_config(user_id, agent_id)
+        except Exception:
+            raise TaskError(f"agent '{agent_id}' is not available (it does not exist or is not one of this user's agents)") from None
+        limits = task_limits(config.delegation)
+        timeout_s = int(timeout_s or 0)
+        if timeout_s < 0 or timeout_s > limits.timeout_seconds:
+            raise TaskError(f"limit: timeout_s must be between 1 and {limits.timeout_seconds} seconds (0 = {limits.timeout_seconds})")
+        timeout_s = timeout_s or limits.timeout_seconds
+        trigger = re.sub(r"[^A-Za-z0-9_.-]", "", trigger or "schedule")[:32] or "schedule"
+
+        parent = {"agent_id": agent_id, "chat_id": ""}
+        if notify_chat is not None:
+            notify_agent, notify_id = notify_chat
+            try:
+                service._owned_agent(user_id, notify_agent)
+                notify_conversations = service._conversations(user_id, notify_agent)
+                service._require_chat(notify_conversations, notify_id)
+                if notify_conversations.is_task_chat(notify_id) or notify_conversations.is_disposable(notify_id):
+                    raise TaskError("a task chat or a disposable chat cannot receive the result")
+            except TaskError:
+                raise
+            except Exception:
+                raise TaskError(f"notify chat {notify_agent}/{notify_id} does not exist for this user") from None
+            parent = {"agent_id": notify_agent, "chat_id": notify_id}
+
+        if instructions:
+            target, grant, backends = None, [g for g in dict.fromkeys(groups or []) if g in DELEGATE_GRANTABLE_GROUPS], []
+        else:
+            standin = SimpleNamespace(user_id=user_id, agent_id="")  # `_resolve_target` only reads these two
+            target = self._resolve_target(standin, agent_id, [{"agent": agent_id, "remember": False}])  # type: ignore[arg-type]
+            grant = [g for g in target["groups"] if g in DELEGATE_GRANTABLE_GROUPS]
+            backends = list(target["backends"]) if "terminal" in target["groups"] else []
+            if backends:
+                grant.append("terminal")
+        if (until := self.store.blocked_until(user_id)) is not None:
+            raise TaskError(f"rate limit: the provider's plan limit was reached; no new tasks until {until:%H:%M}")
+        self.check_budget(user_id)
+
+        task_id = secrets.token_hex(6)
+        wake = notify_chat is not None
+        record = {
+            "id": task_id, "user_id": user_id, "parent": dict(parent), "depth": 1,
+            "target": (
+                {"kind": "agent", "agent_id": target["id"], "name": target["name"], "remember": False}
+                if target is not None else {"kind": "ephemeral", "agent_id": agent_id}
+            ),
+            "child": {"agent_id": agent_id, "chat_id": None},
+            "title": _title(goal), "goal": goal, "grant": {"groups": grant, "backends": backends},
+            "limits": {"timeout_s": timeout_s, "max_tokens": limits.max_tokens},
+            "status": "running", "reason": None, "created_at": _now(), "started_at": _now(), "ended_at": None,
+            "usage": {"in": 0, "out": 0}, "result": None, "error": None,
+            "owner": {"pid": os.getpid(), "channel": "wait"}, "followups": 0, "notify": wake,
+            "wake": {"state": "pending" if wake else "none"}, "unattended": True, "trigger": trigger,
+        }
+        lock = self.store.run_lock(user_id, task_id)
+        with self.store.lock(user_id):
+            self._check_capacity(user_id, record["parent"], limits)
+            lock.acquire()
+            self.store.save(record)
+        live = _LiveTask(
+            user_id, task_id, agent_id, "", limits, timeout_s, lock, parent_chat=parent["chat_id"], parent_agent=parent["agent_id"],
+        )
+        try:
+            conversations = service._conversations(user_id, agent_id)
+            mark = ChatTask(
+                task_id=task_id, parent_agent_id=parent["agent_id"], parent_chat_id=parent["chat_id"], depth=1,
+                groups=grant, instructions=instructions, created_at=_now(), backends=backends, title=record["title"],
+                unattended=True, kind="agent" if target is not None else "ephemeral", remember=False,
+            )
+            chat_id = conversations.create(origin=_CHILD_ORIGIN, task=mark)
+            if target is None and model.strip():
+                try:
+                    service.set_chat_model(user_id, agent_id, chat_id, model.strip())
+                except BaseException:
+                    service._remove_task_chat(user_id, agent_id, chat_id)
+                    raise
+        except Exception as exc:
+            self._finish(live, "failed", reason="launch_error", error=str(exc)[:300])
+            raise TaskError(str(exc)) if not isinstance(exc, TaskError) else exc
+        live.chat_id = chat_id
+        self.store.update(user_id, task_id, lambda r: r["child"].__setitem__("chat_id", chat_id))
+        with self._guard:
+            self._live[(user_id, task_id)] = live
+        text = f"Task {task_id}\n\nGoal:\n{goal}" + (f"\n\nContext:\n{context}" if context else "")
+        if target is not None:
+            text = f"Scheduled task ({trigger}) for {user_id}\n\n{text}"
+        self._emit("task_started", user_id, task_id=task_id, agent_id=parent["agent_id"], chat_id=parent["chat_id"], status="running")
+        self._start_threads(live, text)
+        return live
+
+    def wait_for(self, live: _LiveTask, timeout: float | None = None) -> dict | None:
+        """Block until a launched task ends (or `timeout` seconds); its stored record, None if it is still running."""
+        if not live.done.wait(timeout):
+            return None
+        return self.store.get(live.user_id, live.task_id)
 
     def _resolve_target(self, parent: RunContext, agent_id: str, targets: list[dict] | None) -> dict:
         """Check that `agent_id` is a delegation target of the parent and one of the SAME user's agents; read its groups.
@@ -793,7 +951,15 @@ class TaskManager:
             live.tokens_in += tokens_in
             live.tokens_out += tokens_out
             usage = {"in": live.base_in + live.tokens_in, "out": live.base_out + live.tokens_out}
-            self.store.update(user_id, task_id, lambda r: r.__setitem__("usage", usage))
+            day = _today()
+
+            def change(r: dict) -> None:
+                r["usage"] = usage
+                daily = dict(r.get("daily") or {})  # tokens per local day: the daily budget counts from here
+                daily[day] = int(daily.get(day) or 0) + int(tokens_in or 0) + int(tokens_out or 0)
+                r["daily"] = dict(sorted(daily.items())[-DAILY_KEEP_DAYS:])
+
+            self.store.update(user_id, task_id, change)
             if live.tokens_in + live.tokens_out >= live.limits.max_tokens:
                 self._request_stop(live, "token_limit")
 
@@ -1215,6 +1381,7 @@ class TaskManager:
             raise TaskError(f"limit reached: {limits.max_followups} follow-ups for this task; start a new task with what you learned")
         if (until := self.store.blocked_until(user_id)) is not None:
             raise TaskError(f"rate limit: no new work until {until:%H:%M}; do not retry")
+        self.check_budget(user_id)
         agent_id, chat_id = record["child"]["agent_id"], record["child"]["chat_id"]
         if (record.get("target") or {}).get("remember"):  # its memory writes are only safe while that agent is otherwise idle
             self._check_idle(user_id, {"id": agent_id})
@@ -1470,20 +1637,31 @@ class TaskManager:
             "backends": list((record.get("grant") or {}).get("backends") or []),
             "awaiting_approval": awaiting, "approval_elsewhere": elsewhere,
             "commands": list((record.get("commands") or [])[-5:]),
+            "unattended": bool(record.get("unattended")), "trigger": record.get("trigger"),
+            "created_at": record.get("created_at"),
         }
         if full:
             out["result"] = text[:FULL_RESULT_CHARS]
         return out
 
-    def list_view(self, user_id: str, agent_id: str | None = None, chat_id: str | None = None) -> list[dict]:
-        """The user's tasks (newest last), optionally only those launched from one parent chat."""
+    def list_view(
+        self, user_id: str, agent_id: str | None = None, chat_id: str | None = None, status: str = "", limit: int = 0,
+    ) -> list[dict]:
+        """The user's tasks (newest last), optionally only those launched from one parent chat.
+
+        `status`: `running` (not ended yet) or `finished` (ended in any way), else all; `limit` keeps the newest N.
+        """
         with self.store.lock(user_id):
             self._fail_dead(user_id)
             records = self.store.list(user_id)
-        return [
-            self.view(r) for r in records
+        records = [
+            r for r in records
             if (agent_id is None or r["parent"]["agent_id"] == agent_id) and (chat_id is None or r["parent"]["chat_id"] == chat_id)
+            and (status != "running" or r["status"] not in FINAL_STATES) and (status != "finished" or r["status"] in FINAL_STATES)
         ]
+        if limit and limit > 0:
+            records = records[-limit:]
+        return [self.view(r) for r in records]
 
     def detail(self, user_id: str, task_id: str) -> dict:
         """One of the user's tasks, in full; raises TaskError when it does not exist."""

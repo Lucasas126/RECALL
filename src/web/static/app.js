@@ -451,6 +451,7 @@ function translateInterface() {
   renderVersion();
   for (const [id, text] of [
     ["settings-title", "User settings"], ["settings-save", "Save settings"],
+    ["tasks-title", "Tasks"], ["tasks-empty", "No tasks to show."],
     ["task-dialog-banner-text", "Internal worker chat: read-only, not part of your chat list. Use Steer on the task card to correct it."],
     ["settings-thinking-label", "Show model thinking"],
     ["settings-thinking-hint", "Shows the model's reasoning above its replies in the chat."],
@@ -576,12 +577,16 @@ function translateInterface() {
   $("dream-model").placeholder = tr("Your chat model");
   $("agent-model").placeholder = tr("Your default model");
   for (const [id, text] of [
-    ["settings-open", "Settings"], ["settings-close", "Close"],
+    ["settings-open", "Settings"], ["settings-close", "Close"], ["tasks-open", "Tasks"], ["tasks-close", "Close"],
     ["logout", "Log out"], ["jump-latest", "Jump to latest"], ["theme-toggle", "Switch theme"],
   ]) {
     $(id).title = tr(text);
     $(id).setAttribute("aria-label", tr(text));
   }
+  for (const [filter, text] of [["all", "All"], ["running", "Running"], ["finished", "Finished"]]) {
+    document.querySelector(`#tasks-filter [data-filter="${filter}"]`).textContent = tr(text);
+  }
+  $("tasks-filter").setAttribute("aria-label", tr("Filter tasks"));
   $("new-disposable-chat").title = tr("New disposable chat");
   $("new-disposable-chat").setAttribute("aria-label", tr("New disposable chat"));
   syncNavToggles();
@@ -3424,6 +3429,74 @@ function wakeBubbleState(message) {
   return { ids: Array.isArray(message?.task_ids) ? message.task_ids : titles.map((t) => t.id), titles: titles.map((t) => t.title), body: parts.join("\n\n").trim() };
 }
 
+// ---- task panel helpers: the list of all the user's tasks (cross-chat), its filter, budget line and rows
+// 950 -> "950", 12400 -> "12.4k", 1500000 -> "1.5M"
+function formatTokenCount(count) {
+  const value = Number(count);
+  if (!Number.isFinite(value) || value < 0) return "0";
+  if (value < 1000) return String(Math.round(value));
+  if (value < 1_000_000) return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0).replace(/\.0$/, "")}k`;
+  return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+}
+
+// "running" keeps the tasks that have not ended, "finished" the ended ones, anything else all of them.
+function taskPanelFilter(tasks, filter) {
+  const list = Array.isArray(tasks) ? tasks : [];
+  if (filter === "running") return list.filter((task) => !taskIsFinal(task.status));
+  if (filter === "finished") return list.filter((task) => taskIsFinal(task.status));
+  return list.slice();
+}
+
+// Newest first by creation time (the server lists oldest first); stable for equal or missing times.
+function taskPanelSort(tasks) {
+  const stamp = (task) => Date.parse(task.created_at ?? task.started_at ?? "") || 0;
+  return (Array.isArray(tasks) ? tasks : []).map((task, index) => ({ task, index }))
+    .sort((a, b) => stamp(b.task) - stamp(a.task) || b.index - a.index).map((item) => item.task);
+}
+
+// Today's usage line: used and limit as short strings; limit null when unlimited; over = the budget is spent.
+function taskBudgetState(budget) {
+  const used = Math.max(0, Number(budget?.used) || 0);
+  const limit = Math.max(0, Number(budget?.limit) || 0);
+  return { used: formatTokenCount(used), limit: limit ? formatTokenCount(limit) : null, over: limit > 0 && used >= limit, percent: limit ? Math.min(100, Math.round((used / limit) * 100)) : 0 };
+}
+
+// What one row of the panel shows (the record is a `GET /api/tasks` entry, labelled with the parent's names).
+function taskPanelRow(record, nowMs) {
+  const kind = record?.target?.kind ?? "ephemeral";
+  const worker = kind === "agent" ? record?.target?.name || record?.target?.agent_id || "" : "";
+  const status = record?.status ?? "";
+  const running = status === "running";
+  const parentChat = record?.parent?.chat_id ?? "";
+  return {
+    id: record?.id ?? "",
+    title: record?.title || record?.id || "task",
+    status,
+    statusLabel: taskStatusLabel(taskDisplayStatus(record) || status),
+    awaitingApproval: taskDisplayStatus(record).startsWith("awaiting_approval"),
+    ephemeral: !worker,
+    target: worker,
+    parentAgent: record?.parent?.agent_name || record?.parent?.agent_id || "",
+    parentTitle: parentChat ? record?.parent?.title || "" : "",
+    parentAgentId: record?.parent?.agent_id ?? "",
+    parentChatId: parentChat,
+    canOpenParent: Boolean(parentChat),
+    scheduled: Boolean(record?.unattended),
+    elapsed: formatElapsed(taskElapsed(record, nowMs)),
+    tokens: (record?.usage?.in ?? 0) + (record?.usage?.out ?? 0),
+    running,
+    canStop: running,
+    canSteer: running,
+    canOpenChat: Boolean(record?.child?.chat_id),
+  };
+}
+
+// The panel keeps refreshing while any listed task runs.
+function taskPanelNeedsPolling(response) {
+  return (response?.tasks ?? []).some((task) => !taskIsFinal(task.status));
+}
+// ---- end task panel helpers
+
 // Keep polling while a task of the chat runs or its result is still on the way to the parent.
 function tasksNeedPolling(response) {
   const tasks = response?.tasks ?? [];
@@ -3710,6 +3783,173 @@ async function openTaskChat(id) {
 
 $("task-dialog-close").addEventListener("click", () => $("task-dialog").close());
 $("task-dialog").addEventListener("close", () => clearTimeout(taskDialogTimer));
+// ---- task panel (DOM): every task of the user across chats and agents, newest first
+const taskPanel = { filter: "all", tasks: [], rows: new Map(), timer: null, running: false, again: false, loaded: false };
+
+function renderTaskBudget(budget) {
+  const info = taskBudgetState(budget);
+  const box = $("tasks-budget");
+  box.textContent = info.limit === null
+    ? tr("Tasks today: {used} tokens (no daily limit)", { used: info.used })
+    : tr("Tasks today: {used} of {limit} tokens", { used: info.used, limit: info.limit });
+  box.classList.toggle("over", info.over);
+  box.title = info.over ? tr("Daily task budget reached; it resets at midnight") : "";
+}
+
+function taskPanelRowNode(id) {
+  const badge = element("span", { className: "task-badge" });
+  badge.setAttribute("role", "status");
+  const title = element("strong", { className: "tasks-row-title" });
+  const meta = element("div", { className: "tasks-row-meta" });
+  const error = element("div", { className: "task-error", hidden: true });
+  error.setAttribute("role", "alert");
+  const button = (text, handler) => {
+    const node = element("button", { type: "button", className: "secondary", textContent: text });
+    node.addEventListener("click", handler);
+    return node;
+  };
+  const field = element("input", { type: "text", className: "task-steer-input", maxLength: 2000, placeholder: tr("Tell the worker what to change") });
+  field.setAttribute("aria-label", tr("Steer"));
+  const form = element("div", { className: "task-steer-form", hidden: true });
+  const send = element("button", { type: "button", className: "primary", textContent: tr("Send") });
+  form.append(field, send);
+  const stop = button(tr("Stop"), async () => {
+    error.hidden = true;
+    try { await api(taskUrl(id, "/stop"), { method: "POST" }); } catch (err) { showTaskError(error, err); }
+    taskPanelRefresh();
+  });
+  const steer = button(tr("Steer"), () => {
+    form.hidden = !form.hidden;
+    if (!form.hidden) field.focus();
+  });
+  const open = button(tr("Open chat"), () => openTaskChat(id));
+  send.addEventListener("click", async () => {
+    const text = field.value.trim();
+    if (!text) return;
+    error.hidden = true;
+    try {
+      await api(taskUrl(id, "/steer"), { method: "POST", body: JSON.stringify({ text }) });
+      field.value = "";
+      form.hidden = true;
+    } catch (err) { showTaskError(error, err); }
+    taskPanelRefresh();
+  });
+  field.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.isComposing) {
+      event.preventDefault();
+      send.click();
+    }
+  });
+  const actions = element("div", { className: "task-actions" }, stop, steer, open);
+  const head = element("div", { className: "tasks-row-head" }, badge, title);
+  const node = element("li", { className: "tasks-row" }, head, meta, actions, form, error);
+  node.dataset.id = id;
+  node._parts = { badge, title, meta, stop, steer, open, form };
+  return node;
+}
+
+function updateTaskPanelRow(node, record) {
+  const view = taskPanelRow(record, Date.now());
+  const parts = node._parts;
+  node.dataset.status = view.status;
+  parts.badge.className = `task-badge ${view.awaitingApproval ? "awaiting_approval" : view.status}`;
+  parts.badge.textContent = tr(view.statusLabel);
+  parts.title.textContent = view.title;
+  parts.meta.replaceChildren();
+  const bits = [view.ephemeral ? tr("ephemeral") : view.target];
+  if (view.scheduled) bits.push(tr("scheduled"));
+  if (view.elapsed) bits.push(view.elapsed);
+  if (view.tokens) bits.push(tr("{count} tokens", { count: formatTokenCount(view.tokens) }));
+  parts.meta.append(element("span", { textContent: bits.join(" · ") }));
+  if (view.canOpenParent) {
+    const link = element("button", {
+      type: "button", className: "link-button tasks-parent",
+      textContent: tr("from {agent} · {chat}", { agent: view.parentAgent, chat: view.parentTitle || tr("(untitled chat)") }),
+    });
+    link.addEventListener("click", async () => {
+      $("tasks-dialog").close();
+      await openChatFromList({ id: view.parentChatId, agent_id: view.parentAgentId });
+    });
+    parts.meta.append(link);
+  } else {
+    parts.meta.append(element("span", { textContent: tr("no parent chat") }));
+  }
+  parts.stop.hidden = !view.canStop;
+  parts.steer.hidden = !view.canSteer;
+  parts.open.hidden = !view.canOpenChat;
+  if (!view.canSteer) parts.form.hidden = true;
+}
+
+function renderTaskPanel() {
+  const list = $("tasks-list");
+  const shown = taskPanelSort(taskPanelFilter(taskPanel.tasks, taskPanel.filter));
+  const wanted = new Set(shown.map((task) => task.id));
+  for (const [id, node] of [...taskPanel.rows]) {
+    if (!wanted.has(id)) {
+      node.remove();
+      taskPanel.rows.delete(id);
+    }
+  }
+  shown.forEach((task, index) => {
+    let node = taskPanel.rows.get(task.id);
+    if (!node) {
+      node = taskPanelRowNode(task.id);
+      taskPanel.rows.set(task.id, node);
+    }
+    updateTaskPanelRow(node, task);
+    if (list.children[index] !== node) list.insertBefore(node, list.children[index] ?? null);
+  });
+  $("tasks-empty").hidden = shown.length > 0 || !taskPanel.loaded;
+  for (const button of document.querySelectorAll("#tasks-filter button")) {
+    const on = button.dataset.filter === taskPanel.filter;
+    button.classList.toggle("active", on);
+    button.setAttribute("aria-pressed", String(on));
+  }
+}
+
+async function taskPanelRefresh() {
+  if (!$("tasks-dialog").open || !state.user) return;
+  if (taskPanel.running) {
+    taskPanel.again = true;
+    return;
+  }
+  clearTimeout(taskPanel.timer);
+  taskPanel.running = true;
+  taskPanel.again = false;
+  let keep = false;
+  try {
+    const data = await api("/api/tasks?limit=100");
+    taskPanel.tasks = data.tasks;
+    taskPanel.loaded = true;
+    for (const task of data.tasks) taskRecords.set(task.id, task);
+    renderTaskBudget(data.budget);
+    renderTaskPanel();
+    $("tasks-error").hidden = true;
+    keep = taskPanelNeedsPolling(data);
+  } catch (err) {
+    showTaskError($("tasks-error"), err);
+  }
+  taskPanel.running = false;
+  if ($("tasks-dialog").open && (keep || taskPanel.again)) taskPanel.timer = setTimeout(taskPanelRefresh, taskPanel.again ? 0 : 3000);
+}
+
+$("tasks-open").addEventListener("click", () => {
+  const dialog = $("tasks-dialog");
+  if (!dialog.open) dialog.showModal();
+  taskPanel.loaded = false;
+  taskPanel.rows.clear();  // rebuilt: labels follow the interface language
+  $("tasks-list").replaceChildren();
+  taskPanelRefresh();
+});
+$("tasks-close").addEventListener("click", () => $("tasks-dialog").close());
+$("tasks-dialog").addEventListener("close", () => clearTimeout(taskPanel.timer));
+$("tasks-filter").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-filter]");
+  if (!button) return;
+  taskPanel.filter = button.dataset.filter;
+  renderTaskPanel();
+});
+// ---- end task panel (DOM)
 // ---- end task cards: DOM
 
 function approvalInitialState() {

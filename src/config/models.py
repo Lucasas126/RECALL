@@ -448,6 +448,7 @@ class SubagentSettings(BaseModel):
     max_followups: int = Field(default=5, ge=0, le=50, strict=True)  # task_send follow-ups per task
     max_auto_wakes: int = Field(default=3, ge=1, le=20, strict=True)  # wake-started parent turns in a row without a user message
     wake_debounce_seconds: float = Field(default=1.5, ge=0, le=30)  # results ending within this window share one wake
+    daily_token_budget: int = Field(default=1_000_000, ge=0, le=1_000_000_000, strict=True)  # in+out tokens of all a user's tasks per local day; 0 = unlimited
 
 
 class DelegationTarget(BaseModel):

@@ -42,6 +42,8 @@ python -m src.admin agent create --user ana --id travel --name Travel --set desc
 
 `password_hash`, `id` and `agents` are refused (use `set-password` and the `agent` commands). `*.api_key` values must look like a variable name, never a key.
 
+`python -m src.admin task run --user U --agent A --goal "..." [--context C] [--instructions I] [--notify AGENT:CHAT] [--wait]` starts an **unattended** subagent task with no parent chat (testing entry point for future scheduled jobs): prints `task: <id>`, and with `--wait` the status, tokens and result. Manual and dangerous terminal actions are denied, `smart` normal ones run; limits and the daily token budget apply; without `--wait` it stops when the command exits. See `delegation-processes.md`.
+
 Creating users and passwords stays with `python -m src.admin create-user` and `python -m src.admin set-password`, which the user runs himself (hidden prompt). `python -m src.admin version` prints the running version (and the image build id when set). Other checks: `python -m src.admin terminal-test --user U --backend B` (ssh backends) and `python -m src.admin route-test "text" --user U`.
 
 ## Secrets

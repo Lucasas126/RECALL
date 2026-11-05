@@ -210,7 +210,7 @@ class Agent:
             keep = [name for name in task.backends if name in cfg.backends and name in self.config.terminal_backends]
             if keep:
                 self.config.terminal = cfg.model_copy(update={
-                    "backends": {name: cfg.backends[name].model_copy(update={"approvals": "manual"}) for name in keep},
+                    "backends": {name: cfg.backends[name].model_copy(update={"approvals": self._worker_approvals(task, cfg.backends[name])}) for name in keep},
                     "default_backend": cfg.default_backend if cfg.default_backend in keep else keep[0],
                 })
                 self.config.terminal_backends = {name: self.config.terminal_backends[name] for name in keep}
@@ -218,6 +218,12 @@ class Agent:
                 self.config.terminal = None
         elif cfg is not None:
             self.config.terminal = None
+
+    @staticmethod
+    def _worker_approvals(task: ChatTask, backend) -> str:
+        """Approval mode of a worker's backend: always `manual`, except an unattended task keeps `smart` (nobody is asked
+        anyway: dangerous and manual actions are denied, safe ones run); `off` is never inherited."""
+        return "smart" if task.unattended and backend.approvals == "smart" else "manual"
 
     def _build_base_tools(self) -> tuple[list[dict], dict]:
         config = self.config
