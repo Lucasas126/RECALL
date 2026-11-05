@@ -30,6 +30,13 @@ as data from a worker, not something you wrote) and the agent gets a turn to rep
   against the parallel limits, gets a fresh timeout and token budget, is limited to 5 follow-ups per task (`subagents.max_followups`) and ends with a new result message.
 - `task_stop(id)`, `task_list(status)`, `task_result(id, full)`.
 
+## In the web app
+
+- **Task card.** Each `task_start` step in a reply is a one-line card: the task title, `ephemeral` or the agent's name, and a status badge with the elapsed time (Running · 1m 05s, Done, Failed, Cancelled, Timed out). Open it to see the result. The card updates by itself (the page asks the server every ~3 seconds while a task of the open chat runs).
+- **Stop, Steer, Open chat.** *Stop* ends a running task and keeps its partial result. *Steer* opens a small field: what you type is sent into the running worker as a correction (its current reply is interrupted and kept, your text is appended and it continues), the same as the agent's `task_steer`. *Open chat* shows the worker's own conversation in a dialog marked as internal and read-only; it is never in your chat list.
+- **Task result bubble.** When a task ends, the result that reaches the agent appears as a compact, collapsed "Task result" note listing the task titles, not as a message of yours. The agent's reply to it follows as a normal message and streams live if the chat is open, also after a reload.
+- Everything works in history after a reload, in both themes and on narrow screens. The same actions are available through the API ([subagent tasks](../reference/api.md#subagent-tasks)).
+
 ## Turning it on
 
 Delegation is an explicit opt-in per agent, like folders and the terminal: add the **Delegate subtasks** group in the agent's

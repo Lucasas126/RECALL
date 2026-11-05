@@ -28,6 +28,7 @@ from src.service.chat import (
     ServiceError,
     UnknownAgent,
     UnknownChat,
+    UnknownTask,
     UnknownDreamSession,
     UnknownUser,
 )
@@ -95,6 +96,10 @@ class TextIn(BaseModel):
 
 class ApprovalIn(BaseModel):
     decision: Literal["approve", "deny"]
+
+
+class TaskSteerIn(BaseModel):
+    text: str
 
 
 def _sse(event: str, data, generation_id: str = "") -> str:
@@ -188,6 +193,7 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
 
     @app.exception_handler(UnknownAgent)
     @app.exception_handler(UnknownChat)
+    @app.exception_handler(UnknownTask)
     @app.exception_handler(ApprovalNotFound)
     @app.exception_handler(UnknownDreamSession)
     def _not_found(request: Request, exc: ServiceError):
@@ -522,6 +528,28 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
         agent_id: str, chat_id: str, approval_id: str, body: ApprovalIn, user_id: str = Depends(current_user),
     ):
         return service.resolve_approval(user_id, agent_id, chat_id, approval_id, body.decision)
+
+    # ------------------------------------------------------------------ subagent tasks
+
+    @app.get("/api/tasks")
+    def list_tasks(agent: Optional[str] = None, chat: Optional[str] = None, user_id: str = Depends(current_user)):
+        return service.list_tasks(user_id, agent, chat)
+
+    @app.get("/api/tasks/{task_id}")
+    def get_task(task_id: str, user_id: str = Depends(current_user)):
+        return service.get_task(user_id, task_id)
+
+    @app.post("/api/tasks/{task_id}/steer")
+    def steer_task(task_id: str, body: TaskSteerIn, user_id: str = Depends(current_user)):
+        return service.steer_task(user_id, task_id, body.text)
+
+    @app.post("/api/tasks/{task_id}/stop")
+    def stop_task(task_id: str, user_id: str = Depends(current_user)):
+        return service.stop_task(user_id, task_id)
+
+    @app.get("/api/tasks/{task_id}/chat")
+    def get_task_chat(task_id: str, user_id: str = Depends(current_user)):
+        return service.get_task_chat(user_id, task_id)
 
     # ------------------------------------------------------------------ frontend
 

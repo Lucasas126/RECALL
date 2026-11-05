@@ -61,6 +61,7 @@ from src.service.dream import (
     STATUS_EMOJI, STATUS_SUMMARY_CHARS, DreamDependencies, DreamManager, format_local_time, md_escape,
     parse_dream_command, summary_block,
 )
+from src.agent.toolsets.delegate import TaskError
 from src.service.tasks import TaskManager
 from src.terminal.approvals import ApprovalBroker, ApprovalNotFound
 from src.terminal.context import RunContext, run_context
@@ -162,6 +163,10 @@ class UnknownAgent(ServiceError):
 
 class UnknownChat(ServiceError):
     code = "unknown_chat"
+
+
+class UnknownTask(ServiceError):
+    code = "unknown_task"
 
 
 class AgentBusy(ServiceError):
@@ -1296,6 +1301,59 @@ class ChatService:
         self._owned_agent(user_id, agent_id)
         self._require_chat(self._conversations(user_id, agent_id), chat_id)
         return self._approvals.pending(user_id, agent_id, chat_id)
+
+    # ------------------------------------------------------------------ subagent tasks (web API; always the session user's own)
+
+    def _task_record(self, user_id: str, task_id: str) -> dict:
+        try:
+            return self._tasks._record(user_id, task_id, None)
+        except TaskError as exc:
+            raise UnknownTask("unknown task: {task_id}", task_id=task_id) from exc
+
+    def list_tasks(self, user_id: str, agent_id: str | None = None, chat_id: str | None = None) -> dict:
+        """The user's tasks, optionally those launched from one parent chat, plus whether that chat is about to get a wake."""
+        if agent_id is not None:
+            self._owned_agent(user_id, agent_id)
+        tasks = self._tasks.list_view(user_id, agent_id, chat_id)
+        out: dict = {"tasks": tasks}
+        if agent_id is not None and chat_id is not None:
+            out["active"] = self.chat_active(user_id, agent_id, chat_id)
+            out["pending_wake"] = self._tasks.pending_wake(user_id, agent_id, chat_id)
+        return out
+
+    def get_task(self, user_id: str, task_id: str) -> dict:
+        self._task_record(user_id, task_id)
+        return self._tasks.detail(user_id, task_id)
+
+    def steer_task(self, user_id: str, task_id: str, text: str) -> dict:
+        """The user corrects a running task (same mechanism as the `task_steer` tool)."""
+        record = self._task_record(user_id, task_id)
+        if record["status"] != "running":
+            raise AgentBusy("task {task_id} is not running (status: {status})", task_id=task_id, status=record["status"])
+        try:
+            return self._tasks.steer(user_id, task_id, text)
+        except TaskError as exc:
+            if "not running" in str(exc):
+                raise AgentBusy("task {task_id} is not running (status: {status})", task_id=task_id, status=record["status"]) from exc
+            raise InputError(str(exc)) from exc
+
+    def stop_task(self, user_id: str, task_id: str) -> dict:
+        record = self._task_record(user_id, task_id)
+        try:
+            return self._tasks.stop_task(user_id, task_id)
+        except TaskError as exc:
+            raise AgentBusy("task {task_id} cannot be stopped from here (status: {status})", task_id=task_id, status=record["status"]) from exc
+
+    def get_task_chat(self, user_id: str, task_id: str) -> dict:
+        """The task's hidden worker chat, read-only, in the shape of `get_chat`."""
+        self._task_record(user_id, task_id)
+        try:
+            agent_id, chat_id = self._tasks.child_of(user_id, task_id)
+        except TaskError as exc:
+            raise UnknownChat("unknown chat: {chat_id}", chat_id=task_id) from exc
+        out = self.get_chat(user_id, agent_id, chat_id)
+        out["task"] = {"id": task_id, "agent_id": agent_id, "chat_id": chat_id, "internal": True}
+        return out
 
     def resolve_approval(self, user_id: str, agent_id: str, chat_id: str, approval_id: str, decision: str) -> dict:
         """Approve or deny a pending approval of the chat; raises ApprovalNotFound / ApprovalForbidden."""

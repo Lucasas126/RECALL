@@ -254,6 +254,36 @@ details.action.failed .action-name { color: var(--danger); }
 .action-block { margin-top: 6px; }
 .action-label { font-size: .8em; text-transform: uppercase; letter-spacing: .04em; opacity: .8; }
 details.action pre { margin: 2px 0 0; padding: 8px; background: var(--bg); border-radius: 6px; white-space: pre-wrap; word-break: break-word; max-height: var(--tool-block-max); overflow: auto; }
+/* subagent task cards, wake bubbles and the worker-chat dialog */
+.task-card > summary { gap: 8px; }
+.task-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.task-badge { flex: none; font-size: .85em; padding: 0 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--text); }
+.task-badge.running { border-color: var(--accent); color: var(--accent); }
+.task-badge.done { border-color: var(--ok); color: var(--ok); }
+.task-badge.failed, .task-badge.timed_out { border-color: var(--danger); color: var(--danger); }
+.task-badge.cancelled, .task-badge.unknown { color: var(--muted); }
+.task-tokens { flex: 1 1 auto; }
+.task-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.task-actions button, .task-steer-form button { padding: 3px 12px; border-radius: 999px; font: inherit; font-size: .9em; }
+.task-steer-form { display: flex; gap: 6px; margin-top: 6px; }
+.task-steer-form[hidden], .task-actions button[hidden], .task-result-block[hidden], .task-error[hidden] { display: none; }
+.task-steer-input { flex: 1 1 auto; min-width: 0; padding: 4px 8px; font: inherit; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); }
+.task-error { margin-top: 6px; color: var(--danger); }
+details.msg.task-wake { align-self: flex-start; padding: 6px 12px; border-style: dashed; background: transparent; color: var(--muted); font-size: .9em; }
+.task-wake > summary { cursor: pointer; display: flex; gap: 8px; min-width: 0; white-space: nowrap; overflow: hidden; }
+.task-wake-label { flex: none; font-weight: 600; color: var(--text); }
+.task-wake-titles { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.task-wake-body { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow: auto; font: 12px/1.4 ui-monospace, monospace; }
+#task-dialog { color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 12px; width: min(780px, calc(100vw - 32px)); height: min(640px, 85vh); padding: 16px; }
+#task-dialog[open] { display: flex; flex-direction: column; gap: 10px; }
+#task-dialog::backdrop { background: var(--backdrop); }
+.task-internal-banner { margin: 0; padding: 8px 12px; border: 1px solid var(--warn-line); border-left: 4px solid var(--warn); border-radius: 10px; background: var(--warn-bg); font-size: .9em; }
+#task-dialog-messages { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+@media (max-width: 800px) {
+  #task-dialog { width: calc(100vw - 16px); height: calc(100dvh - 16px); max-height: none; padding: 12px; }
+  .task-card > summary { flex-wrap: wrap; white-space: normal; }
+  .task-steer-form { flex-direction: column; }
+}
 #usage { padding: 4px var(--gutter); color: var(--muted); font: 12px/1.4 ui-monospace, monospace; }
 #usage summary { cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #usage pre { margin: 4px 0 0; white-space: pre-wrap; max-height: 140px; overflow-y: auto; }

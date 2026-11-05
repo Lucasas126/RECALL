@@ -14,6 +14,7 @@ plus an optional `"code"` (see [error codes](#error-codes)).
 | agents | `GET`/`POST /api/agents`, `GET`/`PUT`/`DELETE /api/agents/<agent_id>`, `GET /api/tool-groups`, `GET /api/agents/<agent_id>/index`, `POST /api/agents/<agent_id>/index/reindex` (table below) |
 | MCP | `GET /api/mcp`, `GET /api/mcp/<server_id>/tools`, `POST /api/mcp/<server_id>/connect`, `DELETE /api/mcp/<server_id>/connection` ([MCP servers](../user-guide/mcp.md)) |
 | chats | `GET /api/chats`, `GET`/`POST /api/agents/<agent_id>/chats`, `POST .../chats/<chat_id>/disposable`, `GET`/`DELETE .../chats/<chat_id>`, `GET .../chats/<chat_id>/models`, `PUT .../model`, `PUT .../reasoning-effort`, `PUT .../title`, `POST .../chats/<chat_id>/messages` (SSE, see [architecture](../architecture/overview.md#web-steering)), `GET .../chats/<chat_id>/stream` ([following a running reply](#following-a-running-reply)), `GET .../chats/<chat_id>/approvals`, `POST .../chats/<chat_id>/approvals/<approval_id>` ([terminal approvals](#terminal-approvals)) |
+| subagent tasks | `GET /api/tasks`, `GET /api/tasks/<task_id>`, `POST .../steer`, `POST .../stop`, `GET .../chat` ([table below](#subagent-tasks)) |
 | dream and soul | `.../dream/settings\|status\|start\|cancel\|sessions`, `.../soul` (the response also carries `max_chars`, the application-wide SOUL limit, and `default`, the default SOUL.md template); `.../memories/<target>` returns its `limit` from settings.yaml, `.../soul/history`, `.../memories/<target>` ([dream mode](../user-guide/dream.md#web-api)) |
 
 ## providers and model catalog API
@@ -170,6 +171,20 @@ event; `[]` when none), for clients that connect after the event was sent.
 | `422` | `decision` is missing or not exactly `approve` / `deny` |
 
 Telegram answers the same approvals with inline buttons.
+
+## Subagent tasks
+
+Tasks launched by the `delegate` tools (see [delegating tasks](../user-guide/delegation.md)). All routes need the session and only ever see the session user's tasks; another user's task id answers `404` like an unknown one.
+
+| route | what it does |
+| --- | --- |
+| `GET /api/tasks?agent=<agent_id>&chat=<chat_id>` | the user's tasks, oldest first; with `agent` and `chat`, only those launched from that parent chat. Each task: `id`, `title`, `goal` (first 300 characters), `target` (`{kind: "ephemeral" \| "agent", agent_id}`), `status` (`running`, `done`, `failed`, `cancelled`, `timed_out`), `reason`, `started_at`, `ended_at`, `elapsed_s`, `usage` (`{in, out}`), `parent` (`{agent_id, chat_id}`), `child` (`{agent_id, chat_id}` of the hidden worker chat), `result_preview` (300 characters), `result_truncated`, `error`. With both filters the response also has `active` (the parent chat has a reply running or queued) and `pending_wake` (a finished task's result is still on its way to the parent): the web UI polls every ~3 s while a task runs or `pending_wake` is true, and attaches to the wake reply through `GET .../stream` when `active` turns true. |
+| `GET /api/tasks/<task_id>` | the same record with the full `goal` and the capped `result` (50,000 characters) |
+| `POST /api/tasks/<task_id>/steer` | body `{"text": "..."}`: the user's correction goes into the running task, like the `task_steer` tool (the worker's reply is interrupted and kept, the correction appended). Returns `{id, status}` |
+| `POST /api/tasks/<task_id>/stop` | stops a running task (its partial result is kept) and returns `{id, status}`; on a task that already ended it returns its status unchanged |
+| `GET /api/tasks/<task_id>/chat` | the hidden worker chat, read-only, in the shape of `GET .../chats/<chat_id>` plus `task: {id, agent_id, chat_id, internal: true}`. There is no write route: the worker chat never appears in the chat lists |
+
+Errors: `401` no session, `404` unknown task (`code: "unknown_task"`) or a task of another user, `400` empty or too long steer text, `409` steer or stop on a task that does not run in this process (already ended, or owned by another process). A wake turn in `GET .../chats/<chat_id>` has `role: "user"`, `source: "task"` and `task_ids`; the UI shows it as a "Task result" note, not as a message of the user.
 
 ## Editing a message
 

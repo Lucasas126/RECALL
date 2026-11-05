@@ -731,6 +731,23 @@ _SPANISH = {
     "RECALL knowledge (how RECALL works)": "Conocimiento de RECALL (cómo funciona RECALL)",
     "Gives the agent a built-in, read-only guide to how RECALL works. Takes effect in new chats.": "Da al agente una guía integrada y de solo lectura sobre cómo funciona RECALL. Se aplica en los chats nuevos.",
     "The configuration of this agent on disk is invalid, so the previous one is still in use: {details}": "La configuración de este agente en disco no es válida, así que se sigue usando la anterior: {details}",
+    # subagents (web)
+    "unknown task: {task_id}": "Tarea desconocida: {task_id}",
+    "task {task_id} is not running (status: {status})": "La tarea {task_id} no está en marcha (estado: {status})",
+    "task {task_id} cannot be stopped from here (status: {status})": "La tarea {task_id} no se puede detener desde aquí (estado: {status})",
+    "Done": "Hecha",
+    "Stop": "Detener",
+    "Steer": "Corregir",
+    "Send": "Enviar",
+    "Open chat": "Abrir chat",
+    "Task result": "Resultado de tarea",
+    "Unknown": "Desconocido",
+    "ephemeral": "efímero",
+    "{count} tokens": "{count} tokens",
+    "No result": "Sin resultado",
+    "Tell the worker what to change": "Dile al trabajador qué cambiar",
+    "Worker chat: {title}": "Chat del trabajador: {title}",
+    "Internal worker chat: read-only, not part of your chat list. Use Steer on the task card to correct it.": "Chat interno del trabajador: solo lectura, no forma parte de tu lista de chats. Usa Corregir en la tarjeta de la tarea para darle una indicación.",
 }
 
 

@@ -634,6 +634,14 @@
     <p id="settings-version" class="app-version"></p>
   </dialog>
 
+  <dialog id="task-dialog" aria-labelledby="task-dialog-title">
+    <div class="model-heading">
+      <h2 id="task-dialog-title">Worker chat</h2>
+      <button id="task-dialog-close" type="button" class="icon-btn" title="Close" aria-label="Close"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    </div>
+    <p id="task-dialog-banner-text" class="task-internal-banner" role="status">Internal worker chat: read-only, not part of your chat list. Use Steer on the task card to correct it.</p>
+    <div id="task-dialog-messages" role="log"></div>
+  </dialog>
   <dialog id="model-dialog" aria-labelledby="model-title">
     <div class="model-heading">
       <h2 id="model-title">Models</h2>
