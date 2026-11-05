@@ -45,4 +45,6 @@ rules:
 - writes are atomic and serialized per user by `.config/<user_id>/agents.lock`. only the `agents:` entry of `user.yaml` is rewritten, so comments and other keys are kept.
 - Telegram sessions that are already open keep the agent id they started with; use `/selectagent` (or restart the bot) after a rename or delete.
 
+reloading the page reopens the chat and the agent you had open (the address holds `#chat/<agent id>/<chat id>`, and the last chat of each user is remembered in the browser as a fallback for a new tab). if that chat or agent no longer exists, a new chat starts. logging out forgets it.
+
 you can switch to another chat, or reload the page, while a reply is being generated: the reply keeps running on the server, and when you return to that chat (or open it in another tab) the web UI shows what was generated so far and keeps updating live until it ends. the chat list marks chats that are still replying.
