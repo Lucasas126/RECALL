@@ -7,6 +7,7 @@ import mimetypes
 import os
 import re
 import secrets
+import time
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -115,7 +116,8 @@ class TelegramBotState:
     sessions: dict[int, TelegramSession] = field(default_factory=dict)
     approvals: dict[str, "_ApprovalCard"] = field(default_factory=dict)  # pending approval id -> its message
     task_cards: dict[str, str] = field(default_factory=dict)  # task id -> user id that got its [Stop] button
-    task_lines: dict[str, tuple[int, int]] = field(default_factory=dict)  # task id -> (telegram chat, message) of its status line
+    reply_hosts: dict[tuple[int, str, str, str], "_ReplyStream"] = field(default_factory=dict)  # (telegram chat, user, agent, chat) -> latest reply
+    task_hosts: dict[str, "_ReplyStream"] = field(default_factory=dict)  # running task id -> the reply message holding its [Stop]
     busy: dict[tuple[str, str, str], int] = field(default_factory=dict)  # (user, agent, chat) -> reply streams in flight
     loop: "asyncio.AbstractEventLoop | None" = None  # the bot's loop: task events arrive on worker threads
     unsubscribe: "Callable[[], None] | None" = None
@@ -1063,6 +1065,10 @@ async def reroute_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 await _start_pending(context, session, record)
                 return
             text = await _reroute_pending(update, context, session, record, agent_id)
+        elif action == "u":  # accept the proposed agent now: same effect as the grace timer firing
+            await query.answer()
+            await _start_pending(context, session, record)
+            return
         elif action == "a":
             agents = state.service.list_agents(session.user_id)
             panel = _new_panel(update, "reroute_agent")
@@ -1387,6 +1393,7 @@ def _final_messages(
 class _ReplyContent:
     parts: list[tuple[str, str]] = field(default_factory=list)
     actions: list[dict] = field(default_factory=list)
+    pending: dict[str, int] = field(default_factory=dict)  # tool call id -> index of its line shown since `tool_start`
 
     def append(self, kind: str, text: str) -> None:
         if not text:
@@ -1396,10 +1403,25 @@ class _ReplyContent:
         else:
             self.parts.append((kind, text))
 
-    def add_action(self, action: dict) -> None:
+    def _action_kind(self) -> str:
         # Tool events have no phase field; retain the latest emitted token context.
         thinking = self.parts and self.parts[-1][0] in ("reasoning", "reasoning_tool")
-        self.append("reasoning_tool" if thinking else "tool", _format_actions([action]))
+        return "reasoning_tool" if thinking else "tool"
+
+    def start_action(self, action: dict) -> None:
+        """Show a tool's line as soon as it starts (`tool_start`); the finished `tool` event completes the same line."""
+        call_id = str(action.get("id") or "")
+        if not call_id or call_id in self.pending:
+            return
+        self.pending[call_id] = len(self.parts)
+        self.parts.append((self._action_kind(), _format_actions([action])))
+
+    def add_action(self, action: dict) -> None:
+        index = self.pending.pop(str(action.get("id") or ""), None)
+        if index is not None and index < len(self.parts):
+            self.parts[index] = (self.parts[index][0], _format_actions([action]))
+        else:
+            self.append(self._action_kind(), _format_actions([action]))
         self.actions.append(action)
 
     def reconcile(self, event: ChatEvent) -> None:
@@ -1431,6 +1453,53 @@ class _ReplyStream:
         self.last_text = ""
         self.last_push = 0.0
         self.paused_until = 0.0
+        # [Stop] buttons of the tasks launched from this reply (task id -> short title): shown only while they run
+        self.tasks: dict[str, str] = {}
+        self.markup: InlineKeyboardMarkup | None = None
+        self.shown_markup: tuple = ()
+        self.ended = False
+        self.ended_at = 0.0
+        self.content: _ReplyContent | None = None
+        self.show_thinking = True
+        self.lock = asyncio.Lock()
+
+    def attach(self, state: "TelegramBotState", key: tuple[int, str, str, str], content: "_ReplyContent") -> None:
+        """Register this reply as the one that hosts the [Stop] buttons of the tasks its turn launches."""
+        self.content = content
+        state.reply_hosts[key] = self
+
+    def _build_markup(self, language: str) -> None:
+        rows = [
+            [InlineKeyboardButton(message(language, "⏹ Stop {title}", title=title[:28]), callback_data=f"{_TASK_CALLBACK}:{task_id}:stop")]
+            for task_id, title in self.tasks.items()
+        ]
+        self.markup = InlineKeyboardMarkup(rows) if rows else None
+
+    @property
+    def _markup_key(self) -> tuple:
+        return tuple(b.callback_data for row in (self.markup.inline_keyboard if self.markup else ()) for b in row)
+
+    async def set_tasks(self, language: str) -> None:
+        """Show the current [Stop] buttons on this reply message (and drop them when no task runs)."""
+        self._build_markup(language)
+        if not self.ended:  # still streaming: the next edit carries the buttons; push one now if there is text
+            preview = _final_messages(self.content.parts, show_thinking=self.show_thinking) if self.content else []
+            if preview:
+                await self.update(*preview[-1], force=True)
+            return
+        async with self.lock:  # already sent: only the buttons change
+            if self.message is None or self._markup_key == self.shown_markup:
+                return
+            try:
+                await self.bot.edit_message_reply_markup(
+                    chat_id=self.chat_id, message_id=self.message.message_id, reply_markup=self.markup,
+                )
+                self.shown_markup = self._markup_key
+            except RetryAfter as exc:
+                self.paused_until = asyncio.get_running_loop().time() + exc.retry_after
+            except BadRequest as exc:
+                if "not modified" not in str(exc).lower():
+                    logger.warning("Telegram [Stop] button edit failed: %s", exc)
 
     async def start(self) -> None:
         if self.use_draft:
@@ -1439,24 +1508,32 @@ class _ReplyStream:
                 return
         await self.bot.send_chat_action(self.chat_id, "typing")
 
-    async def update(self, text: str, entities: list[MessageEntity]) -> None:
+    async def update(self, text: str, entities: list[MessageEntity], force: bool = False) -> None:
+        """Push the streaming text. `force` skips the interval and the same-text check (a [Stop] button changed)."""
+        async with self.lock:
+            await self._update(text, entities, force)
+
+    async def _update(self, text: str, entities: list[MessageEntity], force: bool) -> None:
         loop_time = asyncio.get_running_loop().time()
         interval = self._DRAFT_INTERVAL if self.use_draft else self._EDIT_INTERVAL
+        unchanged = text == self.last_text and self._markup_key == self.shown_markup
         if (
-            not text or text == self.last_text
-            or loop_time < self.paused_until or loop_time - self.last_push < interval
+            not text or unchanged or loop_time < self.paused_until
+            or (not force and loop_time - self.last_push < interval)
         ):
             return
         self.last_push = loop_time
-        if self.use_draft and await self._push_draft(text, entities):
+        # a draft cannot carry buttons: with [Stop] to show, the reply becomes a real message
+        if self.use_draft and self.message is None and self.markup is None and await self._push_draft(text, entities):
             self.last_text = text
             return
         try:
             if self.message is None:
-                self.message = await self.bot.send_message(self.chat_id, text, entities=entities)
+                self.message = await self.bot.send_message(self.chat_id, text, entities=entities, reply_markup=self.markup)
             else:
-                await self.message.edit_text(text, entities=entities)
+                await self.message.edit_text(text, entities=entities, reply_markup=self.markup)
             self.last_text = text
+            self.shown_markup = self._markup_key
         except RetryAfter as exc:
             self.paused_until = loop_time + exc.retry_after
         except BadRequest as exc:
@@ -1464,18 +1541,21 @@ class _ReplyStream:
                 logger.warning("Telegram streaming edit failed: %s", exc)
 
     async def finish(self, messages: list[tuple[str, list[MessageEntity]]]) -> None:
-        first, *rest = messages
-        if self.message is not None:
-            try:
-                if first[0] != self.last_text:
-                    await self.message.edit_text(first[0], entities=first[1])
-            except BadRequest as exc:
-                if "not modified" not in str(exc).lower():
-                    raise
-        else:
-            await self._send(*first)
-        for text, entities in rest:
-            await self._send(text, entities)
+        self.ended, self.ended_at = True, time.monotonic()
+        async with self.lock:
+            first, *rest = messages
+            if self.message is not None:
+                try:
+                    if first[0] != self.last_text or self._markup_key != self.shown_markup:
+                        await self.message.edit_text(first[0], entities=first[1], reply_markup=self.markup)
+                except BadRequest as exc:
+                    if "not modified" not in str(exc).lower():
+                        raise
+            else:
+                self.message = await self._send(*first, reply_markup=self.markup)
+            self.last_text, self.shown_markup = first[0], self._markup_key
+            for text, entities in rest:
+                await self._send(text, entities)
 
     async def _push_draft(self, text: str, entities: list[MessageEntity]) -> bool:
         try:
@@ -1491,14 +1571,14 @@ class _ReplyStream:
             self.use_draft = False
             return False
 
-    async def _send(self, text: str, entities: list[MessageEntity]) -> None:
+    async def _send(self, text: str, entities: list[MessageEntity], reply_markup=None):
+        kwargs = {"reply_markup": reply_markup} if reply_markup is not None else {}
         for _ in range(3):
             try:
-                await self.bot.send_message(self.chat_id, text, entities=entities)
-                return
+                return await self.bot.send_message(self.chat_id, text, entities=entities, **kwargs)
             except RetryAfter as exc:
                 await asyncio.sleep(exc.retry_after + 1)
-        await self.bot.send_message(self.chat_id, text, entities=entities)
+        return await self.bot.send_message(self.chat_id, text, entities=entities, **kwargs)
 
 
 async def _offer_reroute(
@@ -1511,7 +1591,9 @@ async def _offer_reroute(
     names = {agent["id"]: agent["name"] for agent in agents}
     record.agent_name = names.get(record.auto_agent_id, record.auto_agent_id)
     token = f"{_REROUTE_CALLBACK}:{record.token}"
-    rows: list[list[InlineKeyboardButton]] = []
+    # first button: accept the proposed agent now instead of waiting for the grace timer
+    rows: list[list[InlineKeyboardButton]] = [[InlineKeyboardButton(
+        _msg(session, "✅ Use {agent}", agent=record.agent_name[:40]), callback_data=f"{token}:u")]]
     seconds = int(record.grace or _REROUTE_GRACE_SECONDS)
     entities = None
     if record.routed and record.uncertain:
@@ -1704,12 +1786,13 @@ async def _send_generation(
     stream = _ReplyStream(context.bot, chat.id, use_draft=chat.type == ChatType.PRIVATE)
     await stream.start()
     content = _ReplyContent()
+    stream.attach(state, (chat.id, user_id, agent_id, chat_id), content)
     language = session.language
     busy_key = (user_id, agent_id, chat_id)
     state.busy[busy_key] = state.busy.get(busy_key, 0) + 1  # a task wake waits instead of echoing this reply
     try:
         preferences = state.service.get_preferences(user_id)
-        show_thinking = preferences["show_thinking"]
+        show_thinking = stream.show_thinking = preferences["show_thinking"]
         language = preferences["language"]
         agent_name = _agent_name(state.service, user_id, agent_id)
         # Sending may transcribe audio first; keep that blocking work off the event loop.
@@ -1733,6 +1816,8 @@ async def _send_generation(
                 return
             if event.kind in ("text", "reasoning"):
                 content.append(event.kind, event.text)
+            elif event.kind == "tool_start" and event.data:  # the tool's line shows while it runs, like a finished one
+                content.start_action(event.data)
             elif event.kind == "tool":
                 if event.data is None:
                     raise ValueError("Telegram tool event is missing its action data")
@@ -1805,26 +1890,6 @@ def _task_status_text(language: str, status: str) -> str:
     }.get(status, status)
 
 
-def _task_line(language: str, record: dict, agent_name: str) -> str:
-    """The one-line status of a task for the start and end messages."""
-    target = record.get("target") or {}
-    if target.get("kind") == "agent":  # an existing agent runs it: name it instead of the launching chat's agent
-        agent_name = str(target.get("name") or target.get("agent_id") or agent_name)
-    values = {"title": record.get("title") or record.get("id", ""), "agent": agent_name, "elapsed": _task_elapsed(record)}
-    status = record.get("status")
-    if status == "running":
-        return message(language, "🧩 Task started: {title} ({agent})", **values)
-    if status == "done":
-        return message(language, "✅ Task done: {title} ({agent}) · {elapsed}", **values)
-    if status == "cancelled":
-        return message(language, "⏹ Task cancelled: {title} ({agent}) · {elapsed}", **values)
-    if status == "timed_out":
-        return message(language, "⌛ Task timed out: {title} ({agent}) · {elapsed}", **values)
-    if record.get("reason") == "rate_limit":
-        return message(language, "⚠️ Task stopped, plan limit reached: {title} ({agent}) · {elapsed}", **values)
-    return message(language, "⚠️ Task failed: {title} ({agent}) · {elapsed}", **values)
-
-
 def _chat_origin(state: TelegramBotState, user_id: str, agent_id: str, chat_id: str) -> str | None:
     try:
         return state.service._conversations(user_id, agent_id).origin(chat_id)
@@ -1860,27 +1925,32 @@ def _chat_label(state: TelegramBotState, session: TelegramSession, event: dict) 
     return f"{name} · {title}"
 
 
-async def _send_task_line(bot, state: TelegramBotState, telegram_id: int, session: TelegramSession, event: dict) -> None:
+_HOST_GRACE_SECONDS = 600  # a finished reply still hosts the [Stop] of a task that starts right after it
+
+
+async def _task_started_button(state: TelegramBotState, telegram_id: int, session: TelegramSession, event: dict) -> None:
+    """Put a [Stop] button for a started task on the reply message of the turn that launched it (no extra message)."""
     manager = _task_manager(state)
     task_id = str(event.get("task_id") or "")
+    host = state.reply_hosts.get((telegram_id, event["user_id"], event["agent_id"], event["chat_id"]))
+    if host is None or (host.ended and (host.message is None or time.monotonic() - host.ended_at > _HOST_GRACE_SECONDS)):
+        return  # no reply can host it: /tasks still lists and stops it
     record = await asyncio.to_thread(manager.store.get, event["user_id"], task_id)
-    if record is None:
+    if record is None or record.get("status") not in ("queued", "running"):
         return
-    language = session.language
-    label = _chat_label(state, session, event)
-    if event["kind"] == "task_started":
-        markup = InlineKeyboardMarkup([[InlineKeyboardButton(
-            message(language, "⏹ Stop"), callback_data=f"{_TASK_CALLBACK}:{task_id}:stop")]])
-        sent = await bot.send_message(telegram_id, _task_line(language, record, label), reply_markup=markup)
-        state.task_cards[task_id] = event["user_id"]
-        state.task_lines[task_id] = (telegram_id, sent.message_id)
-        return
+    host.tasks[task_id] = str(record.get("title") or task_id)
+    state.task_hosts[task_id] = host
+    state.task_cards[task_id] = event["user_id"]
+    await host.set_tasks(session.language)
+
+
+async def _task_finished_button(state: TelegramBotState, event: dict, language: str = "en") -> None:
+    """Remove the [Stop] button of a task that ended; the reply keeps the buttons of its other running tasks."""
+    task_id = str(event.get("task_id") or "")
     state.task_cards.pop(task_id, None)
-    line = state.task_lines.pop(task_id, None)
-    if line is not None:  # the start message loses its Stop button
-        with suppress(TelegramError):
-            await bot.edit_message_reply_markup(chat_id=line[0], message_id=line[1], reply_markup=None)
-    await bot.send_message(telegram_id, _task_line(language, record, label))
+    host = state.task_hosts.pop(task_id, None)
+    if host is not None and host.tasks.pop(task_id, None) is not None:
+        await host.set_tasks(language)
 
 
 async def _send_wake(bot, state: TelegramBotState, telegram_id: int, session: TelegramSession, event: dict) -> None:
@@ -1897,11 +1967,12 @@ async def _send_wake(bot, state: TelegramBotState, telegram_id: int, session: Te
     stream = _ReplyStream(bot, telegram_id, use_draft=True)
     await stream.start()
     content = _ReplyContent()
+    stream.attach(state, (telegram_id, user_id, agent_id, chat_id), content)
     language = session.language
     label = _chat_label(state, session, event)
     try:
         preferences = state.service.get_preferences(user_id)
-        show_thinking = preferences["show_thinking"]
+        show_thinking = stream.show_thinking = preferences["show_thinking"]
         language = preferences["language"]
         while True:
             has_event, item = await _next_event(events)
@@ -1916,6 +1987,8 @@ async def _send_wake(bot, state: TelegramBotState, telegram_id: int, session: Te
                 return
             if item.kind in ("text", "reasoning"):
                 content.append(item.kind, item.text)
+            elif item.kind == "tool_start" and item.data:
+                content.start_action(item.data)
             elif item.kind == "tool" and item.data is not None:
                 content.add_action(item.data)
             elif item.kind == "notice":
@@ -1948,6 +2021,10 @@ async def _handle_task_event(bot, state: TelegramBotState, event: dict) -> None:
     if kind not in ("task_started", "task_finished", "task_wake", "task_approval", "task_approval_resolved"):
         return
     try:
+        if kind == "task_finished":  # the host is known from the start: no chat lookup needed
+            language = next((s.language for s in state.sessions.values() if s.user_id == event.get("user_id")), "en")
+            await _task_finished_button(state, event, language)
+            return
         targets = await asyncio.to_thread(_task_targets, state, event)
         for telegram_id, session in targets:
             try:
@@ -1964,8 +2041,8 @@ async def _handle_task_event(bot, state: TelegramBotState, event: dict) -> None:
                     )
                 elif kind == "task_wake":
                     await _send_wake(bot, state, telegram_id, session, event)
-                else:
-                    await _send_task_line(bot, state, telegram_id, session, event)
+                elif kind == "task_started":
+                    await _task_started_button(state, telegram_id, session, event)
             except Exception:
                 logger.exception("Telegram task event %s failed", kind)
     except Exception:
@@ -2096,8 +2173,9 @@ async def task_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await query.answer(str(exc), show_alert=True)
         return
     await query.answer(_msg(session, "Task {id}: {status}", id=task_id, status=_task_status_text(session.language, outcome.get("status", ""))))
-    with suppress(TelegramError):
-        await query.edit_message_reply_markup(reply_markup=None)
+    if task_id not in state.task_hosts:  # a hosted [Stop] is removed by the task's end event, keeping the other tasks' buttons
+        with suppress(TelegramError):
+            await query.edit_message_reply_markup(reply_markup=None)
 
 
 async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

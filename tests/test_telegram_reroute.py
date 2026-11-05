@@ -185,7 +185,7 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("It has been a while. Starting a new chat with First.", text)
         self.assertIn("30 seconds", text)
         buttons = self.markup_buttons()
-        self.assertEqual([button.text for button in buttons], ["↩ Continue previous chat", "🔀 Change agent"])
+        self.assertEqual([button.text for button in buttons], ["✅ Use First", "↩ Continue previous chat", "🔀 Change agent"])
         for button in buttons:
             self.assertLessEqual(len(button.callback_data.encode()), 64)
         record = self.session.pending_reroute
@@ -226,7 +226,7 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
     async def test_continue_previous_replays_the_message_and_deletes_the_auto_chat(self) -> None:
         await self.idle_message()
         buttons = self.markup_buttons()
-        query, update = self.query(buttons[0].callback_data, 55)
+        query, update = self.query(buttons[1].callback_data, 55)
         with patch("src.telegram.bot._send_generation", new=AsyncMock()) as generation:
             await reroute_callback(update, self.context)
             await _drain()
@@ -236,7 +236,7 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Old topic", query.edit_message_text.await_args.args[0])
         self.assertIsNone(self.session.pending_reroute)
         # a second tap is told the option expired
-        again, update = self.query(buttons[0].callback_data, 55)
+        again, update = self.query(buttons[1].callback_data, 55)
         await reroute_callback(update, self.context)
         self.assertIn("expired", again.answer.await_args.args[0])
         self.service.discard_chat.assert_called_once()
@@ -248,7 +248,7 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
         }
         self.service.chat_summary.return_value = {"id": "x1", "title": "Latest", "turns": 2}
         await self.idle_message(hours=0)
-        query, update = self.query(self.markup_buttons()[0].callback_data, 55)
+        query, update = self.query(self.markup_buttons()[1].callback_data, 55)
         with patch("src.telegram.bot._send_generation", new=AsyncMock()):
             await reroute_callback(update, self.context)
             await _drain()
@@ -258,7 +258,7 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_change_agent_opens_picker_then_replays_in_a_fresh_chat(self) -> None:
         await self.idle_message()
-        query, update = self.query(self.markup_buttons()[1].callback_data, 55)
+        query, update = self.query(self.markup_buttons()[2].callback_data, 55)
         await reroute_callback(update, self.context)
         markup = query.message.reply_text.await_args.kwargs["reply_markup"]
         buttons = [button for row in markup.inline_keyboard for button in row]
@@ -276,9 +276,31 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(generation.await_args.args[2:4], ("hello there", []))
         self.assertIsNone(self.session.pending_reroute)
 
+    async def test_use_button_accepts_the_proposed_agent_at_once_and_cancels_the_timer(self) -> None:
+        await self.idle_message()
+        record = self.session.pending_reroute
+        use = self.markup_buttons()[0]
+        self.assertEqual(use.text, "✅ Use First")
+        self.assertLessEqual(len(use.callback_data.encode()), 64)
+        query, update = self.query(use.callback_data, 55)
+        with patch("src.telegram.bot._send_generation", new=AsyncMock()) as generation:
+            await reroute_callback(update, self.context)
+            await _drain()
+            generation.assert_called_once()
+            self.assertEqual(generation.await_args.args[2:4], ("hello there", []))
+            self.assertTrue(record.timer.cancelled() or record.timer.done())
+            self.assertIsNone(self.session.pending_reroute)
+            self.assertEqual(self.session.chat_id, "chat-of-agent-a")  # the auto chat stays: nothing is discarded
+            self.service.discard_chat.assert_not_called()
+            # a second tap (or the timer firing at the same time) cannot start another generation
+            again, update = self.query(use.callback_data, 55)
+            await reroute_callback(update, self.context)
+            await _drain()
+            generation.assert_called_once()
+
     async def test_tap_after_the_grace_period_is_expired(self) -> None:
         await self.idle_message(grace=0.01)
-        data = self.markup_buttons()[0].callback_data
+        data = self.markup_buttons()[1].callback_data
         with patch("src.telegram.bot._send_generation", new=AsyncMock()) as generation:
             await asyncio.sleep(0.1)
         query, update = self.query(data, 55)
@@ -354,7 +376,7 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
         generation.assert_not_called()
         self.assertEqual(self.session.chat_id, "chat-of-agent-a")
         self.assertEqual(self.session.pending_reroute.previous_chat_id, "x1")
-        self.assertEqual(len(self.markup_buttons()), 2)
+        self.assertEqual(len(self.markup_buttons()), 3)
 
     async def test_persisted_activity_newer_than_memory_keeps_the_chat(self) -> None:
         self.session.last_message_at = datetime.now(timezone.utc) - timedelta(hours=3)
@@ -388,7 +410,7 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
         from src.service.chat import UnknownChat
         await self.idle_message()
         self.service.chat_summary.side_effect = UnknownChat("unknown chat: {chat_id}", chat_id="old-chat")
-        query, update = self.query(self.markup_buttons()[0].callback_data, 55)
+        query, update = self.query(self.markup_buttons()[1].callback_data, 55)
         with self.assertLogs("recall.telegram", level="WARNING"):
             await reroute_callback(update, self.context)
         self.assertTrue(query.answer.await_args.kwargs["show_alert"])
