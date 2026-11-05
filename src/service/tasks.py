@@ -728,6 +728,10 @@ class TaskManager:
         if target is not None:  # the message of an existing agent says who asks, so it does not take the task for the user's words
             text = f"Task from {parent_name or parent.agent_id} ({user_id})\n\n{text}"
         self._emit("task_started", user_id, task_id=task_id, agent_id=parent.agent_id, chat_id=parent.chat_id, status="running")
+        try:  # into the parent's reply stream NOW: a `wait=true` task_start returns only when the worker ends
+            parent.emit("task_started", {"task_id": task_id, "goal": goal[:300], "title": record["title"], "chat_id": chat_id})
+        except Exception:
+            logger.warning("could not announce task %s in the parent stream", task_id, exc_info=True)
         self._start_threads(live, text)
         return live
 

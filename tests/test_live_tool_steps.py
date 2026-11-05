@@ -107,6 +107,31 @@ class LiveToolStepTests(steering.SteeringFixture):
         self.assertEqual(rest[0].data["id"], "c1")
         consumer.join(3)
 
+    def test_text_deltas_after_a_tool_hop_stay_separate_live_events(self) -> None:
+        """Regression: the answer streams on every hop; nothing between provider and subscriber merges it."""
+        key = ("user-one", "agent-one")
+
+        def response(messages, model, **kwargs):
+            if any(m["role"] == "tool" for m in messages):
+                yield ("reasoning", "think ")
+                for piece in ("Hel", "lo ", "there"):
+                    yield ("content", piece)
+                yield {"response": "Hello there", "usage": None, "tool_calls": None}
+            else:
+                yield {"tool_calls": [{"id": "c1", "name": "write", "arguments": {}}]}
+
+        def factory(user, agent, chat):
+            instance = self._factory(user, agent, chat)
+            instance._tool_handlers = {"write": lambda: "ok"}
+            return instance
+
+        self.providers[key].invoke.side_effect = response
+        self.service._agent_factory = factory
+        events = list(self._send("Go"))
+        self.assertEqual([e.text for e in events if e.kind == "text"], ["Hel", "lo ", "there"])
+        kinds = [e.kind for e in events]
+        self.assertLess(kinds.index("tool"), kinds.index("text"))
+
 
 if __name__ == "__main__":
     unittest.main()

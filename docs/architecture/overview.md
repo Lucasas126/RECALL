@@ -269,6 +269,12 @@ token. `Agent._take_assoc_result` uses its outcome once per turn:
   finished tool calls only when the call ends (Claude subscription) still show them, and
   a call that already finished its tool calls is not restarted; the hint then reaches
   the model on the next hop
+- streaming after tool hops: every layer (provider, `Agent._stream_reply`, `ChatService`,
+  SSE) forwards each text delta as its own event on every hop (regression test in
+  `tests/test_live_tool_steps.py`). With the Claude subscription, Sonnet 5.5's upstream
+  stream for a request whose last message is a tool result arrives in one burst
+  (measured: `message_start` and all deltas within ~10 ms), so the answer looks
+  unstreamed on that model/hop; this is upstream timing, not RECALL buffering
 - nothing found, or the search fails: the reply is never touched (a warning is logged
   for failures)
 - not finished when the reply completes, or the turn is interrupted or steered: the

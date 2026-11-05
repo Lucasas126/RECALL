@@ -204,13 +204,15 @@ class ChatEvent:
     after the reply), `interrupted` (partial answer in `text`, reasoning/actions in `data`) or
     `notice` (a warning about how the request was handled, in `text`, sent before the reply),
     `approval` (a tool waits for the user's go-ahead; `data`: id, tool, backend, command, cwd, reason, risk, timeout_seconds,
-    expires_at) or `approval_resolved` (`data`: id, decision approved|denied, reason). The reply resumes by itself
+    expires_at) or `approval_resolved` (`data`: id, decision approved|denied, reason), or `task_started` (a task was
+    launched while its `task_start` call is still running, e.g. `wait=true`; `data`: task_id, goal, title, chat_id of the
+    worker). The reply resumes by itself
     once the approval is answered through `resolve_approval`, times out or is cancelled.
     Non-streaming replies arrive as `tool` events followed by one `text` event. All events
     carry a generation id so adapters can distinguish overlapping deliveries.
     """
 
-    kind: Literal["reasoning", "text", "tool_start", "tool", "usage", "interrupted", "memory", "notice", "approval", "approval_resolved"]
+    kind: Literal["reasoning", "text", "tool_start", "tool", "usage", "interrupted", "memory", "notice", "approval", "approval_resolved", "task_started"]
     text: str = ""
     data: Optional[dict] = None
     generation_id: str = ""

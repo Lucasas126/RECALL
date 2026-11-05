@@ -107,7 +107,7 @@ steering (a new message) or `interrupted` ends it early. Chat summaries (`GET /a
 
 `GET /api/agents/<agent_id>/chats/<chat_id>/stream` attaches another viewer (another tab, a page load) to the reply that is
 running now. It returns the same SSE frames as the `messages` stream (`reasoning`, `text`, `tool_start`, `tool`, `memory`, `approval`,
-`approval_resolved`, `notice`, `usage`, `interrupted`, `error`, then `done`, each with the generation `id:`), starting with
+`approval_resolved`, `task_started`, `notice`, `usage`, `interrupted`, `error`, then `done`, each with the generation `id:`), starting with
 the events produced so far (consecutive `reasoning`/`text` chunks arrive merged, and the replay keeps at most the last
 5000 events) and continuing live until the reply ends. Viewers do not take events from each other and the stream of the
 original `messages` request is unchanged; closing a viewer does not cancel the reply. Codes: `200` SSE; `204` (empty body)
@@ -153,6 +153,8 @@ data: {"id": "9f2c1a7be034", "decision": "approved", "reason": "approved"}
 `sandbox_read`, `sandbox_write`, `sandbox_patch` or `sandbox_search`; `command` is the command line or a short description of the
 file operation. `decision` is `approved` or `denied`; `reason` is `approved`, `denied by user`, `timed out`, `cancelled` or
 `service shutdown`. The stream stays open and silent between the two events, and the reply resumes by itself afterwards.
+
+`task_started` (`{"task_id", "goal", "title", "chat_id"}`, `chat_id` of the worker) is sent as soon as a task launched by this reply exists, so a `task_start` call that is still running (`wait=true` blocks until the worker ends) can already show its card with the Open chat button; the same stream also has the final `tool` event with the result.
 
 `GET /api/agents/<agent_id>/chats/<chat_id>/approvals` returns the chat's pending approvals (same objects as the `approval`
 event; `[]` when none), for clients that connect after the event was sent.
