@@ -25,6 +25,13 @@ class RunContext:
     interactive: bool = True  # a person is attached and can answer an approval request
     tasks: Any = None  # TaskManager: what the `delegate` tools launch tasks through
     task_launches: int = 0  # tasks launched by this run (one parent turn), against max_launches_per_turn
+    # a subagent task's run asks its PARENT chat (agent id, chat id) for approvals, so the cards appear where the user is
+    approval_target: tuple[str, str] | None = None
+    task: dict | None = None  # attribution of that run's approvals: {"id", "title", "kind" (ephemeral|agent), "worker"}
+    # where the approval/approval_resolved events go instead of `emit` (the task manager's events for the parent chat)
+    approval_emit: Callable[[str, dict], None] | None = None
+    # called with True when the run starts waiting for an approval and False when it stops (pauses a task's timeout)
+    approval_wait: Callable[[bool], None] | None = None
 
 
 _current: ContextVar[RunContext | None] = ContextVar("recall_terminal_run", default=None)

@@ -42,6 +42,10 @@ On a `local` backend, `terminal` and the `sandbox_*` tools refuse, in every appr
 
 When nobody can answer (no attached client, and every dream session) the policy never waits: `manual` denies everything, `smart` runs normal actions and denies dangerous ones, `off` runs everything except the hardline. Dreams use the terminal only with `terminal.allow_in_dream: true` and `terminal` in `dream.tools`.
 
+## Workers launched with `task_start`
+
+An agent can hand a worker some of its backends with `task_start(backends=[...])` (see the delegation page). For the worker those backends are always `manual`, even if the agent's mode is `off` or `smart` (`local` too), and a worker never gets a backend its parent lacks. Its approval cards appear in the chat that launched the task (web or Telegram, not relayed to the other channel), labelled "Task <title> (ephemeral) wants to run:"; the user answering resumes the worker, a timeout denies, and the task's own timeout is paused while it waits. Hardline rules, dangerous detection and protected paths apply unchanged. A worker run nobody watches follows the unattended rules above.
+
 ## Audit and privacy
 
 Every executed or refused action appends a JSON line to `data/<user_id>/<agent_id>/terminal_audit.jsonl` (decision, command redacted, exit code); you cannot read it. Commands and outputs go to the model provider like the rest of the conversation: never print secrets into your context. The user can test a backend with `python -m src.admin terminal-test --user <user_id> --backend <name>`.

@@ -43,10 +43,10 @@ The web **Agents** tab configures these groups for each agent:
 
 <a id="delegate"></a>
 - `delegate`: seven tools, all returning compact JSON (or `error: ...` text), only for the chat that launched the task.
-  - `task_start(goal, context, instructions, tools, model, timeout_s, wait=false, wake=true)` runs a task in a hidden worker chat. By default it returns `{id, status: "running"}` at once and the
+  - `task_start(goal, context, instructions, tools, backends, model, timeout_s, wait=false, wake=true)` runs a task in a hidden worker chat. By default it returns `{id, status: "running"}` at once and the
     result arrives later as a message in the chat (a *wake* turn, see the [delegation guide](../user-guide/delegation.md#results-wake-the-agent)); `wait=true` blocks and returns the result (`id`,
     `status` `done|failed|cancelled|timed_out`, `reason`, capped `result`, `tokens`); `wake=false` records the result silently (fire-and-forget). `instructions` is the worker's system prompt (no inherited SOUL);
-    `tools` can only name `web`, and only if the agent has it. The description states the limits (3 running tasks per chat, 4 per user, 10 minutes and 200 000 tokens per task, 8000 result characters, depth 1).
+    `tools` can only name `web`, and only if the agent has it. `backends` names terminal backends the agent itself has (enum in the schema, empty when it has no terminal): the worker then gets the terminal group for those backends, always on `manual` approvals, asked in the launching chat and attributed to the task; the task's timeout is paused while it waits (see [delegation](../user-guide/delegation.md#terminal-and-approvals)). The description states the limits (3 running tasks per chat, 4 per user, 10 minutes and 200 000 tokens per task, 8000 result characters, depth 1).
   - `task_list(status="")`: one line per task of this chat, `id status [unread] age title`.
   - `task_result(id, full=false)`: the capped result, or with `full` the worker's whole final answer (up to 50 000 characters); status only while it runs. Marks the result consumed.
   - `task_steer(id, text)`: correct a *running* task; its reply is interrupted (partial kept) and continues with the correction.
@@ -58,7 +58,9 @@ The web **Agents** tab configures these groups for each agent:
 
 In a [disposable chat](../user-guide/memory.md#disposable-chats) the write tools of
 `memory_edit`, `self` (`memory`, `skill_manage`, `soul_edit`) and `folders_edit` are
-removed, whatever the groups, and the whole `terminal` group and the `delegate` tools are not built; the read tools stay.
+removed, whatever the groups, and the whole `terminal` group and the `delegate` tools are not built; the read tools stay. The exception is the hidden chat of a
+subagent task that was granted terminal backends: it is excluded from learning (no Dream, no indexing) like any disposable chat but keeps the terminal group it was granted, restricted to those
+backends and to `manual` approvals; its memory, self and folder-edit tools stay removed.
 
 Without `tool_groups`, agents get `memory_read`, `memory_edit`, `web` and
 `self`. `skill_view` is added whenever the agent has skills, even without

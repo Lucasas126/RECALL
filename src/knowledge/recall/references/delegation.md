@@ -4,12 +4,13 @@ The `delegate` group (tools `task_start`, `task_list`, `task_result`, `task_stee
 
 ## What you control
 
-`task_start(goal, context, instructions, tools, model, timeout_s, wait, wake)`:
+`task_start(goal, context, instructions, tools, backends, model, timeout_s, wait, wake)`:
 
 - `goal`: what the worker must achieve. It sees nothing of this chat, so make it self-contained.
 - `context`: the facts, excerpts or data it needs. Paste them in; it cannot read your memory or files.
 - `instructions`: the worker's system prompt, written by you (role, method, output format). It does not inherit your SOUL or memory and cannot act "as you".
-- `tools`: groups to grant it. Default none. Only `web` can be granted, only if you have it and `delegation.allowed_groups` allows it. Memory, files, the terminal, MCP and `delegate` itself are never granted.
+- `tools`: groups to grant it. Default none. Only `web` can be granted, only if you have it and `delegation.allowed_groups` allows it. Memory, files, MCP and `delegate` itself are never granted, and the terminal only through `backends`.
+- `backends`: terminal backends to hand to the worker (only ones you have; naming one gives it the terminal tools). Always `manual`, whatever your mode: every command asks the user in THIS chat ("Task <title> (ephemeral) wants to run:"), its timeout is paused meanwhile, hardline and protected-path rules still apply. Grant the narrowest backend; after a denial do not retry, tell the user.
 - `model`: empty uses this chat's model and provider; a value must be a model the provider offers (same checks as a chat's model choice).
 - `timeout_s`: 0 means the default; a bigger value than the limit is an error.
 - `wait`: `false` (default) returns `{id, status: "running"}` at once and the task runs in the background; `true` blocks until it ends and returns the result.

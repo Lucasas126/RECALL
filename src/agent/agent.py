@@ -14,7 +14,7 @@ from src.providers.routing import provider_for
 from src.agent import usage
 from src.agent import associative
 from src.agent.profile import AgentProfile, load_profile, system_prompt
-from src.agent.tool_groups import DISPOSABLE_BLOCKED_TOOLS
+from src.agent.tool_groups import DISPOSABLE_BLOCKED_TOOLS, TOOL_GROUP_TOOLS
 from src.agent.tools import build_tools, chat_folder_options
 from src.agent.toolsets.delegate import delegate_notice, worker_prompt
 from src.agent.toolsets.terminal import terminal_notice
@@ -198,6 +198,20 @@ class Agent:
         self.profile = AgentProfile(soul=worker_prompt(task.instructions))
         self.config.associative_memory = "off"
         self.config.mcp = {}
+        cfg = self.config.terminal
+        if cfg is not None and "terminal" in task.groups:
+            # only the granted backends the parent has, every one on manual approvals (a child never gets `off`/`smart`)
+            keep = [name for name in task.backends if name in cfg.backends and name in self.config.terminal_backends]
+            if keep:
+                self.config.terminal = cfg.model_copy(update={
+                    "backends": {name: cfg.backends[name].model_copy(update={"approvals": "manual"}) for name in keep},
+                    "default_backend": cfg.default_backend if cfg.default_backend in keep else keep[0],
+                })
+                self.config.terminal_backends = {name: self.config.terminal_backends[name] for name in keep}
+            else:
+                self.config.terminal = None
+        elif cfg is not None:
+            self.config.terminal = None
 
     def _build_base_tools(self) -> tuple[list[dict], dict]:
         config = self.config
@@ -209,7 +223,15 @@ class Agent:
         return build_tools(
             self, TavilyClient.from_config(TAVILY), groups, config.allow, config.deny,
             skill_view=bool(self.profile.skills), disposable=self._disposable,
+            worker_terminal=self._task is not None,
         )
+
+    def _blocked_tools(self) -> frozenset[str]:
+        """Tools a disposable chat refuses. 'Excluded from learning' is not 'tools blocked': a task's worker keeps the
+        terminal it was granted (every action still needs a manual approval); memory, self and folder edits stay blocked."""
+        if self._task is not None and "terminal" in self._task.groups:
+            return DISPOSABLE_BLOCKED_TOOLS - frozenset(TOOL_GROUP_TOOLS["terminal"])
+        return DISPOSABLE_BLOCKED_TOOLS
 
     def _report_usage(self, api_usage) -> None:
         """Tell the usage hook (a task's token watchdog) what one model call used."""
@@ -757,7 +779,7 @@ class Agent:
                     args = {}
             handler = self._tool_handlers.get(name)
             failed = False
-            if self._disposable and name in DISPOSABLE_BLOCKED_TOOLS:  # defence in depth: the specs already omit these
+            if self._disposable and name in self._blocked_tools():  # defence in depth: the specs already omit these
                 result, failed = f"error: '{name}' is not available in a disposable chat", True
             elif handler is None:
                 result, failed = f"error: unknown tool '{name}'", True

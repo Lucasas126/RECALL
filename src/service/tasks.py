@@ -268,6 +268,27 @@ class _LiveTask:
     stop_reason: str | None = None  # why a stop was requested: timeout, token_limit, stopped, parent_cancelled, shutdown
     partial: list[str] = field(default_factory=list)  # text the worker streamed, for a task that does not finish
     guard: threading.Lock = field(default_factory=threading.Lock)
+    waits: int = 0  # approvals the worker is waiting on right now (the timeout is paused while there is one)
+    wait_since: float = 0.0  # monotonic time the oldest of them started
+    paused: float = 0.0  # seconds already spent waiting for approvals
+
+    def approval_wait(self, waiting: bool) -> None:
+        """The worker starts (True) or stops (False) waiting for an approval: pause and resume the wall-clock timeout."""
+        with self.guard:
+            if waiting:
+                if self.waits == 0:
+                    self.wait_since = monotonic()
+                self.waits += 1
+            elif self.waits > 0:
+                self.waits -= 1
+                if self.waits == 0:
+                    self.paused += monotonic() - self.wait_since
+
+    def active_seconds(self) -> float:
+        """Wall-clock seconds this run has been working: elapsed time minus the time awaiting approvals."""
+        with self.guard:
+            paused = self.paused + (monotonic() - self.wait_since if self.waits else 0.0)
+        return monotonic() - self.started - paused
 
 
 class TaskManager:
@@ -311,11 +332,49 @@ class TaskManager:
             except Exception:
                 logger.warning("a task event listener failed", exc_info=True)
 
+    # ------------------------------------------------------------------ approvals of a worker
+
+    def bind_worker(self, context: RunContext, task: ChatTask) -> RunContext:
+        """Point a worker run's approvals at the PARENT chat, attributed to the task (decision 6: that channel only).
+
+        The approval cards are then registered under (parent agent, parent chat), listed there after a reload and
+        announced to the viewers of the parent chat with `task_approval` / `task_approval_resolved` events; resolving
+        one resumes the worker. While the worker waits, its wall-clock timeout is paused. `task.unattended` makes the
+        run non-interactive: manual and dangerous actions are denied, nobody is asked.
+        """
+        user_id, agent_id, chat_id = context.user_id, task.parent_agent_id, task.parent_chat_id
+        record = self.store.get(user_id, task.task_id) or {}
+        target = record.get("target") or {}
+        kind = target.get("kind", "ephemeral")
+        worker = "ephemeral" if kind == "ephemeral" else str(target.get("agent_id") or "agent")
+        context.approval_target = (agent_id, chat_id)
+        context.task = {"id": task.task_id, "title": task.title or record.get("title") or task.task_id, "kind": kind, "worker": worker}
+        context.interactive = not task.unattended
+
+        def emit(kind_: str, data: dict) -> None:
+            self._emit(f"task_{kind_}", user_id, agent_id=agent_id, chat_id=chat_id, task_id=task.task_id, data=data)
+
+        def waiting(on: bool) -> None:
+            with self._guard:
+                live = self._live.get((user_id, task.task_id))
+            if live is not None:
+                live.approval_wait(on)
+
+        context.approval_emit = emit
+        context.approval_wait = waiting
+        return context
+
+    def awaiting_approval(self, user_id: str, task_id: str) -> int:
+        """Approvals the worker of a task is waiting on right now (0 when none)."""
+        broker = getattr(self._service, "_approvals", None)
+        return broker.pending_for_task(user_id, task_id) if broker is not None else 0
+
     # ------------------------------------------------------------------ launching
 
     def run(
         self, parent: RunContext, *, config: Any, limits: TaskLimits, grantable: list[str], goal: str, context: str,
         instructions: str, groups: list[str], model: str, timeout_s: int,
+        backends: list[str] | None = None, grantable_backends: list[str] | None = None,
     ) -> dict:
         """Launch a task and block until it ends (phase 1's `task_start(wait=true)`); returns the result summary.
 
@@ -324,6 +383,7 @@ class TaskManager:
         live = self.launch(
             parent, limits=limits, grantable=grantable, goal=goal, context=context, instructions=instructions,
             groups=groups, model=model, timeout_s=timeout_s, wake=False,
+            backends=backends, grantable_backends=grantable_backends,
         )
         try:
             while not live.done.wait(0.2):
@@ -341,6 +401,7 @@ class TaskManager:
     def launch(
         self, parent: RunContext, *, limits: TaskLimits, grantable: list[str], goal: str, context: str,
         instructions: str, groups: list[str], model: str, timeout_s: int, wake: bool = True,
+        backends: list[str] | None = None, grantable_backends: list[str] | None = None,
     ) -> _LiveTask:
         """Check every limit and the grant, create the record and the hidden chat, and start the worker.
 
@@ -361,6 +422,14 @@ class TaskManager:
                 f"cannot grant {', '.join(bad)} to a task; grantable groups for this agent: "
                 f"{', '.join(grantable) or 'none'} (never more than you have, and never delegate, memory, files or the terminal)"
             )
+        backends = list(dict.fromkeys(backends or []))
+        if backends:  # a terminal grant: only backends the parent has, and only with the parent's own terminal group
+            if bad := [name for name in backends if name not in (grantable_backends or [])]:
+                raise TaskError(
+                    f"cannot grant backend {', '.join(bad)} to a task; backends you can grant: "
+                    f"{', '.join(grantable_backends or []) or 'none (you have no terminal)'} (never more than you have)"
+                )
+            groups = [*groups, "terminal"]  # the grant of a backend is the grant of the terminal tools
         timeout_s = int(timeout_s or 0)
         if timeout_s < 0 or timeout_s > limits.timeout_seconds:
             raise TaskError(f"limit: timeout_s must be between 1 and {limits.timeout_seconds} seconds (0 = {limits.timeout_seconds})")
@@ -388,7 +457,7 @@ class TaskManager:
             "parent": {"agent_id": parent.agent_id, "chat_id": parent.chat_id},
             "depth": 1, "target": {"kind": "ephemeral", "agent_id": parent.agent_id},
             "child": {"agent_id": parent.agent_id, "chat_id": None},
-            "title": _title(goal), "goal": goal, "grant": {"groups": groups},
+            "title": _title(goal), "goal": goal, "grant": {"groups": groups, "backends": backends},
             "limits": {"timeout_s": timeout_s, "max_tokens": limits.max_tokens},
             "status": "running", "reason": None, "created_at": _now(), "started_at": _now(), "ended_at": None,
             "usage": {"in": 0, "out": 0}, "result": None, "error": None,
@@ -403,7 +472,7 @@ class TaskManager:
         parent.task_launches += 1
         live = _LiveTask(user_id, task_id, parent.agent_id, "", limits, timeout_s, lock, parent_chat=parent.chat_id)
         try:
-            chat_id = self._create_child_chat(parent, task_id, groups, instructions, model)
+            chat_id = self._create_child_chat(parent, task_id, groups, instructions, model, backends, record["title"])
         except Exception as exc:
             self._finish(live, "failed", reason="launch_error", error=str(exc)[:300])
             raise TaskError(str(exc)) if not isinstance(exc, TaskError) else exc
@@ -437,12 +506,15 @@ class TaskManager:
                 "wait for one to finish (task_wait), then launch again"
             )
 
-    def _create_child_chat(self, parent: RunContext, task_id: str, groups: list[str], instructions: str, model: str) -> str:
+    def _create_child_chat(
+        self, parent: RunContext, task_id: str, groups: list[str], instructions: str, model: str,
+        backends: list[str] | None = None, title: str = "",
+    ) -> str:
         service = self._service
         conversations = service._conversations(parent.user_id, parent.agent_id)
         mark = ChatTask(
             task_id=task_id, parent_agent_id=parent.agent_id, parent_chat_id=parent.chat_id, depth=1,
-            groups=groups, instructions=instructions, created_at=_now(),
+            groups=groups, instructions=instructions, created_at=_now(), backends=list(backends or []), title=title,
         )
         chat_id = conversations.create(origin=_CHILD_ORIGIN, task=mark)
         try:
@@ -585,7 +657,7 @@ class TaskManager:
         """Wall-clock and token watchdog: asks the worker to stop, and ends the task itself if it will not."""
         while not live.done.wait(self.poll_seconds):
             if live.stop_reason is None:
-                if monotonic() - live.started >= live.timeout_s:
+                if live.active_seconds() >= live.timeout_s:  # the time spent awaiting an approval does not count
                     self._request_stop(live, "timeout")
                 elif live.tokens_in + live.tokens_out >= live.limits.max_tokens:
                     self._request_stop(live, "token_limit")
@@ -1079,6 +1151,10 @@ class TaskManager:
             "child": {"agent_id": (record.get("child") or {}).get("agent_id"), "chat_id": (record.get("child") or {}).get("chat_id")},
             "result_preview": text[:300], "result_truncated": bool(result.get("truncated")),
             "error": (record.get("error") or {}).get("message"),
+            "backends": list((record.get("grant") or {}).get("backends") or []),
+            "awaiting_approval": (
+                self.awaiting_approval(record.get("user_id", ""), record["id"]) if record.get("status") not in FINAL_STATES else 0
+            ),
         }
         if full:
             out["result"] = text[:FULL_RESULT_CHARS]

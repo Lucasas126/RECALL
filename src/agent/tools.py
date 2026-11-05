@@ -10,7 +10,7 @@ from src.agent.toolsets.tags import build_tag_tools
 from src.agent.toolsets.folders import build_folder_tools
 from src.agent.toolsets.terminal import build_terminal_tools
 from src.agent.toolsets.web import build_web_tools
-from src.agent.tool_groups import DISPOSABLE_BLOCKED_TOOLS, validate_tool_groups
+from src.agent.tool_groups import DISPOSABLE_BLOCKED_TOOLS, TOOL_GROUP_TOOLS, validate_tool_groups
 from src.config.models import ResolvedAgent
 from src.providers.tavily import TavilyClient
 
@@ -46,12 +46,14 @@ def build_tools(
     tool_groups: list[str] | None = None,
     allow: list[str] | None = None,
     deny: list[str] | None = None,
-    *, skill_view: bool = False, disposable: bool = False,
+    *, skill_view: bool = False, disposable: bool = False, worker_terminal: bool = False,
 ) -> tuple[list[dict], dict[str, Callable[..., str]]]:
     """Build the tool specs and handlers bound to an agent.
 
     `skill_view` adds that tool even without the `self` group, so agents can always load their skills.
     `disposable` drops every tool that writes the agent's own persistent state (read tools stay).
+    `worker_terminal` (a subagent task's chat) keeps the terminal group it was granted although the chat is disposable:
+    being excluded from learning does not block the terminal (its approvals are manual, see `Agent._become_worker`).
     """
     selected = validate_tool_groups(tool_groups or [])
     base_tools = []
@@ -68,7 +70,7 @@ def build_tools(
         base_tools.extend(build_folder_tools(agent, writable="folders_edit" in selected and not disposable))
     if web_client is not None and "web" in selected:
         base_tools.extend(build_web_tools(web_client))
-    if "terminal" in selected and not disposable:
+    if "terminal" in selected and (not disposable or worker_terminal):
         base_tools.extend(build_terminal_tools(agent.config))
     if "delegate" in selected:  # a disposable chat (and so a task's own chat) never launches tasks: DISPOSABLE_BLOCKED_TOOLS
         base_tools.extend(build_delegate_tools(agent.config))
@@ -76,7 +78,8 @@ def build_tools(
         func.tool_spec["function"]["name"]: func
         for func in base_tools
     }
-    denied = set(deny or ()) | (DISPOSABLE_BLOCKED_TOOLS if disposable else set())
+    blocked = DISPOSABLE_BLOCKED_TOOLS - (set(TOOL_GROUP_TOOLS["terminal"]) if worker_terminal else set())
+    denied = set(deny or ()) | (blocked if disposable else set())
     allowed = set(allow) if allow is not None else None
     funcs = [
         tools_by_name[name] for name in _ORDER

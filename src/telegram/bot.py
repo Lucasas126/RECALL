@@ -1576,16 +1576,26 @@ class _ApprovalCard:
     body: str  # Markdown shown above the outcome line
 
 
+def task_attribution(language: str, task: dict | None) -> str:
+    """'Task <title> (ephemeral|<agent>) wants to run:' for an approval asked by a subagent task, else ''."""
+    if not isinstance(task, dict) or not task.get("id"):
+        return ""
+    return message(
+        language, "Task {title} ({worker}) wants to run:",
+        title=str(task.get("title") or task["id"]), worker=str(task.get("worker") or "ephemeral"),
+    )
+
+
 def _approval_text(language: str, data: dict) -> str:
     command = str(data.get("command", ""))
     if len(command) > _APPROVAL_COMMAND_CHARS:
         command = command[:_APPROVAL_COMMAND_CHARS] + "…"
     command = command.replace("```", "``\u200b`")
     risk = message(language, "dangerous") if data.get("risk") == "dangerous" else message(language, "needs your approval")
-    lines = [
-        message(language, "🔐 *Approval needed* ({risk})", risk=risk),
-        "```\n" + command + "\n```",
-    ]
+    lines = [message(language, "🔐 *Approval needed* ({risk})", risk=risk)]
+    if label := task_attribution(language, data.get("task")):
+        lines.append(_md_escape(label))
+    lines.append("```\n" + command + "\n```")
     if data.get("backend"):
         lines.append(message(language, "Backend: {backend}", backend=_md_escape(str(data["backend"]))))
     lines.append(message(language, "Working directory: {cwd}", cwd=_md_escape(str(data.get("cwd", "")))))
@@ -1927,13 +1937,24 @@ async def _send_wake(bot, state: TelegramBotState, telegram_id: int, session: Te
 
 async def _handle_task_event(bot, state: TelegramBotState, event: dict) -> None:
     kind = event.get("kind")
-    if kind not in ("task_started", "task_finished", "task_wake"):
+    if kind not in ("task_started", "task_finished", "task_wake", "task_approval", "task_approval_resolved"):
         return
     try:
         targets = await asyncio.to_thread(_task_targets, state, event)
         for telegram_id, session in targets:
             try:
-                if kind == "task_wake":
+                if kind == "task_approval":  # a worker's approval is asked in the parent's Telegram chat, attributed to the task
+                    await _send_approval(
+                        SimpleNamespace(bot=bot), state,
+                        TelegramSession(event["user_id"], event["agent_id"], event["chat_id"]),
+                        telegram_id, event.get("data") or {}, session.language,
+                    )
+                elif kind == "task_approval_resolved":
+                    data = event.get("data") or {}
+                    await _close_approval(
+                        bot, state, str(data.get("id")), str(data.get("decision")), str(data.get("reason", "")), session.language,
+                    )
+                elif kind == "task_wake":
                     await _send_wake(bot, state, telegram_id, session, event)
                 else:
                     await _send_task_line(bot, state, telegram_id, session, event)
@@ -1982,9 +2003,13 @@ async def tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.effective_message.reply_text(_msg(session, "No tasks in this chat."))
         return
     lines, rows = [], []
+    manager = _task_manager(state)
     for record in records[-15:]:
         icon = _TASK_ICONS.get(record["status"], "•")
-        lines.append(f"{icon} {record['id']} · {record['title']} — {_task_status_text(session.language, record['status'])} · {_task_elapsed(record)}")
+        status = _task_status_text(session.language, record["status"])
+        if record["status"] == "running" and manager.awaiting_approval(session.user_id, record["id"]):
+            status = _msg(session, "status: awaiting approval")
+        lines.append(f"{icon} {record['id']} · {record['title']} — {status} · {_task_elapsed(record)}")
         if record["status"] == "running":
             rows.append([InlineKeyboardButton(
                 _msg(session, "⏹ Stop {title}", title=record["title"][:28]), callback_data=f"{_TASK_CALLBACK}:{record['id']}:stop")])
