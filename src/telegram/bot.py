@@ -11,6 +11,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
+from types import SimpleNamespace
 from typing import Any, Callable, get_args
 
 import telegramify_markdown
@@ -32,6 +33,7 @@ from telegram.ext import (
     filters,
 )
 
+from src.agent.toolsets.delegate import TaskError
 from src.config.favorites import FavoritesError
 from src.config.models import ReasoningEffort
 from src.config.preferences import PreferencesError, UserPreferences
@@ -56,6 +58,8 @@ _CHAT_IDLE_TIMEOUT = timedelta(minutes=TELEGRAM_CHAT_IDLE_MINUTES)  # telegram.c
 _PANEL_CALLBACK = "p"
 _REROUTE_CALLBACK = "r"
 _APPROVAL_CALLBACK = "ap"
+_TASK_CALLBACK = "tk"
+_TASK_RESULT_CHARS = 1500
 _APPROVAL_COMMAND_CHARS = 900
 # seconds the answer waits after an idle new chat is announced, so the user can still pick another place;
 # opening the agent picker gives the user more time
@@ -110,6 +114,11 @@ class TelegramBotState:
     service: ChatService
     sessions: dict[int, TelegramSession] = field(default_factory=dict)
     approvals: dict[str, "_ApprovalCard"] = field(default_factory=dict)  # pending approval id -> its message
+    task_cards: dict[str, str] = field(default_factory=dict)  # task id -> user id that got its [Stop] button
+    task_lines: dict[str, tuple[int, int]] = field(default_factory=dict)  # task id -> (telegram chat, message) of its status line
+    busy: dict[tuple[str, str, str], int] = field(default_factory=dict)  # (user, agent, chat) -> reply streams in flight
+    loop: "asyncio.AbstractEventLoop | None" = None  # the bot's loop: task events arrive on worker threads
+    unsubscribe: "Callable[[], None] | None" = None
 
 
 @dataclass
@@ -171,6 +180,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if _session(update, state) is None:
         await _unauthorized(update)
         return
+    language = getattr(_session(update, state), "language", "en")
     await update.effective_message.reply_text(
         f"{version_label()}\n\n"
         "Available commands:\n\n"
@@ -184,8 +194,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/dream — Last dream session, schedule and pending chats\n"
         "/dreamstart — Start a dream session now\n"
         "/dreamcancel — Stop the running dream session\n"
-        "/help — Show this help\n\n"
-        "You can send text, images, audio, voice messages, and video directly."
+        "/help — Show this help\n"
+        + message(language, "/tasks — Subagent tasks of this chat, with a Stop button\n"
+                            "/task — /task <id> shows a task; /task <id> <text> corrects a running one\n")
+        + "\nYou can send text, images, audio, voice messages, and video directly."
     )
 
 
@@ -1683,6 +1695,8 @@ async def _send_generation(
     await stream.start()
     content = _ReplyContent()
     language = session.language
+    busy_key = (user_id, agent_id, chat_id)
+    state.busy[busy_key] = state.busy.get(busy_key, 0) + 1  # a task wake waits instead of echoing this reply
     try:
         preferences = state.service.get_preferences(user_id)
         show_thinking = preferences["show_thinking"]
@@ -1737,6 +1751,313 @@ async def _send_generation(
         await stream.finish([(
             message(language, "Generation failed: {error}", error=error_message(language, exc)), [],
         )])
+    finally:
+        left = state.busy.get(busy_key, 1) - 1
+        if left > 0:
+            state.busy[busy_key] = left
+        else:
+            state.busy.pop(busy_key, None)
+
+
+# ---------------------------------------------------------------------------------------------- subagent tasks
+# The bot listens to the TaskManager of its own process (docs/project/design-subagents.md sections 8 and 9): one
+# status line when a task of a Telegram chat starts and one when it ends, the wake reply streamed into the private
+# chat, and /tasks and /task to look at, stop and correct tasks.
+
+_TASK_ICONS = {"running": "🧩", "done": "✅", "failed": "⚠️", "cancelled": "⏹", "timed_out": "⌛"}
+
+
+def _task_manager(state: TelegramBotState):
+    return getattr(state.service, "_tasks", None)
+
+
+def _task_elapsed(record: dict) -> str:
+    try:
+        end = datetime.fromisoformat(record["ended_at"]) if record.get("ended_at") else datetime.now().astimezone()
+        seconds = max(0, round((end - datetime.fromisoformat(record["started_at"])).total_seconds()))
+    except (KeyError, TypeError, ValueError):
+        return "?"
+    return f"{seconds}s" if seconds < 90 else f"{seconds // 60}m" if seconds < 5400 else f"{seconds // 3600}h"
+
+
+def _task_status_text(language: str, status: str) -> str:
+    return {
+        "running": message(language, "status: running"),
+        "done": message(language, "status: done"),
+        "failed": message(language, "status: failed"),
+        "cancelled": message(language, "status: cancelled"),
+        "timed_out": message(language, "status: timed out"),
+    }.get(status, status)
+
+
+def _task_line(language: str, record: dict, agent_name: str) -> str:
+    """The one-line status of a task for the start and end messages."""
+    values = {"title": record.get("title") or record.get("id", ""), "agent": agent_name, "elapsed": _task_elapsed(record)}
+    status = record.get("status")
+    if status == "running":
+        return message(language, "🧩 Task started: {title} ({agent})", **values)
+    if status == "done":
+        return message(language, "✅ Task done: {title} ({agent}) · {elapsed}", **values)
+    if status == "cancelled":
+        return message(language, "⏹ Task cancelled: {title} ({agent}) · {elapsed}", **values)
+    if status == "timed_out":
+        return message(language, "⌛ Task timed out: {title} ({agent}) · {elapsed}", **values)
+    if record.get("reason") == "rate_limit":
+        return message(language, "⚠️ Task stopped, plan limit reached: {title} ({agent}) · {elapsed}", **values)
+    return message(language, "⚠️ Task failed: {title} ({agent}) · {elapsed}", **values)
+
+
+def _chat_origin(state: TelegramBotState, user_id: str, agent_id: str, chat_id: str) -> str | None:
+    try:
+        return state.service._conversations(user_id, agent_id).origin(chat_id)
+    except Exception:
+        return None
+
+
+def _task_targets(state: TelegramBotState, event: dict) -> list[tuple[int, TelegramSession]]:
+    """The Telegram chats that show a task event: the user's chat when its parent is the session's current chat or a Telegram chat."""
+    user_id, agent_id, chat_id = event.get("user_id"), event.get("agent_id"), event.get("chat_id")
+    if not (user_id and agent_id and chat_id):
+        return []
+    found = []
+    for telegram_id, session in list(state.sessions.items()):
+        if session.user_id != user_id:
+            continue
+        if session.chat_id == chat_id or _chat_origin(state, user_id, agent_id, chat_id) == "telegram":
+            found.append((telegram_id, session))
+    return found
+
+
+def _chat_label(state: TelegramBotState, session: TelegramSession, event: dict) -> str:
+    """Agent and chat title when the chat is not the session's current one, else the agent name alone."""
+    user_id, agent_id, chat_id = event["user_id"], event["agent_id"], event["chat_id"]
+    name = _agent_name(state.service, user_id, agent_id)
+    if session.chat_id == chat_id and session.agent_id == agent_id:
+        return name
+    title = chat_id[:8]
+    try:
+        title = next((c.get("title") or title for c in state.service.list_chats(user_id, agent_id) if c.get("id") == chat_id), title)
+    except (ServiceError, OSError, ValueError, KeyError):
+        pass
+    return f"{name} · {title}"
+
+
+async def _send_task_line(bot, state: TelegramBotState, telegram_id: int, session: TelegramSession, event: dict) -> None:
+    manager = _task_manager(state)
+    task_id = str(event.get("task_id") or "")
+    record = await asyncio.to_thread(manager.store.get, event["user_id"], task_id)
+    if record is None:
+        return
+    language = session.language
+    label = _chat_label(state, session, event)
+    if event["kind"] == "task_started":
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton(
+            message(language, "⏹ Stop"), callback_data=f"{_TASK_CALLBACK}:{task_id}:stop")]])
+        sent = await bot.send_message(telegram_id, _task_line(language, record, label), reply_markup=markup)
+        state.task_cards[task_id] = event["user_id"]
+        state.task_lines[task_id] = (telegram_id, sent.message_id)
+        return
+    state.task_cards.pop(task_id, None)
+    line = state.task_lines.pop(task_id, None)
+    if line is not None:  # the start message loses its Stop button
+        with suppress(TelegramError):
+            await bot.edit_message_reply_markup(chat_id=line[0], message_id=line[1], reply_markup=None)
+    await bot.send_message(telegram_id, _task_line(language, record, label))
+
+
+async def _send_wake(bot, state: TelegramBotState, telegram_id: int, session: TelegramSession, event: dict) -> None:
+    """Stream the reply of a wake turn into the private chat, like a normal reply but without an incoming Update."""
+    user_id, agent_id, chat_id = event["user_id"], event["agent_id"], event["chat_id"]
+    key = (user_id, agent_id, chat_id)
+    for _ in range(240):  # a reply the user started in this chat is streaming already: the wake runs behind it
+        if key not in state.busy:
+            break
+        await asyncio.sleep(0.5)
+    events = await asyncio.to_thread(state.service.follow, user_id, agent_id, chat_id)
+    if events is None:  # no reply running or queued (already finished)
+        return
+    stream = _ReplyStream(bot, telegram_id, use_draft=True)
+    await stream.start()
+    content = _ReplyContent()
+    language = session.language
+    label = _chat_label(state, session, event)
+    try:
+        preferences = state.service.get_preferences(user_id)
+        show_thinking = preferences["show_thinking"]
+        language = preferences["language"]
+        while True:
+            has_event, item = await _next_event(events)
+            if not has_event:
+                break
+            if item is None:
+                continue
+            if item.kind == "interrupted":
+                content.reconcile(item)
+                content.append("text", message(language, "\n\n_[Interrupted — your latest message is being processed.]_"))
+                await stream.finish(_final_messages(content.parts, show_thinking=show_thinking, agent_name=label))
+                return
+            if item.kind in ("text", "reasoning"):
+                content.append(item.kind, item.text)
+            elif item.kind == "tool" and item.data is not None:
+                content.add_action(item.data)
+            elif item.kind == "notice":
+                content.append("notice", item.text)
+            elif item.kind == "approval" and item.data:
+                await _send_approval(
+                    SimpleNamespace(bot=bot), state, TelegramSession(user_id, agent_id, chat_id), telegram_id, item.data, language,
+                )
+                continue
+            elif item.kind == "approval_resolved" and item.data:
+                await _close_approval(
+                    bot, state, str(item.data.get("id")), str(item.data.get("decision")), str(item.data.get("reason", "")), language,
+                )
+                continue
+            else:
+                continue
+            preview = _final_messages(content.parts, show_thinking=show_thinking)
+            if preview:
+                await stream.update(*preview[-1])
+        if not any(kind == "text" for kind, _ in content.parts):
+            content.append("text", message(language, "_(The model returned no text.)_"))
+        await stream.finish(_final_messages(content.parts, show_thinking=show_thinking, agent_name=label))
+    except Exception as exc:
+        logger.exception("Telegram wake reply failed")
+        await stream.finish([(message(language, "Generation failed: {error}", error=error_message(language, exc)), [])])
+
+
+async def _handle_task_event(bot, state: TelegramBotState, event: dict) -> None:
+    kind = event.get("kind")
+    if kind not in ("task_started", "task_finished", "task_wake"):
+        return
+    try:
+        targets = await asyncio.to_thread(_task_targets, state, event)
+        for telegram_id, session in targets:
+            try:
+                if kind == "task_wake":
+                    await _send_wake(bot, state, telegram_id, session, event)
+                else:
+                    await _send_task_line(bot, state, telegram_id, session, event)
+            except Exception:
+                logger.exception("Telegram task event %s failed", kind)
+    except Exception:
+        logger.exception("Telegram task event %s failed", kind)
+
+
+def _on_task_event(bot, state: TelegramBotState, event: dict) -> None:
+    """TaskManager listener: runs on a worker thread, so it only hands the event over to the bot's loop."""
+    loop = state.loop
+    if loop is None or loop.is_closed():
+        return
+    asyncio.run_coroutine_threadsafe(_handle_task_event(bot, state, event), loop)
+
+
+def _subscribe_tasks(application: Application, state: TelegramBotState) -> None:
+    manager = _task_manager(state)
+    if manager is None:
+        return
+    state.loop = asyncio.get_running_loop()
+    state.unsubscribe = manager.subscribe(lambda event: _on_task_event(application.bot, state, event))
+
+
+def _chat_tasks(state: TelegramBotState, session: TelegramSession) -> list[dict]:
+    manager = _task_manager(state)
+    return [
+        r for r in manager.store.list(session.user_id)
+        if (r["parent"]["agent_id"], r["parent"]["chat_id"]) == (session.agent_id, session.chat_id)
+    ]
+
+
+async def tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """`/tasks` lists the subagent tasks of the current chat, with a [Stop] button per running one."""
+    state: TelegramBotState = context.application.bot_data["state"]
+    session = _session(update, state)
+    if session is None:
+        await _unauthorized(update)
+        return
+    if session.chat_id is None:
+        await update.effective_message.reply_text(_msg(session, "Create a chat first with /newchat."))
+        return
+    records = await asyncio.to_thread(_chat_tasks, state, session)
+    if not records:
+        await update.effective_message.reply_text(_msg(session, "No tasks in this chat."))
+        return
+    lines, rows = [], []
+    for record in records[-15:]:
+        icon = _TASK_ICONS.get(record["status"], "•")
+        lines.append(f"{icon} {record['id']} · {record['title']} — {_task_status_text(session.language, record['status'])} · {_task_elapsed(record)}")
+        if record["status"] == "running":
+            rows.append([InlineKeyboardButton(
+                _msg(session, "⏹ Stop {title}", title=record["title"][:28]), callback_data=f"{_TASK_CALLBACK}:{record['id']}:stop")])
+    markup = InlineKeyboardMarkup(rows) if rows else None
+    await update.effective_message.reply_text("\n".join(lines), reply_markup=markup)
+    for record in records[-15:]:
+        if record["status"] == "running":
+            state.task_cards[record["id"]] = session.user_id
+
+
+async def task_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """`/task <id>` shows a task; `/task <id> <text>` sends a correction to a running one."""
+    state: TelegramBotState = context.application.bot_data["state"]
+    session = _session(update, state)
+    if session is None:
+        await _unauthorized(update)
+        return
+    args = list(context.args or [])
+    reply = update.effective_message.reply_text
+    if not args:
+        await reply(_msg(session, "Usage: /task <id> to see a task, /task <id> <text> to correct a running one. /tasks lists them."))
+        return
+    task_id, text = args[0], " ".join(args[1:]).strip()
+    manager = _task_manager(state)
+    try:
+        if text:
+            await asyncio.to_thread(manager.steer, session.user_id, task_id, text)
+            await reply(_msg(session, "✏️ Correction sent to task {id}.", id=task_id))
+            return
+        record = await asyncio.to_thread(manager.store.get, session.user_id, task_id)
+    except TaskError as exc:
+        await reply(str(exc))
+        return
+    if record is None:
+        await reply(_msg(session, "Unknown task: {id}. /tasks lists the tasks of this chat.", id=task_id))
+        return
+    head = f"{_TASK_ICONS.get(record['status'], '•')} {record['id']} · {record['title']} — " \
+           f"{_task_status_text(session.language, record['status'])} · {_task_elapsed(record)}"
+    result = ((record.get("result") or {}).get("text") or "").strip()
+    if len(result) > _TASK_RESULT_CHARS:
+        result = result[:_TASK_RESULT_CHARS].rstrip() + "…"
+    error = (record.get("error") or {}).get("message")
+    parts = [head] + ([f"⚠️ {error}"] if error else []) + ([result] if result else [])
+    await reply("\n\n".join(parts))
+
+
+async def task_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """[Stop] under a task message or in /tasks."""
+    query = update.callback_query
+    state: TelegramBotState = context.application.bot_data["state"]
+    session = _session(update, state)
+    if session is None:
+        await query.answer()
+        await _unauthorized(update)
+        return
+    parts = (query.data or "").split(":")
+    task_id, action = (parts + ["", ""])[1:3]
+    owner = state.task_cards.get(task_id)
+    if owner is not None and owner != session.user_id:
+        await query.answer(_msg(session, "Only the chat's owner can answer this."), show_alert=True)
+        return
+    manager = _task_manager(state)
+    if action != "stop" or manager is None:
+        await query.answer(_msg(session, "This task is not available."), show_alert=True)
+        return
+    try:
+        outcome = await asyncio.to_thread(manager.stop_task, session.user_id, task_id)
+    except TaskError as exc:
+        await query.answer(str(exc), show_alert=True)
+        return
+    await query.answer(_msg(session, "Task {id}: {status}", id=task_id, status=_task_status_text(session.language, outcome.get("status", ""))))
+    with suppress(TelegramError):
+        await query.edit_message_reply_markup(reply_markup=None)
 
 
 async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1822,16 +2143,21 @@ def build_application(
         BotCommand("dream", "Dream status: last session, schedule, pending chats"),
         BotCommand("dreamstart", "Start a dream session now"),
         BotCommand("dreamcancel", "Stop the running dream session"),
+        BotCommand("tasks", "Subagent tasks of this chat"),
+        BotCommand("task", "Show or correct a subagent task: /task <id> [text]"),
         BotCommand("help", "Show available commands"),
     ]
     async def set_commands(application: Application) -> None:
         await application.bot.set_my_commands(application.bot_data["commands"])
+        _subscribe_tasks(application, state)
         if dream_scheduler:
             state.service.start_dream_scheduler()
 
     application.post_init = set_commands
 
     async def close_service(_: Application) -> None:
+        if state.unsubscribe is not None:
+            state.unsubscribe()
         state.service.close()
 
     application.post_shutdown = close_service
@@ -1841,6 +2167,9 @@ def build_application(
     application.add_handler(CallbackQueryHandler(panel_callback, pattern=rf"^{_PANEL_CALLBACK}:"))
     application.add_handler(CallbackQueryHandler(reroute_callback, pattern=rf"^{_REROUTE_CALLBACK}:"))
     application.add_handler(CallbackQueryHandler(approval_callback, pattern=rf"^{_APPROVAL_CALLBACK}:"))
+    application.add_handler(CallbackQueryHandler(task_callback, pattern=rf"^{_TASK_CALLBACK}:"))
+    application.add_handler(CommandHandler("tasks", tasks_command))
+    application.add_handler(CommandHandler("task", task_command))
     application.add_handler(CommandHandler(["newchat", "new", "selectagent"], new_chat))
     application.add_handler(CommandHandler("selectmodel", select_model))
     application.add_handler(CommandHandler("model", show_model))

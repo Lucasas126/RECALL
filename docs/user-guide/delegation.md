@@ -95,3 +95,13 @@ A worker never has more access than its parent and has no secrets, memory or fil
 
 See also: the built-in `recall` skill page `delegation.md` (what agents read about this), [tools](../reference/tools.md#delegate), and the
 [architecture note](../architecture/agents-and-users.md#subagent-tasks).
+
+## Telegram
+
+When a task is launched from a Telegram chat (or from the chat Telegram currently shows), the bot sends one short line when it starts (with a **Stop** button) and one when it ends: status, title, agent and elapsed time. If the chat is not the current one, the line and the reply name the agent and the chat. When the results wake the parent, its reply is streamed into the private chat like any other reply (approvals included), without you writing anything; if you are in the middle of a reply, the wake waits behind it.
+
+- `/tasks`: the tasks of the current chat (status, title, elapsed), with a Stop button per running task.
+- `/task <id>`: status and result of a task (capped at 1500 characters).
+- `/task <id> <text>`: corrects a running task; its current generation is interrupted, the partial reply is kept and your text is appended.
+
+Only the user the task belongs to can stop or correct it. The bot only sees tasks that run in its own process, so a task started from the web UI is managed there.
