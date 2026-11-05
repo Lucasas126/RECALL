@@ -206,6 +206,11 @@ the chat is reopened. The chat list marks generating chats, and a generating cha
 cannot be deleted. `Steer`, the model picker and the usage panel only apply to
 the open chat. Chats of the same agent generate in parallel too; only messages
 targeting the same chat are ordered and steered together.
+A reply also survives a page reload or a second tab: the service keeps a bounded,
+merged copy of the running reply's events (`_RunFeed`, one queue per viewer), and
+`GET .../chats/<chat_id>/stream` replays it and follows the rest live (see the
+[API reference](../reference/api.md#following-a-running-reply)); `openChat` attaches when the chat
+summary says `active`. Dropping a viewer or the posting request never cancels the run.
 Logging out detaches the browser streams; callbacks from an old session cannot
 modify the new session, and only the latest request of a chat can update its usage panel.
 Detaching a transport does not cancel a service generation on its own.

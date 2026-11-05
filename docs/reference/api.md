@@ -13,7 +13,7 @@ plus an optional `"code"` (see [error codes](#error-codes)).
 | models | `GET /api/providers/status`, `GET /api/models/catalog`, `GET /api/models`, `GET`/`POST /api/models/favorites`, `DELETE /api/models/favorites/<model_id>` ([models and providers](../user-guide/models-and-providers.md)) |
 | agents | `GET`/`POST /api/agents`, `GET`/`PUT`/`DELETE /api/agents/<agent_id>`, `GET /api/tool-groups`, `GET /api/agents/<agent_id>/index`, `POST /api/agents/<agent_id>/index/reindex` (table below) |
 | MCP | `GET /api/mcp`, `GET /api/mcp/<server_id>/tools`, `POST /api/mcp/<server_id>/connect`, `DELETE /api/mcp/<server_id>/connection` ([MCP servers](../user-guide/mcp.md)) |
-| chats | `GET /api/chats`, `GET`/`POST /api/agents/<agent_id>/chats`, `POST .../chats/<chat_id>/disposable`, `GET`/`DELETE .../chats/<chat_id>`, `GET .../chats/<chat_id>/models`, `PUT .../model`, `PUT .../reasoning-effort`, `PUT .../title`, `POST .../chats/<chat_id>/messages` (SSE, see [architecture](../architecture/overview.md#web-steering)), `GET .../chats/<chat_id>/approvals`, `POST .../chats/<chat_id>/approvals/<approval_id>` ([terminal approvals](#terminal-approvals)) |
+| chats | `GET /api/chats`, `GET`/`POST /api/agents/<agent_id>/chats`, `POST .../chats/<chat_id>/disposable`, `GET`/`DELETE .../chats/<chat_id>`, `GET .../chats/<chat_id>/models`, `PUT .../model`, `PUT .../reasoning-effort`, `PUT .../title`, `POST .../chats/<chat_id>/messages` (SSE, see [architecture](../architecture/overview.md#web-steering)), `GET .../chats/<chat_id>/stream` ([following a running reply](#following-a-running-reply)), `GET .../chats/<chat_id>/approvals`, `POST .../chats/<chat_id>/approvals/<approval_id>` ([terminal approvals](#terminal-approvals)) |
 | dream and soul | `.../dream/settings\|status\|start\|cancel\|sessions`, `.../soul` (the response also carries `max_chars`, the application-wide SOUL limit, and `default`, the default SOUL.md template); `.../memories/<target>` returns its `limit` from settings.yaml, `.../soul/history`, `.../memories/<target>` ([dream mode](../user-guide/dream.md#web-api)) |
 
 ## providers and model catalog API
@@ -96,6 +96,38 @@ converts the chat in either direction and returns its summary. Becoming disposab
 indexed chunks and excludes it from Dream; becoming normal counts it again from the start.
 A chat with an active or queued reply returns `409` (`agent_busy`); an unknown chat is `404`
 and a non-boolean value `422`. See [disposable chats](../user-guide/memory.md#disposable-chats).
+
+## Following a running reply
+
+Leaving a chat never stops its reply: the run belongs to the service, not to the HTTP request that started it, and only
+steering (a new message) or `interrupted` ends it early. Chat summaries (`GET /api/chats`, `GET .../chats`, the `chat` of
+`GET .../chats/<chat_id>`) carry `active` (boolean), true while the chat has a reply running or queued.
+
+`GET /api/agents/<agent_id>/chats/<chat_id>/stream` attaches another viewer (another tab, a page load) to the reply that is
+running now. It returns the same SSE frames as the `messages` stream (`reasoning`, `text`, `tool`, `memory`, `approval`,
+`approval_resolved`, `notice`, `usage`, `interrupted`, `error`, then `done`, each with the generation `id:`), starting with
+the events produced so far (consecutive `reasoning`/`text` chunks arrive merged, and the replay keeps at most the last
+5000 events) and continuing live until the reply ends. Viewers do not take events from each other and the stream of the
+original `messages` request is unchanged; closing a viewer does not cancel the reply. Codes: `200` SSE; `204` (empty body)
+when no reply is running, meaning the saved chat is complete; `404` unknown chat; `401` not logged in. The replay is
+dropped when the reply ends, so after `204` read `GET .../chats/<chat_id>`.
+
+```
+GET /api/agents/helper/chats/20260105-093000/stream
+event: text
+data: "Partial answer so far"
+
+event: text
+data: " and the rest, live"
+
+event: usage
+data: "context: ..."
+
+event: done
+data: ""
+```
+
+Pending approvals are visible both ways: replayed as `approval` events and listed by `GET .../approvals`.
 
 ## Terminal approvals
 

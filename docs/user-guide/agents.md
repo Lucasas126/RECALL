@@ -42,3 +42,5 @@ rules:
 - editing, renaming or deleting an agent with active or queued replies returns `409`; the cached runtime is rebuilt from the saved file on the next message.
 - writes are atomic and serialized per user by `.config/<user_id>/agents.lock`. only the `agents:` entry of `user.yaml` is rewritten, so comments and other keys are kept.
 - Telegram sessions that are already open keep the agent id they started with; use `/selectagent` (or restart the bot) after a rename or delete.
+
+you can switch to another chat, or reload the page, while a reply is being generated: the reply keeps running on the server, and when you return to that chat (or open it in another tab) the web UI shows what was generated so far and keeps updating live until it ends. the chat list marks chats that are still replying.
