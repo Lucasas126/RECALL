@@ -71,3 +71,7 @@ Search results look stale or empty: in the agent's Folders tab check the index s
 ## Memory full
 
 The `memory` tool refuses a write that would exceed the limit and lists the current entries; send one batch of `operations` that removes or shortens stale entries and adds the new one.
+
+## The answer after a tool call is not streamed
+
+With Claude Sonnet 5.5 (and often Opus), the text written right after a tool result arrives in one block when it is finished: the provider sends it that way (a known upstream behaviour, not RECALL). Thinking and the first answer of a turn still stream; Haiku streams after tools too. Nothing to fix on our side.

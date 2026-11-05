@@ -817,6 +817,14 @@ _SPANISH = {
     "Writing…": "Escribiendo…",
     "Running {tool}: {detail}": "Ejecutando {tool}: {detail}",
     "Running {tool}": "Ejecutando {tool}",
+    # subagents (brief)
+    "Task brief": "Encargo de la tarea",
+    "Goal": "Objetivo",
+    "Context": "Contexto",
+    "from {agent}": "de {agent}",
+    "Follow-up from {agent}": "Continuación de {agent}",
+    "Correction from {agent}": "Corrección de {agent}",
+    "the parent agent": "el agente principal",
 }
 
 

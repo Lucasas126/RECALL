@@ -732,7 +732,9 @@ class TaskManager:
             parent.emit("task_started", {"task_id": task_id, "goal": goal[:300], "title": record["title"], "chat_id": chat_id})
         except Exception:
             logger.warning("could not announce task %s in the parent stream", task_id, exc_info=True)
-        self._start_threads(live, text)
+        brief = {"task_id": task_id, "from": (parent_name or parent.agent_id) if target is not None else "", "user": user_id,
+                 "goal": goal, "context": context, "instructions_present": bool(instructions)}
+        self._start_threads(live, text, {"task_brief": brief})
         return live
 
     def launch_unattended(
@@ -850,7 +852,9 @@ class TaskManager:
         if target is not None:
             text = f"Scheduled task ({trigger}) for {user_id}\n\n{text}"
         self._emit("task_started", user_id, task_id=task_id, agent_id=parent["agent_id"], chat_id=parent["chat_id"], status="running")
-        self._start_threads(live, text)
+        brief = {"task_id": task_id, "from": "", "user": user_id, "goal": goal, "context": context,
+                 "instructions_present": bool(instructions), "trigger": trigger}
+        self._start_threads(live, text, {"task_brief": brief})
         return live
 
     def wait_for(self, live: _LiveTask, timeout: float | None = None) -> dict | None:
@@ -936,9 +940,9 @@ class TaskManager:
                 "memory writes are not safe in parallel: try again when it is idle"
             )
 
-    def _start_threads(self, live: _LiveTask, text: str) -> None:
+    def _start_threads(self, live: _LiveTask, text: str, meta: dict | None = None) -> None:
         for target, name in ((self._drive, "task"), (self._watch, "task-watch")):
-            threading.Thread(target=target, args=(live, text) if target == self._drive else (live,),
+            threading.Thread(target=target, args=(live, text, meta) if target == self._drive else (live,),
                              daemon=True, name=f"{name}-{live.task_id}").start()
 
     def _check_capacity(self, user_id: str, parent: dict, limits: TaskLimits) -> None:
@@ -988,12 +992,12 @@ class TaskManager:
 
     # ------------------------------------------------------------------ running
 
-    def _drive(self, live: _LiveTask, text: str) -> None:
+    def _drive(self, live: _LiveTask, text: str, meta: dict | None = None) -> None:
         """Send the task to the worker's chat and consume its reply; ends the task with the matching state."""
         error: BaseException | None = None
         try:
             if live.stop_reason is None:  # a stop that came before the first message must not start the worker
-                events = self._service.send(live.user_id, live.agent_id, live.chat_id, text, internal_task=True)
+                events = self._service.send(live.user_id, live.agent_id, live.chat_id, text, internal_task=True, meta=meta)
                 if live.stop_reason is not None:  # ... nor one that came while the message was being queued
                     self._service.cancel_chat_run(live.user_id, live.agent_id, live.chat_id)
             else:
@@ -1568,7 +1572,9 @@ class TaskManager:
                 )
             live.pending_feeds += 1  # the driver must not finish before the reply of this message is followed
         try:
-            events = self._service.send(user_id, live.agent_id, live.chat_id, f"Correction from the parent agent:\n{text}", internal_task=True)
+            events = self._service.send(user_id, live.agent_id, live.chat_id, f"Correction from the parent agent:\n{text}", internal_task=True,
+                meta={"task_message": {"kind": "correction", "text": text}},
+            )
         except Exception as exc:
             with live.guard:
                 live.pending_feeds -= 1
@@ -1645,7 +1651,7 @@ class TaskManager:
             "task_started", user_id, task_id=record["id"], agent_id=record["parent"]["agent_id"],
             chat_id=record["parent"]["chat_id"], status="running", followup=changed[0]["followups"],
         )
-        self._start_threads(live, f"Follow-up from the parent agent:\n{text}")
+        self._start_threads(live, f"Follow-up from the parent agent:\n{text}", {"task_message": {"kind": "followup", "text": text}})
         return {"id": record["id"], "status": "running", "followup": changed[0]["followups"]}
 
     def cancel_for_parent(self, user_id: str, chat_id: str) -> None:
