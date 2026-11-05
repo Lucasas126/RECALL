@@ -259,6 +259,7 @@ class _LiveTask:
     turn_floor: int = 0  # turns the worker chat had before this run: the answer is read after them
     feeds: deque = field(default_factory=deque)  # reply feeds of steering messages the driver still has to follow
     pending_feeds: int = 0  # steering messages sent whose feed is not queued yet
+    closed: bool = False  # the driver found no more feeds: the run is ending and accepts no more steering
     done: threading.Event = field(default_factory=threading.Event)
     started: float = field(default_factory=monotonic)
     tokens_in: int = 0
@@ -493,6 +494,7 @@ class TaskManager:
                     live.pending_feeds -= 1
                     return live.feeds.popleft()
                 if live.pending_feeds <= 0:
+                    live.closed = True  # under the guard, so a concurrent steer either lands before or is refused
                     return None
             sleep(0.01)
 
@@ -799,6 +801,10 @@ class TaskManager:
                 "task_steer only corrects a running task, use task_send to continue a finished one"
             )
         with live.guard:
+            if live.closed:
+                raise TaskError(
+                    f"task {record['id']} has just finished; use task_send to continue it with the correction"
+                )
             live.pending_feeds += 1  # the driver must not finish before the reply of this message is followed
         try:
             events = self._service.send(user_id, live.agent_id, live.chat_id, f"Correction from the parent agent:\n{text}")
