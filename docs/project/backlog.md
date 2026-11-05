@@ -18,6 +18,9 @@ One list of ideas and planned work, with what is already done kept separate. Imp
 
 ### tools
 
+- **RECALL knowledge, phase 2**: reference pages for Telegram, models and providers, MCP, recipes (step-by-step fixes) and the user documentation, added to `src/knowledge/recall/` ([RECALL knowledge](../user-guide/recall-knowledge.md) is phase 1).
+- **Read access to docs and source for agents**: let an agent read `docs/` and the code to answer deeper questions. `docs/` is not in the Docker image today; remove it from `.dockerignore` first.
+- **Agent-proposed config edits with approval cards**: an agent proposes a change to its own yaml (a tool group, a limit) and the user approves or rejects it in a card, like terminal approvals, instead of editing files by hand.
 - **File tools v2** for every source: paginated reads with line numbers and text extraction for PDF/Office files; regex content search and glob file search; `patch` (unique find-and-replace with tolerant matching, returning a diff); a stale-write guard.
 - **Terminal follow-ups** (phase 1 is [done](#done)): a background `process` tool (start, poll, wait, kill); LLM-assisted smart approvals (a small model classifies borderline commands instead of the pattern lists); a per-chat "always allow" for a command or pattern; a Docker backend that creates a per-agent sandbox container itself.
 - **Terminal multi-backend follow-ups**: an agent may use several backends (sandbox, the user's own PC over Windows OpenSSH); still open: a Windows-native backend without Git Bash, a per-chat "always allow" per backend, wake-on-LAN/availability check before a PC call.

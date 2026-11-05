@@ -12,6 +12,7 @@
 
 - Preserve unrelated work in the worktree. Inspect `git status` before editing and do not overwrite existing user changes.
 - Keep changes focused. When behavior or configuration changes, update the directly related documentation and examples.
+- Agents read their own manual from `src/knowledge/recall/` (the built-in `recall` skill). When you change behavior, config fields, tools or commands, update it too; `tests/test_recall_knowledge.py` enforces part of it.
 - Treat each requested feature or change as a ticket. Before implementation, present a practical multi-step action plan, with each step scoped as a coherent commit, and ask for confirmation to begin the whole plan.
 - Once the plan is confirmed, implement its steps in order without asking for confirmation between steps. After each step, summarize what changed and suggest a commit message for that step. Do not create commits unless explicitly asked.
 - Never add credentials, `.env` contents, private user data, logs, or generated indexes to source control. API keys belong in environment variables; YAML may contain the variable name, never the secret.

@@ -7,7 +7,7 @@ One file per agent: `.config/<user_id>/agents/<agent_id>.yaml`. The agent's pers
 
 Defaults when a key is omitted: `stream: true`, `has_memory: true`, `reasoning: true`, `reasoning_effort: medium`,
 `conversation_messages_retained: 30`, `tools: true`, `associative_memory: llm`, `associative_execution: parallel`,
-`dream.enabled: false`. The values in the example below are illustrative.
+`dream.enabled: false`, `recall_knowledge: true`. The values in the example below are illustrative.
 
 ## agent file
 
@@ -26,6 +26,7 @@ chat_config:
   associative_memory: llm            # off | llm | question_only (see memory)
   associative_execution: parallel    # parallel | sequential
   keep_reasoning_in_memory: false    # store the thinking in context/history
+  recall_knowledge: true             # the built-in, read-only `recall` skill (how RECALL works); false hides it from this agent
   conversation_messages_retained: 20 # at most N messages kept in context; cuts go below N (see prompt caching)
   tools: true                       # enable the selected tool groups
   tool_groups: [memory_read, memory_edit, self]  # memory_read, memory_edit, web, self, folders_read, folders_edit, terminal
@@ -62,6 +63,9 @@ terminal:                            # required by the `terminal` tool group (se
   max_output_chars: 20000            # output returned to the model, 500-200000 (capped by settings.yaml)
   allow_in_dream: false              # dream sessions may use the tools (also needs `terminal` in dream.tools)
 ```
+
+`recall_knowledge` (default `true`, Basic > Advanced in the Agents tab) adds one line to the skills index and lets `skill_view` read the
+built-in `recall` skill that ships with the code; see [RECALL knowledge](../user-guide/recall-knowledge.md). It applies to new chats.
 
 The `terminal` block is only used when `terminal` is in `tool_groups`. The model picks the backend per call (the five tools
 take an optional `backend` argument limited to these names); approvals, working directory and timeout follow the backend it

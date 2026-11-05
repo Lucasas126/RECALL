@@ -17,6 +17,7 @@ Documentation map. The root [README](../README.md) gives the short pitch; [AGENT
 - [Telegram](user-guide/telegram.md): access mapping, commands, panels.
 - [Files and media](user-guide/files-and-media.md): images, audio, video, PDFs, OCR.
 - [MCP servers](user-guide/mcp.md): external services such as Google Calendar.
+- [RECALL knowledge](user-guide/recall-knowledge.md): the built-in, read-only skill that tells each agent how RECALL works, and its per-agent switch.
 - [Terminal sandbox](user-guide/terminal.md): commands and file edits in an SSH sandbox, with approvals and an audit file.
 
 ## reference
