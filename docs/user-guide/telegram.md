@@ -24,12 +24,12 @@ Telegram provides `/help`,
 `/settings`, `/newchat`, `/selectmodel`, `/selectagent`, `/agent`, `/model`,
 `/stt`, `/dream` (status of the active agent's [dream mode](dream.md#commands): last
 session with its summary, schedule, pending chats), `/dreamstart` (starts a session) and
-`/dreamcancel` (stops it). Every command is one word so Telegram renders it as tappable and lists it in the
+`/dreamcancel` (stops it), `/tasks` and `/task` ([subagent tasks](delegation.md#telegram)). Every command is one word so Telegram renders it as tappable and lists it in the
 command menu; `/dream start` and `/dream cancel` typed as text still work but are not advertised.
 Telegram's native command menu is populated at startup, and
 `/help` prints the same command list in the chat.
 Operational notices and errors use the user's saved English/Spanish preference;
-the native command descriptions and `/help` text remain English.
+the native command descriptions and `/help` text remain English (except the `/tasks` and `/task` lines of `/help`, which follow the preference).
 The agent's name opens the first message of each reply inline and in bold (`**Aria:** answer`); when the answer starts with a
 list, code block, heading, table or quote, the name takes its own line instead. Long replies carry it only in the first message.
 

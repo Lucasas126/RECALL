@@ -54,3 +54,7 @@ Delegate work that is big, independent and worth its own model run: reading and 
 Task records live in `data/<user_id>/.tasks/<task_id>.json` (goal, status, usage, capped result; no secrets). The worker's conversation is a normal chat file in your own `conversations/` folder marked by `<chat_id>.task.json`: it is hidden from chat lists and the latest chat, never pruned while empty, not reviewed by Dream and not indexed, and it is removed with the user's disposable-chat retention. A disposable chat cannot launch tasks. If the process dies while a task runs, the task is later marked `failed` with reason `owner_lost`; nothing is resumed.
 
 Code: `src/service/tasks.py`, `src/agent/toolsets/delegate.py`.
+
+## Telegram
+
+In Telegram the user sees one status line when a task starts (with a Stop button) and one when it ends, and your wake reply arrives in the chat on its own. The user can run `/tasks` (list with Stop buttons), `/task <id>` (status and capped result) and `/task <id> <text>` (corrects a running task, like `task_steer`). Tasks started from the web UI are not managed from the Telegram bot.

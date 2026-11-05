@@ -731,6 +731,27 @@ _SPANISH = {
     "RECALL knowledge (how RECALL works)": "Conocimiento de RECALL (cómo funciona RECALL)",
     "Gives the agent a built-in, read-only guide to how RECALL works. Takes effect in new chats.": "Da al agente una guía integrada y de solo lectura sobre cómo funciona RECALL. Se aplica en los chats nuevos.",
     "The configuration of this agent on disk is invalid, so the previous one is still in use: {details}": "La configuración de este agente en disco no es válida, así que se sigue usando la anterior: {details}",
+    # subagents (telegram)
+    "/tasks — Subagent tasks of this chat, with a Stop button\n/task — /task <id> shows a task; /task <id> <text> corrects a running one\n": "/tasks — Tareas de subagentes de este chat, con botón para detenerlas\n/task — /task <id> muestra una tarea; /task <id> <texto> corrige una en marcha\n",
+    "status: running": "estado: en curso",
+    "status: done": "estado: terminada",
+    "status: failed": "estado: fallida",
+    "status: cancelled": "estado: cancelada",
+    "status: timed out": "estado: tiempo agotado",
+    "🧩 Task started: {title} ({agent})": "🧩 Tarea iniciada: {title} ({agent})",
+    "✅ Task done: {title} ({agent}) · {elapsed}": "✅ Tarea terminada: {title} ({agent}) · {elapsed}",
+    "⏹ Task cancelled: {title} ({agent}) · {elapsed}": "⏹ Tarea cancelada: {title} ({agent}) · {elapsed}",
+    "⌛ Task timed out: {title} ({agent}) · {elapsed}": "⌛ Tarea con tiempo agotado: {title} ({agent}) · {elapsed}",
+    "⚠️ Task stopped, plan limit reached: {title} ({agent}) · {elapsed}": "⚠️ Tarea detenida, límite del plan alcanzado: {title} ({agent}) · {elapsed}",
+    "⚠️ Task failed: {title} ({agent}) · {elapsed}": "⚠️ Tarea fallida: {title} ({agent}) · {elapsed}",
+    "⏹ Stop": "⏹ Detener",
+    "⏹ Stop {title}": "⏹ Detener {title}",
+    "No tasks in this chat.": "No hay tareas en este chat.",
+    "Usage: /task <id> to see a task, /task <id> <text> to correct a running one. /tasks lists them.": "Uso: /task <id> para ver una tarea, /task <id> <texto> para corregir una en marcha. /tasks las lista.",
+    "✏️ Correction sent to task {id}.": "✏️ Corrección enviada a la tarea {id}.",
+    "Unknown task: {id}. /tasks lists the tasks of this chat.": "Tarea desconocida: {id}. /tasks lista las tareas de este chat.",
+    "This task is not available.": "Esta tarea no está disponible.",
+    "Task {id}: {status}": "Tarea {id}: {status}",
 }
 
 
