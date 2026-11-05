@@ -127,7 +127,7 @@ class WebSteeringTests(steering.SteeringFixture):
             f"/api/agents/agent-one/chats/{self.chat}"
         ).json()["messages"]
         self.assertEqual(history[-1]["associative_matches"], 2)
-        self.assertIn("context:", history[-1]["usage_report"])
+        self.assertTrue(history[-1]["usage_report"].startswith("context "))
         self.assertNotIn("latency:", history[-1]["usage_report"])
         self.assertEqual(history[-1]["usage"], {"in": 10, "out": 5})
 
