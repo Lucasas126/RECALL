@@ -38,6 +38,7 @@ Addresses are `source:path`, for example `mind_palace:notes/pets.md`.
 | `sandbox_write` | terminal | atomic whole-file write |
 | `sandbox_patch` | terminal | unique find-and-replace (or `replace_all`), returns a diff |
 | `sandbox_search` | terminal | regex over contents, or a name glob with `files=true`; at most 200 results |
+| `task_start` | delegate | run a task in a separate worker agent in a hidden chat and return its result (`wait=true` only for now); see `references/delegation.md` |
 
 `folders_edit` includes the three read tools. `folders_read` and `folders_edit` need at least one folder in `folders`; with either group the generic memory tools can read the folders too, and with `folders_edit` they can write them, except in folders marked `read_only`.
 
@@ -52,6 +53,7 @@ Addresses are `source:path`, for example `mind_palace:notes/pets.md`.
 | `folders_read` | `folder_list`, `folder_read`, `folder_search` |
 | `folders_edit` | the read tools plus `folder_write`, `folder_append`, `folder_edit`, `folder_move`, `folder_delete` |
 | `terminal` | `terminal`, `sandbox_read`, `sandbox_write`, `sandbox_patch`, `sandbox_search` (they take an optional `backend`) |
+| `delegate` | `task_start` (opt-in like folders and the terminal; needs the agent's `delegation` block, which gets defaults) |
 
 ## Dream-only tools
 
@@ -70,5 +72,5 @@ A dream can write only to `mind_palace` and its own files, read folders only wit
 - After a successful write, the changed file is reindexed in the background once the reply ends.
 - Read-only sources and folders return an error that names the source; write to `mind_palace` or an editable folder instead.
 - `edit`, `folder_edit` and `skill_manage` patch require the old text to appear exactly once; add context if it does not.
-- In a disposable chat `memory_edit` tools, `memory`, `skill_manage`, `soul_edit`, the folder write tools and the whole `terminal` group are not offered. Read tools, web and MCP stay.
+- In a disposable chat `memory_edit` tools, `memory`, `skill_manage`, `soul_edit`, the folder write tools, the whole `terminal` group and `task_start` are not offered. Read tools, web and MCP stay.
 - Most tool errors come back as text starting with `error:`; read it and fix the call instead of repeating it.

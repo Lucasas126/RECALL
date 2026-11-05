@@ -41,9 +41,17 @@ The web **Agents** tab configures these groups for each agent:
   backends in the user's `terminal_backends`. Every call goes through the approval policy and is audited; output is
   stripped, redacted and truncated. See the [terminal guide](../user-guide/terminal.md).
 
+<a id="delegate"></a>
+- `delegate`: `task_start(goal, context, instructions, tools, model, timeout_s, wait)` runs a task in a hidden worker chat and returns JSON
+  with `id`, `status` (`done`, `failed`, `cancelled`, `timed_out`), `reason`, the capped `result` and `tokens`. `instructions` is the worker's
+  system prompt (written by the calling agent, no inherited SOUL); `tools` can only name `web`, and only if the agent has it; `wait` must be
+  `true` in this phase (`wait=false` returns `error: asynchronous tasks arrive later; use wait=true`). The description states the limits
+  (3 running tasks per chat, 4 per user, 10 minutes and 200 000 tokens per task, 8000 result characters, depth 1) and errors name the limit
+  hit. Needs the group in `tool_groups`; the `delegation` block is optional. See the [delegation guide](../user-guide/delegation.md).
+
 In a [disposable chat](../user-guide/memory.md#disposable-chats) the write tools of
 `memory_edit`, `self` (`memory`, `skill_manage`, `soul_edit`) and `folders_edit` are
-removed, whatever the groups, and the whole `terminal` group is not built; the read tools stay.
+removed, whatever the groups, and the whole `terminal` group and `task_start` are not built; the read tools stay.
 
 Without `tool_groups`, agents get `memory_read`, `memory_edit`, `web` and
 `self`. `skill_view` is added whenever the agent has skills, even without

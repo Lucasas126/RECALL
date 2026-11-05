@@ -38,6 +38,11 @@ TOOL_GROUP_CATALOG: Final[tuple[dict[str, str], ...]] = (
         "name": "Terminal sandbox",
         "description": "Run commands and edit files in a sandbox, with your approval.",
     },
+    {
+        "id": "delegate",
+        "name": "Delegate subtasks",
+        "description": "Hand a self-contained task to a short-lived worker in a hidden chat and get its result back.",
+    },
 )
 
 TOOL_GROUP_IDS: Final[frozenset[str]] = frozenset(item["id"] for item in TOOL_GROUP_CATALOG)
@@ -57,7 +62,12 @@ TOOL_GROUP_TOOLS: Final[dict[str, tuple[str, ...]]] = {
         "folder_write", "folder_append", "folder_edit", "folder_move", "folder_delete",
     ),
     "terminal": ("terminal", "sandbox_read", "sandbox_write", "sandbox_patch", "sandbox_search"),
+    "delegate": ("task_start",),
 }
+
+# the groups a parent may hand to a subagent (phase 1: read-only web access); memory, self, folders, terminal,
+# MCP and `delegate` itself are never grantable
+DELEGATE_GRANTABLE_GROUPS: Final[tuple[str, ...]] = ("web",)
 
 # tools that change the agent's own persistent state (memory, SOUL, skills, notes, user folders);
 # a disposable chat neither exposes nor runs them
@@ -65,6 +75,7 @@ DISPOSABLE_BLOCKED_TOOLS: Final[frozenset[str]] = frozenset(
     {*TOOL_GROUP_TOOLS["memory_edit"], "memory", "skill_manage", "soul_edit"}
     | {name for name in TOOL_GROUP_TOOLS["folders_edit"] if name not in TOOL_GROUP_TOOLS["folders_read"]}
     | set(TOOL_GROUP_TOOLS["terminal"])  # a disposable chat never gets the terminal at all
+    | set(TOOL_GROUP_TOOLS["delegate"])  # nor can it launch tasks: this also gives depth 1 (children are disposable)
 )
 
 

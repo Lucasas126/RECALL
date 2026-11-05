@@ -7,7 +7,7 @@ import yaml
 
 from src.config.models import (
     AssociativeMemoryConfig, ChatNamingConfig, ClaudeLoginSettings, IndexConfig, McpSettings, MemoryLimits, OrchestratorConfig, PdfConfig, PromptCacheConfig, SpeechToTextConfig, TavilyConfig, TerminalSettings,
-    VideoDecompositionConfig,
+    SubagentSettings, VideoDecompositionConfig,
 )
 
 """Framework-level settings, loaded from `settings.yaml` at the repo root.
@@ -137,6 +137,9 @@ ASSOC = AssociativeMemoryConfig.model_validate(_raw.get("associative_memory", {}
 
 # ------------------------------------------------------------------ telegram orchestrator
 ORCHESTRATOR = OrchestratorConfig.model_validate(_raw.get("orchestrator") or {})
+
+# ------------------------------------------------------------------ subagents (the `delegate` tool group)
+SUBAGENTS = SubagentSettings.model_validate(_raw.get("subagents") or {})
 
 # ------------------------------------------------------------------ terminal sandbox
 def parse_allow_local(yaml_value: object, env_value: str | None = None) -> object:

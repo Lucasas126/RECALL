@@ -32,6 +32,7 @@ Paths come from `paths` in `settings.yaml` (defaults `.config`, `data`, `logs`);
 .config/<user_id>/user.yaml                    user, provider, models, terminal_backends
 .config/<user_id>/agents/<agent_id>.yaml       one file per agent
 .config/<user_id>/preferences.json             interface preferences shared by web and Telegram
+data/<user_id>/.tasks/                         subagent task records (one JSON per task; see delegation.md)
 data/<user_id>/<agent_id>/
   SOUL.md  soul_history/  memories/  skills/   your own files (source `agent`)
   mind_palace/  conversations/                 your notes and chats

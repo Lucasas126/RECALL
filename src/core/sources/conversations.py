@@ -20,6 +20,7 @@ _TITLE_CHARS = 60
 DEFAULT_DISPOSABLE_RETENTION_DAYS = 30
 _DISPOSABLE_SUFFIX = ".disposable.json"
 _ORIGIN_SUFFIX = ".origin.json"
+_TASK_SUFFIX = ".task.json"
 DEFAULT_ORIGIN = "web"  # chats without an origin marker predate it and count as web chats
 _ORIGIN_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 
@@ -86,6 +87,24 @@ class ChatOrigin(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     origin: str
+
+
+class ChatTask(BaseModel):
+    """Marks the hidden chat of a subagent task (`<chat_id>.task.json`): its parentage, grant and worker prompt.
+
+    A task chat is also disposable (not learned from) and is left out of chat lists, the latest chat and pruning.
+    The agent reads its restrictions from this stored mark, so they survive a rebuild and the model cannot drop them.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: str
+    parent_agent_id: str
+    parent_chat_id: str
+    depth: int = 1
+    groups: list[str] = Field(default_factory=list)  # the tool groups the worker was granted
+    instructions: str = ""  # the worker's system prompt, written by the parent
+    created_at: str = ""
 
 
 class ChatMetadataError(UserMessageError, RuntimeError):
@@ -253,6 +272,29 @@ class ConversationsSource(Source):
         except OSError as exc:
             raise ChatMetadataError("Could not save the origin of chat {chat_id}.", chat_id=chat_id) from exc
 
+    def _task_path(self, chat_id: str) -> Path:
+        return self.resolve(f"{chat_id}{_TASK_SUFFIX}")
+
+    def is_task_chat(self, chat_id: str) -> bool:
+        """Whether the chat is the hidden chat of a subagent task."""
+        self._path(chat_id)  # validates the id
+        return self._task_path(chat_id).is_file()
+
+    def task_chats(self) -> set[str]:
+        """The ids of every task chat that still has its transcript."""
+        marked = {p.name[: -len(_TASK_SUFFIX)] for p in self.root.iterdir() if p.name.endswith(_TASK_SUFFIX)}
+        return {chat_id for chat_id in marked if _CHAT_ID_RE.match(chat_id) and self.resolve(f"{chat_id}.jsonl").is_file()}
+
+    def task_mark(self, chat_id: str) -> ChatTask | None:
+        """The task mark of a chat, None for an ordinary one. An unreadable mark raises: it never reads as ordinary."""
+        self._path(chat_id)  # validates the id
+        try:
+            return ChatTask.model_validate_json(self._task_path(chat_id).read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
+        except (OSError, UnicodeError, ValidationError) as exc:
+            raise ChatMetadataError("Could not read the task mark of chat {chat_id}.", chat_id=chat_id) from exc
+
     def last_activity(self, chat_id: str) -> datetime:
         """When the chat last changed: the modification time of its transcript."""
         return datetime.fromtimestamp(self._path(chat_id).stat().st_mtime).astimezone()
@@ -275,10 +317,17 @@ class ConversationsSource(Source):
                 continue
         return expired
 
-    def create(self, *, disposable: bool = False, origin: str = DEFAULT_ORIGIN) -> str:
-        """Create an empty chat and return its id."""
+    def create(self, *, disposable: bool = False, origin: str = DEFAULT_ORIGIN, task: ChatTask | None = None) -> str:
+        """Create an empty chat and return its id; a `task` makes it the hidden, disposable chat of that task."""
         chat_id = f"{datetime.now():%Y%m%d-%H%M%S}-{secrets.token_hex(3)}"
-        self._path(chat_id).touch(exist_ok=False)
+        path = self._path(chat_id)
+        if task is not None:
+            disposable = True
+            try:  # the mark goes first, so an empty-chat prune can never see the chat unmarked
+                atomic_write_text(self._task_path(chat_id), task.model_dump_json() + "\n")
+            except OSError as exc:
+                raise ChatMetadataError("Could not save the task mark of chat {chat_id}.", chat_id=chat_id) from exc
+        path.touch(exist_ok=False)
         if disposable:
             self.set_disposable(chat_id, True)
         self.set_origin(chat_id, origin)
@@ -293,6 +342,7 @@ class ConversationsSource(Source):
         title = self.resolve(f"{chat_id}.title.json")
         disposable = self._disposable_path(chat_id)
         origin = self._origin_path(chat_id)
+        task = self._task_path(chat_id)
         legacy_transcription = self.resolve(f"{chat_id}.stt.json")  # per-chat STT overrides are no longer read
         removed = self._removed_path(chat_id)
         path.unlink()
@@ -302,6 +352,7 @@ class ConversationsSource(Source):
         title.unlink(missing_ok=True)
         disposable.unlink(missing_ok=True)
         origin.unlink(missing_ok=True)
+        task.unlink(missing_ok=True)
         legacy_transcription.unlink(missing_ok=True)
 
     def _removed_path(self, chat_id: str) -> Path:
@@ -372,16 +423,17 @@ class ConversationsSource(Source):
                 turns.append(json.loads(line))
         return turns
 
-    def chats(self) -> list[str]:
-        """List chat ids, oldest first."""
-        return sorted(p.stem for p in self.root.iterdir() if p.suffix == ".jsonl")
+    def chats(self, *, include_internal: bool = False) -> list[str]:
+        """List chat ids, oldest first; subagent task chats are internal and only listed with `include_internal`."""
+        hidden = set() if include_internal else self.task_chats()
+        return sorted(p.stem for p in self.root.iterdir() if p.suffix == ".jsonl" and p.stem not in hidden)
 
     def prune_empty(self, keep: str | Collection[str] | None = None) -> list[str]:
-        """Delete unused chats except the given chat id(s); return the removed ids."""
+        """Delete unused chats except the given chat id(s) and task chats (which start empty); return the removed ids."""
         removed = []
         kept = {keep} if isinstance(keep, str) else set(keep or ())
         for path in self.root.iterdir():
-            if path.suffix != ".jsonl" or path.stem in kept:
+            if path.suffix != ".jsonl" or path.stem in kept or self._task_path(path.stem).is_file():
                 continue
             if not path.read_text(encoding="utf-8").strip():
                 self.delete_chat(path.stem)
@@ -389,8 +441,9 @@ class ConversationsSource(Source):
         return removed
 
     def latest(self) -> str | None:
-        """The id of the most recently modified chat, if any."""
-        files = [p for p in self.root.iterdir() if p.suffix == ".jsonl"]
+        """The id of the most recently modified chat, if any (task chats are not candidates)."""
+        hidden = self.task_chats()
+        files = [p for p in self.root.iterdir() if p.suffix == ".jsonl" and p.stem not in hidden]
         return max(files, key=lambda p: p.stat().st_mtime).stem if files else None
 
     def summary(self, chat_id: str, retention_days: int = DEFAULT_DISPOSABLE_RETENTION_DAYS) -> dict:

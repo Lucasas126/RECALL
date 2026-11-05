@@ -10,7 +10,7 @@ from typing import Any
 from pydantic import BaseModel
 from pydantic_core import PydanticUndefined
 
-from src.config.models import AgentTerminalConfig, ChatConfig, DreamConfig
+from src.config.models import AgentDelegationConfig, AgentTerminalConfig, ChatConfig, DreamConfig
 
 
 def field_spec(model: type[BaseModel], name: str) -> dict[str, Any]:
@@ -30,7 +30,7 @@ def _specs(model: type[BaseModel], names: tuple[str, ...]) -> dict[str, dict[str
 
 
 def agent_defaults() -> dict[str, dict[str, dict[str, Any]]]:
-    """Defaults and bounds of the agent form, grouped like the agent YAML: chat_config, dream and terminal."""
+    """Defaults and bounds of the agent form, grouped like the agent YAML: chat_config, dream, terminal, delegation."""
     return {
         "chat_config": _specs(ChatConfig, (
             "stream", "has_memory", "reasoning", "reasoning_effort", "reasoning_tokens", "keep_reasoning_in_memory",
@@ -42,4 +42,5 @@ def agent_defaults() -> dict[str, dict[str, dict[str, Any]]]:
             "max_minutes", "notify_telegram",
         )),
         "terminal": _specs(AgentTerminalConfig, ("timeout_seconds", "max_output_chars", "allow_in_dream")),
+        "delegation": _specs(AgentDelegationConfig, ("enabled", "max_parallel", "timeout_seconds", "max_tokens")),
     }

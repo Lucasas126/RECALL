@@ -23,6 +23,8 @@ class RunContext:
     emit: Callable[[str, dict], None]  # puts a ChatEvent of that kind (approval, approval_resolved) in the run's stream
     cancellation: CancellationToken | None = None
     interactive: bool = True  # a person is attached and can answer an approval request
+    tasks: Any = None  # TaskManager: what the `delegate` tools launch tasks through
+    task_launches: int = 0  # tasks launched by this run (one parent turn), against max_launches_per_turn
 
 
 _current: ContextVar[RunContext | None] = ContextVar("recall_terminal_run", default=None)

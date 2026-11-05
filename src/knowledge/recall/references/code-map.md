@@ -31,6 +31,7 @@ Paths are relative to the repository root. In Docker the same tree sits under `/
 | `src/agent/toolsets/folders.py` | the `folder_*` tools |
 | `src/agent/toolsets/web.py` | `web_search`, `web_retrieve` |
 | `src/agent/toolsets/terminal.py` | terminal tools and the prompt notice for them |
+| `src/agent/toolsets/delegate.py` | `task_start`, the delegation limits and the prompt notice for them |
 | `src/agent/toolsets/mcp.py` | MCP tools |
 | `src/agent/toolsets/dream.py` | dream review-queue tools |
 | `src/agent/associative.py` | associative-memory query and fragment formatting |
@@ -44,6 +45,7 @@ Paths are relative to the repository root. In Docker the same tree sits under `/
 | `src/service/chat.py` | `ChatService`: agents, chats, send queue, preferences, models, dream commands |
 | `src/service/dream.py` | `DreamManager`: schedule, lock, sessions, command parsing |
 | `src/service/providers.py` | which providers are available and why not |
+| `src/service/tasks.py` | `TaskStore` (`data/<user_id>/.tasks/`) and `TaskManager`: subagent tasks, limits, watchdog |
 | `src/web/app.py` | FastAPI routes (agents, chats, SSE messages, dream, soul, index) |
 | `src/web/auth.py` | password hashing and verification |
 | `src/web/static/app.js` | browser UI logic |

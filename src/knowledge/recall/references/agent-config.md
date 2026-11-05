@@ -25,6 +25,7 @@ Unknown keys are rejected in the agent yaml and in most blocks (except `chat_con
 | `dream` | block below |
 | `folders` | up to 20 user folders |
 | `terminal` | block below; needed by the `terminal` tool group |
+| `delegation` | block below; the `delegate` tool group, which gets the defaults when this is omitted |
 
 ### `chat_config` (Agents tab: Basic, Basic > Advanced and Tools)
 
@@ -86,6 +87,16 @@ MCP entry fields: `tools` (list; omitted means all of the server's tools), `read
 | `terminal.default_backend` | required with more than one backend |
 | `terminal.max_output_chars` | 500-200000 (20000) |
 | `terminal.allow_in_dream` | dreams may use the terminal (false); also needs `terminal` in `dream.tools` |
+
+### `delegation` (group `delegate`; see `references/delegation.md`)
+
+| Field | Meaning (default) |
+| --- | --- |
+| `delegation.enabled` | false switches `task_start` off (true) |
+| `delegation.allowed_groups` | groups a task may be given: only `web` (web) |
+| `delegation.max_parallel` | running tasks per chat, 1-10; can only lower `settings.yaml` (3) |
+| `delegation.timeout_seconds` | per task, 10-3600; can only lower it (600) |
+| `delegation.max_tokens` | input + output per task; can only lower it (200000) |
 
 ## User yaml (`.config/<user_id>/user.yaml`; set by the admin, mostly not in the UI)
 

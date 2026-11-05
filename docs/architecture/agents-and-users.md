@@ -56,7 +56,7 @@ Binding an Obsidian vault through the safe/auto overlay (a per-agent shadow tree
 ## tool separation
 
 - each agent has a **tool-group policy**: a selection from the shared catalog (`memory_read`, `memory_edit`, `web`, `self`,
-  `folders_read`, `folders_edit`, see [tools](../reference/tools.md#tool-group-catalog));
+  `folders_read`, `folders_edit`, `terminal`, `delegate`, see [tools](../reference/tools.md#tool-group-catalog));
 - each agent also chooses which shared **MCP servers** it uses, optionally read-only, with a tool selection and extra
   instructions; they act on the agent's own user's connected account ([MCP servers](../user-guide/mcp.md));
 - legacy `allow`/`deny` lists are still accepted as an additional per-tool filter;
@@ -65,3 +65,19 @@ Binding an Obsidian vault through the safe/auto overlay (a per-agent shadow tree
 The effective toolset is `agent_policy ∩ mode_toolset`. For a tool call: (1) is the tool in one of the agent's selected
 groups, (2) does the current mode expose it, (3) does the target `source:path` resolve inside one of this agent's sources?
 If any check fails the call is rejected before touching data.
+
+## subagent tasks
+
+The `delegate` tool group (phase 1 of the [subagents design](../project/design-subagents.md): synchronous `task_start`) adds a second kind of chat run, owned by the
+`TaskManager` in `src/service/tasks.py`, which `ChatService` creates and binds to every reply through `RunContext.tasks`:
+
+- **Store.** `data/<user_id>/.tasks/` holds one JSON record per task (read-modify-write under `.state.lock`, atomic writes), `<id>.run.lock` held by the executing process
+  (a free lock on a non-terminal task means its executor died: `failed`, `owner_lost`) and `.state.json` with the per-user rate-limit cooldown.
+  The folder starts with a dot, so it cannot collide with an agent folder.
+- **Worker chat.** A hidden chat of the launching agent, created with a `<chat_id>.task.json` mark (`ConversationsSource`, `ChatTask`) written before the transcript exists, plus the
+  disposable flag. `chats()`, `latest()` and `prune_empty()` skip task chats; `Agent` reads the mark to become an ephemeral worker (the parent's `instructions` as its system prompt, no
+  SOUL, memory, MCP or associative search, only the granted tool groups) and `DISPOSABLE_BLOCKED_TOOLS` keeps it from launching tasks (depth 1).
+- **Run.** The manager drives the worker through the public `ChatService.send` in a daemon thread and a watchdog thread (wall clock; the token cap is enforced from a usage hook the agent calls after each
+  model call, set up in `ChatService._run`). A stop uses `ChatService.cancel_chat_run`, which cancels without deleting. Provider rate limits end the task as `failed`/`rate_limit` and
+  block new launches for a cooldown; nothing is retried.
+- **Not built yet** (later phases): `wait=false`, the wake message, `task_list/steer/stop/wait`, cross-process commands and approvals for terminal grants.

@@ -29,7 +29,7 @@ chat_config:
   recall_knowledge: true             # the built-in, read-only `recall` skill (how RECALL works); false hides it from this agent
   conversation_messages_retained: 20 # at most N messages kept in context; cuts go below N (see prompt caching)
   tools: true                       # enable the selected tool groups
-  tool_groups: [memory_read, memory_edit, self]  # memory_read, memory_edit, web, self, folders_read, folders_edit, terminal
+  tool_groups: [memory_read, memory_edit, self]  # memory_read, memory_edit, web, self, folders_read, folders_edit, terminal, delegate
   mcp:                               # MCP servers enabled for this agent (see mcp.md)
     google_calendar: {tools: null, read_only: false, instructions: ""}
 dream:                               # background self-review sessions (see dream.md)
@@ -62,6 +62,12 @@ terminal:                            # required by the `terminal` tool group (se
   timeout_seconds: 60                # default command timeout, 1-600 (capped by settings.yaml terminal.max_timeout_seconds)
   max_output_chars: 20000            # output returned to the model, 500-200000 (capped by settings.yaml)
   allow_in_dream: false              # dream sessions may use the tools (also needs `terminal` in dream.tools)
+delegation:                          # the `delegate` tool group (see the delegation guide); optional, defaults apply when the group is selected
+  enabled: true                      # false removes `task_start` without removing the group
+  allowed_groups: [web]              # groups a task may be granted; only `web` is grantable (never memory, folders, terminal, mcp, delegate)
+  max_parallel: null                 # running tasks per chat, 1-10; can only lower settings.yaml subagents.max_parallel_per_parent (3)
+  timeout_seconds: null              # wall clock per task, 10-3600; can only lower subagents.timeout_seconds (600)
+  max_tokens: null                   # input + output tokens per task, 1000-5000000; can only lower subagents.max_tokens (200000)
 ```
 
 `recall_knowledge` (default `true`, Basic > Advanced in the Agents tab) adds one line to the skills index and lets `skill_view` read the
@@ -73,6 +79,11 @@ picks. A backend that does not resolve (unknown name, `local` while `terminal.al
 in the log and the agent keeps the others; when none resolves, or the block is missing, the agent still loads with the
 terminal tools not built. `terminal.backend`, `workdir` and `approvals` at the top level of the block no longer exist. `dream.tools: [terminal]` without `terminal.allow_in_dream: true` is rejected. See the
 [terminal guide](../user-guide/terminal.md).
+
+<a id="delegation"></a>The `delegation` block belongs to the `delegate` tool group, which exposes `task_start` (phase 1: a synchronous worker in a hidden
+chat). The group is opt-in; selecting it without the block saves the defaults above. Unknown keys are rejected, and `allowed_groups` entries other
+than `web` are refused. The numbers can only lower the application's `subagents:` limits ([settings.yaml](settings-yaml.md#subagents)). See the
+[delegation guide](../user-guide/delegation.md).
 
 The size limits of `SOUL.md`, `MEMORY.md` and `USER.md` are not agent settings: they are application-wide and set in the
 `memory_limits` block of [settings.yaml](settings-yaml.md#memory-limits). A `memory_limits` key left over in an older agent
