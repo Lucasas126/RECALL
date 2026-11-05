@@ -262,7 +262,7 @@ class WakeTests(AsyncFixture):
         lines = self.manager.list_for(self.parent())
         self.assertIn(f"{live.task_id} done unread", lines)
         result = self.manager.result(self.parent(), live.task_id)
-        self.assertEqual(result["result"], "RESULT for: find X")
+        self.assertIn('<task_result untrusted="true">\nRESULT for: find X\n</task_result>', result["result"])
         self.assertNotIn("unread", self.manager.list_for(self.parent()))
         self.assertEqual(self.record(live.task_id)["wake"]["state"], "consumed")
 
@@ -279,7 +279,7 @@ class WakeTests(AsyncFixture):
         live = self.launch(wake=False)
         live.done.wait(5)
         limits = replace(base.LIMITS, result_max_chars=500)
-        self.assertEqual(self.manager.result(self.parent(), live.task_id, full=True)["result"], "RESULT for: find X")
+        self.assertIn("\nRESULT for: find X\n</task_result>", self.manager.result(self.parent(), live.task_id, full=True)["result"])
         self.assertEqual(limits.result_max_chars, 500)
 
     def test_delivery_is_idempotent(self) -> None:
@@ -504,9 +504,10 @@ class ToolTests(AsyncFixture):
         self.assertEqual(self.call(tools, "task_list", status="failed"), "no tasks with status failed")
         waited = json.loads(self.call(tools, "task_wait", ids=[task_id], timeout_s=30))
         self.assertEqual(waited["running"], [])
-        self.assertEqual(waited["done"][0]["result"], "RESULT for: find X")
+        self.assertIn("\nRESULT for: find X\n</task_result>", waited["done"][0]["result"])
         result = json.loads(self.call(tools, "task_result", id=task_id, full=True))
-        self.assertEqual((result["status"], result["result"]), ("done", "RESULT for: find X"))
+        self.assertEqual(result["status"], "done")
+        self.assertIn("\nRESULT for: find X\n</task_result>", result["result"])
 
     def test_the_tools_report_errors_as_text_and_only_see_their_own_tasks(self) -> None:
         tools = self.tools()

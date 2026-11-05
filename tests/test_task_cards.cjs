@@ -46,6 +46,9 @@ test("the task id comes from the stored step result", () => {
   assert.equal(context.taskActionId(started), "abc123");
   assert.equal(context.taskActionId({ name: "task_start", result: "error: limit reached" }), null);
   assert.equal(context.taskActionId({ name: "task_start", result: { id: "x1" } }), "x1");
+  // a stored wait=true result is truncated, so it is not valid JSON any more: the id must still be found
+  const truncated = '{"id": "25e1ccdcf21a", "status": "done", "result": "# Tortilla de patatas\\n\\n## Ingre';
+  assert.equal(context.taskActionId({ name: "task_start", result: truncated }), "25e1ccdcf21a");
 });
 
 test("a card of a running task offers stop, steer and (with a worker chat) open", () => {

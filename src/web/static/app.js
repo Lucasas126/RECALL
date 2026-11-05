@@ -3368,7 +3368,11 @@ function taskResultJson(action) {
     const parsed = JSON.parse(value);
     return parsed && typeof parsed === "object" ? parsed : null;
   } catch {
-    return null;
+    // stored tool results are truncated, so a long `wait=true` result is no longer valid JSON: keep its id and status
+    const id = /"id":\s*"([0-9a-f]{12})"/.exec(value)?.[1];
+    if (!id) return null;
+    const status = /"status":\s*"([a-z_]+)"/.exec(value)?.[1];
+    return status ? { id, status } : { id };
   }
 }
 

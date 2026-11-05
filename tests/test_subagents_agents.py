@@ -35,6 +35,7 @@ class AgentTargetFixture(SubagentFixture):
     groups = ["delegate", "web"]
     target_groups = ["web", "memory_read", "memory_edit", "self"]
     target_terminal: AgentTerminalConfig | None = None
+    parent_terminal: AgentTerminalConfig | None = None
 
     def setUp(self) -> None:
         self.target_calls: list[tuple[str, str]] = []  # (system prompt, last user text) of every agent-two model call
@@ -48,7 +49,7 @@ class AgentTargetFixture(SubagentFixture):
         groups = self.target_groups if agent == "agent-two" else self.groups
         return AgentConfig(
             id=agent, name=f"Name of {agent}", chat_config=ChatConfig(tools=True, tool_groups=list(groups)),
-            terminal=self.target_terminal if agent == "agent-two" else None,
+            terminal=self.target_terminal if agent == "agent-two" else self.parent_terminal,
         )
 
     def _factory(self, user: str, agent: str, chat_id: str | None) -> Agent:
@@ -238,12 +239,24 @@ class RunAsTheTargetTests(AgentTargetFixture):
         with self.assertRaises(TaskError) as caught:
             self.to_agent(backends=["lab"], grantable_backends=["box", "lab"])
         self.assertIn("has no backend lab", str(caught.exception))
+        self.parent_terminal = AgentTerminalConfig(backends={"box": AgentTerminalBackend(approvals="smart")})
         # both have box: allowed, and the worker is on manual approvals whatever the target's own mode
         live = self.to_agent(backends=["box"], grantable_backends=["box"])
         self.assertIn("terminal", self.record(live.task_id)["grant"]["groups"])
         self.finish(live)
         mark_ = self.sources[("user-one", "agent-two")].task_mark(self.record(live.task_id)["child"]["chat_id"])
         self.assertEqual(mark_.backends, ["box"])
+
+    def test_a_backend_configured_differently_for_the_target_is_not_granted(self) -> None:
+        self.target_groups = ["web", "terminal"]
+        self.parent_terminal = AgentTerminalConfig(backends={"box": AgentTerminalBackend(workdir="/srv/a", approvals="manual")})
+        self.target_terminal = AgentTerminalConfig(backends={"box": AgentTerminalBackend(workdir="/srv/b", approvals="manual")})
+        with self.assertRaises(TaskError) as caught:
+            self.to_agent(backends=["box"], grantable_backends=["box"])
+        self.assertIn("backend box", str(caught.exception))
+        self.target_terminal = AgentTerminalConfig(backends={"box": AgentTerminalBackend(workdir="/srv/a", approvals="off")})
+        with self.assertRaises(TaskError):  # a laxer approval mode is a different grant too
+            self.to_agent(backends=["box"], grantable_backends=["box"])
 
     def test_the_wake_goes_to_the_parent_chat_not_the_targets(self) -> None:
         events: list[dict] = []

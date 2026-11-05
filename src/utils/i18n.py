@@ -808,6 +808,8 @@ _SPANISH = {
     "(untitled chat)": "(chat sin título)",
     "no parent chat": "sin chat de origen",
     "scheduled": "programada",
+    # subagents (review fixes)
+    "this is an internal task chat: steer the task instead": "este es un chat interno de tarea: corrige la tarea en su lugar",
 }
 
 

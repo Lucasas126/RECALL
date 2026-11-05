@@ -81,6 +81,9 @@ class ApprovalBroker:
         be told while it waits (`approval_wait`), which a task uses to pause its wall-clock timeout.
         """
         timeout = self.timeout_seconds if timeout_seconds is None else timeout_seconds
+        gate = getattr(run, "approval_gate", None)
+        if gate is not None and (refusal := gate()):  # e.g. a task past its approval cap: denied, nobody is asked
+            return Outcome(False, refusal)
         approval_id = uuid4().hex[:12]
         now = time.time()
         payload = {

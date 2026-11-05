@@ -1270,9 +1270,12 @@ class ChatService:
     def send(
         self, user_id: str, agent_id: str, chat_id: str, text: str,
         stream: Optional[bool] = None, attachments: Optional[list[dict]] = None,
-        rewind_to: Optional[int] = None,
+        rewind_to: Optional[int] = None, internal_task: bool = False,
     ) -> Iterator[ChatEvent]:
         """Send a user message to a chat and yield the reply as events.
+
+        A subagent worker's hidden chat accepts messages only from the TaskManager (`internal_task=True`): a person
+        or an API client must steer the task instead (task_steer / task_send).
 
         Validation and scheduling happen immediately, independently of event consumption.
         A new message interrupts an unfinished reply to the same chat and continues its turn.
@@ -1285,6 +1288,13 @@ class ChatService:
         attachments are kept; long-term memory (Dream) is not rewound.
         """
         conversations = self._conversations(user_id, agent_id)
+        if not internal_task:
+            try:
+                is_task_chat = conversations.is_task_chat(chat_id)
+            except ValueError:  # an invalid id is reported as an unknown chat below
+                is_task_chat = False
+            if is_task_chat:
+                raise InputError("this is an internal task chat: steer the task instead")
         attachments = [ChatAttachment.model_validate(item).model_dump() for item in (attachments or [])]
         if rewind_to is not None:
             original = self._edit_target(conversations, chat_id, rewind_to)
