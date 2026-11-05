@@ -100,7 +100,19 @@ The `delegate` tool group (phases 1 and 2a of the [subagents design](../project/
 - **Parent chat deleted.** `ChatService.delete_chat` (also `discard_chat`) first calls `TaskManager.cancel_for_parent`: the chat's running tasks are stopped (`cancelled`/`parent_deleted`,
   wake `orphaned`). A result whose chat is gone when the flush runs is `orphaned` too (the record and the worker chat stay readable); the chat is never recreated.
 - **Recovery.** `TaskManager.recover()` (called from `ChatService.start_dream_scheduler`, i.e. at start of the web and Telegram processes) fails non-terminal tasks whose run lock is free
-  (`owner_lost`, the parent is told) and schedules delivery of terminal tasks whose wake is `pending`, `held` or a stale `claimed`. Same process only; cross-process commands are phase 4.
+  (`owner_lost`, the parent is told) and schedules delivery of terminal tasks whose wake is `pending`, `held` or a stale `claimed` (only for chats whose origin the process serves, see the next item).
+- **Process split (phase 4).** `web.py` and `run_telegram.py` are two processes with separate `ChatService`s that share only files. `ChatService(origins=...)` declares the chat origins a process drives
+  (`create_app` → `{"web"}`, `build_application` → `{"telegram"}`; tests and the CLI declare none, then a process delivers its own tasks' wakes as before and claims nothing). The *executor* of a task is the
+  process that runs the parent's turn; the *origin* of the parent chat (`<chat_id>.origin.json`) names the process that must deliver its wake. Mechanisms, all through the task store, no broker:
+  (1) **commands inbox**: `TaskStore.enqueue` appends `{id, kind: stop|steer|send, text}` to `<task_id>.cmd.jsonl` under the store lock; `TaskManager.stop_task/steer/send` called for a task that is not
+  live here but whose run lock another process holds return `{status: "queued", command}` instead of an error (`send` for a finished task just runs here). The executor's `poll_commands` (every 1 s, only
+  while it has live tasks; also once more when a task ends) takes the file (`take_commands`, at-most-once), applies each through the ordinary `stop`/`steer`/`send` paths and records
+  `{id, kind, status: applied|rejected|failed, note}` in the record's `commands` (`command_outcome`; the web view shows the last five). (2) **wake claim**: a finished task whose process does not serve the
+  parent's origin leaves `wake.state=pending`; `poll_wakes` (every ~2 s, started by `ChatService.start_task_poller`, called from `start_dream_scheduler`, stopped in `close`) delivers the chats of its origins
+  through the same `_deliver`, whose `_claim` is atomic under the store lock and writes `claimed_by` (process id) and `claimed_at`; a claim older than 60 s is taken over, so two pollers deliver once and a
+  crash between claim and delivery loses nothing. (3) **recovery in the poller**: `_fail_dead` runs on every pass, not only at start-up. (4) **approvals are not relayed** (design decision 6): the executor
+  mirrors `awaiting_approval` and `approval_channel` into the record only so that the other channel's task card says *awaiting approval (answer it in Web|Telegram)* (`view()["approval_elsewhere"]`); the
+  approval card itself stays in the executor's channel. Task lists read the store, so every process shows the tasks of the parent chat wherever they run.
 - **Task event hook.** `TaskManager.subscribe(callback)` (returns an unsubscribe function; `ChatService._tasks`) calls `callback(event: dict)` on the thread that raised it, errors are logged and
   ignored, listeners must not block. Events: `task_started` (`task_id`, `agent_id`, `chat_id` of the parent, `status`, `followup` for a task_send), `task_finished` (`status`, `reason`),
   `task_wake` (`chat_id`, `agent_id`, `task_ids`: a wake generation was queued; attach to it with `ChatService.follow`) and `task_orphaned` (`task_ids`). The web and Telegram layers

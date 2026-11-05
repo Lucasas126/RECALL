@@ -62,4 +62,4 @@ Agent targets: `references/delegation-targets.md`. Code: `src/service/tasks.py`,
 
 ## Telegram
 
-In Telegram the user sees one status line when a task starts (with a Stop button) and one when it ends, and your wake reply arrives in the chat on its own. The user can run `/tasks` (list with Stop buttons), `/task <id>` (status and capped result) and `/task <id> <text>` (corrects a running task, like `task_steer`).
+In Telegram the user sees one status line when a task starts (with a Stop button) and one when it ends, and your wake reply arrives in the chat on its own. The user can run `/tasks` (list with Stop buttons), `/task <id>` (status and capped result) and `/task <id> <text>` (corrects a running task, like `task_steer`). Web vs Telegram: `delegation-processes.md`.

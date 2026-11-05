@@ -135,7 +135,7 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     """
     if dream_scheduler is None:
         dream_scheduler = service is None
-    service = service or ChatService()
+    service = service or ChatService(origins={"web"})
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:

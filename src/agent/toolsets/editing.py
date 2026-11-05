@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import TYPE_CHECKING, Annotated, Callable
 
 from src.agent.tooling import tool
@@ -13,6 +14,14 @@ def build_edit_tools(agent: Agent) -> list[Callable[..., str]]:
     """Build tools that create, modify, move or delete memories."""
     sources = agent.sources
 
+    def locked():
+        """The agent's per-folder write lock (the one the self memory uses), so a task of the agent and a normal
+        chat of it, in this or in another process, cannot interleave their read-modify-write cycles."""
+        try:
+            return sources.agent_files().memory_lock()
+        except (KeyError, AttributeError):  # a registry without the agent source (nothing shared to protect)
+            return nullcontext()
+
     @tool
     def write(
         memory_path: Annotated[str, "the 'source:path' address to write"],
@@ -22,7 +31,8 @@ def build_edit_tools(agent: Agent) -> list[Callable[..., str]]:
         Use edit or append for partial changes to avoid rewriting the whole file."""
         if error := readonly_error(sources, memory_path):
             return error
-        path = sources.write(memory_path, content)
+        with locked():
+            path = sources.write(memory_path, content)
         mark_written(agent, memory_path)
         return f"wrote {path}"
 
@@ -36,9 +46,10 @@ def build_edit_tools(agent: Agent) -> list[Callable[..., str]]:
         if error := readonly_error(sources, memory_path):
             return error
         source, rel = sources.resolve(memory_path)
-        existing = source.read(rel) if source.exists(rel) else ""
-        joined = content if not existing else existing + ("" if existing.endswith("\n") else "\n") + content
-        path = source.write(rel, joined)
+        with locked():
+            existing = source.read(rel) if source.exists(rel) else ""
+            joined = content if not existing else existing + ("" if existing.endswith("\n") else "\n") + content
+            path = source.write(rel, joined)
         mark_written(agent, memory_path)
         return f"appended to {path}"
 
@@ -53,13 +64,14 @@ def build_edit_tools(agent: Agent) -> list[Callable[..., str]]:
         if error := readonly_error(sources, memory_path):
             return error
         source, rel = sources.resolve(memory_path)
-        content = source.read(rel)
-        count = content.count(old_string)
-        if count == 0:
-            return f"error: old_string not found in {memory_path}"
-        if count > 1:
-            return f"error: old_string is not unique in {memory_path} ({count} matches); add surrounding context"
-        source.write(rel, content.replace(old_string, new_string, 1))
+        with locked():
+            content = source.read(rel)
+            count = content.count(old_string)
+            if count == 0:
+                return f"error: old_string not found in {memory_path}"
+            if count > 1:
+                return f"error: old_string is not unique in {memory_path} ({count} matches); add surrounding context"
+            source.write(rel, content.replace(old_string, new_string, 1))
         mark_written(agent, memory_path)
         return f"edited {memory_path}"
 
@@ -72,9 +84,10 @@ def build_edit_tools(agent: Agent) -> list[Callable[..., str]]:
         if error := readonly_error(sources, memory_path) or readonly_error(sources, new_path):
             return error
         source, rel = sources.resolve(memory_path)
-        content = source.read(rel)
-        destination = sources.write(new_path, content)
-        source.delete(rel)
+        with locked():
+            content = source.read(rel)
+            destination = sources.write(new_path, content)
+            source.delete(rel)
         mark_written(agent, memory_path)
         mark_written(agent, new_path)
         return f"moved {memory_path} -> {destination}"
@@ -84,7 +97,8 @@ def build_edit_tools(agent: Agent) -> list[Callable[..., str]]:
         """Delete a memory at the given address. From your point of view it stops existing."""
         if error := readonly_error(sources, memory_path):
             return error
-        sources.delete(memory_path)
+        with locked():
+            sources.delete(memory_path)
         mark_written(agent, memory_path)
         return f"deleted {memory_path}"
 

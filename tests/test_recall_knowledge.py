@@ -253,7 +253,7 @@ class AdminCliConsistencyTests(unittest.TestCase):
 
     def test_new_pages_fit_the_size_limits_and_are_linked(self) -> None:
         hub = pack_text(HUB)
-        for name in ("admin-cli", "recipes", "security-for-admins"):
+        for name in ("admin-cli", "recipes", "security-for-admins", "delegation", "delegation-processes"):
             self.assertIn(f"references/{name}.md", hub)
             self.assertLessEqual(len((PACK / "references" / f"{name}.md").read_bytes()), 8 * 1024)
 

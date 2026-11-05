@@ -1790,8 +1790,13 @@ def _task_elapsed(record: dict) -> str:
     return f"{seconds}s" if seconds < 90 else f"{seconds // 60}m" if seconds < 5400 else f"{seconds // 3600}h"
 
 
+def _channel_name(channel: str) -> str:
+    return "Telegram" if channel == "telegram" else "Web"
+
+
 def _task_status_text(language: str, status: str) -> str:
     return {
+        "queued": message(language, "status: queued"),
         "running": message(language, "status: running"),
         "done": message(language, "status: done"),
         "failed": message(language, "status: failed"),
@@ -2010,8 +2015,12 @@ async def tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     for record in records[-15:]:
         icon = _TASK_ICONS.get(record["status"], "•")
         status = _task_status_text(session.language, record["status"])
-        if record["status"] == "running" and manager.awaiting_approval(session.user_id, record["id"]):
-            status = _msg(session, "status: awaiting approval")
+        if record["status"] == "running":
+            channel = record.get("approval_channel")  # mirrored by the executor process; approvals are never relayed
+            if manager.awaiting_approval(session.user_id, record["id"]):
+                status = _msg(session, "status: awaiting approval")
+            elif record.get("awaiting_approval") and channel not in (None, "telegram"):  # run by the web process: its card is there
+                status = _msg(session, "status: awaiting approval (answer it in {channel})", channel=_channel_name(channel))
         lines.append(f"{icon} {record['id']} · {record['title']} — {status} · {_task_elapsed(record)}")
         if record["status"] == "running":
             rows.append([InlineKeyboardButton(
@@ -2039,8 +2048,11 @@ async def task_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     manager = _task_manager(state)
     try:
         if text:
-            await asyncio.to_thread(manager.steer, session.user_id, task_id, text)
-            await reply(_msg(session, "✏️ Correction sent to task {id}.", id=task_id))
+            outcome = await asyncio.to_thread(manager.steer, session.user_id, task_id, text)
+            if outcome.get("status") == "queued":  # the web process runs it: its executor applies the command within seconds
+                await reply(_msg(session, "✏️ Correction queued for task {id}: it runs in the web process and applies it within seconds.", id=task_id))
+            else:
+                await reply(_msg(session, "✏️ Correction sent to task {id}.", id=task_id))
             return
         record = await asyncio.to_thread(manager.store.get, session.user_id, task_id)
     except TaskError as exc:
@@ -2145,7 +2157,7 @@ def build_application(
     allowed = load_allowed_users()
     if dream_scheduler is None:
         dream_scheduler = service is None
-    state = TelegramBotState(service or ChatService())
+    state = TelegramBotState(service or ChatService(origins={"telegram"}))
     for telegram_id, user_id in allowed.items():
         try:
             profile = state.service.login(user_id)
