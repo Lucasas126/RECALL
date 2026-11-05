@@ -1,6 +1,7 @@
 const $ = (id) => document.getElementById(id);
 // inline line icons (currentColor); constants only, never built from user data
 const ICONS = {
+  tool: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><polyline points=\"4 17 10 11 4 5\"/><line x1=\"12\" y1=\"19\" x2=\"20\" y2=\"19\"/></svg>",
   clock: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 7v5l3 2\"/></svg>",
   alert: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 7.5v5.5\"/><path d=\"M12 16.5h.01\"/></svg>",
   send: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M12 19V5\"/><path d=\"m5 12 7-7 7 7\"/></svg>",
@@ -2847,11 +2848,17 @@ function renderMessages(messages) {
   for (const m of messages) {
     const view = addMessage(m.role, container);
     if (m.role === "user" && m.index != null) setEditable(view.el, m.index);
-    if (m.reasoning) view.thinking(m.reasoning);
-    for (const action of m.actions ?? []) view.action(action);
     if (m.associative_skipped) view.memory({ state: "skipped" });
     else if (m.associative_matches != null) view.memory({ state: "done", matches: m.associative_matches });
-    view.text(m.content);
+    if (m.role === "assistant") {
+      for (const step of historySteps(m)) {
+        if (step.type === "reasoning") view.thinking(step.text);
+        else if (step.type === "tool") view.action(step.action);
+        else view.text(step.text);
+      }
+    } else {
+      view.text(m.content);
+    }
     if (m.interrupted) view.interrupted();
     if (m.usage_report) showUsage(m.usage_report);
     else if (m.role === "assistant" && m.usage?.in != null) {
@@ -3035,6 +3042,153 @@ function approvalPendingLabel(count) {
 // Splits a message's text at the given offsets: segment i is raw[starts[i]] up to raw[starts[i + 1]].
 function textSegments(raw, starts) {
   return starts.map((start, i) => raw.slice(start, i + 1 < starts.length ? starts[i + 1] : undefined));
+}
+
+// ------------------------------------------------------------------ reply timeline
+// A reply is an ordered list of segments: {type: "reasoning", text}, {type: "text", text} and {type: "tool", action}.
+// The stored form (message.timeline) has {type: "tool", index} into message.actions instead of the action itself.
+// Same rules as src/core/timeline.py: chunks of one kind merge, a tool step or the other kind starts a new segment,
+// and a whitespace-only chunk never opens a segment.
+
+// The kind a chunk lands in after `last`, or null when it is dropped (whitespace that would open a segment).
+function timelineKind(last, kind, chunk) {
+  if (kind === "tool") return kind;
+  if (!String(chunk ?? "")) return null;
+  if (last === kind) return kind;
+  return String(chunk).trim() ? kind : null;
+}
+
+function timelineStep(segments, kind, payload) {
+  const last = segments[segments.length - 1];
+  if (timelineKind(last?.type, kind, payload) === null) return segments;
+  if (kind === "tool") segments.push({ type: "tool", action: payload });
+  else if (last?.type === kind) last.text += payload;
+  else segments.push({ type: kind, text: String(payload) });
+  return segments;
+}
+
+// Segments from a sequence of stream events [{kind, payload}] (reasoning/text chunks and tool actions).
+function buildTimeline(events) {
+  const segments = [];
+  for (const { kind, payload } of events) {
+    if (kind === "reasoning" || kind === "text" || kind === "tool") timelineStep(segments, kind, payload);
+  }
+  return segments;
+}
+
+// What to draw for a stored message, in order. Messages saved before `timeline` existed keep the old layout:
+// thinking, then every tool step, then the text.
+function historySteps(message) {
+  const actions = message.actions ?? [];
+  const content = message.content;
+  if (message.role !== "assistant" || !Array.isArray(message.timeline) || !message.timeline.length) {
+    const steps = [];
+    if (message.reasoning) steps.push({ type: "reasoning", text: message.reasoning });
+    for (const action of actions) steps.push({ type: "tool", action });
+    steps.push({ type: "text", text: content });
+    return steps;
+  }
+  const steps = [];
+  const shown = new Set();
+  for (const segment of message.timeline) {
+    if (segment.type === "tool") {
+      if (actions[segment.index] && !shown.has(segment.index)) {
+        shown.add(segment.index);
+        steps.push({ type: "tool", action: actions[segment.index] });
+      }
+    } else if (segment.type === "reasoning" || segment.type === "text") {
+      steps.push({ type: segment.type, text: segment.text ?? "" });
+    }
+  }
+  actions.forEach((action, index) => { if (!shown.has(index)) steps.push({ type: "tool", action }); });
+  return steps;
+}
+
+// First words of a thinking segment on one line, for its collapsed header.
+function thinkingPreview(text, max = 90) {
+  const line = String(text ?? "").replace(/\s+/g, " ").trim();
+  return line.length > max ? `${line.slice(0, max)}…` : line;
+}
+
+// One-line view of a tool call: name, backend (terminal) and a short summary of the arguments.
+// `line` is the first line of a command or a key=value list; `full` is the tooltip.
+function actionSummary(action) {
+  const args = action?.arguments && typeof action.arguments === "object" ? action.arguments : {};
+  const backend = typeof args.backend === "string" ? args.backend : "";
+  const one = (value) => String(value).replace(/\s+/g, " ").trim();
+  let line;
+  if (typeof args.command === "string") {
+    line = one(args.command.split(/\r?\n/).find((part) => part.trim()) ?? "");
+  } else {
+    line = Object.entries(args).filter(([key]) => key !== "backend")
+      .map(([key, value]) => `${key}=${one(typeof value === "string" ? value : JSON.stringify(value))}`).join(", ");
+  }
+  const full = `${action?.name ?? ""}${backend ? ` [${backend}]` : ""}\n${actionArgsText(action)}`.trim();
+  return { name: String(action?.name ?? ""), backend, line, full: full.length > 2000 ? `${full.slice(0, 2000)}…` : full };
+}
+
+// The arguments as a block: a lone command as it is (newlines kept), anything else as indented JSON.
+function actionArgsText(action) {
+  const args = action?.arguments ?? {};
+  const keys = Object.keys(args).filter((key) => key !== "backend");
+  if (keys.length === 1 && keys[0] === "command" && typeof args.command === "string") return args.command;
+  return keys.length ? JSON.stringify(Object.fromEntries(keys.map((key) => [key, args[key]])), null, 2) : "";
+}
+
+// A collapsible thinking segment: one line (label + first words) when closed, a capped scrolling block when open.
+function thinkingSegment() {
+  const node = document.createElement("details");
+  node.className = "thinking";
+  node.open = prefs.thinkingOpen;
+  const summary = document.createElement("summary");
+  const preview = document.createElement("span");
+  preview.className = "thinking-preview";
+  summary.append(Object.assign(document.createElement("span"), { className: "thinking-label", textContent: tr("Thinking") }), preview);
+  // a user click on the summary sets the preference for every thinking block
+  summary.addEventListener("click", () => {
+    prefs.thinkingOpen = !node.open;
+    localStorage.setItem("thinkingOpen", prefs.thinkingOpen);
+  });
+  const body = document.createElement("div");
+  body.className = "thinking-text";
+  node.append(summary, body);
+  return {
+    node,
+    set(text) {
+      body.textContent = text;
+      preview.textContent = text ? `· ${thinkingPreview(text)}` : "";
+    },
+  };
+}
+
+// A tool step: closed it is one line (icon, name, backend, summary); open it shows the arguments and the result.
+function actionStep(action) {
+  const info = actionSummary(action);
+  const item = document.createElement("details");
+  item.className = "action" + (action.error ? " failed" : "");
+  const summary = document.createElement("summary");
+  summary.title = info.full;
+  const icon = document.createElement("span");
+  icon.className = "action-icon";
+  icon.innerHTML = ICONS.tool;
+  summary.append(icon, Object.assign(document.createElement("span"), { className: "action-name", textContent: info.name }));
+  if (info.backend) summary.append(Object.assign(document.createElement("span"), { className: "action-backend", textContent: info.backend }));
+  summary.append(Object.assign(document.createElement("span"), { className: "action-args", textContent: info.line }));
+  item.append(summary);
+  const argsText = actionArgsText(action);
+  for (const [label, text] of [[tr("Arguments"), argsText], [tr("Result"), String(action.result ?? "")]]) {
+    if (!text) continue;
+    const block = document.createElement("div");
+    block.className = "action-block";
+    block.append(
+      Object.assign(document.createElement("div"), { className: "action-label", textContent: label }),
+      Object.assign(document.createElement("pre"), { textContent: text }),
+    );
+    item.append(block);
+  }
+  item.dataset.tool = action.name;
+  item.dataset.command = String(action.arguments?.command ?? "");
+  return item;
 }
 
 function approvalInitialState() {
@@ -3383,7 +3537,7 @@ function addMessage(role, parent = state.view ?? $("messages")) {
   // The reply is a timeline: text before a step (tool call, approval card) stays above it, later text opens a new body below it.
   const bodies = [body];
   const starts = [0];
-  let thinking = null;
+  let thinking = null;  // the thinking segment that still takes chunks: nothing was added after it yet
   let thinkingRaw = "";
   let memoryIndicator = null;
   let actionCount = 0;
@@ -3410,7 +3564,8 @@ function addMessage(role, parent = state.view ?? $("messages")) {
     }
   }
   // Puts a step in the timeline at the current point: after the text so far, with fresh text below it.
-  function addStep(node) {
+  function addStep(node, keepThinking = false) {
+    if (!keepThinking) thinking = null;
     if (raw.length > starts[starts.length - 1]) {
       const next = document.createElement("div");
       next.className = "body";
@@ -3445,35 +3600,26 @@ function addMessage(role, parent = state.view ?? $("messages")) {
         renderAttachmentNames(chunk.filter((part) => part.type !== "text").map((part) => ({
           name: part.name || part.type,
         })));
+        if (textParts.join("").trim()) thinking = null;
         renderBody();
         return;
       }
       raw += chunk;
+      if (chunk.trim()) thinking = null;
       renderBody();
     },
     attachments: renderAttachmentNames,
+    // Every reasoning burst is its own segment at its place in the timeline; chunks that follow it directly join it.
     thinking(chunk) {
       if (!thinking) {
-        thinking = document.createElement("details");
-        thinking.className = "thinking";
-        thinking.open = prefs.thinkingOpen;
-        const summary = document.createElement("summary");
-        summary.textContent = "thinking";
-        // a user click on the summary sets the preference for every thinking block
-        summary.addEventListener("click", () => {
-          prefs.thinkingOpen = !thinking.open;
-          localStorage.setItem("thinkingOpen", prefs.thinkingOpen);
-        });
-        thinking.append(summary);
-        const text = document.createElement("div");
-        text.className = "thinking-text";
-        thinking.append(text);
-        if (memoryIndicator) memoryIndicator.after(thinking);
-        else el.prepend(thinking);
+        if (!String(chunk).trim()) return;
+        thinkingRaw = "";
+        thinking = thinkingSegment();
+        addStep(thinking.node, true);
       }
       // models end their reasoning with newlines; trimming keeps an empty line from showing under the block
       thinkingRaw += chunk;
-      thinking.lastChild.textContent = thinkingRaw.trimEnd();
+      thinking.set(thinkingRaw.trimEnd());
     },
     notice(text) {
       const note = document.createElement("div");
@@ -3503,19 +3649,7 @@ function addMessage(role, parent = state.view ?? $("messages")) {
     },
     action(a) {
       actionCount++;
-      const item = document.createElement("details");
-      item.className = "action" + (a.error ? " failed" : "");
-      const summary = document.createElement("summary");
-      const args = Object.entries(a.arguments ?? {})
-        .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
-        .join(", ");
-      summary.textContent = `${a.name}(${args})`;
-      const result = document.createElement("pre");
-      result.textContent = a.result;
-      item.append(summary, result);
-      item.dataset.tool = a.name;
-      item.dataset.command = String(a.arguments?.command ?? "");
-      addStep(item);
+      addStep(actionStep(a));
     },
     approval(approval) {
       showApproval(approval, (node) => addStep(node));
@@ -3533,13 +3667,8 @@ function addMessage(role, parent = state.view ?? $("messages")) {
         raw = snapshot.content;
         for (let i = starts.length - 1; i > 0; i--) if (starts[i] > raw.length) starts[i] = raw.length;
         renderBody(true);
-        thinkingRaw = "";
-        if (thinking) thinking.lastChild.textContent = "";
-        if (snapshot.reasoning) this.thinking(snapshot.reasoning);
-        else if (thinking) {
-          thinking.remove();
-          thinking = null;
-        }
+        // the thinking segments already shown stay; the snapshot only fills in a view that saw none
+        if (snapshot.reasoning && !el.querySelector(":scope > details.thinking")) this.thinking(snapshot.reasoning);
         for (const action of snapshot.actions.slice(actionCount)) this.action(action);
       }
       if (!el.classList.contains("interrupted")) {

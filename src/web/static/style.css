@@ -229,12 +229,31 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .body table { border-collapse: collapse; display: block; overflow-x: auto; }
 .body th, .body td { border: 1px solid var(--line); padding: 4px 10px; }
 .body hr { border: none; border-top: 1px solid var(--line); }
-details.thinking { color: var(--muted); font-style: italic; margin-bottom: 6px; }
-.thinking-text { white-space: pre-wrap; }
-details.action { margin-bottom: 6px; font: 13px/1.4 ui-monospace, monospace; color: var(--muted); }
-details.action summary { cursor: pointer; }
+:root { --tool-block-max: 240px; }
+details.thinking { color: var(--muted); font-style: italic; margin-bottom: 6px; min-width: 0; }
+details.thinking > summary { cursor: pointer; display: flex; gap: 6px; align-items: baseline; min-width: 0; white-space: nowrap; overflow: hidden; }
+details.thinking > summary::-webkit-details-marker { display: none; }
+details.thinking > summary::before { content: "\25B8"; font-style: normal; flex: none; }
+details.thinking[open] > summary::before { content: "\25BE"; }
+.thinking-label { flex: none; }
+.thinking-preview { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .85; }
+details.thinking[open] .thinking-preview { display: none; }
+.thinking-text { white-space: pre-wrap; word-break: break-word; max-height: var(--tool-block-max); overflow-y: auto; margin-top: 4px; padding-left: 14px; border-left: 2px solid var(--line); }
+details.action { margin-bottom: 6px; font: 13px/1.4 ui-monospace, monospace; color: var(--muted); min-width: 0; }
+details.action > summary { cursor: pointer; display: flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; overflow: hidden; }
+details.action > summary::-webkit-details-marker { display: none; }
+details.action > summary::before { content: "\25B8"; flex: none; }
+details.action[open] > summary::before { content: "\25BE"; }
 details.action.failed summary { color: var(--danger); }
-details.action pre { margin: 4px 0 0; padding: 8px; background: var(--bg); border-radius: 6px; white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; }
+.action-icon { flex: none; display: inline-flex; width: 14px; height: 14px; }
+.action-icon svg, .action-icon .icon { width: 14px; height: 14px; }
+.action-name { flex: none; font-weight: 600; color: var(--text); }
+details.action.failed .action-name { color: var(--danger); }
+.action-backend { flex: none; font-size: .85em; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; }
+.action-args { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.action-block { margin-top: 6px; }
+.action-label { font-size: .8em; text-transform: uppercase; letter-spacing: .04em; opacity: .8; }
+details.action pre { margin: 2px 0 0; padding: 8px; background: var(--bg); border-radius: 6px; white-space: pre-wrap; word-break: break-word; max-height: var(--tool-block-max); overflow: auto; }
 #usage { padding: 4px var(--gutter); color: var(--muted); font: 12px/1.4 ui-monospace, monospace; }
 #usage summary { cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #usage pre { margin: 4px 0 0; white-space: pre-wrap; max-height: 140px; overflow-y: auto; }
@@ -575,7 +594,7 @@ input[type="checkbox"]:disabled { opacity: .5; cursor: not-allowed; }
 .approval-card.dangerous .approval-title { color: var(--warn); }
 .approval-tool { color: var(--muted); font: .8em ui-monospace, Consolas, monospace; }
 .approval-countdown { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
-.approval-command { margin: 0; padding: 8px 10px; max-height: 220px; overflow: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font: 13px/1.4 ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.approval-command { margin: 0; padding: 8px 10px; max-height: var(--tool-block-max); overflow: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font: 13px/1.4 ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .approval-command:focus-visible, .approval-card button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .approval-meta { margin: 0; font-size: .9em; color: var(--muted); overflow-wrap: anywhere; }
 .approval-meta strong { color: var(--text); font-weight: 600; }

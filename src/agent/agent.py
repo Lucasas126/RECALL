@@ -23,6 +23,7 @@ from src.config.models import ModelsConfig, ResolvedAgent
 from src.config.settings import AGENT_MAX_TOOL_HOPS, PROMPT_CACHE, TAVILY
 from src.config.zdr import chat_zdr
 from src.core.index import VectorIndex
+from src.core.timeline import TimelineBuilder
 from src.core.sources.registry import SourceRegistry
 from src.utils.logger import get_logger
 from src.providers.provider import (
@@ -236,6 +237,7 @@ class Agent:
         self.last_reasoning: str = ""
         # tool calls made during the last turn (name, arguments, truncated result, error flag)
         self.last_actions: list[dict] = []
+        self._timeline = TimelineBuilder()  # order of thinking, tool steps and text of the reply being built
         # formatted usage breakdown of the last reply (for the caller to display)
         self.last_usage: str = ""
         self.last_latency_report: str = ""
@@ -375,6 +377,7 @@ class Agent:
         self._partial = ""
         self._carried_reasoning = ""
         self.last_actions = []
+        self._timeline = TimelineBuilder()
         self.last_reasoning = ""
         self.last_usage = ""
         self.last_latency_report = ""
@@ -467,8 +470,12 @@ class Agent:
                 for kind, chunk in events:
                     if kind == "content" and isinstance(chunk, str):
                         reply += chunk
+                        self._timeline.text(chunk)
                     elif kind == "reasoning" and isinstance(chunk, str):
                         reasoning += chunk
+                        self._timeline.reasoning(chunk)
+                    elif kind == "tool":
+                        self._timeline.tool()
                     yield kind, chunk
         except GenerationCancelled:
             self._partial = ""  # `reply` already holds everything that was shown
@@ -645,9 +652,14 @@ class Agent:
             if tool_calls and not is_last:
                 tool_calls = _dedupe_tool_calls(tool_calls)
                 self._remember_tool_calls(reply, reasoning, tool_calls)
-                self._run_tools(tool_calls)
+                self._timeline.reasoning(reasoning)
+                self._timeline.text(reply)
+                for _ in self._run_tools(tool_calls):
+                    self._timeline.tool()
                 continue
             self.last_reasoning = reasoning
+            self._timeline.reasoning(reasoning)
+            self._timeline.text(reply)
             usage_report = self._format_usage_report(
                 context, reply, reasoning, result.get("usage")
             )
@@ -754,6 +766,7 @@ class Agent:
             "zdr": self.zdr_required,
             "reasoning": reasoning or None,
             "actions": self.last_actions or None,
+            "timeline": self._timeline.build(len(self.last_actions)),
             "associative_matches": self._assoc_match_count if self._assoc_outcome in ("found", "none") else None,
             "associative_skipped": True if self._assoc_outcome == "skipped" else None,
             "usage_report": usage_report or self.last_usage or None,

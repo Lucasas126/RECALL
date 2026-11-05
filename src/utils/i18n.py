@@ -637,6 +637,8 @@ _SPANISH = {
     "Session started ({trigger}) with {model}; {pending} pending chats; limits {steps} steps, {tokens} tokens, {minutes} min.": "Sesión iniciada ({trigger}) con {model}; {pending} chats pendientes; límites {steps} pasos, {tokens} tokens, {minutes} min.",
     "Tokens: input {input}, output {output}": "Tokens: entrada {input}, salida {output}",
     "Result": "Resultado",
+    "Thinking": "Razonamiento",
+    "Arguments": "Argumentos",
     "Failed": "Fallida",
     "Show all ({count} characters)": "Mostrar todo ({count} caracteres)",
     "error": "error",

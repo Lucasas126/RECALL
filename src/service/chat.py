@@ -989,7 +989,7 @@ class ChatService:
                 "index": position,
                 **{
                     k: t[k] for k in (
-                        "role", "content", "ts", "reasoning", "actions", "interrupted",
+                        "role", "content", "ts", "reasoning", "actions", "timeline", "interrupted",
                         "associative_matches", "associative_skipped", "usage", "usage_report",
                     )
                     if t.get(k) is not None
