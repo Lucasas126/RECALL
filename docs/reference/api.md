@@ -9,7 +9,7 @@ plus an optional `"code"` (see [error codes](#error-codes)).
 | area | routes |
 | --- | --- |
 | session | `POST /api/login`, `POST /api/logout`, `GET /api/me` (the profile and agents, plus `terminal_backends`: `[{"name", "type", "description"}]` sorted by name, the user's terminal backends for the agent form; never hosts, users or key paths), `GET /api/localization?language=en\|es`, `GET /api/version` (public: `{"version": "0.1.0", "build": null}`; `version` comes from `pyproject.toml`, `build` is the first 7 characters of `RECALL_BUILD` or `null`) |
-| preferences | `GET`/`PATCH /api/preferences` ([details](user-yaml.md#preferences-api), including the Telegram orchestrator's `orchestrator` / `core_agent_id` and the read-only `orchestrator_default`; the response also carries a read-only `limits` object `{soul_chars, memory_chars, user_chars}` from the `memory_limits` block of settings.yaml), `GET /api/speech-to-text/models` |
+| preferences | `GET`/`PATCH /api/preferences` ([details](user-yaml.md#preferences-api), including the Telegram orchestrator's `orchestrator` / `core_agent_id` and the read-only `orchestrator_default`; the response also carries a read-only `limits` object `{soul_chars, memory_chars, user_chars}` from the `memory_limits` block of settings.yaml and a read-only `defaults` object with the effective defaults and number bounds), `GET /api/speech-to-text/models` |
 | models | `GET /api/providers/status`, `GET /api/models/catalog`, `GET /api/models`, `GET`/`POST /api/models/favorites`, `DELETE /api/models/favorites/<model_id>` ([models and providers](../user-guide/models-and-providers.md)) |
 | agents | `GET`/`POST /api/agents`, `GET`/`PUT`/`DELETE /api/agents/<agent_id>`, `GET /api/tool-groups`, `GET /api/agents/<agent_id>/index`, `POST /api/agents/<agent_id>/index/reindex` (table below) |
 | MCP | `GET /api/mcp`, `GET /api/mcp/<server_id>/tools`, `POST /api/mcp/<server_id>/connect`, `DELETE /api/mcp/<server_id>/connection` ([MCP servers](../user-guide/mcp.md)) |
@@ -70,6 +70,7 @@ New codes are set with `UserMessageError(..., code="...")` or a class-level `cod
 | `POST` | `/api/mcp/<server_id>/connect` | starts the server's sign-in for the user; returns the status and sign-in URL |
 | `DELETE` | `/api/mcp/<server_id>/connection` | stops the user's server and deletes their stored credentials |
 | `GET` | `/api/agents` | full configuration of each agent the user owns, including `chat_config.tool_groups` |
+| `GET` | `/api/agents/defaults` | defaults and bounds of the agent form fields, generated from the configuration models: `{chat_config, dream, terminal}`, each field `{default, min, max}` (`null` where the model has no default or bound), e.g. `dream.max_steps` `{default: 60, min: 1, max: 500}`, `chat_config.conversation_messages_retained` `{default: 30, min: 1, max: null}` |
 | `POST` | `/api/agents` | creates `agents/<id>.yaml` and appends the id to `agents` in `user.yaml` (`201`) |
 | `GET` | `/api/agents/<agent_id>` | one agent's configuration |
 | `PUT` | `/api/agents/<agent_id>` | replaces the agent; the body `id` may differ, which renames it |

@@ -6,13 +6,29 @@ the file format is in [agent.yaml](../reference/agent-yaml.md); the tools in [to
 
 A user with no agents sees an empty state with a **Create an agent** button.
 
-The web **Agents** tab edits one agent in form tabs: **Basic** (name, description and, for a new agent, its personality, plus a collapsed
-**Advanced** section with streaming, memory, reasoning, associative-memory options, retained messages and the default model),
+The web **Agents** tab edits one agent in form tabs: **Basic** (an **Identity** group with name, description and, for a new agent, its
+personality; a **Model and reasoning** group with the agent's default model, reasoning effort, reasoning on/off, keeping reasoning in
+memory and the reasoning token limit; and a collapsed **Advanced** section with streaming, memory, RECALL knowledge, the
+associative-memory options and messages kept in context),
 **Tools** (use tools and the tool groups) and **MCP**; **Folders** holds the user folders and the memory index status. A saved agent also
 has the dream tabs (**Soul & memory**, **Dream**, **Dream sessions**, see [dream mode](dream.md#web-ui)).
 
-Reasoning is on by default for new agents (and for agent files that omit `reasoning`); turn it off in **Basic > Advanced > Reasoning**.
+Reasoning is on by default for new agents (and for agent files that omit `reasoning`); turn it off in **Basic > Model and reasoning > Reasoning**.
 Models without reasoning support ignore the request. When it is off, the composer's effort selector reads **Disabled in this agent**.
+
+## defaults and reset
+
+Every setting in the agent form (the Basic, Tools and Dream tabs) is one row: its name and a short help line, the control, a muted
+**Default: X** line and a **↺** button (*Reset to default*) that is enabled only while the value differs from the default. The defaults
+come from the configuration models through `GET /api/agents/defaults`, so they match what the server applies to a field an agent file
+omits. Resetting puts the default value in the field; **Save agent** (or **Save dream settings**) stores it. The default model resets to
+*your default model*, the reasoning token limit to *no limit*, and the dream schedule to *manual only*.
+
+Numeric fields (messages kept in context, reasoning tokens, command timeout, dream steps, tokens, minutes and the schedule interval) are a
+text field with **−** / **+** buttons, a unit and the allowed range (taken from the same models). Type a number or use the buttons or the
+up/down arrow keys; Enter or leaving the field commits it. Big numbers show thousands separators. A value outside the range is moved to the
+nearest bound with a message under the field, and text that is not a whole number is flagged and blocks saving. **Messages kept in
+context** keeps all messages when empty; its default is 30.
 
 ## managing agents
 

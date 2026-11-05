@@ -10,6 +10,7 @@ Documentation map. The root [README](../README.md) gives the short pitch; [AGENT
 ## user guide
 
 - [Agents](user-guide/agents.md): creating and editing agents in the web UI.
+- [User settings](user-guide/settings.md): the Settings dialog, its sections, defaults and the reset button.
 - [Models and providers](user-guide/models-and-providers.md): provider tabs, model references, defaults, per-chat override, favorites, ZDR.
 - [Claude subscription](user-guide/claude-subscription.md): the experimental Claude login provider.
 - [Memory](user-guide/memory.md): mind palace, associative memory, the index, user folders.

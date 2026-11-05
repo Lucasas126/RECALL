@@ -275,7 +275,7 @@ form (`src/web/static`):
   shown for a new agent: after the agent is created, the page writes that text
   with `PUT /api/agents/<id>/soul`. the agents API itself has no personality
   field, so saving the agent form never touches `SOUL.md`.
-- **Dream**: schedule (manual only, every N hours or daily at HH:MM, plus the
+- **Dream** (every number has a stepper, unit, allowed range, *Default: X* hint and a reset button, see [defaults and reset](agents.md#defaults-and-reset)): schedule (manual only, every N hours or daily at HH:MM, plus the
   enabled switch), model (free text or the model picker, whose provider tabs
   list OpenRouter, Ollama and Claude subscription models; empty = the
   agent's default chat model, else the user's; a `claude_subscription:<model>` reference uses the user's own

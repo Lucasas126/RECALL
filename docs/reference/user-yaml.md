@@ -229,6 +229,23 @@ resetting preferences. A removed agent can be replaced with a valid selection
 or reset with `{"agent_id": null}`. Neither user YAML nor model favorites are
 rewritten.
 
+`GET /api/preferences` also returns two read-only objects. `limits` holds the size limits of `SOUL.md`, `MEMORY.md` and `USER.md`. `defaults`
+holds what each setting follows when nothing is saved, for the Settings dialog's *Default: X* hints and reset buttons:
+
+| Key | Value |
+| --- | --- |
+| `associative_max_matches` | `{default, min, max}`: `associative_memory.top_n` from `settings.yaml`, bounds 1-20 |
+| `disposable_retention_days` | `{default, min, max}`: 30, bounds 1-365 |
+| `orchestrator` | `orchestrator.enabled` from `settings.yaml` |
+| `show_thinking`, `theme`, `core_agent_id` | `true`, `"system"` (browser only), `null` (the preferred agent) |
+| `language` | the user's `language` from `user.yaml` reduced to `en` or `es` |
+| `default_llm_model`, `default_stt_model` | `models.chat` and `models.stt` of `user.yaml` |
+| `agents` | `[{id, name}]` of the user's agents, for the core-agent choice |
+
+Resetting a setting means saving `null` for it (`associative_max_matches`, `disposable_retention_days`, `orchestrator`,
+`core_agent_id`, `default_llm_model`, `default_stt_model`): the value is stored as absent and keeps following the default. `show_thinking`
+and `language` always hold a value, so their reset saves the default value.
+
 ## creating users (administrator)
 
 Instead of hand-editing, run inside the container (or `python -m src.admin ...` on a plain install):
