@@ -250,7 +250,7 @@ files**: start with `approvals: manual`, so every command waits for your tap. Ex
    ```
 
    Disable the default broad `OpenSSH-Server-In-TCP` rule (or scope it the same way).
-5. **Python on PATH** (Git Bash must find `python3` or `python`): the file tools run small scripts on the machine.
+5. **Git for Windows tools** (`head`, `wc`, `find`, `diff`, `awk`, `mktemp`, `file`): the file tools only use standard POSIX utilities, which Git Bash ships; no Python is needed on the PC.
 6. **Pin the host key and test**, as for the sandbox: `ssh-keyscan 192.0.2.20 > ./config/keys/pc_known_hosts`, declare the backend
    in `terminal_backends` (example above) and run `terminal-test --backend pc`.
 7. **The PC must be on and awake** when the agent uses it; otherwise calls fail with exit code 255 (ssh failed). Dreams are
