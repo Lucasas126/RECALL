@@ -459,6 +459,8 @@ _SPANISH = {
     "Dream · {agent}": "Sueño · {agent}",
     "Last session": "Última sesión",
     "Running": "En marcha",
+    "Starting": "Iniciando",
+    "Stopped": "Detenido",
     "yes": "sí",
     "started {when}": "iniciada {when}",
     "Schedule": "Programación",

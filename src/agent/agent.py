@@ -287,6 +287,7 @@ class Agent:
         ]
         # whether older turns were dropped from the in-context window
         self._truncated = False
+        self._tool_counter = 0  # fallback tool call ids when the provider gives none
         # transient associative-memory hint, injected into the context of the current turn only
         self._assoc_suggestion: Optional[str] = None
         self._assoc_match_count = 0
@@ -648,8 +649,7 @@ class Agent:
             if tool_calls and not is_last:
                 tool_calls = _dedupe_tool_calls(tool_calls)
                 self._remember_tool_calls(reply, reasoning, tool_calls)
-                for action in self._run_tools(tool_calls, cancellation):
-                    yield ("tool", action)
+                yield from self._iter_tools(tool_calls, cancellation)
                 continue
             self.last_reasoning = reasoning
             unused = self._assoc_job is not None and not self._assoc_taken
@@ -778,6 +778,13 @@ class Agent:
         self, tool_calls: list[dict], cancellation: CancellationToken | None = None,
     ) -> list[dict]:
         """Execute each requested tool, append its result to the context and return the actions taken."""
+        return [payload for kind, payload in self._iter_tools(tool_calls, cancellation) if kind == "tool"]
+
+    def _iter_tools(
+        self, tool_calls: list[dict], cancellation: CancellationToken | None = None,
+    ) -> Iterator[tuple[str, dict]]:
+        """Run the tools one by one, yielding `("tool_start", {id, name, arguments})` right before each runs and
+        `("tool", action + id)` when it is done (the id is the provider's call id, else a per-turn counter)."""
         actions = []
         for tc in tool_calls:
             if cancellation is not None:
@@ -789,6 +796,9 @@ class Agent:
                     args = json.loads(args) if args.strip() else {}
                 except json.JSONDecodeError:
                     args = {}
+            self._tool_counter += 1
+            call_id = str(tc.get("id") or f"call-{self._tool_counter}")
+            yield "tool_start", {"id": call_id, "name": name, "arguments": args}
             handler = self._tool_handlers.get(name)
             failed = False
             if self._disposable and name in self._blocked_tools():  # defence in depth: the specs already omit these
@@ -811,9 +821,9 @@ class Agent:
                 text = text[:_ACTION_RESULT_CHARS] + "…"
             actions.append({"name": name, "arguments": args, "result": text, "error": failed})
             self.last_actions.append(actions[-1])
+            yield "tool", {**actions[-1], "id": call_id}
         if cancellation is not None:
             cancellation.raise_if_cancelled()
-        return actions
 
     def _remember_interrupted(self, reply: str, reasoning: str) -> None:
         pending: dict[str, dict] = {}
