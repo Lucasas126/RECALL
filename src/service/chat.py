@@ -1448,6 +1448,24 @@ class ChatService:
         out["task"] = {"id": task_id, "agent_id": agent_id, "chat_id": chat_id, "internal": True}
         return out
 
+    def follow_task(self, user_id: str, task_id: str) -> tuple[Iterator[ChatEvent] | None, str]:
+        """Attach read-only to the running reply of a task's worker chat, like `follow`.
+
+        Returns `(events, "")` to stream, `(None, "")` when nothing is running (the saved chat is complete) and
+        `(None, "elsewhere")` when another process (web or Telegram) executes the task: its replies cannot be streamed from here.
+        """
+        record = self._task_record(user_id, task_id)
+        try:
+            agent_id, chat_id = self._tasks.child_of(user_id, task_id)
+        except TaskError as exc:
+            raise UnknownChat("unknown chat: {chat_id}", chat_id=task_id) from exc
+        if self._tasks.runs_elsewhere(user_id, record):
+            return None, "elsewhere"
+        try:
+            return self.follow(user_id, agent_id, chat_id), ""
+        except UnknownChat:
+            return None, ""
+
     def resolve_approval(self, user_id: str, agent_id: str, chat_id: str, approval_id: str, decision: str) -> dict:
         """Approve or deny a pending approval of the chat; raises ApprovalNotFound / ApprovalForbidden."""
         self._owned_agent(user_id, agent_id)

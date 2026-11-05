@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import threading
 import unittest
+from unittest import mock
 
 from fastapi.testclient import TestClient
 
@@ -139,6 +141,74 @@ class TasksWebTests(base.AsyncFixture):
         listed = self.client.get(f"/api/agents/{AGENT}/chats").json()
         self.assertNotIn(body["task"]["chat_id"], [c["id"] for c in listed])
         self.assertEqual(self.client.post(f"/api/tasks/{live.task_id}/chat", json={"content": "x"}).status_code, 405)
+
+    def test_stream_follows_a_running_worker_live_and_ends_with_it(self) -> None:
+        live = self.start()
+        result: dict = {}
+
+        def read() -> None:
+            result["response"] = self.client.get(f"/api/tasks/{live.task_id}/stream")
+
+        reader = threading.Thread(target=read)
+        reader.start()
+        # the activity of the card comes from the same worker events
+        self.assertTrue(base.until(lambda: (self.client.get(f"/api/tasks/{live.task_id}").json()["activity"] or {}).get("kind") == "text"))
+        listed = self.client.get("/api/tasks", params={"agent": AGENT, "chat": self.chat}).json()["tasks"][0]
+        self.assertEqual(listed["activity"]["kind"], "text")
+        self.release_child.set()
+        reader.join(10)
+        self.assertFalse(reader.is_alive())
+        response = result["response"]
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.headers["content-type"].startswith("text/event-stream"))
+        self.assertIn("event: text", response.text)
+        self.assertIn("RESULT for: find X", response.text)
+        self.assertTrue(response.text.rstrip().endswith("event: done\ndata: \"\""))
+        self.assertTrue(base.until(lambda: live.done.is_set()))
+
+    def test_stream_of_an_idle_task_ends_at_once(self) -> None:
+        self.child_behavior = "ok"
+        live = self.launch(wake=False)
+        self.assertTrue(base.until(lambda: live.done.is_set()))
+        response = self.client.get(f"/api/tasks/{live.task_id}/stream")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.text, 'event: done\ndata: ""\n\n')
+        self.assertIsNone(self.client.get(f"/api/tasks/{live.task_id}").json()["activity"])
+
+    def test_stream_of_a_task_run_by_another_process_says_so(self) -> None:
+        live = self.start()
+        with mock.patch.object(type(self.manager), "runs_elsewhere", return_value=True):
+            response = self.client.get(f"/api/tasks/{live.task_id}/stream")
+        self.assertIn("event: unavailable", response.text)
+        self.assertIn("event: done", response.text)
+        self.assertNotIn("event: text", response.text)
+        self.finish(live)
+
+    def test_stream_is_owner_checked(self) -> None:
+        live = self.start()
+        other = TestClient(create_app(self.service))
+        other.__enter__()
+        self.addCleanup(other.__exit__, None, None, None)
+        login(other, "user-two")
+        self.assertEqual(other.get(f"/api/tasks/{live.task_id}/stream").status_code, 404)
+        self.assertEqual(self.client.get("/api/tasks/nope/stream").status_code, 404)
+        self.finish(live)
+
+    def test_a_task_activity_names_the_tool_running(self) -> None:
+        from types import SimpleNamespace
+        from src.service.tasks import activity_of
+
+        def event(kind, data=None):
+            return SimpleNamespace(kind=kind, data=data, text="")
+
+        start = event("tool_start", {"id": "1", "name": "terminal", "arguments": {"command": "ls -la\nsecond line"}})
+        self.assertEqual(activity_of(start), {"kind": "tool", "tool": "terminal", "detail": "ls -la"})
+        self.assertEqual(activity_of(event("reasoning"))["kind"], "reasoning")
+        self.assertEqual(activity_of(event("text"))["kind"], "text")
+        self.assertEqual(activity_of(event("usage"), {"kind": "text"}), {"kind": "text"})
+        long = event("tool_start", {"name": "web_search", "arguments": '{"query": "' + "x" * 200 + '"}'})
+        self.assertTrue(activity_of(long)["detail"].endswith("…"))
+        self.assertLessEqual(len(activity_of(long)["detail"]), 80)
 
     def test_a_wake_turn_is_returned_with_source_and_task_ids(self) -> None:
         self.child_behavior = "ok"

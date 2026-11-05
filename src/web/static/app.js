@@ -3015,7 +3015,7 @@ function renderMessages(messages) {
     else if (m.role === "assistant" && m.usage?.in != null) {
       const output = m.usage.out == null ? "unknown" : m.usage.out;
       showUsage(
-        `context: saved usage | in=${m.usage.in} out=${output}\n`
+        `in ${thousands(m.usage.in)} · out ${m.usage.out == null ? output : thousands(m.usage.out)}\n`
         + "Detailed context breakdown is unavailable for this older reply."
       );
     }
@@ -3125,10 +3125,17 @@ async function syncEditIndexes(request) {
   });
 }
 
+// 12345 -> "12.345": token counts are easier to read with thousands dots
+function thousands(value) {
+  return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+}
+
 function showUsage(report) {
   $("usage").hidden = false;
-  $("usage").querySelector("summary").textContent = report.split("\n")[0];
-  $("usage").querySelector("pre").textContent = report;
+  // the first line is the collapsed summary; the details below it do not repeat it
+  const [summary, ...details] = report.split("\n");
+  $("usage").querySelector("summary").textContent = summary;
+  $("usage").querySelector("pre").textContent = details.join("\n") || summary;
 }
 
 // ------------------------------------------------------------------ terminal approvals
@@ -3466,6 +3473,7 @@ function taskCardState(record, action, nowMs, listed = false) {
     canStop: running,
     canSteer: running,
     canOpen: Boolean(record?.child?.chat_id),
+    activity: running ? taskActivityLabel(record?.activity) : null,
     result: record?.result ?? record?.result_preview ?? "",
     error: record?.error ?? (launchFailed ? String(taskResultJson(action)?.error ?? action?.result ?? "") : ""),
     reason: record?.reason ?? "",
@@ -3564,6 +3572,24 @@ function tasksNeedPolling(response) {
 // A wake reply started in the open chat without a request of this page: attach to it (never when one is attached).
 function shouldAttachWake({ active, generating, current = true }) {
   return Boolean(active) && !generating && current;
+}
+
+// The muted "what is the worker doing" line of a running task card, from the `activity` of its record
+// ({kind: reasoning | text | tool, tool, detail}): a [template, params] pair for `tr`, or null for nothing.
+function taskActivityLabel(activity) {
+  if (!activity || typeof activity !== "object") return null;
+  if (activity.kind === "reasoning") return ["Thinking…", {}];
+  if (activity.kind === "text") return ["Writing…", {}];
+  if (activity.kind !== "tool" || !activity.tool) return null;
+  const detail = String(activity.detail ?? "").split("\n")[0].trim();
+  return detail ? ["Running {tool}: {detail}", { tool: activity.tool, detail }] : ["Running {tool}", { tool: activity.tool }];
+}
+
+// What the worker dialog does once a live stream of the worker's reply ended: "poll" (the live view is not
+// available here, or it failed: refresh the saved chat every few seconds) or "reload" (show the saved chat, then attach
+// again if the task still runs, which also covers a steer that started a new generation).
+function taskLiveNext({ unavailable, failed }) {
+  return unavailable || failed ? "poll" : "reload";
 }
 // ---- end task cards
 
@@ -3678,7 +3704,8 @@ function taskCardStep(action) {
   const badge = element("span", { className: "task-badge" });
   badge.setAttribute("role", "status");
   const tokens = element("span", { className: "action-args task-tokens" });
-  summary.append(icon, title, target, badge, tokens);
+  const activity = element("span", { className: "task-activity", hidden: true });
+  summary.append(icon, title, target, badge, tokens, activity);
   const result = element("div", { className: "action-block task-result-block" });
   const resultLabel = element("div", { className: "action-label", textContent: tr("Result") });
   const resultText = element("pre");
@@ -3708,7 +3735,7 @@ function taskCardStep(action) {
   const form = element("div", { className: "task-steer-form", hidden: true }, field, send);
   const buttons = element("div", { className: "task-actions" }, stop, steer, open);
   card.append(summary, result, buttons, form, error);
-  card._parts = { title, target, badge, tokens, resultText, result, stop, steer, open, form, error };
+  card._parts = { title, target, badge, tokens, activity, resultText, result, stop, steer, open, form, error };
   card._action = action;
   card._taskId = taskActionId(action);
   taskCards.add(card);
@@ -3729,6 +3756,8 @@ function refreshTaskCard(card) {
   parts.badge.className = `task-badge ${view.awaitingApproval ? "awaiting_approval" : view.status}`;
   parts.badge.textContent = view.elapsed ? `${tr(view.statusLabel)} · ${view.elapsed}` : tr(view.statusLabel);
   parts.tokens.textContent = view.tokens ? tr("{count} tokens", { count: view.tokens }) : "";
+  parts.activity.textContent = view.activity ? tr(view.activity[0], view.activity[1]) : "";
+  parts.activity.hidden = !view.activity;
   const text = view.result || view.error || (view.running || view.status === "starting" ? "" : tr("No result"));
   parts.result.hidden = !text;
   parts.resultText.textContent = text;
@@ -3869,32 +3898,88 @@ async function openTaskChat(id) {
   if (!id) return;
   const dialog = $("task-dialog");
   const box = $("task-dialog-messages");
+  stopTaskDialog();
+  const run = taskDialogRun;
+  const alive = () => run === taskDialogRun && dialog.open;
   const load = async () => {
     try {
       const data = await api(taskUrl(id, "/chat"));
-      if (!dialog.open) return;
-      const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
-      renderTaskChatMessages(box, data.messages);
-      if (stick) box.scrollTop = box.scrollHeight;
+      if (!alive()) return false;
+      renderTaskChatMessages(box, data.messages);  // the stuck flag below keeps the bottom in view
       return data.chat.active;
     } catch (err) {
-      box.replaceChildren(element("div", { className: "task-error", textContent: err.message }));
+      if (alive()) box.replaceChildren(element("div", { className: "task-error", textContent: err.message }));
+      return false;
     }
   };
   const record = taskRecords.get(id);
   $("task-dialog-title").textContent = tr("Worker chat: {title}", { title: record?.title || id });
   box.replaceChildren(element("p", { className: "model-note", textContent: tr("Loading…") }));
+  taskDialogStuck = true;
   if (!dialog.open) dialog.showModal();
-  const schedule = async () => {
-    clearTimeout(taskDialogTimer);
+  // saved chat, then the live reply of the running worker; when that ends, the saved chat again and, if the task
+  // still runs (a steer started a new generation), attach again. Without a live view: poll the saved chat.
+  let pause = 0;
+  while (alive()) {
     const active = await load();
-    if (dialog.open && active) taskDialogTimer = setTimeout(schedule, 3000);
-  };
-  await schedule();
+    if (!alive() || !active) return;
+    const outcome = await streamTaskReply(id, box, run);
+    if (!alive()) return;
+    pause = taskLiveNext(outcome) === "poll" ? 3000 : 500;
+    await new Promise((resolve) => { taskDialogTimer = setTimeout(resolve, pause); });
+  }
 }
 
+let taskDialogRun = 0;
+let taskDialogAbort = null;
+let taskDialogStuck = true;
+
+// Ends whatever the dialog is doing: its live stream and its refresh timer.
+function stopTaskDialog() {
+  taskDialogRun++;
+  clearTimeout(taskDialogTimer);
+  taskDialogAbort?.abort();
+  taskDialogAbort = null;
+}
+
+// Follows the worker's running reply read-only, drawn with the chat's own reply view in the dialog. Resolves with
+// `{unavailable, failed}` when the stream ended (the reply ended, the other process runs the task, or it broke).
+async function streamTaskReply(id, box, run) {
+  const reply = addMessage("assistant", box);
+  const request = {
+    userId: state.user?.id, agentId: "", chatId: "", session: state.session, reply,
+    generationId: null, done: false, unavailable: false,
+  };
+  const controller = new AbortController();
+  taskDialogAbort = controller;
+  let failed = false;
+  try {
+    const res = await fetch(taskUrl(id, "/stream"), {
+      headers: { "Accept-Language": state.preferences?.language ?? "en" }, signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    await readEvents(res, request);
+  } catch (err) {
+    failed = err?.name !== "AbortError";
+  }
+  if (taskDialogAbort === controller) taskDialogAbort = null;
+  if (!reply.el.textContent.trim() && !reply.el.querySelector(".action, .thinking")) reply.el.remove();  // nothing was streamed
+  if (run !== taskDialogRun) return { unavailable: false, failed: false };
+  return { unavailable: request.unavailable, failed };
+}
+
+$("task-dialog-messages").addEventListener("scroll", () => {
+  const box = $("task-dialog-messages");
+  taskDialogStuck = nearBottom(box.scrollHeight, box.scrollTop, box.clientHeight);
+}, { passive: true });
+// streamed steps, thinking and text follow the bottom only while the user is within 30 px of it
+new MutationObserver(() => {
+  const box = $("task-dialog-messages");
+  if (taskDialogStuck) box.scrollTop = box.scrollHeight;
+}).observe($("task-dialog-messages"), { childList: true, subtree: true, characterData: true });
+
 $("task-dialog-close").addEventListener("click", () => $("task-dialog").close());
-$("task-dialog").addEventListener("close", () => clearTimeout(taskDialogTimer));
+$("task-dialog").addEventListener("close", stopTaskDialog);
 // ---- task panel (DOM): every task of the user across chats and agents, newest first
 const taskPanel = { filter: "all", tasks: [], rows: new Map(), timer: null, running: false, again: false, loaded: false };
 
@@ -5070,6 +5155,7 @@ function handleEvent(raw, request) {
   else if (event === "approval") reply.approval({ agent_id: request.agentId, chat_id: request.chatId, ...payload });
   else if (event === "approval_resolved") settleApproval(payload);
   else if (event === "interrupted") reply.interrupted(payload);
+  else if (event === "unavailable") request.unavailable = true;  // a task's live view: another process runs it
   else if (event === "error") {
     request.errored = true;
     reply.error(payload);

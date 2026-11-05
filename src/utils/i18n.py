@@ -812,6 +812,11 @@ _SPANISH = {
     "scheduled": "programada",
     # subagents (review fixes)
     "this is an internal task chat: steer the task instead": "este es un chat interno de tarea: corrige la tarea en su lugar",
+    # subagents (live)
+    "Thinking…": "Razonando…",
+    "Writing…": "Escribiendo…",
+    "Running {tool}: {detail}": "Ejecutando {tool}: {detail}",
+    "Running {tool}": "Ejecutando {tool}",
 }
 
 
