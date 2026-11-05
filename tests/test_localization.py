@@ -65,6 +65,20 @@ class LocalizationCatalogTests(unittest.TestCase):
                 self.assertIn(template, messages("es"))
 
 
+    def test_every_static_interface_text_has_a_translation(self) -> None:
+        # translateInterface() translates [element id, English text] pairs; tr() throws on a missing one,
+        # which shows the "Something went wrong" card to every Spanish user
+        path = Path(__file__).resolve().parents[1] / "src" / "web" / "static" / "app.js"
+        source = path.read_text(encoding="utf-8")
+        start = source.index("function translateInterface()")
+        body = source[start:source.index("\n}\n", start)]
+        pairs = re.findall(r'\[\s*"[a-z0-9-]+"\s*,\s*"((?:[^"\\]|\\.)*)"\s*\]', body)
+        self.assertGreater(len(pairs), 20)
+        for template in pairs:
+            template = template.replace('\\"', '"')
+            with self.subTest(template=template[:70]):
+                self.assertIn(template, messages("es"))
+
 class LocalizationWebTests(unittest.TestCase):
     setUp = preferences_tests.UserPreferencesWebTests.setUp
 

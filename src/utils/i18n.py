@@ -643,7 +643,7 @@ _SPANISH = {
     "Nothing asks. Everything runs without approval, except what the hardline always refuses.": "Nada pregunta. Todo se ejecuta sin aprobación, salvo lo que el bloqueo estricto siempre rechaza.",
     "Command timeout (seconds)": "Tiempo límite por comando (segundos)",
     "Allow in dream": "Permitir en el sueño",
-    "Dream sessions run unattended: with this on, an agent whose dream tools include the terminal can run commands in the sandbox without you watching.": "Las sesiones de sueño se ejecutan sin supervisión: con esto activado, un agente cuyas herramientas de sueño incluyen la terminal puede ejecutar comandos en el sandbox sin que lo veas.",
+    "Dream sessions run unattended: with this on, an agent whose dream tools include the terminal can run commands on its backends without you watching.": "Las sesiones de sueño se ejecutan sin supervisión: con esto activado, un agente cuyas herramientas de sueño incluyen la terminal puede ejecutar comandos en sus backends sin que lo veas.",
     "Not allowed: this approval belongs to another user.": "No permitido: esta aprobación pertenece a otro usuario.",
     "This approval is no longer pending.": "Esta aprobación ya no está pendiente.",
     "dangerous": "peligroso",
