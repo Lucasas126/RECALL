@@ -45,6 +45,26 @@ One list of ideas and planned work, with what is already done kept separate. Imp
 - Remove unnecessary messages from the settings and configuration selectors to keep the interface clean.
 - A global `defaults.yaml` merged under `user.yaml` and agent files, and a channel to user index in a `ConfigStore` ([agent.yaml](../reference/agent-yaml.md#loading)).
 
+## From the replica report (2026-11-05)
+
+Capability gaps an agent reported, in the order they block it; each line says what depends on it.
+
+1. **Search in old conversations**: a session-search tool over conversations with filters (date, chat, origin); recalling what was said and decided depends on it.
+2. **Scheduled jobs and proactive Telegram messages**: cron-like jobs with an unattended approval policy; reminders, recurring reports and any automation depend on it.
+3. **Ask the user with options**: clarify cards in web and Telegram; confirming choices without free-text round trips depends on it.
+4. **Subagents**: delegate work with budgets and backend rules; splitting long tasks and parallel research depend on it.
+5. **Messages between agents**: agent-to-agent hand-offs; the orchestrator follow-ups and delegation depend on it.
+6. **Background processes**: long-running commands with a process tool; builds, servers and watchers depend on it.
+7. **Browser**: driving a web page; sites that need clicks, logins or scripts depend on it.
+8. **Vision**: analysing images the agent did not receive in chat; screenshots and files on the backend depend on it.
+9. **Voice tools**: speech output and input as tools; spoken replies depend on it.
+10. **Connectors**: mail, calendar, drive and similar accounts beyond MCP; personal-data tasks depend on it.
+
+Skills imported from other agent systems:
+
+- **Per-skill platform/compatibility tag**: mark which platform a skill is written for, so an agent knows whether its commands and tools exist here.
+- **Agents should not see foreign frontmatter**: strip or ignore foreign frontmatter keys in imported skills so they do not confuse the model.
+
 ## done
 
 - Terminal tool group, phase 1: `terminal`, `sandbox_read`, `sandbox_write`, `sandbox_patch` and `sandbox_search` against an SSH sandbox (or a local backend on trusted installs), foreground commands with timeouts, approvals (manual / smart / off) through the API and Telegram buttons, a hardline blocklist, redacted and truncated output, an audit file, unattended behaviour for dreams, and `python -m src.admin terminal-test` ([terminal guide](../user-guide/terminal.md)).

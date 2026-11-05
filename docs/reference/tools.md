@@ -16,7 +16,7 @@ review-queue tools of dream sessions. Shared source checks are in `common.py`.
 
 The web **Agents** tab configures these groups for each agent:
 
-- `memory_read`: `query_memory`, `search`, `list_memories`, `read`, `list_tags`,
+- `memory_read`: `query_memory`, `search` (optional `path` prefix or glob such as `skills/github/` or `mind_palace/**/*.md`, `offset` and `limit` up to 200; the result gives the total and the next offset), `list_memories`, `read`, `list_tags`,
   and `find_notes_by_tag`.
 - `memory_edit`: `write`, `append`, `edit`, `move`, and `delete`.
 - `web`: `web_search` and `web_retrieve`.
@@ -24,7 +24,7 @@ The web **Agents** tab configures these groups for each agent:
   or as an atomic `operations` batch, with the character limit checked on the
   final result), `skill_view`, `skill_manage` (create, edit, patch, delete,
   write_file, remove_file) and `soul_edit` (replace or patch `SOUL.md`, saving
-  the previous version). Changes apply to new chats. `skill_view` also reads the built-in, read-only `recall` skill
+  the previous version). Changes apply to new chats. `skill_view` lists a skill's supporting files and, given a folder such as `references/`, that folder's files; it also reads the built-in, read-only `recall` skill
   (`skill_view("recall", "references/<file>.md")`), which `skill_manage` refuses to change; see [RECALL knowledge](../user-guide/recall-knowledge.md).
 - `folders_read`: `folder_list`, `folder_read` and `folder_search` over every
   folder in the agent's `folders:` list. paths take the folder name as the source
