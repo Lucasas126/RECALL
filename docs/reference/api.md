@@ -1,6 +1,6 @@
 # HTTP API and error codes
 
-The web UI is a thin client of these routes (served by `src/web/app.py`). Everything except login and `GET /api/localization`
+The web UI is a thin client of these routes (served by `src/web/app.py`). Everything except login, `GET /api/version` and `GET /api/localization`
 needs the signed session cookie and is scoped to the session user. Application errors are `{"detail": "<localized message>"}`
 plus an optional `"code"` (see [error codes](#error-codes)).
 
@@ -8,7 +8,7 @@ plus an optional `"code"` (see [error codes](#error-codes)).
 
 | area | routes |
 | --- | --- |
-| session | `POST /api/login`, `POST /api/logout`, `GET /api/me` (the profile and agents, plus `terminal_backends`: `[{"name", "type", "description"}]` sorted by name, the user's terminal backends for the agent form; never hosts, users or key paths), `GET /api/localization?language=en\|es` |
+| session | `POST /api/login`, `POST /api/logout`, `GET /api/me` (the profile and agents, plus `terminal_backends`: `[{"name", "type", "description"}]` sorted by name, the user's terminal backends for the agent form; never hosts, users or key paths), `GET /api/localization?language=en\|es`, `GET /api/version` (public: `{"version": "0.1.0", "build": null}`; `version` comes from `pyproject.toml`, `build` is the first 7 characters of `RECALL_BUILD` or `null`) |
 | preferences | `GET`/`PATCH /api/preferences` ([details](user-yaml.md#preferences-api), including the Telegram orchestrator's `orchestrator` / `core_agent_id` and the read-only `orchestrator_default`; the response also carries a read-only `limits` object `{soul_chars, memory_chars, user_chars}` from the `memory_limits` block of settings.yaml), `GET /api/speech-to-text/models` |
 | models | `GET /api/providers/status`, `GET /api/models/catalog`, `GET /api/models`, `GET`/`POST /api/models/favorites`, `DELETE /api/models/favorites/<model_id>` ([models and providers](../user-guide/models-and-providers.md)) |
 | agents | `GET`/`POST /api/agents`, `GET`/`PUT`/`DELETE /api/agents/<agent_id>`, `GET /api/tool-groups`, `GET /api/agents/<agent_id>/index`, `POST /api/agents/<agent_id>/index/reindex` (table below) |

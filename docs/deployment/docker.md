@@ -162,6 +162,11 @@ host.
 - Credentials can also live in `.config/secrets.env` (inside the mounted config folder), written with
   `docker compose exec -it recall-web python -m src.admin set-secret NAME`; no restart is needed for those. The real
   environment wins over the file.
+- `RECALL_BUILD`: build identifier baked into the image (not a runtime setting you edit). The `RECALL_BUILD` build
+  argument of the `Dockerfile` is set to the commit sha by the publish workflow; without it no build is shown.
+  The version comes from `pyproject.toml`, copied with the code. Where it shows: `GET /api/version`, the login form
+  and Settings dialog of the web UI (`RECALL v0.1.0 (abc1234)`), the first line of Telegram `/help`, and
+  `docker compose exec web python -m src.admin version`.
 - Deploy-only values read by Compose: `GHCR_OWNER` (lowercase), `RECALL_TAG`,
   `RECALL_PORT`, `RECALL_*_DIR`, `TZ`.
 
