@@ -12,6 +12,7 @@ import requests
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError, field_validator, model_validator
 
 from src.config.models import TavilyConfig
+from src.config.secrets import get_secret
 from src.utils.logger import get_logger
 
 logger = get_logger("provider-tavily")
@@ -134,7 +135,7 @@ class TavilyClient:
     @classmethod
     def from_config(cls, config: TavilyConfig) -> TavilyClient | None:
         """Resolve the shared key at runtime; an unset key leaves web access unavailable."""
-        api_key = os.environ.get(config.api_key, "")
+        api_key = get_secret(config.api_key)
         if not api_key.strip():
             logger.info("web access unavailable: env var %s is not set", config.api_key)
             return None

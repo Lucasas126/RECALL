@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import argparse
 import re
 import tomllib
+import typing
 import unittest
 from fnmatch import fnmatch
 from pathlib import Path
@@ -11,9 +13,11 @@ from unittest.mock import patch
 
 import yaml
 from fastapi.testclient import TestClient
+from pydantic import BaseModel
 
 from auth_helpers import TEST_PASSWORD_HASH, login
 from src import knowledge
+from src.admin import users as users_cli
 from src.agent.profile import load_profile, profile_blocks
 from src.agent.tool_groups import TOOL_GROUP_TOOLS
 from src.agent.tools import build_tools
@@ -163,6 +167,100 @@ class ConfigConsistencyTests(unittest.TestCase):
         for name in re.findall(r"^\| `([\w.]+)` \|", text, flags=re.M):
             with self.subTest(documented=name):
                 self.assertIn(name.rsplit(".", 1)[-1], fields)
+
+
+def admin_commands() -> argparse.ArgumentParser:
+    return users_cli._build_parser()
+
+
+def resolve_command(tokens: list[str]) -> tuple[argparse.ArgumentParser, int]:
+    """Walk the argparse tree; returns the deepest parser reached and how many tokens named sub-commands."""
+    node, used = admin_commands(), 0
+    for token in tokens:
+        actions = [a for a in node._actions if isinstance(a, argparse._SubParsersAction)]
+        if not actions or token not in actions[0].choices:
+            break
+        node, used = actions[0].choices[token], used + 1
+    return node, used
+
+
+def model_path_exists(cls, parts: list[str]) -> bool:
+    """Whether dotted `parts` name a field of the pydantic model `cls` (below dict values, any key is accepted)."""
+    index = 0
+    while index < len(parts):
+        if cls is None:
+            return True
+        fields = cls.model_fields
+        if parts[index] not in fields:
+            return bool(cls.model_config.get("extra") == "allow")
+        annotation = fields[parts[index]].annotation
+        index += 1
+        if typing.get_origin(annotation) is dict:  # name -> model: the next segment is a key
+            annotation = typing.get_args(annotation)[1]
+            index += 1
+        candidates = [annotation, *typing.get_args(annotation)]
+        cls = next((a for a in candidates if isinstance(a, type) and issubclass(a, BaseModel)), None)
+    return True
+
+
+class AdminCliConsistencyTests(unittest.TestCase):
+    PAGES = [HUB, *REFERENCES]
+
+    def test_every_admin_command_named_in_the_pack_and_docs_exists(self) -> None:
+        paths = [*self.PAGES, *sorted((ROOT / "docs").rglob("*.md")), ROOT / "src" / "agent" / "guide_soul.md"]
+        seen = set()
+        for path in paths:
+            for match in re.finditer(r"python -m src\.admin((?: [a-z][a-z-]*)*)", pack_text(path)):
+                tokens = match.group(1).split()
+                if not tokens:
+                    continue
+                node, used = resolve_command(tokens)
+                with self.subTest(file=path.name, command=" ".join(tokens)):
+                    self.assertGreaterEqual(used, 1, "unknown admin command")
+                    has_more = any(isinstance(a, argparse._SubParsersAction) for a in node._actions)
+                    self.assertFalse(has_more, "incomplete command: a sub-command is required")
+                seen.add(tokens[0])
+        # the pack documents every top-level command
+        top = {a for action in admin_commands()._actions if isinstance(action, argparse._SubParsersAction) for a in action.choices}
+        text = pack_text(PACK / "references" / "admin-cli.md") + pack_text(PACK / "references" / "code-map.md")
+        for command in sorted(top):
+            with self.subTest(documented=command):
+                self.assertIn(command, text)
+
+    def test_every_option_used_in_examples_exists(self) -> None:
+        for path in self.PAGES:
+            for span in backticked(pack_text(path)):
+                match = re.match(r"python -m src\.admin((?: [a-z][a-z-]*)+)", span)
+                if not match:
+                    continue
+                node, _ = resolve_command(match.group(1).split())
+                known = {opt for action in node._actions for opt in action.option_strings}
+                for option in re.findall(r"(?<=\s)(--[a-z-]+)", span):
+                    with self.subTest(file=path.name, span=span, option=option):
+                        self.assertIn(option, known)
+
+    def test_set_paths_in_examples_are_real_fields(self) -> None:
+        for path in self.PAGES:
+            for span in backticked(pack_text(path)):
+                if "python -m src.admin" not in span or "--set" not in span:
+                    continue
+                cls = models.UserConfig if " user set" in span else models.AgentConfig
+                for target in re.findall(r"--set ([A-Za-z0-9_.-]+)=", span):
+                    if target == "path":  # the generic placeholder in the command table
+                        continue
+                    with self.subTest(file=path.name, path=target):
+                        self.assertTrue(model_path_exists(cls, target.split(".")), target)
+
+    def test_new_pages_fit_the_size_limits_and_are_linked(self) -> None:
+        hub = pack_text(HUB)
+        for name in ("admin-cli", "recipes", "security-for-admins"):
+            self.assertIn(f"references/{name}.md", hub)
+            self.assertLessEqual(len((PACK / "references" / f"{name}.md").read_bytes()), 8 * 1024)
+
+    def test_security_page_states_the_cross_user_and_secret_rules(self) -> None:
+        text = pack_text(PACK / "references" / "security-for-admins.md")
+        for needle in ("another user", "set-secret", "approval", "prompt", "/app/.config", "never"):
+            self.assertIn(needle.lower(), text.lower())
 
 
 class ReadOnlyTests(unittest.TestCase):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -12,7 +13,7 @@ from src.utils.files import atomic_write_text, exclusive_file_lock
 from src.utils.i18n import UserMessageError
 
 _AGENT_LIST_RE = re.compile(r"^agents\s*:")
-_LIST_ITEM_RE = re.compile(r"^\s+-")
+_LIST_ITEM_RE = re.compile(r"^\s*-(\s|$)")  # indented or not: `yaml.dump` writes `- item` at the key's column
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
@@ -69,12 +70,43 @@ class AgentStore:
 
     def path_for(self, user_id: str, agent_id: str) -> Path:
         """Return the file defining `agent_id`; raises FileNotFoundError if none does."""
-        matches = [path for path in self._agent_files(user_id) if self._read(path).id == agent_id]
+        matches: list[Path] = []
+        first_error: Exception | None = None
+        for path in self._agent_files(user_id):
+            try:
+                if self._read(path).id == agent_id:
+                    matches.append(path)
+            except (AgentConfigError, yaml.YAMLError) as exc:  # one broken file must not hide the valid agents
+                first_error = first_error or exc
         if not matches:
+            if first_error is not None:
+                raise first_error
             raise FileNotFoundError(f"agent config not found: {agent_id}")
         if len(matches) > 1:
             raise AgentConflict("Several agent files define the id '{agent_id}'.", agent_id=agent_id)
         return matches[0]
+
+    def fingerprint(self, user_id: str, agent_id: str) -> str:
+        """Changes when `user.yaml` or the agent's file changes on disk (by any process), valid or not."""
+        digest = hashlib.sha256()
+        candidate = self._agents_dir(user_id) / f"{agent_id}.yaml"
+        paths = [self._user_file(user_id), candidate]
+        if not candidate.is_file():  # the file name is only a convention: find the file whose `id` matches
+            for path in self._agent_files(user_id):
+                try:
+                    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+                except (OSError, UnicodeError, yaml.YAMLError):
+                    continue
+                if isinstance(data, dict) and data.get("id") == agent_id:
+                    paths = [self._user_file(user_id), path]
+                    break
+        for path in paths:
+            try:
+                digest.update(path.read_bytes())
+            except OSError:
+                digest.update(b"\0missing")
+            digest.update(b"\0")
+        return digest.hexdigest()
 
     # ------------------------------------------------------------------ writes
 

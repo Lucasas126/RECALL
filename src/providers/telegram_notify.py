@@ -6,6 +6,7 @@ import re
 import httpx
 import telegramify_markdown
 
+from src.config.secrets import get_secret
 from src.utils.logger import get_logger
 
 logger = get_logger("telegram")
@@ -47,10 +48,10 @@ class TelegramNotifier:
     @classmethod
     def from_env(cls, allowed_users_env: str) -> "TelegramNotifier | None":
         """A notifier when a bot token is configured, else None (notifications are then skipped)."""
-        token = os.getenv(BOT_TOKEN_ENV, "").strip()
+        token = get_secret(BOT_TOKEN_ENV).strip()
         if not token:
             return None
-        allowed, _ = parse_allowed_users(os.getenv(allowed_users_env, ""))
+        allowed, _ = parse_allowed_users(get_secret(allowed_users_env))
         return cls(token, allowed)
 
     def linked(self, user_id: str) -> bool:

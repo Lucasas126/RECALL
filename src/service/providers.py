@@ -16,6 +16,7 @@ from src.config.model_refs import (
     split_reference,
 )
 from src.config.models import UserConfig
+from src.config.secrets import get_secret
 from src.providers.catalog import CatalogUnavailable, list_openrouter_models, list_openrouter_transcription_models
 from src.providers.claude_subscription.catalog import catalog_entries as claude_catalog_entries
 from src.providers.claude_subscription.login import NO_OWN_LOGIN_CODE, NO_OWN_LOGIN_MESSAGE, login_allowed
@@ -45,7 +46,7 @@ def _row(provider: str, main: str, *, available: bool, reason: str | None = None
 
 def _openrouter(user: UserConfig) -> dict:
     variable = user.openrouter_settings().api_key
-    found = bool(os.environ.get(variable, "").strip())
+    found = bool(get_secret(variable).strip())
     return _row(OPENROUTER, user.provider.name, available=found, reason=None if found else "no_api_key", detail=variable)
 
 

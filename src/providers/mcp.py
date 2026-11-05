@@ -24,6 +24,7 @@ from mcp_types import (
 )
 
 from src.config.models import McpEnvFromEnvironment, McpEnvUserFile, McpServerConfig, McpSettings
+from src.config.secrets import get_secret
 from src.utils.i18n import UserMessageError
 from src.utils.logger import get_logger, run_log_dir
 
@@ -423,7 +424,7 @@ class McpManager:
         env: dict[str, str] = {}
         for name, value in server.env.items():
             if isinstance(value, McpEnvFromEnvironment):
-                resolved = os.environ.get(value.env, "")
+                resolved = get_secret(value.env)
                 if not resolved:
                     raise McpError(
                         "Set the environment variable {name}; the MCP server '{server}' needs it.",

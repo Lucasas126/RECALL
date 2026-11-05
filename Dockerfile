@@ -52,12 +52,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # - tesseract-ocr (+ eng/spa data, matching pdf.ocr_languages): scanned PDF pages
 # - ffmpeg (includes ffprobe): video decomposition
 # - tzdata: log timestamps honour the TZ env var
+# - file, diffutils: the `type: local` terminal backend (see docs/deployment/docker.md) runs commands inside this
+#   image; bash, coreutils (head, wc, tr, mktemp, dirname, mv, chmod), findutils, grep and awk (mawk) that the
+#   sandbox_* file tools need already come with python:slim, `file` does not, diffutils is listed to be explicit
 # npx for the Google Calendar MCP is intentionally not included (only `node`, below).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       tesseract-ocr tesseract-ocr-eng tesseract-ocr-spa \
       ffmpeg \
       openssh-client \
+      file diffutils \
       tzdata \
  && rm -rf /var/lib/apt/lists/*
 

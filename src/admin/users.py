@@ -5,6 +5,9 @@
     python -m src.admin set-password <user_id> [--generate]
     python -m src.admin route-test "message text" --user <user_id> [--force]
     python -m src.admin terminal-test --user <user_id> --backend <name>
+    python -m src.admin agent list|show|create|set|rename|delete|check ...   (src/admin/agents.py)
+    python -m src.admin user show|set --user <user_id> ...                   (src/admin/agents.py)
+    python -m src.admin set-secret NAME [--stdin]  /  secret list            (src/admin/credentials.py)
 
 Passwords are never accepted as arguments (shell history): they are typed twice with
 hidden input, or generated with --generate and printed once. Provider API keys are never
@@ -173,6 +176,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     term.add_argument("--user", required=True, help="RECALL user id that owns the backend")
     term.add_argument("--backend", required=True, help="name under terminal_backends in the user's user.yaml")
+    from src.admin import agents as agent_commands  # lazy: agents imports this module
+
+    agent_commands.add_parsers(sub)
+    secret_set = sub.add_parser(
+        "set-secret", help="store a credential in .config/secrets.env (hidden prompt or --stdin; never an argument)",
+    )
+    secret_set.add_argument("name", help="variable NAME, e.g. OPENROUTER_API_KEY (capitals, digits, _)")
+    secret_set.add_argument("--stdin", action="store_true", help="read the value from standard input (pipe)")
+    secret = sub.add_parser("secret", help="credential names and whether they are set (never values)")
+    secret_sub = secret.add_subparsers(dest="secret_command", required=True)
+    secret_sub.add_parser("list", help="names referenced by the configuration, set or not")
     return parser
 
 
@@ -259,6 +273,20 @@ def main(argv: list[str] | None = None) -> int:
         return route_test(args.user, args.text, force=args.force)
     if args.command == "terminal-test":
         return terminal_test(args.user, args.backend)
+    if args.command in ("agent", "user"):
+        from src.admin import agents as agent_commands
+
+        return agent_commands.run(args)
+    if args.command in ("set-secret", "secret"):
+        from src.admin import credentials
+
+        try:
+            if args.command == "set-secret":
+                return credentials.set_secret(args.name, use_stdin=args.stdin)
+            return credentials.secret_list()
+        except AdminError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
     try:
         if args.command == "create-user":
             check_user_id(args.user_id)

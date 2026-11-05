@@ -139,4 +139,18 @@ ASSOC = AssociativeMemoryConfig.model_validate(_raw.get("associative_memory", {}
 ORCHESTRATOR = OrchestratorConfig.model_validate(_raw.get("orchestrator") or {})
 
 # ------------------------------------------------------------------ terminal sandbox
-TERMINAL = TerminalSettings.model_validate(_raw.get("terminal") or {})
+def parse_allow_local(yaml_value: object, env_value: str | None = None) -> object:
+    """`terminal.allow_local`, overridden by RECALL_TERMINAL_ALLOW_LOCAL (true/false, 1/0, yes/no, on/off)."""
+    if env_value is not None and env_value.strip():
+        word = env_value.strip().lower()
+        if word in ("true", "1", "yes", "on"):
+            return True
+        if word in ("false", "0", "no", "off"):
+            return False
+        raise ValueError(f"RECALL_TERMINAL_ALLOW_LOCAL must be true or false, got {env_value!r}")
+    return False if yaml_value is None else yaml_value  # a non-boolean yaml value is rejected by TerminalSettings
+
+
+_terminal = dict(_raw.get("terminal") or {})
+_terminal["allow_local"] = parse_allow_local(_terminal.get("allow_local"), os.environ.get("RECALL_TERMINAL_ALLOW_LOCAL"))
+TERMINAL = TerminalSettings.model_validate(_terminal)

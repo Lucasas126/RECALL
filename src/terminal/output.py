@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from src.config.secrets import file_values
+
 _ANSI = re.compile(
     r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"      # OSC ... BEL / ST
     r"|\x1b\[[0-?]*[ -/]*[@-~]"               # CSI
@@ -30,9 +32,15 @@ def strip_ansi(text: str) -> str:
     return _CONTROL.sub("", _ANSI.sub("", text.replace("\r\n", "\n")))
 
 
+MIN_SECRET_LENGTH = 8  # shorter values are too likely to match ordinary text
+
+
 def redact(text: str) -> str:
     for pattern, replacement in _SECRETS:
         text = pattern.sub(replacement, text)
+    # exact values stored in .config/secrets.env, whatever their shape (longest first)
+    for value in sorted({v for v in file_values() if len(v) >= MIN_SECRET_LENGTH}, key=len, reverse=True):
+        text = text.replace(value, REDACTED)
     return text
 
 

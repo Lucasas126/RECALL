@@ -35,6 +35,7 @@ from telegram.ext import (
 from src.config.favorites import FavoritesError
 from src.config.models import ReasoningEffort
 from src.config.preferences import PreferencesError, UserPreferences
+from src.config.secrets import get_secret
 from src.config.settings import ORCHESTRATOR, TELEGRAM_ALLOWED_USERS_ENV, TELEGRAM_CHAT_IDLE_MINUTES
 from src.providers.catalog import CatalogUnavailable
 from src.providers.ollama import is_ollama_cloud
@@ -128,7 +129,7 @@ class _Panel:
 
 def load_allowed_users() -> dict[int, str]:
     """Load Telegram IDs mapped to existing RECALL user IDs from the environment."""
-    allowed, invalid = parse_allowed_users(os.getenv(TELEGRAM_ALLOWED_USERS_ENV, ""))
+    allowed, invalid = parse_allowed_users(get_secret(TELEGRAM_ALLOWED_USERS_ENV))
     for entry in invalid:
         logger.warning("Ignoring invalid Telegram user mapping: %r", entry)
     return allowed

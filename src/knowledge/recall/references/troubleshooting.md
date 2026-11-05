@@ -12,7 +12,7 @@ Each process run writes a new folder `logs/<YYYYmmdd_HHMMSS+zzzz>_<run>/` where 
 | --- | --- | --- |
 | `no_agents` | the user has no agents | create an agent in the Agents tab |
 | `unknown_agent`, `unknown_chat` | not found or not the user's | start a new chat or pick another agent |
-| `missing_api_key` | the provider key variable is not set on the server | set the variable named in `provider.api_key` (user yaml) in the server environment/`.env`, then restart RECALL |
+| `missing_api_key` | the provider key variable is not set on the server | set the variable named in `provider.api_key` (user yaml): either `python -m src.admin set-secret NAME` in his own terminal (no restart) or the server environment/`.env` (restart) |
 | `provider_unreachable` | the Ollama/provider server did not answer | check the server is running and `ollama.host` / `OLLAMA_HOST` |
 | `claude_not_installed` | Claude Code is missing on the RECALL host | install it, or choose another model |
 | `claude_no_own_login` | no `claude_subscription.claude_config_dir` and not in `claude_subscription.default_login_users` (`settings.yaml`) | ask the administrator for a login folder |

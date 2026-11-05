@@ -1,14 +1,16 @@
 # Configuration fields
 
-Unknown keys are rejected in the agent yaml and in most blocks (except `chat_config`, which tolerates extras). Only the user edits these files or the Agents tab; you cannot. Keys use dotted names below.
+Unknown keys are rejected in the agent yaml and in most blocks (except `chat_config`, which tolerates extras). The user edits these files or the Agents tab. An agent with the `terminal` group and a local backend (the setup guide) changes them with `python -m src.admin` (`references/admin-cli.md`); any other agent cannot. Keys use dotted names below.
 
 ## When a change takes effect
 
 | Change | Applies |
 | --- | --- |
 | Agent yaml saved from the Agents tab | next message (cached runtime is rebuilt); refused with 409 while a reply is active or queued |
-| Agent yaml edited by hand | read when the agent loads; restart if unsure |
-| `user.yaml` or `settings.yaml` | read at load/start-up; restart web and Telegram for `settings.yaml` |
+| Agent yaml edited by hand or with `python -m src.admin agent set` (another process) | next message: the services compare the file with what the cached runtime was built from and rebuild it between replies; an INVALID file keeps the last good config (error logged, notice in the chat) |
+| `user.yaml` (`user set`, by hand) | same: next message |
+| `settings.yaml`, `.env`, `RECALL_*` variables | restart web and Telegram |
+| a key stored with `python -m src.admin set-secret` | next message (see `references/admin-cli.md`) |
 | SOUL, memories, skills (yours or the user's edits) | new chats; a running chat keeps its prompt |
 | `chat_config.recall_knowledge` | prompt is built per chat: new chats |
 

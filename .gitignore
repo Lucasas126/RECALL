@@ -219,8 +219,9 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Config folder
+# Config folder (also holds secrets.env, written by `python -m src.admin set-secret`)
 .config/
+secrets.env
 
 # Google OAuth client for the Google Calendar MCP server (contains the client secret)
 gcp-oauth.keys.json

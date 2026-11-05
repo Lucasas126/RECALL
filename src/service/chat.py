@@ -21,6 +21,7 @@ from src.agent.tools import chat_folder_options
 from src.agent.dream import DEFAULT_DREAM_PROMPT
 from src.agent.default_soul import default_soul
 from src.config.agents import AgentStore
+from src.config.errors import describe_config_error
 from src.config.favorites import ModelFavorites
 from src.config.loader import agent_default_model, load_agent, load_agent_config, load_user, user_models
 from src.config.model_refs import CLAUDE_SUBSCRIPTION, OPENROUTER, PROVIDERS, is_claude_subscription, model_name, provider_of
@@ -29,6 +30,7 @@ from src.config.models import (
 )
 from src.agent.tool_groups import DEFAULT_TOOL_GROUPS, TOOL_GROUP_CATALOG
 from src.config.preferences import PreferencesError, UserPreferences, UserPreferencesStore
+from src.config.secrets import fingerprint as secrets_fingerprint, get_secret
 from src.config.zdr import chat_zdr, ensure_zdr_compatible, zdr_required
 from src.config.settings import (
     CHAT_NAMING, CONFIG_DIR, DATA_DIR, MCP, ORCHESTRATOR, PDF, SPEECH_TO_TEXT, TAVILY, TELEGRAM_ALLOWED_USERS_ENV,
@@ -221,6 +223,8 @@ class _AgentSlot:
 
     def __init__(self) -> None:
         self.agents: dict[str, Agent] = {}
+        # chat id -> fingerprint of the config files (and secrets) the cached agent was built from
+        self.fingerprints: dict[str, str] = {}
         self.lock = threading.Lock()
         self.state = threading.Lock()
         self.pending: dict[str, deque[_MessageRun]] = {}
@@ -254,6 +258,11 @@ class ChatService:
         self._favorites = ModelFavorites(CONFIG_DIR)
         self._preferences = UserPreferencesStore(CONFIG_DIR)
         self._agents = AgentStore(CONFIG_DIR, DATA_DIR)
+        # last configs that loaded fine: another process (the admin CLI, a hand edit) may leave a file invalid for a
+        # while, and the running service keeps using the previous good one instead of failing
+        self._good_users: dict[str, UserConfig] = {}
+        self._good_agents: dict[tuple[str, str], AgentConfig] = {}
+        self._config_problems: dict[tuple[str, str | None], str] = {}
         # (model id -> (monotonic time, supported)) so opening chats does not refetch the catalog
         self._reasoning_support: dict[str, tuple[float, bool]] = {}
         self._availability = ProviderAvailability()
@@ -297,7 +306,7 @@ class ChatService:
             try:
                 user = load_user(user_dir.name)
                 keys = {user.provider.api_key, (user.embeddings_provider or user.provider).api_key}
-                missing = sorted(var for var in keys if var and not os.environ.get(var))
+                missing = sorted(var for var in keys if var and not get_secret(var))
                 if missing:  # such a user cannot run a session (e.g. the repo's example user): skip it quietly
                     logger.debug("dream scheduler skips %s: env var %s is not set", user_dir.name, ", ".join(missing))
                     continue
@@ -339,7 +348,12 @@ class ChatService:
         user = self._user(user_id)
         agents = []
         for agent_id in user.agents:
-            cfg = load_agent_config(user_id, agent_id)
+            try:
+                cfg = self._agent_config(user_id, agent_id)
+            except Exception as exc:  # one unreadable agent file must not hide the list
+                logger.error("agent list: %s/%s: %s", user_id, agent_id, describe_config_error(exc))
+                agents.append({"id": agent_id, "name": agent_id})
+                continue
             agents.append({"id": cfg.id, "name": cfg.name})
         return agents
 
@@ -472,10 +486,45 @@ class ChatService:
         self._replace_preferred_agent(user_id, agent_id, None)
 
     def _agent_config(self, user_id: str, agent_id: str) -> AgentConfig:
+        key = (user_id, agent_id)
         try:
-            return load_agent_config(user_id, agent_id)
+            config = load_agent_config(user_id, agent_id)
         except FileNotFoundError as exc:
+            self._good_agents.pop(key, None)
             raise UnknownAgent("unknown agent: {agent_id}", agent_id=agent_id) from exc
+        except Exception as exc:  # invalid after an outside edit: keep serving the previous good config
+            good = self._good_agents.get(key)
+            if good is None:
+                raise
+            self._report_config_problem((user_id, agent_id), f"{user_id}/{agent_id}.yaml", exc)
+            return good
+        self._good_agents[key] = config
+        self._config_problems.pop((user_id, agent_id), None)
+        return config
+
+    def _runtime_fingerprint(self, user_id: str, agent_id: str) -> str:
+        """What a cached agent was built from: the user and agent yaml and the secrets file (read by any process)."""
+        return f"{self._agents.fingerprint(user_id, agent_id)}:{secrets_fingerprint()}"
+
+    def _config_error_on_disk(self, user_id: str, agent_id: str) -> str | None:
+        """None when the user and agent files on disk load fine now, else a readable, secret-free reason."""
+        try:
+            load_user(user_id)
+            load_agent_config(user_id, agent_id)
+        except FileNotFoundError:
+            return None  # deleted: the rebuild reports it
+        except Exception as exc:
+            details = self._report_config_problem((user_id, agent_id), f"{user_id}/{agent_id}", exc)
+            return details
+        return None
+
+    def _report_config_problem(self, key: tuple[str, str | None], name: str, exc: BaseException) -> str:
+        """Log (once per distinct problem) that a config on disk is invalid and the previous one stays in use."""
+        details = describe_config_error(exc)
+        if self._config_problems.get(key) != details:
+            self._config_problems[key] = details
+            logger.error("invalid configuration %s on disk; keeping the previous good one: %s", name, details)
+        return details
 
     def _replace_preferred_agent(self, user_id: str, old_id: str, new_id: str | None) -> None:
         preferences = self._preferences.get(user_id)
@@ -693,7 +742,7 @@ class ChatService:
                 names[agent_id] = config.name
                 description = (config.description or "").strip()
                 criteria[agent_id] = f"{config.name}: {description}" if description else config.name
-            api_key = os.environ.get(ORCHESTRATOR.api_key, "").strip()
+            api_key = get_secret(ORCHESTRATOR.api_key).strip()
             if not api_key:
                 logger.warning("orchestrator skipped: env var %s is not set", ORCHESTRATOR.api_key)
                 return None
@@ -1263,7 +1312,7 @@ class ChatService:
         transcription_model = user_models(self._user(user_id), self._preferences).stt
         if provider_of(transcription_model, resolved.provider_name) != OPENROUTER:
             raise InputError("audio messages require an OpenRouter speech-to-text model")
-        api_key = resolved.api_key if resolved.provider_name == OPENROUTER else os.environ.get(resolved.openrouter.api_key, "").strip()
+        api_key = resolved.api_key if resolved.provider_name == OPENROUTER else get_secret(resolved.openrouter.api_key).strip()
         if not api_key:
             raise provider_settings.unavailable(
                 {"id": OPENROUTER, "reason": "no_api_key", "detail": resolved.openrouter.api_key})
@@ -1352,17 +1401,38 @@ class ChatService:
     def _run(
         self, user_id: str, agent_id: str, slot: _AgentSlot, run: _MessageRun,
     ) -> Iterator[ChatEvent]:
+        stale: str | None = None  # why the cached agent keeps its old config (the files on disk are invalid)
         with slot.state:
+            fingerprint = self._runtime_fingerprint(user_id, agent_id)
             agent = slot.agents.get(run.chat_id)
+            if agent is not None and slot.fingerprints.get(run.chat_id) != fingerprint:
+                # another process (admin CLI, hand edit) changed the yaml or the secrets: rebuild between replies
+                stale = self._config_error_on_disk(user_id, agent_id)
+                if stale is None:
+                    logger.info("config of %s/%s changed on disk; rebuilding the agent for chat %s",
+                                user_id, agent_id, run.chat_id)
+                    slot.agents.pop(run.chat_id, None)
+                    agent = None
             if agent is None:
                 agent = self._agent_factory(user_id, agent_id, run.chat_id)
                 slot.agents[run.chat_id] = agent
-        # the agent's default model is checked (ZDR policy) only for a chat that does not choose its own
-        inherits = self._conversations(user_id, agent_id).model_selection(run.chat_id) is None
-        agent.refresh_user_models(
-            user_models(self._user(user_id), self._preferences, self._agent_config(user_id, agent_id), check=inherits),
-            self._preferences.get(user_id).associative_max_matches,
-        )
+                slot.fingerprints[run.chat_id] = fingerprint
+        if stale is not None:
+            yield ChatEvent(
+                "notice", generation_id=run.generation_id,
+                text=message(
+                    self.language(user_id),
+                    "The configuration of this agent on disk is invalid, so the previous one is still in use: {details}",
+                    details=stale,
+                ),
+            )
+        else:
+            # the agent's default model is checked (ZDR policy) only for a chat that does not choose its own
+            inherits = self._conversations(user_id, agent_id).model_selection(run.chat_id) is None
+            agent.refresh_user_models(
+                user_models(self._user(user_id), self._preferences, self._agent_config(user_id, agent_id), check=inherits),
+                self._preferences.get(user_id).associative_max_matches,
+            )
         agent.config.language = self.language(user_id)
         try:
             result = agent.invoke(
@@ -1422,7 +1492,7 @@ class ChatService:
                 provider = claude_subscription_provider(user.claude_subscription, user_id=user.id, purpose="chat_naming.model")
                 reply = provider.invoke(messages, CHAT_NAMING.model, stream=False, zdr=zdr)
             else:
-                api_key = os.environ.get(CHAT_NAMING.api_key, "").strip()
+                api_key = get_secret(CHAT_NAMING.api_key).strip()
                 if not api_key:
                     logger.warning("chat naming skipped: env var %s is not set", CHAT_NAMING.api_key)
                     return
@@ -1729,9 +1799,19 @@ class ChatService:
     def _user(self, user_id: str) -> UserConfig:
         self._check_id("user", user_id, UnknownUser)
         try:
-            return load_user(user_id)
+            user = load_user(user_id)
         except FileNotFoundError as e:
+            self._good_users.pop(user_id, None)
             raise UnknownUser("unknown user: {user_id}", user_id=user_id) from e
+        except Exception as exc:  # invalid after an outside edit: keep serving the previous good config
+            good = self._good_users.get(user_id)
+            if good is None:
+                raise
+            self._report_config_problem((user_id, None), f"{user_id}/user.yaml", exc)
+            return good
+        self._good_users[user_id] = user
+        self._config_problems.pop((user_id, None), None)
+        return user
 
     def _owned_agent(self, user_id: str, agent_id: str) -> UserConfig:
         """The user's config, after checking that the user owns the agent."""

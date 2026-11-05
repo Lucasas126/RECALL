@@ -9,6 +9,7 @@ import yaml
 from src.config.agents import AgentModelError, AgentStore
 from src.config.models import AgentConfig, ModelsConfig, ResolvedAgent, UserConfig
 from src.config.preferences import UserPreferencesStore
+from src.config.secrets import get_secret
 from src.config.settings import ASSOC, CHAT_NAMING, CONFIG_DIR, DATA_DIR, MCP, TERMINAL
 from src.config.zdr import ensure_zdr_compatible, zdr_required
 from src.agent.tool_groups import DEFAULT_TOOL_GROUPS
@@ -98,7 +99,7 @@ def load_agent(user_id: str, agent_id: Optional[str] = None, *, check_agent_mode
     # local providers (e.g. ollama) need no key; only resolve one if configured
     api_key = ""
     if user.provider.api_key:
-        api_key = os.environ.get(user.provider.api_key, "")
+        api_key = get_secret(user.provider.api_key)
         if not api_key:
             raise ValueError(f"env var '{user.provider.api_key}' is not set")
 
@@ -106,7 +107,7 @@ def load_agent(user_id: str, agent_id: Optional[str] = None, *, check_agent_mode
     embeddings_provider = user.embeddings_provider or user.provider
     embeddings_api_key = api_key if embeddings_provider is user.provider else ""
     if embeddings_provider is not user.provider and embeddings_provider.api_key:
-        embeddings_api_key = os.environ.get(embeddings_provider.api_key, "")
+        embeddings_api_key = get_secret(embeddings_provider.api_key)
         if not embeddings_api_key:
             raise ValueError(f"env var '{embeddings_provider.api_key}' is not set")
 

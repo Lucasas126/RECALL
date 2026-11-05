@@ -7,6 +7,7 @@ from time import perf_counter
 from typing import TYPE_CHECKING, Optional
 
 from src.config.model_refs import is_claude_subscription
+from src.config.secrets import get_secret
 from src.config.settings import ASSOC
 from src.config.zdr import ensure_zdr_compatible, zdr_required
 from src.core.chunking import excerpt
@@ -167,7 +168,7 @@ def _query_model(agent: "Agent") -> tuple[LLMProvider, str, bool]:
     if is_claude_subscription(ASSOC.query_model):
         ensure_zdr_compatible(ASSOC.query_model, zdr, "associative_memory")
         return agent.claude_provider("associative_memory.query_model"), ASSOC.query_model, zdr
-    api_key = os.environ.get(ASSOC.api_key, "").strip()
+    api_key = get_secret(ASSOC.api_key).strip()
     if not api_key:
         raise RuntimeError(f"associative query model needs the env var {ASSOC.api_key} to be set")
     return OpenRouterProvider(api_key=api_key), ASSOC.query_model, zdr

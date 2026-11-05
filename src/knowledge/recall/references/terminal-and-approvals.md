@@ -1,13 +1,13 @@
 # Terminal and approvals
 
-The `terminal` group runs commands and edits files on a **backend** chosen by the user: normally a sandbox, possibly the user's own PC, reached over SSH. It is off by default. It never touches RECALL's own data or your memory sources, and is never built in disposable chats.
+The `terminal` group runs commands and edits files on a **backend** chosen by the user: normally a sandbox, possibly the user's own PC, reached over SSH. It is off by default. The file tools do not use your memory sources, and the terminal is never built in disposable chats. With a `local` backend the commands DO reach RECALL's own `.config` and `data` folders: read `references/security-for-admins.md` before using one.
 
 ## Backends
 
 | Type | Where commands run | Availability |
 | --- | --- | --- |
 | `ssh` | another machine, through the local `ssh` binary; key only, strict host-key checking | always |
-| `local` | the RECALL host itself, with a scrubbed environment | only if `terminal.allow_local: true` in `settings.yaml` |
+| `local` | the RECALL host itself (in Docker: the container, as the app user, in `/app`), with a scrubbed environment | only if `terminal.allow_local: true` in `settings.yaml` or `RECALL_TERMINAL_ALLOW_LOCAL=true` in the server environment |
 
 Backends are declared by the user in `terminal_backends` of the user yaml; each agent lists the ones it may use in its own `terminal.backends`, with a `workdir` and an `approvals` mode each. Your system prompt lists your allowed backends with working directory, approval mode and description; trust that list. A backend is a disposable sandbox only if its description says so; otherwise treat it as one of the user's real machines. Pass `backend` to choose one; without it the call goes to `terminal.default_backend`. A backend that fails to resolve is dropped with a log warning; with none left, the tools are not built.
 

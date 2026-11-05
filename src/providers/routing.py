@@ -5,6 +5,7 @@ import os
 
 from src.config.model_refs import CLAUDE_SUBSCRIPTION, LABELS, OLLAMA, OPENROUTER, split_reference
 from src.config.models import ClaudeSubscriptionConfig, OllamaConfig, OpenRouterConfig
+from src.config.secrets import get_secret
 from src.providers.claude_subscription import claude_subscription_provider
 from src.providers.provider import LLMProvider, ProviderUnavailable, get_provider
 
@@ -24,7 +25,7 @@ def provider_for(
     if settings is None:
         raise ValueError(f"unknown provider {name!r} for {purpose}")
     if name == OPENROUTER:
-        key = main_api_key if name == main else os.environ.get(openrouter.api_key, "").strip()
+        key = main_api_key if name == main else get_secret(openrouter.api_key).strip()
         if not key:
             raise ProviderUnavailable(
                 f"provider not available: {LABELS[name]}: API key variable '{openrouter.api_key}' is not set "
