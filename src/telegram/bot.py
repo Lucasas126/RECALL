@@ -1562,8 +1562,10 @@ def _approval_text(language: str, data: dict) -> str:
     lines = [
         message(language, "🔐 *Approval needed* ({risk})", risk=risk),
         "```\n" + command + "\n```",
-        message(language, "Working directory: {cwd}", cwd=_md_escape(str(data.get("cwd", "")))),
     ]
+    if data.get("backend"):
+        lines.append(message(language, "Backend: {backend}", backend=_md_escape(str(data["backend"]))))
+    lines.append(message(language, "Working directory: {cwd}", cwd=_md_escape(str(data.get("cwd", "")))))
     if data.get("reason"):
         lines.append(message(language, "Reason: {reason}", reason=_md_escape(str(data["reason"]))))
     lines.append(message(language, "It is denied automatically after {seconds} s.", seconds=int(data.get("timeout_seconds", 0))))

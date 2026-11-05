@@ -10,7 +10,7 @@ const take = (name) => source.match(new RegExp(`function ${name}\\([\\s\\S]*?\\r
 const names = [
   "approvalTitle", "formatCountdown", "approvalRemaining", "approvalOutcome", "approvalOutcomeLabel",
   "approvalInitialState", "approvalActive", "approvalTransition",
-  "terminalApprovalHint", "terminalBackendOptions", "buildTerminalConfig", "isTerminalError",
+  "terminalApprovalHint", "terminalBackendOptions", "terminalBackendRows", "terminalDefaultBackend", "buildTerminalConfig", "isTerminalError",
 ];
 const context = vm.createContext({ tr: (text, values = {}) => text.replace(/\{(\w+)\}/g, (_, key) => values[key]) });
 vm.runInContext(`${names.map(take).join("\n")}\n${names.map((n) => `this.${n} = ${n};`).join(" ")}`, context);
@@ -99,15 +99,35 @@ test("an answer or a vanished approval settles a pending card", () => {
   assert.equal(plain(f.approvalTransition(f.approvalInitialState(), { type: "nope" })).phase, "pending");
 });
 
-test("backend options show name and type only; none defined gives an empty list for the help state", () => {
-  assert.deepEqual(plain(f.terminalBackendOptions([], "")), []);
+test("backend options show name, type and description only; none defined gives an empty list for the help state", () => {
+  assert.deepEqual(plain(f.terminalBackendOptions([], [])), []);
   assert.deepEqual(plain(f.terminalBackendOptions(undefined, null)), []);
-  assert.deepEqual(plain(f.terminalBackendOptions([{ name: "box", type: "ssh" }], "box")), [{ value: "box", label: "box (ssh)" }]);
   assert.deepEqual(
-    plain(f.terminalBackendOptions([{ name: "box", type: "ssh" }], "old")).map((o) => o.value),
+    plain(f.terminalBackendOptions([{ name: "box", type: "ssh", description: "sandbox" }], ["box"])),
+    [{ value: "box", label: "box (ssh)", description: "sandbox" }],
+  );
+  assert.deepEqual(
+    plain(f.terminalBackendOptions([{ name: "box", type: "ssh" }], ["old"])).map((o) => o.value),
     ["box", "old"],
   );
-  assert.equal(f.terminalBackendOptions([], "old")[0].label, "old (not defined)");
+  assert.equal(f.terminalBackendOptions([], ["old"])[0].label, "old (not defined)");
+});
+
+test("one row per backend: allowed ones carry the saved settings, the rest default to manual and ~", () => {
+  const backends = [{ name: "pc", type: "ssh", description: "my PC" }, { name: "sandbox", type: "ssh", description: "" }];
+  const saved = { backends: { sandbox: { workdir: "~/workspace", approvals: "smart" }, gone: { workdir: "~", approvals: "off" } } };
+  const rows = plain(f.terminalBackendRows(backends, saved));
+  assert.deepEqual(rows.map((r) => [r.name, r.allowed, r.workdir, r.approvals]), [
+    ["pc", false, "~", "manual"], ["sandbox", true, "~/workspace", "smart"], ["gone", true, "~", "off"],
+  ]);
+  assert.equal(rows[0].description, "my PC");
+  assert.equal(f.terminalBackendRows([], null).length, 0);
+});
+
+test("the default backend must be an allowed one", () => {
+  assert.equal(f.terminalDefaultBackend(["a", "b"], "b"), "b");
+  assert.equal(f.terminalDefaultBackend(["a", "b"], "c"), "a");
+  assert.equal(f.terminalDefaultBackend([], "c"), "");
 });
 
 test("the approvals hint follows the mode", () => {
@@ -117,19 +137,34 @@ test("the approvals hint follows the mode", () => {
 });
 
 test("buildTerminalConfig round-trips the form and leaves a disabled group alone", () => {
-  const saved = { backend: "box", workdir: "~/w", approvals: "manual", timeout_seconds: 60, allow_in_dream: false, extra: 1 };
-  const fields = { backend: "box", workdir: "  ~/other ", approvals: "smart", timeout: "90", allowInDream: true };
+  const saved = {
+    backends: { sandbox: { workdir: "~/w", approvals: "manual", timeout_seconds: 30 } },
+    default_backend: "sandbox", timeout_seconds: 60, allow_in_dream: false, extra: 1,
+  };
+  const fields = {
+    backends: [
+      { name: "sandbox", allowed: true, workdir: "  ~/other ", approvals: "smart" },
+      { name: "pc", allowed: true, workdir: " ", approvals: "manual" },
+      { name: "nas", allowed: false, workdir: "~", approvals: "off" },
+    ],
+    defaultBackend: "pc", timeout: "90", allowInDream: true,
+  };
   assert.deepEqual(plain(f.buildTerminalConfig(saved, true, fields)), {
-    backend: "box", workdir: "~/other", approvals: "smart", timeout_seconds: 90, allow_in_dream: true, extra: 1,
+    backends: {
+      sandbox: { workdir: "~/other", approvals: "smart", timeout_seconds: 30 },
+      pc: { workdir: "~", approvals: "manual" },
+    },
+    default_backend: "pc", timeout_seconds: 90, allow_in_dream: true, extra: 1,
   });
   assert.deepEqual(plain(f.buildTerminalConfig(saved, false, fields)), saved);
   assert.equal(f.buildTerminalConfig(undefined, false, fields), null);
-  assert.equal(f.buildTerminalConfig(saved, true, { ...fields, backend: "" }), null);
-  assert.equal(f.buildTerminalConfig(null, true, { ...fields, workdir: " " }).workdir, "~/workspace");
+  assert.equal(f.buildTerminalConfig(saved, true, { ...fields, backends: [{ ...fields.backends[2] }] }), null);
+  const stale = f.buildTerminalConfig(null, true, { ...fields, defaultBackend: "nas" });
+  assert.equal(stale.default_backend, "sandbox");  // a default that is no longer allowed falls back to the first allowed
 });
 
 test("isTerminalError spots save errors about the terminal block", () => {
-  assert.equal(f.isTerminalError("terminal.backend is unknown"), true);
+  assert.equal(f.isTerminalError("terminal.backends is unknown"), true);
   assert.equal(f.isTerminalError("Terminal backend missing"), true);
   assert.equal(f.isTerminalError("name is too long"), false);
   assert.equal(f.isTerminalError(null), false);

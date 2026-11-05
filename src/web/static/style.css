@@ -524,4 +524,9 @@ input[type="checkbox"]:disabled { opacity: .5; cursor: not-allowed; }
 .agent-terminal { display: flex; flex-direction: column; gap: 10px; }
 .agent-terminal[hidden] { display: none; }
 .terminal-warning { color: var(--warn); }
+.terminal-backends { display: flex; flex-direction: column; gap: 10px; }
+.terminal-backend { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.terminal-backend-details { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.terminal-backend-details[hidden] { display: none; }
+.approval-backend { padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--raised); font-size: .8em; }
 select.warning { border-color: var(--warn); color: var(--warn); }

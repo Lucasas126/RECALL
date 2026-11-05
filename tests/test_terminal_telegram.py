@@ -12,7 +12,7 @@ from src.telegram.bot import (
 from src.terminal.approvals import ApprovalForbidden, ApprovalNotFound
 
 DATA = {"id": "0123456789ab", "tool": "terminal", "command": "rm -rf build", "cwd": "~/workspace",
-        "reason": "recursive delete", "risk": "dangerous", "timeout_seconds": 300, "expires_at": 1.0}
+        "reason": "recursive delete", "risk": "dangerous", "backend": "pc", "timeout_seconds": 300, "expires_at": 1.0}
 
 
 class TelegramApprovalTests(unittest.IsolatedAsyncioTestCase):
@@ -49,6 +49,10 @@ class TelegramApprovalTests(unittest.IsolatedAsyncioTestCase):
             self.assertLess(len(button.callback_data.encode()), 64)  # Telegram's limit
             self.assertIn(DATA["id"], button.callback_data)
         self.assertIn(DATA["id"], self.state.approvals)
+
+    async def test_message_shows_the_backend(self) -> None:
+        self.assertIn("Backend: pc", _approval_text("en", DATA))
+        self.assertNotIn("Backend:", _approval_text("en", {k: v for k, v in DATA.items() if k != "backend"}))
 
     async def test_long_commands_are_cut_and_fences_cannot_break_out(self) -> None:
         text = _approval_text("en", {**DATA, "command": "echo " + "x" * 5000 + " ``` injected"})

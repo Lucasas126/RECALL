@@ -139,7 +139,8 @@ class ApprovalApiTests(steering.SteeringFixture):
 
 
 class TerminalBackendListingTests(steering.SteeringFixture):
-    BACKEND = ssh_config(host="203.0.113.77", user="sandboxer", port=2222, key_file="/keys/secret_id", known_hosts_file="/keys/kh_secret")
+    BACKEND = ssh_config(host="203.0.113.77", user="sandboxer", port=2222, key_file="/keys/secret_id", known_hosts_file="/keys/kh_secret",
+                         description="User A's PC, real files")
     backends: dict = {}
 
     def _user(self, user_id):
@@ -156,10 +157,13 @@ class TerminalBackendListingTests(steering.SteeringFixture):
     def test_no_backends_by_default(self) -> None:
         self.assertEqual(self.me().json()["terminal_backends"], [])
 
-    def test_lists_only_name_and_type(self) -> None:
-        self.backends = {"box": self.BACKEND, "alpha": self.BACKEND}
+    def test_lists_only_name_type_and_description(self) -> None:
+        self.backends = {"box": self.BACKEND, "alpha": self.BACKEND.model_copy(update={"description": ""})}
         response = self.me()
-        self.assertEqual(response.json()["terminal_backends"], [{"name": "alpha", "type": "ssh"}, {"name": "box", "type": "ssh"}])
+        self.assertEqual(response.json()["terminal_backends"], [
+            {"name": "alpha", "type": "ssh", "description": ""},
+            {"name": "box", "type": "ssh", "description": "User A's PC, real files"},
+        ])
         for secret in ("203.0.113.77", "sandboxer", "2222", "/keys/secret_id", "secret_id", "kh_secret"):
             self.assertNotIn(secret, response.text)
 

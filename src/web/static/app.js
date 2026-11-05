@@ -106,13 +106,10 @@ function translateInterface() {
     ["agent-associative-execution-label", "Associative search timing"],
     ["agent-associative-parallel", "In parallel with the reply"], ["agent-associative-sequential", "Before the reply"],
     ["agent-tool-groups-label", "Tool groups"],
-    ["agent-terminal-legend", "Terminal"], ["agent-terminal-backend-label", "Backend"],
+    ["agent-terminal-legend", "Terminal"], ["agent-terminal-default-label", "Default backend"],
     ["agent-terminal-no-backends", "No terminal backends are configured. Add one under terminal_backends in your user configuration; see docs/user-guide/terminal.md."],
-    ["agent-terminal-workdir-label", "Working directory"], ["agent-terminal-approvals-label", "Approvals"],
-    ["agent-terminal-approvals-manual", "Manual: ask for everything"], ["agent-terminal-approvals-smart", "Smart: ask for dangerous actions"],
-    ["agent-terminal-approvals-off", "Off: never ask (risky)"],
     ["agent-terminal-timeout-label", "Command timeout (seconds)"], ["agent-terminal-dream-label", "Allow in dream"],
-    ["agent-terminal-dream-hint", "Dream sessions run unattended: with this on, an agent whose dream tools include the terminal can run commands in the sandbox without you watching."],
+    ["agent-terminal-dream-hint", "Dream sessions run unattended: with this on, an agent whose dream tools include the terminal can run commands on its backends without you watching."],
     ["agent-effort-label", "Reasoning effort"], ["agent-effort-default", "Default"],
     ["agent-tokens-enabled-label", "Limit reasoning tokens"], ["agent-reasoning-tokens-label", "Reasoning tokens"],
     ["agent-retained-label", "Messages kept in context"],
@@ -616,27 +613,85 @@ function updateTerminalBlock() {
 
 function renderTerminalBlock(agent) {
   const saved = agent.terminal ?? null;
-  const options = terminalBackendOptions(state.user?.terminal_backends, saved?.backend);
-  $("agent-terminal-backend").replaceChildren(...options.map((option) => Object.assign(document.createElement("option"), {
-    value: option.value, textContent: option.label,
-  })));
-  $("agent-terminal-backend").value = saved?.backend ?? options[0]?.value ?? "";
-  $("agent-terminal-no-backends").hidden = options.length > 0;
-  $("agent-terminal-workdir").value = saved?.workdir ?? "~/workspace";
-  $("agent-terminal-approvals").value = saved?.approvals ?? "manual";
-  $("agent-terminal-approvals-hint").textContent = terminalApprovalHint($("agent-terminal-approvals").value);
-  $("agent-terminal-approvals").classList.toggle("warning", $("agent-terminal-approvals").value === "off");
+  const rows = terminalBackendRows(state.user?.terminal_backends, saved);
+  $("agent-terminal-no-backends").hidden = rows.length > 0;
+  $("agent-terminal-backends").replaceChildren(...rows.map(buildTerminalBackendRow));
   $("agent-terminal-timeout").value = saved?.timeout_seconds ?? 60;
   $("agent-terminal-dream").checked = saved?.allow_in_dream ?? false;
   $("agent-terminal-error").textContent = "";
+  refreshTerminalDefault(saved?.default_backend);
   updateTerminalBlock();
 }
 
-$("agent-terminal-approvals").addEventListener("change", () => {
-  const value = $("agent-terminal-approvals").value;
-  $("agent-terminal-approvals-hint").textContent = terminalApprovalHint(value);
-  $("agent-terminal-approvals").classList.toggle("warning", value === "off");
-});
+function buildTerminalBackendRow(row) {
+  const make = (tag, className, text) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text != null) node.textContent = text;
+    return node;
+  };
+  const box = make("div", "terminal-backend");
+  box.dataset.name = row.name;
+  const allow = document.createElement("input");
+  allow.type = "checkbox";
+  allow.className = "terminal-allow";
+  allow.checked = row.allowed;
+  const head = make("label", "model-filter");
+  head.append(allow, make("span", null, `${tr("Allow")} ${row.label}`));
+  box.append(head);
+  if (row.description) box.append(make("p", "model-note", row.description));
+  const details = make("div", "terminal-backend-details");
+  const workdir = document.createElement("input");
+  workdir.className = "terminal-workdir";
+  workdir.maxLength = 1024;
+  workdir.placeholder = "~";
+  workdir.autocomplete = "off";
+  workdir.value = row.workdir;
+  const workdirLabel = make("label");
+  workdirLabel.append(make("span", null, tr("Working directory")), workdir);
+  const approvals = document.createElement("select");
+  approvals.className = "terminal-approvals";
+  for (const [value, label] of [
+    ["manual", tr("Manual: ask for everything")], ["smart", tr("Smart: ask for dangerous actions")],
+    ["off", tr("Off: never ask (risky)")],
+  ]) approvals.append(Object.assign(document.createElement("option"), { value, textContent: label }));
+  approvals.value = row.approvals;
+  const hint = make("span", "model-note", terminalApprovalHint(row.approvals));
+  const approvalsLabel = make("label");
+  approvalsLabel.append(make("span", null, tr("Approvals")), approvals, hint);
+  approvals.classList.toggle("warning", row.approvals === "off");
+  approvals.addEventListener("change", () => {
+    hint.textContent = terminalApprovalHint(approvals.value);
+    approvals.classList.toggle("warning", approvals.value === "off");
+  });
+  details.append(workdirLabel, approvalsLabel);
+  details.hidden = !row.allowed;
+  box.append(details);
+  allow.addEventListener("change", () => {
+    details.hidden = !allow.checked;
+    refreshTerminalDefault($("agent-terminal-default").value);
+  });
+  return box;
+}
+
+// The form's backend rows as plain data (also what buildTerminalConfig takes).
+function readTerminalBackendFields() {
+  return [...document.querySelectorAll("#agent-terminal-backends .terminal-backend")].map((box) => ({
+    name: box.dataset.name,
+    allowed: box.querySelector(".terminal-allow").checked,
+    workdir: box.querySelector(".terminal-workdir").value,
+    approvals: box.querySelector(".terminal-approvals").value,
+  }));
+}
+
+function refreshTerminalDefault(preferred) {
+  const names = readTerminalBackendFields().filter((field) => field.allowed).map((field) => field.name);
+  const select = $("agent-terminal-default");
+  select.replaceChildren(...names.map((name) => Object.assign(document.createElement("option"), { value: name, textContent: name })));
+  select.value = terminalDefaultBackend(names, preferred);
+  $("agent-terminal-default-label").parentElement.hidden = names.length < 2;
+}
+
 
 const AGENT_PANELS = ["basic", "tools", "mcp", "folders"];
 // panels of a saved agent with their own saves, outside the agent form
@@ -955,9 +1010,8 @@ function agentFormBody() {
     ...(saved ? { dream: saved.dream } : {}),
     folders: agentFoldersBody(),
     terminal: buildTerminalConfig(saved?.terminal, terminalGroupChecked(), {
-      backend: $("agent-terminal-backend").value, workdir: $("agent-terminal-workdir").value,
-      approvals: $("agent-terminal-approvals").value, timeout: $("agent-terminal-timeout").value,
-      allowInDream: $("agent-terminal-dream").checked,
+      backends: readTerminalBackendFields(), defaultBackend: $("agent-terminal-default").value,
+      timeout: $("agent-terminal-timeout").value, allowInDream: $("agent-terminal-dream").checked,
     }),
     chat_config: {
       model: $("agent-model").value.trim() || null,  // null follows the user's default model
@@ -2453,7 +2507,9 @@ function buildApprovalCard(entry) {
   countdown.setAttribute("role", "timer");
   countdown.title = tr("Time left");
   const head = make("div", "approval-head");
-  head.append(title, make("span", "approval-tool", approval.tool ?? ""), countdown);
+  head.append(title, make("span", "approval-tool", approval.tool ?? ""));
+  if (approval.backend) head.append(make("span", "approval-backend", approval.backend));
+  head.append(countdown);
   // focusable so a long command can be scrolled with the keyboard
   const command = make("pre", "approval-command", approval.command ?? "");
   command.tabIndex = 0;
@@ -2621,24 +2677,56 @@ function terminalApprovalHint(value) {
   }
 }
 
-// Backend choices by name and type (never hosts or keys); a saved backend that no longer exists stays selectable so the error can be seen.
-function terminalBackendOptions(backends, saved) {
-  const options = (backends ?? []).map((backend) => ({ value: backend.name, label: `${backend.name} (${backend.type})` }));
-  if (saved && !options.some((option) => option.value === saved)) {
-    options.push({ value: saved, label: tr("{name} (not defined)", { name: saved }) });
+// Backend choices by name and type (never hosts or keys), with the user's description; a saved backend that no longer
+// exists stays selectable so the error can be seen. `savedNames` are the backends the agent already uses.
+function terminalBackendOptions(backends, savedNames) {
+  const options = (backends ?? []).map((backend) => ({
+    value: backend.name, label: `${backend.name} (${backend.type})`, description: backend.description ?? "",
+  }));
+  for (const saved of savedNames ?? []) {
+    if (!options.some((option) => option.value === saved)) {
+      options.push({ value: saved, label: tr("{name} (not defined)", { name: saved }), description: "" });
+    }
   }
   return options;
 }
 
+// One row per backend of the user (plus saved ones that vanished): allowed or not, with its saved or default settings.
+function terminalBackendRows(backends, saved) {
+  const used = saved?.backends ?? {};
+  return terminalBackendOptions(backends, Object.keys(used)).map((option) => {
+    const entry = used[option.value];
+    return {
+      name: option.value, label: option.label, description: option.description, allowed: Boolean(entry),
+      workdir: entry?.workdir ?? "~", approvals: entry?.approvals ?? "manual",
+    };
+  });
+}
+
+// The default backend among the allowed names: the preferred one when it is still allowed, else the first.
+function terminalDefaultBackend(allowedNames, preferred) {
+  return allowedNames.includes(preferred) ? preferred : allowedNames[0] ?? "";
+}
+
 // The `terminal` block to save: the form's fields while the group is enabled, else the saved block untouched.
+// Per-backend fields the form does not edit (timeout_seconds) are kept from the saved block.
 function buildTerminalConfig(saved, enabled, fields) {
   if (!enabled) return saved ?? null;
-  if (!fields.backend) return null;
+  const allowed = (fields.backends ?? []).filter((field) => field.allowed);
+  if (!allowed.length) return null;
+  const backends = {};
+  for (const field of allowed) {
+    backends[field.name] = {
+      ...(saved?.backends?.[field.name] ?? {}),
+      workdir: field.workdir.trim() || "~",
+      approvals: field.approvals,
+    };
+  }
+  const { backend: _old, workdir: _oldWorkdir, approvals: _oldApprovals, ...rest } = saved ?? {};
   return {
-    ...(saved ?? {}),
-    backend: fields.backend,
-    workdir: fields.workdir.trim() || "~/workspace",
-    approvals: fields.approvals,
+    ...rest,
+    backends,
+    default_backend: terminalDefaultBackend(allowed.map((field) => field.name), fields.defaultBackend),
     timeout_seconds: Number(fields.timeout),
     allow_in_dream: Boolean(fields.allowInDream),
   };
