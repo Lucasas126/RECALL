@@ -10,6 +10,11 @@ from src.utils.files import atomic_write_text, exclusive_file_lock
 from src.utils.i18n import UserMessageError
 
 
+# bounds of the numeric preferences; the interface reads them from the preferences `defaults` object
+ASSOCIATIVE_MAX_MATCHES_BOUNDS = (1, 20)
+DISPOSABLE_RETENTION_DAYS_BOUNDS = (1, 365)
+
+
 class PreferencesError(UserMessageError, RuntimeError):
     """User preferences could not be read, validated or saved."""
 
@@ -25,9 +30,9 @@ class UserPreferences(BaseModel):
     default_llm_model: Annotated[str, Field(strict=True, min_length=1, max_length=256)] | None = None
     default_stt_model: Annotated[str, Field(strict=True, min_length=1, max_length=256)] | None = None
     # most associative-memory fragments injected per turn; None follows settings.yaml `associative_memory.top_n`
-    associative_max_matches: Annotated[int, Field(strict=True, ge=1, le=20)] | None = None
+    associative_max_matches: Annotated[int, Field(strict=True, ge=ASSOCIATIVE_MAX_MATCHES_BOUNDS[0], le=ASSOCIATIVE_MAX_MATCHES_BOUNDS[1])] | None = None
     # days of inactivity after which a disposable chat is deleted; None means the default (30)
-    disposable_retention_days: Annotated[int, Field(strict=True, ge=1, le=365)] | None = None
+    disposable_retention_days: Annotated[int, Field(strict=True, ge=DISPOSABLE_RETENTION_DAYS_BOUNDS[0], le=DISPOSABLE_RETENTION_DAYS_BOUNDS[1])] | None = None
     # Telegram orchestrator for this user; None follows settings.yaml `orchestrator.enabled`
     orchestrator: bool | None = Field(default=None, strict=True)
     # agent used when the orchestrator is unsure (greetings, general talk); None means the preferred agent

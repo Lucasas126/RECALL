@@ -313,6 +313,10 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     def list_agent_configs(user_id: str = Depends(current_user)):
         return service.list_agent_configs(user_id)
 
+    @app.get("/api/agents/defaults")
+    def get_agent_defaults(user_id: str = Depends(current_user)):
+        return service.agent_defaults(user_id)
+
     @app.get("/api/tool-groups")
     def list_tool_groups(user_id: str = Depends(current_user)):
         return service.list_tool_groups(user_id)

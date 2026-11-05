@@ -229,7 +229,7 @@ class UserPreferencesWebTests(unittest.TestCase):
         """The preferences without the read-only application `limits` object."""
         limits = body["limits"]
         assert set(limits) == {"soul_chars", "memory_chars", "user_chars"}
-        return {key: value for key, value in body.items() if key != "limits"}
+        return {key: value for key, value in body.items() if key not in ("limits", "defaults")}
 
     def test_orchestrator_preferences_round_trip_and_core_agent_must_exist(self) -> None:
         response = self.client.patch(self.url, json={"orchestrator": True, "core_agent_id": "agent-b"})

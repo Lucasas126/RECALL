@@ -26,7 +26,9 @@ Unknown keys are rejected in the agent yaml and in most blocks (except `chat_con
 | `folders` | up to 20 user folders |
 | `terminal` | block below; needed by the `terminal` tool group |
 
-### `chat_config` (Agents tab, Basic > Advanced and Tools)
+### `chat_config` (Agents tab: Basic, Basic > Advanced and Tools)
+
+Basic holds Identity (name, description, personality) and Model and reasoning (`model`, `reasoning_effort`, `reasoning`, `keep_reasoning_in_memory`, `reasoning_tokens`); the collapsed Advanced section holds `stream`, `has_memory`, `recall_knowledge`, `associative_memory`, `associative_execution` and `conversation_messages_retained`. Every setting row shows its default and a reset button (the defaults come from `GET /api/agents/defaults`).
 
 | Field | Meaning (default) |
 | --- | --- |
@@ -104,4 +106,4 @@ Provider options: `ollama.host`; `claude_subscription` takes `claude_config_dir`
 
 Backends (`terminal_backends.<name>`): `type` is `ssh` (`host`, `port`, `user`, `key_file`, `known_hosts_file`) or `local` (`workdir`; refused unless `terminal.allow_local` in `settings.yaml`); both take `description`.
 
-Preferences (`preferences.json`, Settings dialog and Telegram `/settings`) are separate from the yaml and apply from the next read.
+Preferences (`preferences.json`, Settings dialog and Telegram `/settings`) are separate from the yaml and apply from the next read. The Settings dialog has sections General (thinking, theme, language), Models (default LLM and speech-to-text), Chats & memory (associative matches, disposable days), Telegram (orchestrator, core agent) and Connections; each row shows its default and a reset button, and a reset stores nothing (null), so the setting follows the default again.

@@ -86,22 +86,378 @@ function renderVersion() {
   for (const id of ["login-version", "settings-version"]) $(id).textContent = text;
 }
 
+// ---- settings helpers (pure: no DOM, no state; tested without a browser)
+// The sections of the user settings dialog and the preferences each one holds (`connections` has none).
+const SETTINGS_SECTIONS = {
+  general: ["show_thinking", "language"],
+  models: ["default_llm_model", "default_stt_model"],
+  chats: ["associative_max_matches", "disposable_retention_days"],
+  telegram: ["orchestrator", "core_agent_id"],
+  connections: [],
+};
+// Saving null for these means "follow the default"; the others always hold a value.
+const NULLABLE_PREFERENCES = new Set([
+  "default_llm_model", "default_stt_model", "associative_max_matches", "disposable_retention_days",
+  "orchestrator", "core_agent_id",
+]);
+
+// Which section is shown and which tab is pressed; an unknown name falls back to the first section.
+function settingsSectionView(active) {
+  const names = Object.keys(SETTINGS_SECTIONS);
+  const current = names.includes(active) ? active : names[0];
+  return Object.fromEntries(names.map((name) => [name, { hidden: name !== current, pressed: name === current }]));
+}
+
+// The section a preference key belongs to, or null.
+function settingsSectionOf(key) {
+  return Object.keys(SETTINGS_SECTIONS).find((name) => SETTINGS_SECTIONS[name].includes(key)) ?? null;
+}
+
+// Number of pending changes per section, for the dots on the tabs.
+function sectionChangeCounts(changes) {
+  const counts = Object.fromEntries(Object.keys(SETTINGS_SECTIONS).map((name) => [name, 0]));
+  for (const key of Object.keys(changes)) {
+    const section = settingsSectionOf(key);
+    if (section) counts[section] += 1;
+  }
+  return counts;
+}
+
+// null, undefined and "" all mean "no value"; numbers and numeric strings compare as numbers.
+function sameValue(a, b) {
+  const empty = (value) => value === null || value === undefined || value === "";
+  if (empty(a) || empty(b)) return empty(a) && empty(b);
+  if (typeof a === "number" || typeof b === "number") return Number(a) === Number(b);
+  return a === b;
+}
+
+function differsFromDefault(value, defaultValue) {
+  return !sameValue(value, defaultValue);
+}
+
+// Reads typed text. Thousands separators ("500,000", "500.000", "500 000") are accepted; decimals are not.
+// error: null | "format" | "min" | "max"; value is the number whenever the text is numeric.
+function parseNumberInput(raw, spec = {}) {
+  const text = String(raw ?? "").trim();
+  if (text === "") return { empty: true, value: null, error: null };
+  if (!/^\d+$/.test(text) && !/^\d{1,3}(?:[.,\s\u00a0\u202f]\d{3})+$/.test(text)) {
+    return { empty: false, value: null, error: "format" };
+  }
+  const value = Number(text.replace(/[.,\s\u00a0\u202f]/g, ""));
+  if (spec.min != null && value < spec.min) return { empty: false, value, error: "min" };
+  if (spec.max != null && value > spec.max) return { empty: false, value, error: "max" };
+  return { empty: false, value, error: null };
+}
+
+function clampNumber(value, spec = {}) {
+  let result = value;
+  if (spec.min != null && result < spec.min) result = spec.min;
+  if (spec.max != null && result > spec.max) result = spec.max;
+  return result;
+}
+
+// One step of the - / + buttons; an empty field starts at its start value, else the default, else the minimum.
+function stepNumber(current, direction, spec = {}) {
+  if (current === null || current === undefined) return clampNumber(spec.start ?? spec.default ?? spec.min ?? 0, spec);
+  return clampNumber(current + direction * (spec.step || 1), spec);
+}
+
+function formatNumber(value, language = "en") {
+  return new Intl.NumberFormat(language === "es" ? "es" : "en").format(value);
+}
+
+// "Allowed: 1–20", "Minimum: 1" or "" depending on the bounds the backend reports.
+function rangeText(spec, translate, language = "en") {
+  const fmt = (n) => formatNumber(n, language);
+  if (spec.min != null && spec.max != null) return translate("Allowed: {min}–{max}", { min: fmt(spec.min), max: fmt(spec.max) });
+  if (spec.min != null) return translate("Minimum: {min}", { min: fmt(spec.min) });
+  if (spec.max != null) return translate("Maximum: {max}", { max: fmt(spec.max) });
+  return "";
+}
+
+// What to send for one preference: undefined (unchanged), null (reset: follow the default) or the new value.
+function preferenceChange(key, value, original, defaultValue) {
+  if (sameValue(value, original)) return undefined;
+  if (NULLABLE_PREFERENCES.has(key) && sameValue(value, defaultValue)) return null;
+  return value;
+}
+
+// The PATCH body for the settings dialog: only the preferences whose value differs from what was loaded.
+function settingsChanges(current, original, defaults) {
+  const changes = {};
+  for (const key of Object.keys(current)) {
+    const change = preferenceChange(key, current[key], original[key], defaults[key]);
+    if (change !== undefined) changes[key] = change;
+  }
+  return changes;
+}
+// ---- end settings helpers
+
+// ---- number fields and setting rows (DOM)
+// Every setting is a `.setting-row`: label, help, control, a muted "Default: X" line and a reset button that is
+// enabled only while the value differs from the default. Number inputs (`input[data-number]`) become a text
+// field with - / + buttons, a unit and inline validation.
+const settingRows = [];
+const numberSpecs = new Map(); // input id -> () => ({ default, min, max, step })
+
+function uiLanguage() {
+  return state.preferences?.language ?? "en";
+}
+
+function unitLabel(unit) {
+  switch (unit) {
+    case "matches": return tr("matches");
+    case "days": return tr("days");
+    case "steps": return tr("steps");
+    case "tokens": return tr("tokens");
+    case "minutes": return tr("minutes");
+    case "seconds": return tr("seconds");
+    case "messages": return tr("messages");
+    default: return "";
+  }
+}
+
+function numberSpec(input) {
+  const spec = numberSpecs.get(input.id)?.() ?? {};
+  return { ...spec, step: Number(input.dataset.step) || 1, start: input.dataset.start ? Number(input.dataset.start) : undefined };
+}
+
+function numberMessageElement(input) {
+  const field = input.closest(".num-field");
+  let element = input.closest(".setting-row")?.querySelector(".setting-error");
+  if (!element) {
+    element = field.nextElementSibling?.classList.contains("setting-error") ? field.nextElementSibling : null;
+    if (!element) {
+      element = Object.assign(document.createElement("span"), { className: "setting-error error" });
+      element.setAttribute("role", "alert");
+      field.after(element);
+    }
+  }
+  return element;
+}
+
+function showNumberMessage(input, text, blocking) {
+  numberMessageElement(input).textContent = text;
+  if (blocking) input.setAttribute("aria-invalid", "true");
+  else input.removeAttribute("aria-invalid");
+}
+
+function numberErrorText(parsed, spec) {
+  if (parsed.error === "format") return tr("Enter a whole number.");
+  if (parsed.error === "min") return tr("Must be at least {min}.", { min: formatNumber(spec.min, uiLanguage()) });
+  if (parsed.error === "max") return tr("Must be at most {max}.", { max: formatNumber(spec.max, uiLanguage()) });
+  return "";
+}
+
+// null when empty, NaN when the text is not valid, else the number
+function numberValue(id) {
+  const input = $(id);
+  const parsed = parseNumberInput(input.value, numberSpec(input));
+  if (parsed.empty) return null;
+  return parsed.error ? Number.NaN : parsed.value;
+}
+
+function setNumberValue(input, value) {
+  input.value = value == null ? "" : formatNumber(value, uiLanguage());
+  showNumberMessage(input, "", false);
+}
+
+function fireChange(element) {
+  element.dispatchEvent(new Event("input", { bubbles: true }));
+  element.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+// Enter or blur: out-of-range numbers are clamped (and the message says so); text that is no number stays and blocks saving.
+function commitNumber(input) {
+  const spec = numberSpec(input);
+  const parsed = parseNumberInput(input.value, spec);
+  if (parsed.empty) return showNumberMessage(input, "", false);
+  if (parsed.error === "format") return showNumberMessage(input, numberErrorText(parsed, spec), true);
+  if (parsed.error) {
+    setNumberValue(input, clampNumber(parsed.value, spec));
+    return showNumberMessage(input, tr("Adjusted to the allowed range ({min}–{max}).", {
+      min: spec.min == null ? "…" : formatNumber(spec.min, uiLanguage()),
+      max: spec.max == null ? "…" : formatNumber(spec.max, uiLanguage()),
+    }), false);
+  }
+  setNumberValue(input, parsed.value);
+}
+
+function stepNumberField(input, direction) {
+  const spec = numberSpec(input);
+  const parsed = parseNumberInput(input.value, spec);
+  const current = parsed.value;
+  setNumberValue(input, stepNumber(current, direction, spec));
+  fireChange(input);
+}
+
+function setupNumberFields() {
+  for (const input of document.querySelectorAll("input[data-number]")) {
+    const field = document.createElement("span");
+    field.className = "num-field";
+    const button = (direction, text) => {
+      const element = Object.assign(document.createElement("button"), { type: "button", className: "num-step", textContent: text });
+      element.dataset.direction = String(direction);
+      element.addEventListener("click", () => stepNumberField(input, direction));
+      return element;
+    };
+    const unit = Object.assign(document.createElement("span"), { className: "num-unit model-note" });
+    input.before(field);
+    field.append(button(-1, "−"), input, button(1, "+"), unit);
+    input.addEventListener("input", () => {
+      const parsed = parseNumberInput(input.value, numberSpec(input));
+      showNumberMessage(input, numberErrorText(parsed, numberSpec(input)), parsed.error === "format");
+    });
+    input.addEventListener("change", () => commitNumber(input));
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") { event.preventDefault(); commitNumber(input); fireChange(input); }
+      else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        event.preventDefault();
+        stepNumberField(input, event.key === "ArrowUp" ? 1 : -1);
+      }
+    });
+  }
+}
+
+function refreshNumberFields() {
+  for (const input of document.querySelectorAll("input[data-number]")) {
+    const field = input.closest(".num-field");
+    if (!field) continue;
+    const spec = numberSpec(input);
+    const [minus, plus] = field.querySelectorAll(".num-step");
+    minus.disabled = plus.disabled = input.disabled;
+    minus.setAttribute("aria-label", tr("Decrease"));
+    plus.setAttribute("aria-label", tr("Increase"));
+    field.querySelector(".num-unit").textContent = unitLabel(input.dataset.unit);
+    input.placeholder = spec.default == null ? "" : formatNumber(spec.default, uiLanguage());
+  }
+}
+
+// The first enabled number input in `scope` whose text is not a valid number; it already shows its message.
+function firstInvalidNumber(scope) {
+  for (const input of scope.querySelectorAll("input[data-number]")) {
+    if (input.disabled) continue;
+    const parsed = parseNumberInput(input.value, numberSpec(input));
+    if (parsed.error) {
+      showNumberMessage(input, numberErrorText(parsed, numberSpec(input)), true);
+      return input;
+    }
+  }
+  return null;
+}
+
+// Makes a field visible (its tab, its section, the Advanced disclosure) and focuses it.
+function revealField(input) {
+  const details = input.closest("details");
+  if (details) details.open = true;
+  const panel = input.closest(".agent-panel");
+  if (panel?.id.startsWith("agent-panel-")) showAgentPanel(panel.id.replace("agent-panel-", ""));
+  if (panel?.id === "dream-form") showAgentPanel("dream");
+  const section = input.closest(".settings-section");
+  if (section?.id.startsWith("settings-section-")) showSettingsSection(section.id.replace("settings-section-", ""));
+  input.focus();
+}
+
+// A row is wired once: `read()` the current value, `write(v)` set it, `getDefault()` the effective default
+// (undefined while unknown), `describe(v)` the default as text.
+function registerRow(controlId, config) {
+  const element = $(controlId).closest(".setting-row");
+  const row = { id: controlId, element, ...config };
+  settingRows.push(row);
+  element.querySelector(".setting-reset").addEventListener("click", () => {
+    const value = row.getDefault();
+    if (value === undefined) return;
+    row.write(value);
+    fireChange(element);
+  });
+  return row;
+}
+
+function refreshRow(row) {
+  const defaultValue = row.getDefault();
+  const current = row.read();
+  const hint = row.element.querySelector(".setting-default");
+  const reset = row.element.querySelector(".setting-reset");
+  const unknown = defaultValue === undefined;
+  let text = unknown ? "" : tr("Default: {value}", { value: row.describe(defaultValue) });
+  if (!unknown && row.range) {
+    const range = rangeText(row.range(), tr, uiLanguage());
+    if (range) text += ` · ${range}`;
+  }
+  hint.textContent = text;
+  reset.disabled = unknown || current === undefined || !differsFromDefault(current, defaultValue);
+  const label = tr("Reset to default");
+  reset.title = label;
+  reset.setAttribute("aria-label", label);
+}
+
+function refreshRows(scope = document) {
+  refreshNumberFields();
+  for (const row of settingRows) if (scope.contains(row.element)) refreshRow(row);
+}
+
+// typing, stepping, resetting: keep the default hints and reset buttons of the form in step
+for (const type of ["input", "change"]) {
+  document.addEventListener(type, (event) => {
+    const scope = event.target.closest?.("#settings-form, #agent-form, #dream-form");
+    if (scope) refreshRows(scope);
+  });
+}
+
+// ---- row kinds
+function optionText(selectId, value) {
+  const option = [...$(selectId).options].find((item) => item.value === (value ?? ""));
+  return option ? option.textContent : String(value);
+}
+const onOff = (value) => tr(value ? "On" : "Off");
+
+function checkboxRow(id, getDefault, afterWrite) {
+  return registerRow(id, {
+    getDefault, describe: onOff, read: () => $(id).checked, write: (value) => { $(id).checked = value; afterWrite?.(); },
+  });
+}
+function selectRow(id, getDefault, afterWrite) {
+  return registerRow(id, {
+    getDefault, describe: (value) => optionText(id, value), read: () => $(id).value || null,
+    write: (value) => { $(id).value = value ?? ""; afterWrite?.(); },
+  });
+}
+function numberRow(id, getSpec, nullText) {
+  numberSpecs.set(id, getSpec);
+  return registerRow(id, {
+    getDefault: () => { const spec = getSpec(); return spec ? spec.default : undefined; },
+    describe: (value) => (value == null ? nullText() : `${formatNumber(value, uiLanguage())} ${unitLabel($(id).dataset.unit)}`.trim()),
+    range: () => getSpec() ?? {},
+    read: () => numberValue(id), write: (value) => setNumberValue($(id), value),
+  });
+}
+// ---- end number fields and setting rows
+
 function translateInterface() {
   renderVersion();
   for (const [id, text] of [
     ["settings-title", "User settings"], ["settings-save", "Save settings"],
     ["settings-thinking-label", "Show model thinking"],
+    ["settings-thinking-hint", "Shows the model's reasoning above its replies in the chat."],
     ["settings-assoc-max-label", "Maximum associative memory matches"],
+    ["settings-assoc-max-hint", "Most memory fragments suggested to the agent per message. The minimum similarity is set by the application, not by you."],
     ["settings-orchestrator-label", "Choose the agent automatically in Telegram"],
     ["settings-orchestrator-hint", "When a Telegram message starts a new chat, a fast model picks the best agent from the agents' descriptions. You can still override it with the buttons. The message text and the agents' names and descriptions are sent to the decision model's provider."],
     ["settings-core-agent-label", "Core agent (used when unsure)"],
+    ["settings-core-agent-hint", "The agent that answers greetings and general talk when no agent is clearly the best fit."],
     ["settings-disposable-days-label", "Days to keep disposable chats"],
-    ["settings-disposable-days-hint", "Disposable chats are deleted after this many days without activity (1–365). Leave empty to use the default of 30."],
-    ["settings-assoc-max-hint", "Leave empty to use the application default. The minimum similarity is set by the application, not by you."],
+    ["settings-disposable-days-hint", "Disposable chats are deleted after this many days without activity."],
     ["settings-language-label", "Alerts and errors"], ["settings-theme-label", "Theme"],
+    ["settings-language-hint", "Language of alerts and error messages, here and in Telegram."],
+    ["settings-theme-hint", "Applied at once and remembered in this browser only."],
     ["settings-theme-system", "System"], ["settings-theme-light", "Light"], ["settings-theme-dark", "Dark"],
     ["settings-note", "Settings are shared with Telegram. Chats without a selected model use your current defaults."],
     ["settings-llm-label", "Default LLM model"], ["settings-stt-label", "Default STT model"],
+    ["settings-llm-hint", "Used by chats that have no model of their own and by agents that do not set one."],
+    ["settings-stt-hint", "Transcribes voice messages to text."],
+    ["settings-tab-general-text", "General"], ["settings-tab-models-text", "Models"],
+    ["settings-tab-chats-text", "Chats & memory"], ["settings-tab-telegram-text", "Telegram"],
+    ["settings-tab-connections-text", "Connections"],
     ["model-zdr-text", "ZDR only (OpenRouter)"],
     ["agent-label", "Agent"], ["chat-model-label", "Chat model"], ["chat-effort-text", "Reasoning effort"],
     ["model-inherit", "Use user default"],
@@ -112,6 +468,13 @@ function translateInterface() {
     ["agent-name-label", "Name"], ["agent-description-label", "Description"],
     ["agent-description-hint", "Optional. Shown in the agent list; not sent to the agent's chat model. The Telegram orchestrator reads it to pick agents: one or two sentences, what topics should this agent answer?"],
     ["agent-prompt-label", "Personality (SOUL.md)"], ["agent-behavior-label", "Chat behavior"],
+    ["agent-identity-legend", "Identity"], ["agent-model-legend", "Model and reasoning"],
+    ["agent-effort-hint", "How much the model thinks before answering. Models without effort levels ignore it."],
+    ["agent-reasoning-hint", "Asks models that support it to reason before answering."],
+    ["agent-keep-reasoning-hint", "Keeps the model's reasoning in the saved conversation instead of dropping it."],
+    ["agent-reasoning-tokens-hint", "Caps the tokens the model may spend reasoning. Not every model supports a limit."],
+    ["agent-stream-hint", "Shows the reply as it is written instead of all at once."],
+    ["agent-tools-hint", "Lets the agent call tools; the groups below choose which."],
     ["agent-prompt-hint", "Saved as the agent's SOUL.md. Leave it empty to start with the default SOUL.md; edit it later in the Soul & memory tab."],
     ["soul-default", "Insert default template"],
     ["agent-stream-label", "Stream replies"], ["agent-memory-label", "Use memory"],
@@ -129,9 +492,9 @@ function translateInterface() {
     ["agent-terminal-timeout-label", "Command timeout (seconds)"], ["agent-terminal-dream-label", "Allow in dream"],
     ["agent-terminal-dream-hint", "Dream sessions run unattended: with this on, an agent whose dream tools include the terminal can run commands on its backends without you watching."],
     ["agent-effort-label", "Reasoning effort"], ["agent-effort-default", "Default"],
-    ["agent-tokens-enabled-label", "Limit reasoning tokens"], ["agent-reasoning-tokens-label", "Reasoning tokens"],
+    ["agent-tokens-enabled-label", "Limit reasoning tokens"],
     ["agent-retained-label", "Messages kept in context"],
-    ["agent-retained-hint", "Empty keeps all messages."], ["agent-save", "Save agent"], ["agent-delete", "Delete agent"],
+    ["agent-retained-hint", "Older messages are left out of the prompt. Empty keeps all messages."], ["agent-save", "Save agent"], ["agent-delete", "Delete agent"],
     ["agent-tab-basic", "Basic"], ["agent-advanced-summary", "Advanced"], ["agent-tab-tools", "Tools"],
     ["agent-tab-mcp", "MCP"], ["agent-tab-soul", "Soul & memory"], ["agent-tab-dream", "Dream"],
     ["agent-tab-sessions", "Dream sessions"],
@@ -145,17 +508,18 @@ function translateInterface() {
     ["dream-schedule-label", "Schedule"], ["dream-mode-manual-label", "Manual only"],
     ["dream-mode-every-label", "Every"], ["dream-hours-label", "hours"], ["dream-mode-daily-label", "Daily at"],
     ["dream-enabled-label", "Schedule enabled"],
+    ["dream-schedule-reset-label", "Reset the whole schedule"],
     ["dream-schedule-hint", "Scheduled sessions are skipped while no chat is pending. You can always start one by hand, from the Dream sessions tab or with /dream start in a chat."],
     ["dream-model-legend", "Model and limits"], ["dream-model-label", "Model"], ["dream-model-browse", "Browse"],
     ["dream-model-hint", "Empty uses the agent's default chat model, else yours."],
-    ["agent-model-label", "Default model"], ["agent-model-browse", "Browse"], ["agent-model-clear", "Clear"],
+    ["agent-model-label", "Default model"], ["agent-model-browse", "Browse"],
     ["agent-model-hint", "Empty follows your default model. A model chosen inside a chat still takes precedence."],
     ["dream-effort-label", "Reasoning effort"], ["dream-effort-none", "No reasoning request"],
-    ["dream-max-steps-label", "Maximum steps"], ["dream-max-steps-hint", "Model calls per session (1–500)."],
+    ["dream-max-steps-label", "Maximum steps"], ["dream-max-steps-hint", "Model calls per session."],
     ["dream-max-tokens-label", "Maximum tokens"],
-    ["dream-max-tokens-hint", "Input plus output tokens per session (1,000–10,000,000)."],
+    ["dream-max-tokens-hint", "Input plus output tokens per session."],
     ["dream-max-minutes-label", "Maximum minutes"],
-    ["dream-max-minutes-hint", "Time limit per session (1–120). One minute before it the agent is told to wrap up; at the limit the session is closed."],
+    ["dream-max-minutes-hint", "Time limit per session. One minute before it the agent is told to wrap up; at the limit the session is closed."],
     ["dream-cancel", "Cancel dream"],
     ["dream-tools-legend", "Dream reading tools"],
     ["dream-tools-hint", "Chats, mind palace and the agent's own files are always available."],
@@ -180,7 +544,9 @@ function translateInterface() {
     ["connections-note", "Connect your own account for each service your agents can use. Every user connects separately."],
     ["connections-browser-note", "Sign-in opens in a browser on the computer running RECALL."],
   ]) $(id).textContent = tr(text);
+  $("settings-nav").setAttribute("aria-label", tr("Settings sections"));
   renderAgentsEmpty();
+  refreshRows();
   $("dream-model").placeholder = tr("Your chat model");
   $("agent-model").placeholder = tr("Your default model");
   for (const [id, text] of [
@@ -567,15 +933,18 @@ function showTab(tab) {
 async function loadAgentConfigs() {
   const session = state.session;
   try {
-    const [agents, toolGroups, mcpServers] = await Promise.all([
+    const [agents, toolGroups, mcpServers, defaults] = await Promise.all([
       api("/api/agents"), api("/api/tool-groups"), api("/api/mcp"),
+      api("/api/agents/defaults").catch(() => null), // only the default hints depend on it
     ]);
     if (session !== state.session) return;
     state.agentConfigs = agents;
     state.toolGroupCatalog = toolGroups;
+    state.agentDefaults = defaults;
     state.mcpServers = mcpServers;
     state.mcpTools.clear();
     renderAgentList();
+    refreshRows();
   } catch (err) {
     if (session === state.session) $("agent-error").textContent = err.message;
   }
@@ -694,12 +1063,13 @@ function fillAgentForm(agent) {
   $("agent-effort").value = config.reasoning_effort ?? "";
   $("agent-tokens-enabled").checked = config.reasoning_tokens != null;
   $("agent-reasoning-tokens").disabled = config.reasoning_tokens == null;
-  $("agent-reasoning-tokens").value = config.reasoning_tokens ?? "";
-  $("agent-retained").value = config.conversation_messages_retained ?? "";
+  setNumberValue($("agent-reasoning-tokens"), config.reasoning_tokens);
+  setNumberValue($("agent-retained"), config.conversation_messages_retained);
   renderAgentMcp(config.mcp ?? {});
   renderFolders(agent.folders ?? []);
   resetIndexStatus();
   showAgentPanel("basic");
+  refreshRows($("agent-form"));
 }
 
 // The Terminal block follows the `terminal` tool group: shown (and validated) only while the group is ticked.
@@ -718,7 +1088,7 @@ function renderTerminalBlock(agent) {
   const rows = terminalBackendRows(state.user?.terminal_backends, saved);
   $("agent-terminal-no-backends").hidden = rows.length > 0;
   $("agent-terminal-backends").replaceChildren(...rows.map(buildTerminalBackendRow));
-  $("agent-terminal-timeout").value = saved?.timeout_seconds ?? 60;
+  setNumberValue($("agent-terminal-timeout"), saved?.timeout_seconds ?? agentDefault("terminal.timeout_seconds") ?? 60);
   $("agent-terminal-dream").checked = saved?.allow_in_dream ?? false;
   $("agent-terminal-error").textContent = "";
   refreshTerminalDefault(saved?.default_backend);
@@ -1098,10 +1468,7 @@ function agentIdFromName(name) {
 }
 
 function agentFormBody() {
-  const optionalNumber = (id) => {
-    const value = $(id).value.trim();
-    return value === "" ? null : Number(value);
-  };
+  const optionalNumber = numberValue;
   const name = $("agent-name").value.trim();
   const saved = state.agentConfigs.find((agent) => agent.id === state.agentForm.originalId);
   return {
@@ -1113,7 +1480,7 @@ function agentFormBody() {
     folders: agentFoldersBody(),
     terminal: buildTerminalConfig(saved?.terminal, terminalGroupChecked(), {
       backends: readTerminalBackendFields(), defaultBackend: $("agent-terminal-default").value,
-      timeout: $("agent-terminal-timeout").value, allowInDream: $("agent-terminal-dream").checked,
+      timeout: numberValue("agent-terminal-timeout"), allowInDream: $("agent-terminal-dream").checked,
     }),
     chat_config: {
       model: $("agent-model").value.trim() || null,  // null follows the user's default model
@@ -1177,12 +1544,14 @@ $("agent-associative").addEventListener("change", () => {
 $("agent-tokens-enabled").addEventListener("change", () => {
   const enabled = $("agent-tokens-enabled").checked;
   $("agent-reasoning-tokens").disabled = !enabled;
-  if (enabled && !$("agent-reasoning-tokens").value) $("agent-reasoning-tokens").value = "1024";
+  if (enabled && !$("agent-reasoning-tokens").value) setNumberValue($("agent-reasoning-tokens"), 1024);
 });
 
 $("agent-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (state.agentForm.busy) return;
+  const invalid = firstInvalidNumber($("agent-form"));
+  if (invalid) { revealField(invalid); return; }
   const session = state.session;
   const previousId = state.agentForm.originalId;
   const body = JSON.stringify(agentFormBody());
@@ -1314,10 +1683,82 @@ async function savePreferences(changes) {
   } finally {
     if (session === state.session) {
       state.settingsBusy = false;
-      $("settings-save").disabled = false;
+      updateSettingsUi();
       updateBusy();
     }
   }
+}
+
+let settingsSavedTimer = null;
+
+// What the application follows for a preference nobody set; `defaults` arrives with GET /api/preferences.
+function prefDefault(key) {
+  const entry = state.preferences?.defaults?.[key];
+  return entry !== null && typeof entry === "object" && "default" in entry ? entry.default : entry;
+}
+
+const SETTINGS_KEYS = Object.values(SETTINGS_SECTIONS).flat();
+
+// The effective values loaded into the dialog (a null in preferences.json shows as its default).
+function settingsOriginalValues() {
+  const saved = state.settingsOriginal;
+  return {
+    show_thinking: saved.show_thinking, language: saved.language,
+    default_llm_model: saved.default_llm_model, default_stt_model: saved.default_stt_model,
+    associative_max_matches: saved.associative_max_matches ?? prefDefault("associative_max_matches"),
+    disposable_retention_days: saved.disposable_retention_days ?? prefDefault("disposable_retention_days"),
+    orchestrator: saved.orchestrator ?? saved.orchestrator_default ?? false,
+    core_agent_id: saved.core_agent_id ?? null,
+  };
+}
+
+function settingsCurrentValues() {
+  const number = (id, key) => {
+    const value = numberValue(id);
+    return value === null ? prefDefault(key) : value; // an empty field means the default
+  };
+  return {
+    show_thinking: $("settings-thinking").checked, language: $("settings-language").value,
+    default_llm_model: state.settingsModelDraft.default_llm_model, default_stt_model: state.settingsModelDraft.default_stt_model,
+    associative_max_matches: number("settings-assoc-max", "associative_max_matches"),
+    disposable_retention_days: number("settings-disposable-days", "disposable_retention_days"),
+    orchestrator: $("settings-orchestrator").checked, core_agent_id: $("settings-core-agent").value || null,
+  };
+}
+
+function pendingSettings() {
+  if (!state.settingsOriginal || !state.settingsModelDraft) return {};
+  const defaults = Object.fromEntries(SETTINGS_KEYS.map((key) => [key, prefDefault(key)]));
+  return settingsChanges(settingsCurrentValues(), settingsOriginalValues(), defaults);
+}
+
+// Pending-changes text, dots on the section tabs and the Save button follow the form.
+function updateSettingsUi() {
+  const changes = pendingSettings();
+  const count = Object.keys(changes).length;
+  $("settings-pending").textContent = count === 0 ? "" : count === 1 ? tr("1 unsaved change") : tr("{count} unsaved changes", { count });
+  const counts = sectionChangeCounts(changes);
+  for (const tab of $("settings-nav").querySelectorAll("button")) {
+    const dot = tab.querySelector(".settings-dot");
+    if (dot) dot.hidden = !counts[tab.dataset.section];
+  }
+  $("settings-save").disabled = state.settingsBusy || !state.settingsOriginal || count === 0;
+  return changes;
+}
+
+function showSettingsSection(name) {
+  const view = settingsSectionView(name);
+  for (const tab of $("settings-nav").querySelectorAll("button")) {
+    tab.setAttribute("aria-pressed", String(view[tab.dataset.section].pressed));
+  }
+  for (const section of Object.keys(view)) {
+    if (section === "connections") continue;
+    $(`settings-section-${section}`).hidden = view[section].hidden;
+  }
+  $("settings-form").hidden = !view.connections.hidden;
+  $("connections").hidden = view.connections.hidden;
+  if (view.connections.hidden) stopConnectionsPoll();
+  else if (state.mcpServers.some((server) => server.pending)) startConnectionsPoll();
 }
 
 function fillSettings() {
@@ -1328,9 +1769,10 @@ function fillSettings() {
   };
   $("settings-thinking").checked = state.preferences.show_thinking;
   $("settings-language").value = state.preferences.language;
-  $("settings-assoc-max").value = state.preferences.associative_max_matches ?? "";
-  $("settings-disposable-days").value = state.preferences.disposable_retention_days ?? "";
-  $("settings-orchestrator").checked = state.preferences.orchestrator ?? state.preferences.orchestrator_default ?? false;
+  const original = settingsOriginalValues();
+  setNumberValue($("settings-assoc-max"), original.associative_max_matches);
+  setNumberValue($("settings-disposable-days"), original.disposable_retention_days);
+  $("settings-orchestrator").checked = original.orchestrator;
   const core = $("settings-core-agent");
   core.replaceChildren(new Option(tr("Same as preferred agent"), ""), ...(state.user?.agents ?? []).map((a) => new Option(a.name, a.id)));
   core.value = state.preferences.core_agent_id ?? "";
@@ -1344,38 +1786,49 @@ function renderSettingsModels() {
   const disabled = !state.settingsOriginal || !state.user || state.settingsBusy;
   $("settings-llm").disabled = disabled;
   $("settings-stt").disabled = disabled;
+  refreshRows($("settings-form"));
+  updateSettingsUi();
 }
 
 $("settings-open").addEventListener("click", async () => {
   const session = state.session;
   state.settingsOriginal = null;
   state.settingsModelDraft = null;
+  clearTimeout(settingsSavedTimer);
+  $("settings-saved").textContent = "";
+  showSettingsSection("general");
   renderSettingsModels();
   $("settings-error").textContent = "";
-  $("settings-save").disabled = true;
   $("settings-dialog").showModal();
   loadConnections();
   try {
     await refreshPreferences();
     if (session !== state.session) return;
     fillSettings();
-    $("settings-save").disabled = state.settingsBusy;
   } catch (err) {
     if (session === state.session) $("settings-error").textContent = err.message;
   }
 });
 
+$("settings-nav").addEventListener("click", (event) => {
+  const tab = event.target.closest("button[data-section]");
+  if (tab) showSettingsSection(tab.dataset.section);
+});
+for (const type of ["input", "change"]) $("settings-form").addEventListener(type, updateSettingsUi);
 $("settings-theme").addEventListener("change", (e) => applyTheme(e.target.value));
 $("theme-toggle").addEventListener("click", () => {
   applyTheme(effectiveTheme() === "dark" ? "light" : "dark");
   $("settings-theme").value = localStorage.getItem("theme") ?? "system";
+  refreshRows($("settings-form"));
 });
-$("settings-close").addEventListener("click", () => $("settings-dialog").close());
+// closing with unsaved changes asks first (the Close button, Escape)
+function requestSettingsClose() {
+  if (Object.keys(pendingSettings()).length && !window.confirm(tr("You have unsaved changes. Close and discard them?"))) return;
+  $("settings-dialog").close();
+}
+$("settings-close").addEventListener("click", requestSettingsClose);
+$("settings-dialog").addEventListener("cancel", (event) => { event.preventDefault(); requestSettingsClose(); });
 $("settings-dialog").addEventListener("close", stopConnectionsPoll);
-$("connections").addEventListener("toggle", () => {
-  if (!$("connections").open) stopConnectionsPoll();
-  else if (state.mcpServers.some((server) => server.pending)) startConnectionsPoll();
-});
 
 // ------------------------------------------------------------------ providers (model picker)
 
@@ -1595,7 +2048,7 @@ async function changeConnection(server, action) {
 }
 
 function startConnectionsPoll() {
-  if (state.connectionsPoll || !$("settings-dialog").open || !$("connections").open) return;
+  if (state.connectionsPoll || !$("settings-dialog").open || $("connections").hidden) return;
   state.connectionsPoll = setInterval(loadConnections, 3000);
 }
 
@@ -1606,29 +2059,23 @@ function stopConnectionsPoll() {
 $("settings-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   if (state.settingsBusy || !state.settingsOriginal) return;
-  const session = state.session;
-  const changes = {};
-  const thinking = $("settings-thinking").checked;
-  const language = $("settings-language").value;
-  if (thinking !== state.settingsOriginal.show_thinking) changes.show_thinking = thinking;
-  if (language !== state.settingsOriginal.language) changes.language = language;
-  const rawMax = $("settings-assoc-max").value.trim();
-  const maxMatches = rawMax === "" ? null : Number(rawMax);
-  if (maxMatches !== (state.settingsOriginal.associative_max_matches ?? null)) changes.associative_max_matches = maxMatches;
-  const rawDays = $("settings-disposable-days").value.trim();
-  const retentionDays = rawDays === "" ? null : Number(rawDays);
-  if (retentionDays !== (state.settingsOriginal.disposable_retention_days ?? null)) changes.disposable_retention_days = retentionDays;
-  const orchestratorBefore = state.settingsOriginal.orchestrator ?? state.settingsOriginal.orchestrator_default ?? false;
-  if ($("settings-orchestrator").checked !== orchestratorBefore) changes.orchestrator = $("settings-orchestrator").checked;
-  const coreAgent = $("settings-core-agent").value || null;
-  if (coreAgent !== (state.settingsOriginal.core_agent_id ?? null)) changes.core_agent_id = coreAgent;
-  for (const key of ["default_llm_model", "default_stt_model"]) {
-    if (state.settingsModelDraft?.[key] !== state.settingsOriginal[key]) changes[key] = state.settingsModelDraft[key];
+  const invalid = firstInvalidNumber($("settings-form"));
+  if (invalid) {
+    $("settings-error").textContent = tr("Fix the highlighted values before saving.");
+    revealField(invalid);
+    return;
   }
+  const session = state.session;
+  const changes = pendingSettings();
+  if (!Object.keys(changes).length) return;
   $("settings-error").textContent = "";
   try {
-    if (Object.keys(changes).length) await savePreferences(changes);
-    if (session === state.session) $("settings-dialog").close();
+    await savePreferences(changes);
+    if (session !== state.session) return;
+    fillSettings();
+    $("settings-saved").textContent = tr("Saved");
+    clearTimeout(settingsSavedTimer);
+    settingsSavedTimer = setTimeout(() => { $("settings-saved").textContent = ""; }, 4000);
   } catch (err) {
     if (session === state.session) $("settings-error").textContent = err.message;
   }
@@ -2191,12 +2638,14 @@ async function selectModel(modelId, provider = state.modelProvider) {
   if (target === "dream-llm") {
     // only fills the Dream tab's field; Save dream settings stores it
     $("dream-model").value = modelId ?? "";
+    refreshRows($("dream-form"));
     $("model-dialog").close();
     return;
   }
   if (target === "agent-llm") {
     // only fills the agent form's field; saving the agent stores it
     $("agent-model").value = modelId ?? "";
+    refreshRows($("agent-form"));
     $("model-dialog").close();
     return;
   }
@@ -3829,20 +4278,21 @@ function syncDreamScheduleInputs() {
   $("dream-enabled").disabled = mode === "manual";
   $("dream-every-hours").required = mode === "every";
   $("dream-daily-at").required = mode === "daily";
+  refreshNumberFields();
 }
 
 function fillDreamSettings(settings) {
   const dream = settings.dream;
   const mode = dream.every_hours != null ? "every" : dream.daily_at != null ? "daily" : "manual";
   $(`dream-mode-${mode}`).checked = true;
-  $("dream-every-hours").value = dream.every_hours ?? "";
+  setNumberValue($("dream-every-hours"), dream.every_hours);
   $("dream-daily-at").value = dream.daily_at ?? "";
   $("dream-enabled").checked = dream.enabled;
   $("dream-model").value = dream.model ?? "";
   $("dream-effort").value = dream.reasoning_effort ?? "";
-  $("dream-max-steps").value = dream.max_steps;
-  $("dream-max-tokens").value = dream.max_tokens;
-  $("dream-max-minutes").value = dream.max_minutes;
+  setNumberValue($("dream-max-steps"), dream.max_steps);
+  setNumberValue($("dream-max-tokens"), dream.max_tokens);
+  setNumberValue($("dream-max-minutes"), dream.max_minutes);
   $("dream-tool-web").checked = dream.tools.includes("web");
   $("dream-tool-folders").checked = dream.tools.includes("folders");
   $("dream-prompt").value = dream.prompt;
@@ -3850,6 +4300,7 @@ function fillDreamSettings(settings) {
   $("dream-notify").checked = dream.notify_telegram;
   $("dream-model-browse").disabled = !state.user;
   syncDreamScheduleInputs();
+  refreshRows($("dream-form"));
 }
 
 async function loadDreamSettings() {
@@ -3871,13 +4322,13 @@ function dreamSettingsBody() {
   return {
     dream: {
       enabled: mode !== "manual" && $("dream-enabled").checked,
-      every_hours: mode === "every" ? Number($("dream-every-hours").value) : null,
+      every_hours: mode === "every" ? numberValue("dream-every-hours") : null,
       daily_at: mode === "daily" ? $("dream-daily-at").value : null,
       model: $("dream-model").value.trim() || null,
       reasoning_effort: $("dream-effort").value || null,
-      max_steps: Number($("dream-max-steps").value),
-      max_tokens: Number($("dream-max-tokens").value),
-      max_minutes: Number($("dream-max-minutes").value),
+      max_steps: numberValue("dream-max-steps"),
+      max_tokens: numberValue("dream-max-tokens"),
+      max_minutes: numberValue("dream-max-minutes"),
       tools: ["web", "folders"].filter((tool) => $(`dream-tool-${tool}`).checked),
       prompt: $("dream-prompt").value.trim() ? $("dream-prompt").value : "",
       notify_telegram: $("dream-notify").checked,
@@ -3887,6 +4338,8 @@ function dreamSettingsBody() {
 
 async function saveDreamSettings(event) {
   event.preventDefault();
+  const invalid = firstInvalidNumber($("dream-form"));
+  if (invalid) { revealField(invalid); return; }
   const session = state.session;
   const token = state.dream.token;
   const agentId = state.dream.agentId;
@@ -4326,13 +4779,103 @@ $("dream-prompt-reset").addEventListener("click", () => {
 });
 $("dream-model-browse").addEventListener("click", () => openModelPicker("dream-llm"));
 $("agent-model-browse").addEventListener("click", () => openModelPicker("agent-llm"));
-$("agent-model-clear").addEventListener("click", () => { $("agent-model").value = ""; });
 $("dream-form").addEventListener("submit", saveDreamSettings);
 $("dream-start").addEventListener("click", startDream);
 $("dream-cancel").addEventListener("click", cancelDream);
 $("dream-session-back").addEventListener("click", showDreamList);
 
 resetDream();
+
+// ------------------------------------------------------------------ setting rows: defaults and reset
+
+setupNumberFields();
+
+// user settings (defaults come from GET /api/preferences > defaults)
+checkboxRow("settings-thinking", () => prefDefault("show_thinking"));
+registerRow("settings-theme", {
+  getDefault: () => prefDefault("theme"), describe: (value) => optionText("settings-theme", value),
+  read: () => $("settings-theme").value, write: (value) => { $("settings-theme").value = value; applyTheme(value); },
+});
+registerRow("settings-language", {
+  getDefault: () => prefDefault("language"), describe: (value) => optionText("settings-language", value),
+  read: () => $("settings-language").value || undefined, write: (value) => { $("settings-language").value = value; },
+});
+for (const [id, key] of [["settings-llm", "default_llm_model"], ["settings-stt", "default_stt_model"]]) {
+  registerRow(id, {
+    getDefault: () => prefDefault(key), describe: (value) => String(value),
+    read: () => state.settingsModelDraft?.[key],
+    write: (value) => { state.settingsModelDraft[key] = value; renderSettingsModels(); },
+  });
+}
+numberRow("settings-assoc-max", () => state.preferences?.defaults?.associative_max_matches, () => "");
+numberRow("settings-disposable-days", () => state.preferences?.defaults?.disposable_retention_days, () => "");
+checkboxRow("settings-orchestrator", () => prefDefault("orchestrator"));
+registerRow("settings-core-agent", {
+  getDefault: () => prefDefault("core_agent_id"), describe: () => tr("Same as preferred agent"),
+  read: () => $("settings-core-agent").value || null, write: (value) => { $("settings-core-agent").value = value ?? ""; },
+});
+
+// agent form (defaults come from GET /api/agents/defaults, generated from the configuration models)
+function agentDefaultSpec(path) {
+  const [section, name] = path.split(".");
+  return state.agentDefaults?.[section]?.[name];
+}
+const agentDefault = (path) => agentDefaultSpec(path)?.default;
+const chatDefault = (name) => () => agentDefault(`chat_config.${name}`);
+const dreamDefault = (name) => () => agentDefault(`dream.${name}`);
+
+registerRow("agent-model", {
+  getDefault: chatDefault("model"), describe: () => tr("your default model"),
+  read: () => $("agent-model").value.trim() || null, write: (value) => { $("agent-model").value = value ?? ""; },
+});
+selectRow("agent-effort", chatDefault("reasoning_effort"));
+checkboxRow("agent-reasoning", chatDefault("reasoning"));
+checkboxRow("agent-keep-reasoning", chatDefault("keep_reasoning_in_memory"));
+numberSpecs.set("agent-reasoning-tokens", () => agentDefaultSpec("chat_config.reasoning_tokens"));
+registerRow("agent-reasoning-tokens", {
+  getDefault: chatDefault("reasoning_tokens"), describe: () => tr("No limit"),
+  range: () => agentDefaultSpec("chat_config.reasoning_tokens") ?? {},
+  read: () => ($("agent-tokens-enabled").checked ? numberValue("agent-reasoning-tokens") : null),
+  write: (value) => {
+    $("agent-tokens-enabled").checked = value != null;
+    $("agent-reasoning-tokens").disabled = value == null;
+    setNumberValue($("agent-reasoning-tokens"), value);
+  },
+});
+checkboxRow("agent-stream", chatDefault("stream"));
+checkboxRow("agent-memory", chatDefault("has_memory"));
+checkboxRow("agent-recall-knowledge", chatDefault("recall_knowledge"));
+selectRow("agent-associative", chatDefault("associative_memory"), () => {
+  $("agent-associative-execution").disabled = $("agent-associative").value === "off";
+});
+selectRow("agent-associative-execution", chatDefault("associative_execution"));
+numberRow("agent-retained", () => agentDefaultSpec("chat_config.conversation_messages_retained"), () => "");
+checkboxRow("agent-tools", chatDefault("tools"));
+numberRow("agent-terminal-timeout", () => agentDefaultSpec("terminal.timeout_seconds"), () => "");
+
+registerRow("dream-model", {
+  getDefault: dreamDefault("model"), describe: () => tr("the agent's model, else yours"),
+  read: () => $("dream-model").value.trim() || null, write: (value) => { $("dream-model").value = value ?? ""; },
+});
+selectRow("dream-effort", dreamDefault("reasoning_effort"));
+numberRow("dream-max-steps", () => agentDefaultSpec("dream.max_steps"), () => "");
+numberRow("dream-max-tokens", () => agentDefaultSpec("dream.max_tokens"), () => "");
+numberRow("dream-max-minutes", () => agentDefaultSpec("dream.max_minutes"), () => "");
+numberSpecs.set("dream-every-hours", () => agentDefaultSpec("dream.every_hours"));
+checkboxRow("dream-notify", dreamDefault("notify_telegram"));
+registerRow("dream-schedule-row", {
+  // manual-only is the default whenever the model has neither an interval nor a time of day
+  getDefault: () => (state.agentDefaults && agentDefault("dream.every_hours") == null && agentDefault("dream.daily_at") == null
+    ? "manual" : undefined),
+  describe: () => tr("Manual only"), read: () => dreamScheduleMode(),
+  write: () => {
+    $("dream-mode-manual").checked = true;
+    setNumberValue($("dream-every-hours"), null);
+    $("dream-daily-at").value = "";
+    $("dream-enabled").checked = false;
+    syncDreamScheduleInputs();
+  },
+});
 
 // ------------------------------------------------------------------ boot
 

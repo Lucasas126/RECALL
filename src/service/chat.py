@@ -29,11 +29,15 @@ from src.config.models import (
     AgentConfig, DreamConfig, FolderConfig, ReasoningEffort, ResolvedAgent, UserConfig,
 )
 from src.agent.tool_groups import DEFAULT_TOOL_GROUPS, TOOL_GROUP_CATALOG
-from src.config.preferences import PreferencesError, UserPreferences, UserPreferencesStore
+from src.config.preferences import (
+    ASSOCIATIVE_MAX_MATCHES_BOUNDS, DISPOSABLE_RETENTION_DAYS_BOUNDS, PreferencesError, UserPreferences,
+    UserPreferencesStore,
+)
+from src.config.field_defaults import agent_defaults
 from src.config.secrets import fingerprint as secrets_fingerprint, get_secret
 from src.config.zdr import chat_zdr, ensure_zdr_compatible, zdr_required
 from src.config.settings import (
-    CHAT_NAMING, CONFIG_DIR, DATA_DIR, MCP, ORCHESTRATOR, PDF, SPEECH_TO_TEXT, TAVILY, TELEGRAM_ALLOWED_USERS_ENV,
+    ASSOC, CHAT_NAMING, CONFIG_DIR, DATA_DIR, MCP, ORCHESTRATOR, PDF, SPEECH_TO_TEXT, TAVILY, TELEGRAM_ALLOWED_USERS_ENV,
     TERMINAL, VIDEO_DECOMPOSITION, WEB_PUBLIC_URL, memory_limits,
 )
 from src.core.index import VectorIndex
@@ -423,6 +427,11 @@ class ChatService:
         user = self._user(user_id)
         return [self._agent_view(user_id, self._agent_config(user_id, agent_id)) for agent_id in user.agents]
 
+    def agent_defaults(self, user_id: str) -> dict:
+        """Defaults and bounds of the agent form fields, generated from the configuration models."""
+        self._user(user_id)
+        return agent_defaults()
+
     def list_tool_groups(self, user_id: str) -> list[dict]:
         """Return the tool-group catalog; `default` marks the groups an agent without `tool_groups` uses."""
         self._user(user_id)
@@ -601,14 +610,35 @@ class ChatService:
     def get_preferences(self, user_id: str) -> dict:
         """Read current user-wide preferences, including configuration-derived defaults."""
         user = self._user(user_id)
-        return self._preferences_body(self._resolve_preferences(user, self._preferences.get(user_id)))
+        return self._preferences_body(user, self._resolve_preferences(user, self._preferences.get(user_id)))
 
-    @staticmethod
-    def _preferences_body(preferences: UserPreferences) -> dict:
-        """Preferences plus the application-wide size limits (settings.yaml) the interface needs for its counters."""
+    def _preferences_body(self, user: UserConfig, preferences: UserPreferences) -> dict:
+        """Preferences plus the application-wide size limits (settings.yaml) and the effective defaults.
+
+        `defaults` is what each setting follows when the user has not chosen a value (null in preferences.json), with
+        the bounds of the numeric ones; the interface shows it and resets a setting by saving null.
+        """
         return {
             **preferences.model_dump(), "orchestrator_default": ORCHESTRATOR.enabled,
             "limits": memory_limits().model_dump(mode="json"),
+            "defaults": {
+                "show_thinking": True,
+                "language": "es" if user.language.split("-", 1)[0] == "es" else "en",
+                "theme": "system",
+                "default_llm_model": user.models.chat,
+                "default_stt_model": user.models.stt,
+                "associative_max_matches": {
+                    "default": ASSOC.top_n,
+                    "min": ASSOCIATIVE_MAX_MATCHES_BOUNDS[0], "max": ASSOCIATIVE_MAX_MATCHES_BOUNDS[1],
+                },
+                "disposable_retention_days": {
+                    "default": DEFAULT_DISPOSABLE_RETENTION_DAYS,
+                    "min": DISPOSABLE_RETENTION_DAYS_BOUNDS[0], "max": DISPOSABLE_RETENTION_DAYS_BOUNDS[1],
+                },
+                "orchestrator": ORCHESTRATOR.enabled,
+                "core_agent_id": None,
+                "agents": [{"id": agent_id, "name": self._agent_config(user.id, agent_id).name} for agent_id in user.agents],
+            },
         }
 
     def language(self, user_id: str) -> Literal["en", "es"]:
@@ -629,7 +659,7 @@ class ChatService:
         saved = self._preferences.update(
             user_id, changes, validate=lambda preferences: self._resolve_preferences(user, preferences),
         )
-        return self._preferences_body(self._resolve_preferences(user, saved))
+        return self._preferences_body(user, self._resolve_preferences(user, saved))
 
     def _resolve_preferences(self, user: UserConfig, saved: UserPreferences) -> UserPreferences:
         resolved = UserPreferences.model_validate({

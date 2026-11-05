@@ -114,88 +114,129 @@
           </nav>
         <form id="agent-form" class="agent-form-body">
           <div id="agent-panel-basic" class="agent-panel">
-            <label>
-              <span id="agent-name-label">Name</span>
-              <input id="agent-name" required maxlength="100">
-            </label>
-            <label>
-              <span id="agent-description-label">Description</span>
-              <textarea id="agent-description" rows="2" maxlength="500"></textarea>
-              <span id="agent-description-hint" class="model-note">Optional. Shown in the agent list; not sent to the agent's chat model. The Telegram orchestrator reads it to pick agents: one or two sentences, what topics should this agent answer?</span>
-            </label>
-            <label id="agent-prompt-field">
-              <span id="agent-prompt-label">Personality (SOUL.md)</span>
-              <textarea id="agent-prompt" rows="10" maxlength="15000"></textarea>
-              <span id="agent-prompt-hint" class="model-note">Saved as the agent's SOUL.md. Leave it empty to start with the default SOUL.md; edit it later in the Soul &amp; memory tab.</span>
-            </label>
-            <details id="agent-advanced" class="agent-advanced">
-            <summary id="agent-advanced-summary">Advanced</summary>
-            <fieldset class="agent-behavior">
-              <legend id="agent-behavior-label">Chat behavior</legend>
+            <fieldset class="agent-section">
+              <legend id="agent-identity-legend">Identity</legend>
               <label>
-                <span id="agent-model-label">Default model</span>
-                <span class="inline-row">
-                  <input id="agent-model" maxlength="256" placeholder="Your default model" autocomplete="off">
-                  <button id="agent-model-browse" type="button">Browse</button>
-                  <button id="agent-model-clear" type="button">Clear</button>
-                </span>
-                <span id="agent-model-hint" class="model-note">Empty follows your default model. A model chosen inside a chat still takes precedence.</span>
+                <span id="agent-name-label">Name</span>
+                <input id="agent-name" required maxlength="100">
               </label>
               <label>
-                <span id="agent-effort-label">Reasoning effort</span>
-                <select id="agent-effort">
-                  <option value="" id="agent-effort-default">Default</option>
-                  <option value="minimal">minimal</option>
-                  <option value="low">low</option>
-                  <option value="medium">medium</option>
-                  <option value="high">high</option>
-                  <option value="xhigh">xhigh</option>
-                  <option value="max">max</option>
-                </select>
+                <span id="agent-description-label">Description</span>
+                <textarea id="agent-description" rows="2" maxlength="500"></textarea>
+                <span id="agent-description-hint" class="model-note">Optional. Shown in the agent list; not sent to the agent's chat model. The Telegram orchestrator reads it to pick agents: one or two sentences, what topics should this agent answer?</span>
               </label>
-              <label class="model-filter"><input id="agent-stream" type="checkbox">
-                <span id="agent-stream-label">Stream replies</span></label>
-              <label class="model-filter"><input id="agent-memory" type="checkbox">
-                <span id="agent-memory-label">Use memory</span></label>
-              <label class="model-filter"><input id="agent-reasoning" type="checkbox">
-                <span id="agent-reasoning-label">Reasoning</span></label>
-              <label class="model-filter"><input id="agent-keep-reasoning" type="checkbox">
-                <span id="agent-keep-reasoning-label">Keep reasoning in memory</span></label>
-              <label class="model-filter"><input id="agent-recall-knowledge" type="checkbox">
-                <span id="agent-recall-knowledge-label">RECALL knowledge (how RECALL works)</span>
-                <span id="agent-recall-knowledge-hint" class="model-note">Gives the agent a built-in, read-only guide to how RECALL works. Takes effect in new chats.</span></label>
-              <label>
-                <span id="agent-associative-label">Associative memory</span>
-                <select id="agent-associative">
-                  <option value="off" id="agent-associative-off">Off</option>
-                  <option value="llm" id="agent-associative-llm">Query from a small model</option>
-                  <option value="question_only" id="agent-associative-question">Search with your message</option>
-                </select>
-              </label>
-              <label>
-                <span id="agent-associative-execution-label">Associative search timing</span>
-                <select id="agent-associative-execution">
-                  <option value="parallel" id="agent-associative-parallel">In parallel with the reply</option>
-                  <option value="sequential" id="agent-associative-sequential">Before the reply</option>
-                </select>
-              </label>
-              <label class="model-filter"><input id="agent-tokens-enabled" type="checkbox">
-                <span id="agent-tokens-enabled-label">Limit reasoning tokens</span></label>
-              <label>
-                <span id="agent-reasoning-tokens-label">Reasoning tokens</span>
-                <input id="agent-reasoning-tokens" type="number" min="1" step="1" disabled>
-              </label>
-              <label>
-                <span id="agent-retained-label">Messages kept in context</span>
-                <input id="agent-retained" type="number" min="1" step="1">
-                <span id="agent-retained-hint" class="model-note">Empty keeps all messages.</span>
+              <label id="agent-prompt-field">
+                <span id="agent-prompt-label">Personality (SOUL.md)</span>
+                <textarea id="agent-prompt" rows="10" maxlength="15000"></textarea>
+                <span id="agent-prompt-hint" class="model-note">Saved as the agent's SOUL.md. Leave it empty to start with the default SOUL.md; edit it later in the Soul &amp; memory tab.</span>
               </label>
             </fieldset>
+            <fieldset class="agent-section">
+              <legend id="agent-model-legend">Model and reasoning</legend>
+              <div class="setting-row wide">
+                <div class="setting-main">
+                  <label for="agent-model" id="agent-model-label">Default model</label>
+                  <p id="agent-model-hint" class="model-note">Empty follows your default model. A model chosen inside a chat still takes precedence.</p>
+                </div>
+                <div class="setting-control"><input id="agent-model" maxlength="256" placeholder="Your default model" autocomplete="off"><button id="agent-model-browse" type="button">Browse</button><button type="button" class="icon-btn setting-reset">↺</button></div>
+                <p class="setting-default model-note"></p>
+              </div>
+              <div class="setting-row">
+                <div class="setting-main">
+                  <label for="agent-effort" id="agent-effort-label">Reasoning effort</label>
+                  <p id="agent-effort-hint" class="model-note">How much the model thinks before answering. Models without effort levels ignore it.</p>
+                </div>
+                <div class="setting-control"><select id="agent-effort"><option value="" id="agent-effort-default">Default</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option><option value="max">max</option></select><button type="button" class="icon-btn setting-reset">↺</button></div>
+                <p class="setting-default model-note"></p>
+              </div>
+              <div class="setting-row">
+                <div class="setting-main">
+                  <label class="model-filter"><input id="agent-reasoning" type="checkbox"> <span id="agent-reasoning-label">Reasoning</span></label>
+                  <p id="agent-reasoning-hint" class="model-note">Asks models that support it to reason before answering.</p>
+                </div>
+                <div class="setting-control"><button type="button" class="icon-btn setting-reset">↺</button></div>
+                <p class="setting-default model-note"></p>
+              </div>
+              <div class="setting-row">
+                <div class="setting-main">
+                  <label class="model-filter"><input id="agent-keep-reasoning" type="checkbox"> <span id="agent-keep-reasoning-label">Keep reasoning in memory</span></label>
+                  <p id="agent-keep-reasoning-hint" class="model-note">Keeps the model's reasoning in the saved conversation instead of dropping it.</p>
+                </div>
+                <div class="setting-control"><button type="button" class="icon-btn setting-reset">↺</button></div>
+                <p class="setting-default model-note"></p>
+              </div>
+              <div class="setting-row">
+                <div class="setting-main">
+                  <label class="model-filter"><input id="agent-tokens-enabled" type="checkbox"> <span id="agent-tokens-enabled-label">Limit reasoning tokens</span></label>
+                  <p id="agent-reasoning-tokens-hint" class="model-note">Caps the tokens the model may spend reasoning. Not every model supports a limit.</p>
+                </div>
+                <div class="setting-control"><input id="agent-reasoning-tokens" type="text" inputmode="numeric" autocomplete="off" data-number data-unit="tokens" data-step="256" data-start="1024" aria-labelledby="agent-tokens-enabled-label" disabled><button type="button" class="icon-btn setting-reset">↺</button></div>
+                <p class="setting-default model-note"></p>
+                <p class="setting-error error" role="alert"></p>
+              </div>
+            </fieldset>
+            <details id="agent-advanced" class="agent-advanced">
+              <summary id="agent-advanced-summary">Advanced</summary>
+              <fieldset class="agent-section agent-behavior">
+                <legend id="agent-behavior-label">Chat behavior</legend>
+                <div class="setting-row">
+                  <div class="setting-main">
+                    <label class="model-filter"><input id="agent-stream" type="checkbox"> <span id="agent-stream-label">Stream replies</span></label>
+                    <p id="agent-stream-hint" class="model-note">Shows the reply as it is written instead of all at once.</p>
+                  </div>
+                  <div class="setting-control"><button type="button" class="icon-btn setting-reset">↺</button></div>
+                  <p class="setting-default model-note"></p>
+                </div>
+                <div class="setting-row">
+                  <div class="setting-main">
+                    <label class="model-filter"><input id="agent-memory" type="checkbox"> <span id="agent-memory-label">Use memory</span></label>
+                  </div>
+                  <div class="setting-control"><button type="button" class="icon-btn setting-reset">↺</button></div>
+                  <p class="setting-default model-note"></p>
+                </div>
+                <div class="setting-row">
+                  <div class="setting-main">
+                    <label class="model-filter"><input id="agent-recall-knowledge" type="checkbox"> <span id="agent-recall-knowledge-label">RECALL knowledge (how RECALL works)</span></label>
+                    <p id="agent-recall-knowledge-hint" class="model-note">Gives the agent a built-in, read-only guide to how RECALL works. Takes effect in new chats.</p>
+                  </div>
+                  <div class="setting-control"><button type="button" class="icon-btn setting-reset">↺</button></div>
+                  <p class="setting-default model-note"></p>
+                </div>
+                <div class="setting-row">
+                  <div class="setting-main">
+                    <label for="agent-associative" id="agent-associative-label">Associative memory</label>
+                  </div>
+                  <div class="setting-control"><select id="agent-associative"><option value="off" id="agent-associative-off">Off</option><option value="llm" id="agent-associative-llm">Query from a small model</option><option value="question_only" id="agent-associative-question">Search with your message</option></select><button type="button" class="icon-btn setting-reset">↺</button></div>
+                  <p class="setting-default model-note"></p>
+                </div>
+                <div class="setting-row">
+                  <div class="setting-main">
+                    <label for="agent-associative-execution" id="agent-associative-execution-label">Associative search timing</label>
+                  </div>
+                  <div class="setting-control"><select id="agent-associative-execution"><option value="parallel" id="agent-associative-parallel">In parallel with the reply</option><option value="sequential" id="agent-associative-sequential">Before the reply</option></select><button type="button" class="icon-btn setting-reset">↺</button></div>
+                  <p class="setting-default model-note"></p>
+                </div>
+                <div class="setting-row">
+                  <div class="setting-main">
+                    <label for="agent-retained" id="agent-retained-label">Messages kept in context</label>
+                    <p id="agent-retained-hint" class="model-note">Older messages are left out of the prompt. Empty keeps all messages.</p>
+                  </div>
+                  <div class="setting-control"><input id="agent-retained" type="text" inputmode="numeric" autocomplete="off" data-number data-unit="messages"><button type="button" class="icon-btn setting-reset">↺</button></div>
+                  <p class="setting-default model-note"></p>
+                  <p class="setting-error error" role="alert"></p>
+                </div>
+              </fieldset>
             </details>
           </div>
           <div id="agent-panel-tools" class="agent-panel" hidden>
-            <label class="model-filter"><input id="agent-tools" type="checkbox">
-              <span id="agent-tools-label">Use tools</span></label>
+            <div class="setting-row">
+              <div class="setting-main">
+                <label class="model-filter"><input id="agent-tools" type="checkbox"> <span id="agent-tools-label">Use tools</span></label>
+                <p id="agent-tools-hint" class="model-note">Lets the agent call tools; the groups below choose which.</p>
+              </div>
+              <div class="setting-control"><button type="button" class="icon-btn setting-reset">↺</button></div>
+              <p class="setting-default model-note"></p>
+            </div>
             <fieldset id="agent-tool-groups" class="model-capabilities">
               <legend id="agent-tool-groups-label">Tool groups</legend>
             </fieldset>
@@ -207,10 +248,14 @@
                 <span id="agent-terminal-default-label">Default backend</span>
                 <select id="agent-terminal-default"></select>
               </label>
-              <label>
-                <span id="agent-terminal-timeout-label">Command timeout (seconds)</span>
-                <input id="agent-terminal-timeout" type="number" min="1" max="600" step="1" required>
-              </label>
+              <div class="setting-row">
+                <div class="setting-main">
+                  <label for="agent-terminal-timeout" id="agent-terminal-timeout-label">Command timeout (seconds)</label>
+                </div>
+                <div class="setting-control"><input id="agent-terminal-timeout" type="text" inputmode="numeric" autocomplete="off" data-number data-unit="seconds" data-step="5" required><button type="button" class="icon-btn setting-reset">↺</button></div>
+                <p class="setting-default model-note"></p>
+                <p class="setting-error error" role="alert"></p>
+              </div>
               <label class="model-filter"><input id="agent-terminal-dream" type="checkbox">
                 <span id="agent-terminal-dream-label">Allow in dream</span></label>
               <p id="agent-terminal-dream-hint" class="model-note terminal-warning">Dream sessions run unattended: with this on, an agent whose dream tools include the terminal can run commands on its backends without you watching.</p>
@@ -299,7 +344,7 @@
                 <span id="dream-mode-manual-label">Manual only</span></label>
               <label class="model-filter"><input id="dream-mode-every" type="radio" name="dream-mode" value="every">
                 <span id="dream-mode-every-label">Every</span>
-                <input id="dream-every-hours" type="number" min="1" max="720" step="1" class="inline-number" aria-labelledby="dream-mode-every-label dream-hours-label">
+                <input id="dream-every-hours" type="text" inputmode="numeric" autocomplete="off" class="inline-number" data-number data-unit="" aria-labelledby="dream-mode-every-label dream-hours-label">
                 <span id="dream-hours-label">hours</span></label>
               <label class="model-filter"><input id="dream-mode-daily" type="radio" name="dream-mode" value="daily">
                 <span id="dream-mode-daily-label">Daily at</span>
@@ -307,44 +352,56 @@
               <label class="model-filter"><input id="dream-enabled" type="checkbox">
                 <span id="dream-enabled-label">Schedule enabled</span></label>
               <span id="dream-schedule-hint" class="model-note">Scheduled sessions are skipped while no chat is pending. You can always start one by hand, from the Dream sessions tab or with /dream start in a chat.</span>
+              <div class="setting-row" id="dream-schedule-row">
+                <div class="setting-main"><span id="dream-schedule-reset-label" class="model-note">Reset the whole schedule</span></div>
+                <div class="setting-control"><button type="button" class="icon-btn setting-reset">↺</button></div>
+                <p class="setting-default model-note"></p>
+              </div>
             </fieldset>
             <fieldset>
               <legend id="dream-model-legend">Model and limits</legend>
-              <label>
-                <span id="dream-model-label">Model</span>
-                <span class="inline-row">
-                  <input id="dream-model" maxlength="256" placeholder="Your chat model" autocomplete="off">
-                  <button id="dream-model-browse" type="button">Browse</button>
-                </span>
-                <span id="dream-model-hint" class="model-note">Empty uses the agent's default chat model, else yours.</span>
-              </label>
-              <label>
-                <span id="dream-effort-label">Reasoning effort</span>
-                <select id="dream-effort">
-                  <option value="" id="dream-effort-none">No reasoning request</option>
-                  <option value="minimal">minimal</option>
-                  <option value="low">low</option>
-                  <option value="medium">medium</option>
-                  <option value="high">high</option>
-                  <option value="xhigh">xhigh</option>
-                  <option value="max">max</option>
-                </select>
-              </label>
-              <label>
-                <span id="dream-max-steps-label">Maximum steps</span>
-                <input id="dream-max-steps" type="number" min="1" max="500" step="1" required>
-                <span id="dream-max-steps-hint" class="model-note">Model calls per session (1–500).</span>
-              </label>
-              <label>
-                <span id="dream-max-tokens-label">Maximum tokens</span>
-                <input id="dream-max-tokens" type="number" min="1000" max="10000000" step="1" required>
-                <span id="dream-max-tokens-hint" class="model-note">Input plus output tokens per session (1,000–10,000,000).</span>
-              </label>
-              <label>
-                <span id="dream-max-minutes-label">Maximum minutes</span>
-                <input id="dream-max-minutes" type="number" min="1" max="120" step="1" required>
-                <span id="dream-max-minutes-hint" class="model-note">Time limit per session (1–120). One minute before it the agent is told to wrap up; at the limit the session is closed.</span>
-              </label>
+              <div class="setting-row wide">
+                <div class="setting-main">
+                  <label for="dream-model" id="dream-model-label">Model</label>
+                  <p id="dream-model-hint" class="model-note">Empty uses the agent's default chat model, else yours.</p>
+                </div>
+                <div class="setting-control"><input id="dream-model" maxlength="256" placeholder="Your chat model" autocomplete="off"><button id="dream-model-browse" type="button">Browse</button><button type="button" class="icon-btn setting-reset">↺</button></div>
+                <p class="setting-default model-note"></p>
+              </div>
+              <div class="setting-row">
+                <div class="setting-main">
+                  <label for="dream-effort" id="dream-effort-label">Reasoning effort</label>
+                </div>
+                <div class="setting-control"><select id="dream-effort"><option value="" id="dream-effort-none">No reasoning request</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option><option value="max">max</option></select><button type="button" class="icon-btn setting-reset">↺</button></div>
+                <p class="setting-default model-note"></p>
+              </div>
+              <div class="setting-row">
+                <div class="setting-main">
+                  <label for="dream-max-steps" id="dream-max-steps-label">Maximum steps</label>
+                  <p id="dream-max-steps-hint" class="model-note">Model calls per session.</p>
+                </div>
+                <div class="setting-control"><input id="dream-max-steps" type="text" inputmode="numeric" autocomplete="off" data-number data-unit="steps" required><button type="button" class="icon-btn setting-reset">↺</button></div>
+                <p class="setting-default model-note"></p>
+                <p class="setting-error error" role="alert"></p>
+              </div>
+              <div class="setting-row">
+                <div class="setting-main">
+                  <label for="dream-max-tokens" id="dream-max-tokens-label">Maximum tokens</label>
+                  <p id="dream-max-tokens-hint" class="model-note">Input plus output tokens per session.</p>
+                </div>
+                <div class="setting-control"><input id="dream-max-tokens" type="text" inputmode="numeric" autocomplete="off" data-number data-unit="tokens" data-step="10000" required><button type="button" class="icon-btn setting-reset">↺</button></div>
+                <p class="setting-default model-note"></p>
+                <p class="setting-error error" role="alert"></p>
+              </div>
+              <div class="setting-row">
+                <div class="setting-main">
+                  <label for="dream-max-minutes" id="dream-max-minutes-label">Maximum minutes</label>
+                  <p id="dream-max-minutes-hint" class="model-note">Time limit per session. One minute before it the agent is told to wrap up; at the limit the session is closed.</p>
+                </div>
+                <div class="setting-control"><input id="dream-max-minutes" type="text" inputmode="numeric" autocomplete="off" data-number data-unit="minutes" required><button type="button" class="icon-btn setting-reset">↺</button></div>
+                <p class="setting-default model-note"></p>
+                <p class="setting-error error" role="alert"></p>
+              </div>
             </fieldset>
             <fieldset>
               <legend id="dream-tools-legend">Dream reading tools</legend>
@@ -363,8 +420,13 @@
                 <button id="dream-prompt-reset" type="button">Reset to default</button>
               </div>
             </fieldset>
-            <label class="model-filter"><input id="dream-notify" type="checkbox">
-              <span id="dream-notify-label">Notify me on Telegram when a session ends</span></label>
+            <div class="setting-row">
+              <div class="setting-main">
+                <label class="model-filter"><input id="dream-notify" type="checkbox"> <span id="dream-notify-label">Notify me on Telegram when a session ends</span></label>
+              </div>
+              <div class="setting-control"><button type="button" class="icon-btn setting-reset">↺</button></div>
+              <p class="setting-default model-note"></p>
+            </div>
             <p id="dream-error" class="error" role="alert"></p>
             <div class="agent-actions">
               <button id="dream-save" type="submit" class="primary">Save dream settings</button>
@@ -417,53 +479,144 @@
       <button id="settings-close" type="button" class="icon-btn" title="Close" aria-label="Close"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
     </div>
     <p id="settings-note" class="model-note">Settings are shared with Telegram. Chats without a selected model use your current defaults.</p>
-    <form id="settings-form">
-      <label class="model-filter">
-        <input id="settings-thinking" type="checkbox"> <span id="settings-thinking-label">Show model thinking</span>
-      </label>
-      <p><label for="settings-assoc-max"><span id="settings-assoc-max-label">Maximum associative memory matches</span></label><br>
-        <input id="settings-assoc-max" type="number" min="1" max="20" step="1" inputmode="numeric">
-        <span id="settings-assoc-max-hint" class="model-note">Leave empty to use the application default. The minimum similarity is set by the application, not by you.</span>
-      </p>
-      <p><label for="settings-disposable-days"><span id="settings-disposable-days-label">Days to keep disposable chats</span></label><br>
-        <input id="settings-disposable-days" type="number" min="1" max="365" step="1" inputmode="numeric">
-        <span id="settings-disposable-days-hint" class="model-note">Disposable chats are deleted after this many days without activity (1–365). Leave empty to use the default of 30.</span>
-      </p>
-      <p><label class="model-filter"><input id="settings-orchestrator" type="checkbox"> <span id="settings-orchestrator-label">Choose the agent automatically in Telegram</span></label><br>
-        <span id="settings-orchestrator-hint" class="model-note">When a Telegram message starts a new chat, a fast model picks the best agent from the agents' descriptions. You can still override it with the buttons. The message text and the agents' names and descriptions are sent to the decision model's provider.</span>
-      </p>
-      <p><label for="settings-core-agent"><span id="settings-core-agent-label">Core agent (used when unsure)</span></label><br>
-        <select id="settings-core-agent"></select>
-      </p>
-      <p><span id="settings-llm-label">Default LLM model</span><br>
-        <button id="settings-llm" type="button" aria-haspopup="dialog" disabled></button>
-      </p>
-      <p><span id="settings-stt-label">Default STT model</span><br>
-        <button id="settings-stt" type="button" aria-haspopup="dialog" disabled></button>
-      </p>
-      <label for="settings-theme"><span id="settings-theme-label">Theme</span>
-        <select id="settings-theme">
-          <option value="system" id="settings-theme-system">System</option>
-          <option value="light" id="settings-theme-light">Light</option>
-          <option value="dark" id="settings-theme-dark">Dark</option>
-        </select>
-      </label>
-      <label for="settings-language"><span id="settings-language-label">Alerts and errors</span>
-        <select id="settings-language">
-          <option value="en">English</option>
-          <option value="es">Español</option>
-        </select>
-      </label>
-      <p id="settings-error" class="error" role="alert"></p>
-      <button id="settings-save" type="submit" class="primary">Save settings</button>
-    </form>
-    <details id="connections" class="connections">
-      <summary><span id="connections-title">Connections</span> <span id="connections-count" class="model-note"></span></summary>
-      <p id="connections-note" class="model-note">Connect your own account for each service your agents can use. Every user connects separately.</p>
-      <p id="connections-browser-note" class="model-note">Sign-in opens in a browser on the computer running RECALL.</p>
-      <ul id="connection-list"></ul>
-      <p id="connections-error" class="error" role="alert"></p>
-    </details>
+    <div class="settings-layout">
+      <nav id="settings-nav" class="settings-nav" aria-label="Settings sections">
+        <button id="settings-tab-general" type="button" data-section="general" aria-pressed="true"><span id="settings-tab-general-text" class="settings-tab-text">General</span><span class="settings-dot" hidden></span></button>
+        <button id="settings-tab-models" type="button" data-section="models" aria-pressed="false"><span id="settings-tab-models-text" class="settings-tab-text">Models</span><span class="settings-dot" hidden></span></button>
+        <button id="settings-tab-chats" type="button" data-section="chats" aria-pressed="false"><span id="settings-tab-chats-text" class="settings-tab-text">Chats &amp; memory</span><span class="settings-dot" hidden></span></button>
+        <button id="settings-tab-telegram" type="button" data-section="telegram" aria-pressed="false"><span id="settings-tab-telegram-text" class="settings-tab-text">Telegram</span><span class="settings-dot" hidden></span></button>
+        <button id="settings-tab-connections" type="button" data-section="connections" aria-pressed="false"><span id="settings-tab-connections-text" class="settings-tab-text">Connections</span></button>
+      </nav>
+      <div class="settings-body">
+        <form id="settings-form" novalidate>
+          <section id="settings-section-general" class="settings-section" aria-labelledby="settings-tab-general">
+            <div class="setting-row">
+              <div class="setting-main">
+                <label class="model-filter"><input id="settings-thinking" type="checkbox"> <span id="settings-thinking-label">Show model thinking</span></label>
+                <p id="settings-thinking-hint" class="model-note">Shows the model's reasoning above its replies in the chat.</p>
+              </div>
+              <div class="setting-control"><button type="button" class="icon-btn setting-reset">↺</button></div>
+              <p class="setting-default model-note"></p>
+            </div>
+            <div class="setting-row">
+              <div class="setting-main">
+                <label for="settings-theme" id="settings-theme-label">Theme</label>
+                <p id="settings-theme-hint" class="model-note">Applied at once and remembered in this browser only.</p>
+              </div>
+              <div class="setting-control">
+                <select id="settings-theme">
+                  <option value="system" id="settings-theme-system">System</option>
+                  <option value="light" id="settings-theme-light">Light</option>
+                  <option value="dark" id="settings-theme-dark">Dark</option>
+                </select>
+                <button type="button" class="icon-btn setting-reset">↺</button>
+              </div>
+              <p class="setting-default model-note"></p>
+            </div>
+            <div class="setting-row">
+              <div class="setting-main">
+                <label for="settings-language" id="settings-language-label">Alerts and errors</label>
+                <p id="settings-language-hint" class="model-note">Language of alerts and error messages, here and in Telegram.</p>
+              </div>
+              <div class="setting-control">
+                <select id="settings-language">
+                  <option value="en">English</option>
+                  <option value="es">Español</option>
+                </select>
+                <button type="button" class="icon-btn setting-reset">↺</button>
+              </div>
+              <p class="setting-default model-note"></p>
+            </div>
+          </section>
+          <section id="settings-section-models" class="settings-section" aria-labelledby="settings-tab-models" hidden>
+            <div class="setting-row">
+              <div class="setting-main">
+                <span id="settings-llm-label">Default LLM model</span>
+                <p id="settings-llm-hint" class="model-note">Used by chats that have no model of their own and by agents that do not set one.</p>
+              </div>
+              <div class="setting-control">
+                <button id="settings-llm" type="button" aria-haspopup="dialog" aria-labelledby="settings-llm-label settings-llm" disabled></button>
+                <button type="button" class="icon-btn setting-reset">↺</button>
+              </div>
+              <p class="setting-default model-note"></p>
+            </div>
+            <div class="setting-row">
+              <div class="setting-main">
+                <span id="settings-stt-label">Default STT model</span>
+                <p id="settings-stt-hint" class="model-note">Transcribes voice messages to text.</p>
+              </div>
+              <div class="setting-control">
+                <button id="settings-stt" type="button" aria-haspopup="dialog" aria-labelledby="settings-stt-label settings-stt" disabled></button>
+                <button type="button" class="icon-btn setting-reset">↺</button>
+              </div>
+              <p class="setting-default model-note"></p>
+            </div>
+          </section>
+          <section id="settings-section-chats" class="settings-section" aria-labelledby="settings-tab-chats" hidden>
+            <div class="setting-row">
+              <div class="setting-main">
+                <label for="settings-assoc-max" id="settings-assoc-max-label">Maximum associative memory matches</label>
+                <p id="settings-assoc-max-hint" class="model-note">Most memory fragments suggested to the agent per message. The minimum similarity is set by the application, not by you.</p>
+              </div>
+              <div class="setting-control">
+                <input id="settings-assoc-max" type="text" inputmode="numeric" autocomplete="off" data-number data-unit="matches">
+                <button type="button" class="icon-btn setting-reset">↺</button>
+              </div>
+              <p class="setting-default model-note"></p>
+              <p class="setting-error error" role="alert"></p>
+            </div>
+            <div class="setting-row">
+              <div class="setting-main">
+                <label for="settings-disposable-days" id="settings-disposable-days-label">Days to keep disposable chats</label>
+                <p id="settings-disposable-days-hint" class="model-note">Disposable chats are deleted after this many days without activity.</p>
+              </div>
+              <div class="setting-control">
+                <input id="settings-disposable-days" type="text" inputmode="numeric" autocomplete="off" data-number data-unit="days">
+                <button type="button" class="icon-btn setting-reset">↺</button>
+              </div>
+              <p class="setting-default model-note"></p>
+              <p class="setting-error error" role="alert"></p>
+            </div>
+          </section>
+          <section id="settings-section-telegram" class="settings-section" aria-labelledby="settings-tab-telegram" hidden>
+            <div class="setting-row">
+              <div class="setting-main">
+                <label class="model-filter"><input id="settings-orchestrator" type="checkbox"> <span id="settings-orchestrator-label">Choose the agent automatically in Telegram</span></label>
+                <p id="settings-orchestrator-hint" class="model-note">When a Telegram message starts a new chat, a fast model picks the best agent from the agents' descriptions. You can still override it with the buttons. The message text and the agents' names and descriptions are sent to the decision model's provider.</p>
+              </div>
+              <div class="setting-control"><button type="button" class="icon-btn setting-reset">↺</button></div>
+              <p class="setting-default model-note"></p>
+            </div>
+            <div class="setting-row">
+              <div class="setting-main">
+                <label for="settings-core-agent" id="settings-core-agent-label">Core agent (used when unsure)</label>
+                <p id="settings-core-agent-hint" class="model-note">The agent that answers greetings and general talk when no agent is clearly the best fit.</p>
+              </div>
+              <div class="setting-control">
+                <select id="settings-core-agent"></select>
+                <button type="button" class="icon-btn setting-reset">↺</button>
+              </div>
+              <p class="setting-default model-note"></p>
+            </div>
+          </section>
+          <div class="settings-footer">
+            <p id="settings-error" class="error" role="alert"></p>
+            <div class="settings-actions">
+              <span id="settings-pending" class="model-note" role="status"></span>
+              <span id="settings-saved" class="settings-saved" role="status"></span>
+              <button id="settings-save" type="submit" class="primary">Save settings</button>
+            </div>
+          </div>
+        </form>
+        <section id="connections" class="connections settings-section" aria-labelledby="settings-tab-connections" hidden>
+          <h3><span id="connections-title">Connections</span> <span id="connections-count" class="model-note"></span></h3>
+          <p id="connections-note" class="model-note">Connect your own account for each service your agents can use. Every user connects separately.</p>
+          <p id="connections-browser-note" class="model-note">Sign-in opens in a browser on the computer running RECALL.</p>
+          <ul id="connection-list"></ul>
+          <p id="connections-error" class="error" role="alert"></p>
+        </section>
+      </div>
+    </div>
     <p id="settings-version" class="app-version"></p>
   </dialog>
 
