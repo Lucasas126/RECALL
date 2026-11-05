@@ -33,11 +33,16 @@ the native command descriptions and `/help` text remain English.
 The agent's name opens the first message of each reply inline and in bold (`**Aria:** answer`); when the answer starts with a
 list, code block, heading, table or quote, the name takes its own line instead. Long replies carry it only in the first message.
 
-Telegram resumes your most recently active chat (of any agent) when you write
+Telegram resumes your most recently active **Telegram chat** (of any agent) when you write
 within `telegram.chat_idle_minutes` (default 60; the local environment variable
 `RECALL_TELEGRAM_CHAT_IDLE_MINUTES` overrides it) of its last activity, even
 right after the bot restarts. It creates a new chat when the last activity is
-older than that or there is no chat yet. Every assistant reply starts with the
+older than that or there is no Telegram chat yet. Only chats created from Telegram
+(origin `telegram`) count, both for resuming and for measuring idle time; chats you
+use in the web UI never do, however recent. Activity in the chat itself counts, so
+continuing a Telegram-created chat in the web keeps it fresh for Telegram too.
+Chats that existed before origins were introduced have no marker and count as web
+chats, so the first Telegram message after that update starts a new chat once. Every assistant reply starts with the
 agent's name in **bold** on its own line (only the final message, placed right
 before the answer and after any thinking or tool lines; never in streamed drafts,
 and only on the first message when a long reply is split).

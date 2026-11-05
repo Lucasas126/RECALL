@@ -86,7 +86,10 @@ The rules these routes follow (ids, renames, deletion, locks, `409` while replie
 the query `?disposable=true`); without it a normal chat is created. Chat summaries (list,
 create, `GET .../chats/<chat_id>`, rename) include `"disposable": bool` and `"expires_at"`:
 the ISO time a disposable chat will be deleted (last activity plus the user's
-`disposable_retention_days`, default 30), `null` for normal chats.
+`disposable_retention_days`, default 30), `null` for normal chats. They also carry
+`"origin"`: `"web"` (chats created by this API, and chats with no marker) or `"telegram"`
+(created by the Telegram bot; stored in a `<chat_id>.origin.json` sidecar). The Telegram bot only
+resumes chats whose origin is `telegram`; the API always creates `web` chats.
 
 `POST /api/agents/<agent_id>/chats/<chat_id>/disposable` with `{"disposable": true|false}`
 converts the chat in either direction and returns its summary. Becoming disposable drops its
