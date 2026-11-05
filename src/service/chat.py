@@ -600,6 +600,8 @@ class ChatService:
         preferences = self._preferences.get(user_id)
         if preferences.agent_id == old_id:
             self._preferences.update(user_id, UserPreferences(agent_id=new_id))
+        if preferences.default_agent_id == old_id:
+            self._preferences.update(user_id, UserPreferences(default_agent_id=new_id))
         if preferences.core_agent_id == old_id:
             self._preferences.update(user_id, UserPreferences(core_agent_id=new_id))
 
@@ -636,6 +638,7 @@ class ChatService:
                     "min": DISPOSABLE_RETENTION_DAYS_BOUNDS[0], "max": DISPOSABLE_RETENTION_DAYS_BOUNDS[1],
                 },
                 "orchestrator": ORCHESTRATOR.enabled,
+                "default_agent_id": None,
                 "core_agent_id": None,
                 "agents": [{"id": agent_id, "name": self._agent_config(user.id, agent_id).name} for agent_id in user.agents],
             },
@@ -678,14 +681,14 @@ class ChatService:
                 load_agent_config(user.id, agent_id)
             except FileNotFoundError as exc:
                 raise UnknownAgent("unknown agent: {agent_id}", agent_id=agent_id) from exc
-        core_id = resolved.core_agent_id
-        if core_id is not None:
-            self._check_id("agent", core_id, UnknownAgent)
-            if core_id not in user.agents:
-                raise UnknownAgent(
-                    "agent '{agent_id}' is not owned by user '{user_id}'", agent_id=core_id, user_id=user.id,
-                )
-            self._agent_config(user.id, core_id)
+        for chosen in (resolved.default_agent_id, resolved.core_agent_id):
+            if chosen is not None:
+                self._check_id("agent", chosen, UnknownAgent)
+                if chosen not in user.agents:
+                    raise UnknownAgent(
+                        "agent '{agent_id}' is not owned by user '{user_id}'", agent_id=chosen, user_id=user.id,
+                    )
+                self._agent_config(user.id, chosen)
         return resolved.model_copy(update={
             "agent_id": agent_id,
             "default_llm_model": resolved.default_llm_model or user.models.chat,
@@ -810,6 +813,20 @@ class ChatService:
         enabled = ORCHESTRATOR.enabled if override is None else override
         return enabled and len(user.agents) >= 2
 
+    def default_agent(self, user_id: str) -> Optional[str]:
+        """The user's default agent: the saved `default_agent_id` while it is still one of theirs, else the first agent.
+
+        Used for new chats nobody picked an agent for and as the orchestrator's fallback; None only without agents.
+        """
+        user = self._user(user_id)
+        try:
+            saved = self._preferences.get(user_id).default_agent_id
+        except (PreferencesError, OSError, ValueError):
+            saved = None
+        if saved in user.agents:
+            return saved
+        return user.agents[0] if user.agents else None
+
     def orchestrator_core_agent(self, user_id: str) -> Optional[str]:
         """The user's core agent (fallback when unsure) when it still exists, else None."""
         try:
@@ -820,7 +837,7 @@ class ChatService:
         return core if core in user.agents else None
 
     def route_message(self, user_id: str, text: str) -> Optional[RouteDecision]:
-        """Ask the decision model which of the user's agents suits `text`; None means "use the preferred agent".
+        """Ask the decision model which of the user's agents suits `text`; None means "use the default agent".
 
         Never raises: a disabled orchestrator, fewer than two agents, an empty text or any failure of the
         decision API (timeout, HTTP error, bad answer, unknown id, missing key) returns None. Only the text
@@ -856,9 +873,9 @@ class ChatService:
                 agent_names=names, latency_ms=decision.latency_ms, cost=decision.cost,
             )
         except DecisionError as exc:
-            logger.warning("orchestrator: %s; using the preferred agent", exc)
+            logger.warning("orchestrator: %s; using the default agent", exc)
         except Exception as exc:  # the router must never break a message
-            logger.warning("orchestrator failed (%s); using the preferred agent", type(exc).__name__)
+            logger.warning("orchestrator failed (%s); using the default agent", type(exc).__name__)
         return None
 
     def latest_chat(self, user_id: str, origin: Optional[str] = None) -> Optional[dict]:

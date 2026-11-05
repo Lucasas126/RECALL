@@ -31,6 +31,7 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
         self.service.list_agents.return_value = [
             {"id": "agent-a", "name": "First"}, {"id": "agent-b", "name": "Second"},
         ]
+        self.service.default_agent.side_effect = self._default_agent
         self.service.create_chat.return_value = {"id": "new-chat"}
         self.service.get_chat.return_value = {"model": {"id": "llm/base", "provider": "OpenRouter"}, "model_source": "agent"}
         self.service.get_chat_models.return_value = {
@@ -64,6 +65,12 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
             user_data={}, args=[],
         )
         self.context.bot.delete_message = AsyncMock()
+
+    def _default_agent(self, user: str) -> str | None:
+        """Stand-in for ChatService.default_agent: the saved default while listed, else the first agent."""
+        ids = [agent["id"] for agent in self.service.list_agents.return_value]
+        saved = self.preferences.get("default_agent_id")
+        return saved if saved in ids else (ids[0] if ids else None)
 
     async def open_panel(self, command=settings_command):
         self.update.effective_message.reply_text.return_value = SimpleNamespace(message_id=789)
@@ -327,7 +334,16 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(query.answer.await_args.kwargs["show_alert"])
         self.service.update_preferences.assert_not_called()
 
-    async def test_newchat_reads_preferred_agent_saved_by_another_channel(self) -> None:
+    async def test_settings_panel_shows_the_default_agent(self) -> None:
+        await self.open_panel()
+        self.assertIn("Default agent: First", self.text)  # nothing saved: the first agent
+        self.preferences["default_agent_id"] = "agent-b"
+        self.preferences["language"] = "es"
+        self.context.bot.edit_message_reply_markup = AsyncMock()  # opening a second panel closes the first
+        await self.open_panel()
+        self.assertIn("Agente predeterminado: Second", self.text)
+
+    async def test_newchat_with_a_single_agent_uses_the_default_agent(self) -> None:
         self.preferences["agent_id"] = "agent-b"
         self.service.list_agents.return_value = [{"id": "agent-b", "name": "Second"}]  # one agent: no picker
         await new_chat(self.update, self.context)
@@ -335,7 +351,8 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((self.session.agent_id, self.session.chat_id), ("agent-b", "new-chat"))
 
     async def test_current_chat_stays_on_its_agent_until_idle_timeout(self) -> None:
-        self.preferences["agent_id"] = "agent-b"
+        self.preferences["agent_id"] = "agent-a"  # last used: the idle chat must not follow it
+        self.preferences["default_agent_id"] = "agent-b"
         self.session.last_message_at = datetime.now(timezone.utc)
         _prepare_message_session(self.session, self.service)
         self.service.get_preferences.assert_not_called()

@@ -224,6 +224,29 @@ class RouteMessageTests(unittest.TestCase):
         self.service.update_preferences("u", UserPreferences(core_agent_id=None, orchestrator=True))
         self.assertTrue(self.service.get_preferences("u")["orchestrator"])
 
+    def test_default_agent_must_exist_follows_renames_and_is_dropped_on_delete(self) -> None:
+        self.assertIsNone(UserPreferences().default_agent_id)
+        for bad in ({"default_agent_id": "no spaces"}, {"default_agent_id": ""}):
+            with self.subTest(bad=bad), self.assertRaises(ValidationError):
+                UserPreferences.model_validate(bad)
+        saved = self.service.update_preferences("u", UserPreferences(default_agent_id="agent-b"))
+        self.assertEqual(saved["default_agent_id"], "agent-b")
+        with self.assertRaises(UnknownAgent):
+            self.service.update_preferences("u", UserPreferences(default_agent_id="ghost"))
+        self.assertEqual(self.service.get_preferences("u")["default_agent_id"], "agent-b")
+        self.service._replace_preferred_agent("u", "agent-b", "agent-a")  # rename
+        self.assertEqual(self.service.get_preferences("u")["default_agent_id"], "agent-a")
+        self.service._replace_preferred_agent("u", "agent-a", None)  # delete
+        self.assertIsNone(self.service.get_preferences("u")["default_agent_id"])
+
+    def test_default_agent_accessor_falls_back_to_the_first_agent(self) -> None:
+        first = self.service._user("u").agents[0]
+        self.assertEqual(self.service.default_agent("u"), first)  # nothing saved
+        self.service.update_preferences("u", UserPreferences(default_agent_id="agent-b"))
+        self.assertEqual(self.service.default_agent("u"), "agent-b")
+        with patch.object(self.service._preferences, "get", return_value=UserPreferences(default_agent_id="gone")):
+            self.assertEqual(self.service.default_agent("u"), first)  # the saved agent no longer exists
+
 
 if __name__ == "__main__":
     unittest.main()

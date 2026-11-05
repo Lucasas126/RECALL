@@ -18,7 +18,8 @@ Channels map an external identity to a `user_id`; unknown identities are rejecte
 - **Telegram**: `TELEGRAM_ALLOWED_USERS` maps `<telegram_id>=<user_id>` entries, several users per bot ([Telegram](../user-guide/telegram.md)).
 - **CLI** (`cli.py`): the `USER_ID` / `AGENT_ID` values of `.env`.
 
-After that the target agent is chosen (explicit selection, else the user's preferred agent, else the first one in `agents`),
+After that the target agent is chosen (explicit selection, else the user's last used agent (`agent_id`), else the first one in `agents`; new chats nobody picked an agent for use the
+user's default agent, `default_agent_id`, falling back to the first one),
 its `SourceRegistry` is built scoped to user and agent, and the message is handled.
 
 ## data layout

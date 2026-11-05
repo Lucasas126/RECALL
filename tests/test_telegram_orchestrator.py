@@ -81,9 +81,9 @@ class TelegramOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(generation.await_args.args[2:4], ("hello there", []))
         self.assertEqual(self.session.chat_id, "chat-of-agent-b")
         self.assertIsNone(self.session.pending_reroute)
-        self.service.discard_chat.assert_called_once()  # only the empty preferred-agent chat
+        self.service.discard_chat.assert_called_once()  # only the empty default-agent chat
 
-    async def test_pick_equal_to_the_preferred_agent_keeps_the_chat(self) -> None:
+    async def test_pick_equal_to_the_default_agent_keeps_the_chat(self) -> None:
         self.service.route_message.return_value = self.decision("agent-a", 0.95)
         await self.send()
         self.service.discard_chat.assert_not_called()
@@ -136,12 +136,20 @@ class TelegramOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         for button in self.markup_buttons():
             self.assertLessEqual(len(button.callback_data.encode()), 64)
 
-    async def test_uncertain_without_a_core_agent_defaults_to_the_preferred_one(self) -> None:
+    async def test_uncertain_without_a_core_agent_defaults_to_the_default_agent(self) -> None:
         self.uncertain(core=None)
         await self.send("hi")
         self.assertEqual(self.session.chat_id, "chat-of-agent-a")
         self.assertIn("⭐ First", self.labels())
-        self.service.create_chat.assert_called_once()  # the auto chat of the preferred agent is kept
+        self.service.create_chat.assert_called_once()  # the auto chat of the default agent is kept
+
+    async def test_uncertain_without_a_core_agent_uses_the_default_not_the_last_used_agent(self) -> None:
+        self.preferences["default_agent_id"] = "agent-c"  # the last used agent stays agent-a
+        self.uncertain(core=None)
+        await self.send("hi")
+        self.assertEqual(self.session.chat_id, "chat-of-agent-c")
+        self.assertIn("⭐ Third", self.labels())
+        self.service.create_chat.assert_called_once_with("test-user", "agent-c", origin="telegram")
 
     async def test_tap_on_a_candidate_replays_in_a_new_chat_of_that_agent(self) -> None:
         self.uncertain(core="agent-c")
@@ -230,7 +238,7 @@ class TelegramOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Starting a new chat with First", self.message.reply_text.await_args.args[0])
         self.assertEqual(self.labels(), ["↩ Continue previous chat", "🔀 Change agent"])
 
-    async def test_router_failures_fall_back_to_the_preferred_agent(self) -> None:
+    async def test_router_failures_fall_back_to_the_default_agent(self) -> None:
         self.service.route_message.return_value = None
         await self.send()
         self.assertIn("Starting a new chat with First", self.message.reply_text.await_args.args[0])

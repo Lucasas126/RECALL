@@ -20,7 +20,7 @@ class PreferencesError(UserMessageError, RuntimeError):
 
 
 class UserPreferences(BaseModel):
-    """User-wide display, notification language and new-chat agent preferences."""
+    """User-wide display, notification language and agent preferences (`agent_id` is the last used agent)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -35,7 +35,9 @@ class UserPreferences(BaseModel):
     disposable_retention_days: Annotated[int, Field(strict=True, ge=DISPOSABLE_RETENTION_DAYS_BOUNDS[0], le=DISPOSABLE_RETENTION_DAYS_BOUNDS[1])] | None = None
     # Telegram orchestrator for this user; None follows settings.yaml `orchestrator.enabled`
     orchestrator: bool | None = Field(default=None, strict=True)
-    # agent used when the orchestrator is unsure (greetings, general talk); None means the preferred agent
+    # agent for new chats nobody picked an agent for (and the Telegram router's fallback); None means the first agent
+    default_agent_id: Annotated[str, Field(strict=True, pattern=r"^[A-Za-z0-9_-]{1,64}$")] | None = None
+    # agent used when the orchestrator is unsure (greetings, general talk); None means the default agent
     core_agent_id: Annotated[str, Field(strict=True, pattern=r"^[A-Za-z0-9_-]{1,64}$")] | None = None
 
     def language_for(self, configured: str) -> Literal["en", "es"]:

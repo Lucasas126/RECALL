@@ -23,6 +23,7 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
         self.service.list_agents.return_value = [
             {"id": "agent-a", "name": "First"}, {"id": "agent-b", "name": "Second"},
         ]
+        self.service.default_agent.side_effect = lambda user: self.preferences.get("default_agent_id") or "agent-a"
         self.service.create_chat.side_effect = lambda user, agent, **kwargs: {"id": f"chat-of-{agent}"}
         self.service.chat_summary.return_value = {"id": "old-chat", "title": "Old topic", "turns": 4}
         self.service.chat_active.return_value = False

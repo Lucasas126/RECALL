@@ -50,6 +50,8 @@ class PreferencesDefaultsWebTests(unittest.TestCase):
         self.assertEqual(defaults["orchestrator"], ORCHESTRATOR.enabled)
         self.assertEqual(defaults["language"], "es")  # user-one is configured in es-ES
         self.assertEqual((defaults["theme"], defaults["show_thinking"], defaults["core_agent_id"]), ("system", True, None))
+        self.assertIn("default_agent_id", defaults)  # nullable: null means the first agent
+        self.assertIsNone(defaults["default_agent_id"])
         self.assertEqual(defaults["default_llm_model"], "openai/gpt-4o-mini")
         self.assertEqual([agent["id"] for agent in defaults["agents"]], ["agent-a", "agent-b"])
 

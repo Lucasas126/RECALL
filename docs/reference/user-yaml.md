@@ -153,7 +153,7 @@ user's agents (`GET /api/chats`), each labelled in italics with its agent.
 Opening a chat from another agent makes that agent active; choosing an agent in
 the selector starts a new chat with it. The per-chat reasoning effort is also available in Telegram's
 `/settings` panel (**Chat reasoning effort**).
-Thinking visibility, preferred-agent selection and English/Spanish operational
+Thinking visibility, last-used and default agent selection and English/Spanish operational
 notices/errors are implemented in both channels.
 
 ```json
@@ -173,7 +173,11 @@ notices/errors are implemented in both channels.
   `settings.yaml`; the response also carries the read-only `orchestrator_default`. Turns the
   [Telegram orchestrator](../user-guide/telegram.md#telegram-orchestrator-automatic-agent-choice) on or off for this
   user. Non-boolean values are `422`.
-- `core_agent_id`: an agent id this user owns, or `null` (default: the preferred agent). The orchestrator's fallback
+- `default_agent_id`: an agent id this user owns, or `null` (default: the user's first agent). The agent a new chat
+  opens with when none is picked (web login without a chat to reopen, Telegram idle-timeout chats and single-agent
+  `/newchat`) and the orchestrator's fallback when it is unsure and no core agent is set. `agent_id` stays the last
+  used agent. An unknown or foreign agent is `404`; deleting the agent clears it and renaming follows the new id.
+- `core_agent_id`: an agent id this user owns, or `null` (default: the default agent). The orchestrator's fallback
   agent when it is unsure (greetings, general talk). An unknown or foreign agent is `404`; deleting the agent clears
   it and renaming follows the new id.
 - `agent_id`: must identify an agent configured for this user with an existing
@@ -237,13 +241,15 @@ holds what each setting follows when nothing is saved, for the Settings dialog's
 | `associative_max_matches` | `{default, min, max}`: `associative_memory.top_n` from `settings.yaml`, bounds 1-20 |
 | `disposable_retention_days` | `{default, min, max}`: 30, bounds 1-365 |
 | `orchestrator` | `orchestrator.enabled` from `settings.yaml` |
-| `show_thinking`, `theme`, `core_agent_id` | `true`, `"system"` (browser only), `null` (the preferred agent) |
+| `show_thinking`, `theme` | `true`, `"system"` (browser only) |
+| `default_agent_id` | `null` (the first agent) |
+| `core_agent_id` | `null` (the default agent) |
 | `language` | the user's `language` from `user.yaml` reduced to `en` or `es` |
 | `default_llm_model`, `default_stt_model` | `models.chat` and `models.stt` of `user.yaml` |
 | `agents` | `[{id, name}]` of the user's agents, for the core-agent choice |
 
 Resetting a setting means saving `null` for it (`associative_max_matches`, `disposable_retention_days`, `orchestrator`,
-`core_agent_id`, `default_llm_model`, `default_stt_model`): the value is stored as absent and keeps following the default. `show_thinking`
+`default_agent_id`, `core_agent_id`, `default_llm_model`, `default_stt_model`): the value is stored as absent and keeps following the default. `show_thinking`
 and `language` always hold a value, so their reset saves the default value.
 
 ## creating users (administrator)

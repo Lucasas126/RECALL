@@ -90,7 +90,7 @@ function renderVersion() {
 // ---- settings helpers (pure: no DOM, no state; tested without a browser)
 // The sections of the user settings dialog and the preferences each one holds (`connections` has none).
 const SETTINGS_SECTIONS = {
-  general: ["show_thinking", "language"],
+  general: ["show_thinking", "language", "default_agent_id"],
   models: ["default_llm_model", "default_stt_model"],
   chats: ["associative_max_matches", "disposable_retention_days"],
   telegram: ["orchestrator", "core_agent_id"],
@@ -99,8 +99,21 @@ const SETTINGS_SECTIONS = {
 // Saving null for these means "follow the default"; the others always hold a value.
 const NULLABLE_PREFERENCES = new Set([
   "default_llm_model", "default_stt_model", "associative_max_matches", "disposable_retention_days",
-  "orchestrator", "core_agent_id",
+  "orchestrator", "core_agent_id", "default_agent_id",
 ]);
+
+// The agent new chats open with when none is picked: the saved default if the user still has it, else the first agent.
+function defaultAgentId(preferences, agents) {
+  const list = agents ?? [];
+  const saved = preferences?.default_agent_id;
+  if (saved && list.some((agent) => agent.id === saved)) return saved;
+  return list.length ? list[0].id : null;
+}
+
+// True when the scroll position is within `slack` pixels of the bottom (the user is following the latest content).
+function nearBottom(scrollHeight, scrollTop, clientHeight, slack = 80) {
+  return scrollHeight - scrollTop - clientHeight <= slack;
+}
 
 // Which section is shown and which tab is pressed; an unknown name falls back to the first section.
 function settingsSectionView(active) {
@@ -444,6 +457,8 @@ function translateInterface() {
     ["settings-assoc-max-hint", "Most memory fragments suggested to the agent per message. The minimum similarity is set by the application, not by you."],
     ["settings-orchestrator-label", "Choose the agent automatically in Telegram"],
     ["settings-orchestrator-hint", "When a Telegram message starts a new chat, a fast model picks the best agent from the agents' descriptions. You can still override it with the buttons. The message text and the agents' names and descriptions are sent to the decision model's provider."],
+    ["settings-default-agent-label", "Default agent"],
+    ["settings-default-agent-hint", "Used for new chats when you do not pick an agent, and by the Telegram router when it is unsure (unless a core agent is set)."],
     ["settings-core-agent-label", "Core agent (used when unsure)"],
     ["settings-core-agent-hint", "The agent that answers greetings and general talk when no agent is clearly the best fit."],
     ["settings-disposable-days-label", "Days to keep disposable chats"],
@@ -552,7 +567,7 @@ function translateInterface() {
   $("agent-model").placeholder = tr("Your default model");
   for (const [id, text] of [
     ["settings-open", "Settings"], ["settings-close", "Close"],
-    ["logout", "Log out"], ["theme-toggle", "Switch theme"],
+    ["logout", "Log out"], ["jump-latest", "Jump to latest"], ["theme-toggle", "Switch theme"],
   ]) {
     $(id).title = tr(text);
     $(id).setAttribute("aria-label", tr(text));
@@ -751,7 +766,16 @@ async function showApp(user) {
     await refreshPreferences();
     if (session !== state.session) return;
     await selectAgent(state.preferences.agent_id);
-    if (session === state.session && state.agentId && !(await restoreChat(route))) await newChat();
+    if (session === state.session && state.agentId && !(await restoreChat(route))) {
+      // no chat to reopen: a new chat opens with the default agent, not the last selected one
+      const agentId = defaultAgentId(state.preferences, state.user.agents);
+      if (agentId && agentId !== state.agentId) {
+        await savePreferences({ agent_id: agentId });
+        if (session !== state.session) return;
+        await selectAgent(agentId);
+      }
+      if (session === state.session) await newChat();
+    }
     // a deep link (for example from a dream notification) opens its agent page after login
     if (session === state.session && route) await routeFromHash(route);
   } catch (err) {
@@ -1710,6 +1734,7 @@ function settingsOriginalValues() {
     disposable_retention_days: saved.disposable_retention_days ?? prefDefault("disposable_retention_days"),
     orchestrator: saved.orchestrator ?? saved.orchestrator_default ?? false,
     core_agent_id: saved.core_agent_id ?? null,
+    default_agent_id: saved.default_agent_id ?? null,
   };
 }
 
@@ -1724,6 +1749,7 @@ function settingsCurrentValues() {
     associative_max_matches: number("settings-assoc-max", "associative_max_matches"),
     disposable_retention_days: number("settings-disposable-days", "disposable_retention_days"),
     orchestrator: $("settings-orchestrator").checked, core_agent_id: $("settings-core-agent").value || null,
+    default_agent_id: $("settings-default-agent").value || null,
   };
 }
 
@@ -1775,8 +1801,11 @@ function fillSettings() {
   setNumberValue($("settings-disposable-days"), original.disposable_retention_days);
   $("settings-orchestrator").checked = original.orchestrator;
   const core = $("settings-core-agent");
-  core.replaceChildren(new Option(tr("Same as preferred agent"), ""), ...(state.user?.agents ?? []).map((a) => new Option(a.name, a.id)));
+  core.replaceChildren(new Option(tr("Same as default agent"), ""), ...(state.user?.agents ?? []).map((a) => new Option(a.name, a.id)));
   core.value = state.preferences.core_agent_id ?? "";
+  const defaultAgent = $("settings-default-agent");
+  defaultAgent.replaceChildren(new Option(tr("First agent in the list"), ""), ...(state.user?.agents ?? []).map((a) => new Option(a.name, a.id)));
+  defaultAgent.value = state.preferences.default_agent_id ?? "";
   $("settings-theme").value = localStorage.getItem("theme") ?? "system";
   renderSettingsModels();
 }
@@ -2836,7 +2865,7 @@ function isCurrent(request) {
 function activateView(container) {
   state.view = container;
   $("messages").replaceChildren(container);
-  scrollDown();
+  scrollDown(true);
 }
 
 function renderMessages(messages) {
@@ -2869,7 +2898,7 @@ function renderMessages(messages) {
       );
     }
   }
-  scrollDown();
+  scrollDown(true);
 }
 
 // ------------------------------------------------------------------ editing earlier messages
@@ -3411,7 +3440,7 @@ function updateApprovalIndicator() {
       const first = [...approvalEntries.values()].find((entry) => approvalActive(entry.state) && entry.nodes?.card.isConnected);
       first?.nodes.card.scrollIntoView({ block: "center", behavior: "smooth" });
     });
-    $("messages").after(bar);
+    $("messages-wrap").after(bar);
   }
   bar.hidden = false;
   const label = approvalPendingLabel(pending.length);
@@ -3777,10 +3806,23 @@ function renderAgentsEmpty() {
     : "Select an agent to edit it, or create a new one.");
 }
 
-function scrollDown() {
+// The chat never follows streamed content by itself. Only `force` (sending, opening a chat, rendering its history)
+// moves the view to the bottom; otherwise the "Jump to latest" button shows while content extends below the viewport.
+function updateJumpLatest() {
   const box = $("messages");
-  box.scrollTop = box.scrollHeight;
+  $("jump-latest").hidden = nearBottom(box.scrollHeight, box.scrollTop, box.clientHeight);
 }
+
+function scrollDown(force = false) {
+  const box = $("messages");
+  if (force) box.scrollTop = box.scrollHeight;
+  updateJumpLatest();
+}
+
+$("messages").addEventListener("scroll", updateJumpLatest, { passive: true });
+// tool steps, thinking and text streaming below the viewport also show the button
+new MutationObserver(updateJumpLatest).observe($("messages"), { childList: true, subtree: true, characterData: true });
+$("jump-latest").addEventListener("click", () => scrollDown(true));
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_TOTAL_FILE_BYTES = 25 * 1024 * 1024;
@@ -3895,7 +3937,7 @@ async function dispatchMessage(content, attachments, edit = null) {
   state.usages.delete(key);
   $("usage").hidden = true;
   updateBusy();
-  scrollDown();
+  scrollDown(true);
   try {
     await streamReply(content, attachments, request, edit?.index ?? null);
   } catch (err) {
@@ -4940,8 +4982,13 @@ numberRow("settings-assoc-max", () => state.preferences?.defaults?.associative_m
 numberRow("settings-disposable-days", () => state.preferences?.defaults?.disposable_retention_days, () => "");
 checkboxRow("settings-orchestrator", () => prefDefault("orchestrator"));
 registerRow("settings-core-agent", {
-  getDefault: () => prefDefault("core_agent_id"), describe: () => tr("Same as preferred agent"),
+  getDefault: () => prefDefault("core_agent_id"), describe: () => tr("Same as default agent"),
   read: () => $("settings-core-agent").value || null, write: (value) => { $("settings-core-agent").value = value ?? ""; },
+});
+
+registerRow("settings-default-agent", {
+  getDefault: () => prefDefault("default_agent_id"), describe: () => tr("First agent in the list"),
+  read: () => $("settings-default-agent").value || null, write: (value) => { $("settings-default-agent").value = value ?? ""; },
 });
 
 // agent form (defaults come from GET /api/agents/defaults, generated from the configuration models)

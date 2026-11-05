@@ -248,7 +248,7 @@ def route_test(user_id: str, text: str, *, force: bool = False) -> int:
     decision = service.route_message(user_id, text)
     elapsed = (time.monotonic() - started) * 1000
     if decision is None:
-        print("No decision (see the log; Telegram would use the preferred agent).", file=sys.stderr)
+        print("No decision (see the log; Telegram would use the default agent).", file=sys.stderr)
         return 1
     print(f"model: {ORCHESTRATOR.model}")
     for agent_id, probability in decision.ranking:
@@ -257,7 +257,7 @@ def route_test(user_id: str, text: str, *, force: bool = False) -> int:
     verdict = "uncertain" if decision.uncertain else "confident"
     print(f"choice: {decision.agent_id}  confidence: {decision.confidence:.3f} ({verdict}, "
           f"threshold {ORCHESTRATOR.min_confidence})")
-    print(f"core agent: {decision.core_agent_id or '(none: preferred agent)'}")
+    print(f"core agent: {decision.core_agent_id or '(none: the default agent)'}")
     print(f"latency: {elapsed:.0f} ms total, {decision.latency_ms:.0f} ms API; cost: {decision.cost}")
     return 0
 

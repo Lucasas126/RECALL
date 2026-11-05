@@ -277,6 +277,11 @@ def _settings_main_view(
         (agent["name"] for agent in agents if agent["id"] == session.agent_id),
         message(language, "None"),
     )
+    default_id = service.default_agent(session.user_id)
+    default_name = next(
+        (agent["name"] for agent in agents if agent["id"] == default_id),
+        message(language, "None"),
+    )
     visible = message(language, "visible" if preferences["show_thinking"] else "hidden")
     languages = [
         _panel_button(panel, f"{'✅ ' if language == code else ''}{label}", f"lang:{code}")
@@ -292,8 +297,8 @@ def _settings_main_view(
         [_panel_button(panel, message(language, "Close"), "close")],
     ]
     return (
-        message(language, "Settings\n\nThinking: {visibility}\nAlerts/errors: {language}\nActive agent: {agent}\nDefault LLM: {llm}\nDefault STT: {stt}\n\nUser defaults are shared with the web. Chats with no selected model inherit them.",
-                visibility=visible, language=language.upper(), agent=agent_name,
+        message(language, "Settings\n\nThinking: {visibility}\nAlerts/errors: {language}\nActive agent: {agent}\nDefault agent: {default_agent}\nDefault LLM: {llm}\nDefault STT: {stt}\n\nUser defaults are shared with the web. Chats with no selected model inherit them.",
+                visibility=visible, language=language.upper(), agent=agent_name, default_agent=default_name,
                 llm=preferences["default_llm_model"], stt=preferences["default_stt_model"]),
         InlineKeyboardMarkup(keyboard),
     )
@@ -659,13 +664,15 @@ async def _reply_markdown(message, text: str) -> None:
 
 
 def _create_session_chat(session: TelegramSession, service: ChatService, agent_id: str | None = None) -> dict:
-    """Create a chat and point the session at it; `agent_id` (a user pick) also becomes the saved preference.
+    """Create a chat and point the session at it; `agent_id` (a user pick) also becomes the saved last used agent.
+
+    Without `agent_id` the chat is for the user's default agent (Settings > General); the last used agent is kept.
 
     Every path that changes the active agent goes through here, so the session never keeps a chat of the
     previous agent nor an empty chat id that a restart could resume from the old agent.
     """
     if agent_id is None:
-        agent_id = service.get_preferences(session.user_id)["agent_id"]
+        agent_id = service.default_agent(session.user_id)
         if agent_id is None:
             raise InputError("No agents are configured for this user.")
     else:
@@ -699,7 +706,7 @@ def _new_chat_text(
 
 
 async def _create_chat_now(update: Update, state: TelegramBotState, session: TelegramSession) -> None:
-    """Create a chat for the preferred agent and confirm it (the single-agent /newchat)."""
+    """Create a chat for the default agent and confirm it (the single-agent /newchat)."""
     try:
         chat = _create_session_chat(session, state.service)
     except (PreferencesError, ServiceError, ValueError, OSError) as exc:
@@ -914,9 +921,9 @@ async def _switch_auto_chat(session: TelegramSession, service: ChatService, reco
 async def _orchestrate(
     update: Update, context: ContextTypes.DEFAULT_TYPE, session: TelegramSession, record: _Reroute,
 ) -> None:
-    """Let the decision model pick the agent of a message that starts a new chat; any failure keeps the preferred one.
+    """Let the decision model pick the agent of a message that starts a new chat; any failure keeps the default one.
 
-    Confident pick: its chat answers after `grace_seconds`. Uncertain: the core (else preferred) agent answers after
+    Confident pick: its chat answers after `grace_seconds`. Uncertain: the core (else default) agent answers after
     `uncertain_grace_seconds` unless the user taps one of the top candidates. Only the text is sent to the router.
     """
     state: TelegramBotState = context.application.bot_data["state"]
@@ -936,7 +943,7 @@ async def _orchestrate(
             asyncio.to_thread(service.route_message, session.user_id, text), ORCHESTRATOR.timeout_seconds + 0.5,
         )
     except Exception as exc:  # includes the timeout: the router must never block or break the message
-        logger.warning("Telegram orchestrator unavailable (%s); using the preferred agent", type(exc).__name__)
+        logger.warning("Telegram orchestrator unavailable (%s); using the default agent", type(exc).__name__)
         return
     if not isinstance(decision, RouteDecision) or session.pending_reroute is not record:
         return
@@ -947,6 +954,7 @@ async def _orchestrate(
     if not decision.uncertain:
         target, candidates, grace = decision.agent_id, [], ORCHESTRATOR.grace_seconds
     else:
+        # the auto chat was created for the default agent (see _prepare_message_session)
         target = next((a for a in (decision.core_agent_id, record.auto_agent_id) if a in known), decision.agent_id)
         candidates = list(dict.fromkeys(ranking[:3]))
         if target not in candidates:

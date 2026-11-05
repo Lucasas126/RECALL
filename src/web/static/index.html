@@ -67,7 +67,10 @@
         <span id="disposable-banner-text"></span>
         <button id="disposable-convert" type="button"></button>
       </div>
-      <div id="messages" role="log" aria-live="polite" aria-relevant="additions"></div>
+      <div id="messages-wrap">
+        <div id="messages" role="log" aria-live="polite" aria-relevant="additions"></div>
+        <button id="jump-latest" type="button" class="icon-btn" title="Jump to latest" aria-label="Jump to latest" hidden><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button>
+      </div>
       <details id="usage" hidden><summary></summary><pre></pre></details>
       <form id="composer">
         <div id="chat-controls">
@@ -523,6 +526,17 @@
                   <option value="en">English</option>
                   <option value="es">Español</option>
                 </select>
+                <button type="button" class="icon-btn setting-reset">↺</button>
+              </div>
+              <p class="setting-default model-note"></p>
+            </div>
+            <div class="setting-row">
+              <div class="setting-main">
+                <label for="settings-default-agent" id="settings-default-agent-label">Default agent</label>
+                <p id="settings-default-agent-hint" class="model-note">Used for new chats when you do not pick an agent, and by the Telegram router when it is unsure (unless a core agent is set).</p>
+              </div>
+              <div class="setting-control">
+                <select id="settings-default-agent"></select>
                 <button type="button" class="icon-btn setting-reset">↺</button>
               </div>
               <p class="setting-default model-note"></p>

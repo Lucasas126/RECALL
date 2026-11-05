@@ -122,7 +122,7 @@ Telegram's `/settings` panel and the web composer both use it. See
 ### shared channel preferences
 
 `ChatService.get_preferences` and `update_preferences` expose user-scoped
-thinking visibility, notification language, a preferred agent and current
+thinking visibility, notification language, the last used and the default agent and current
 user-owned LLM/STT defaults.
 Overrides live in a validated configuration-side store, separate from user YAML
 and conversation sources. Reads bypass caches; updates merge under an

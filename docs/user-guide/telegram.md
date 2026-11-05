@@ -52,6 +52,9 @@ the active agent, creates a chat with it and closes the picker; Cancel changes
 nothing. With only one agent the chat is created directly. The confirmation
 (`New chat created with **Agent**.` and `Model: _Provider · model_ (Agent default)`)
 is formatted: bold agent name, italic model.
+A new chat started by the idle time (or a single-agent `/newchat`) uses your **default agent** (Settings > General; the
+first agent in your list when none is set), not the last agent you used. The `/settings` panel shows it as
+`Default agent`.
 When a message starts a new chat because of the idle time (not after
 `/newchat`, and not for the very first chat), the bot does not answer at once:
 it creates the new chat and sends a short message with two buttons,
@@ -79,14 +82,14 @@ runs in the middle of a conversation, nor for `/newchat` or `/selectagent`, whic
   **↩ Continue previous chat** (only when a previous chat exists) and **🔀 Other agent** (the full picker, as
   before). If you do nothing, the chosen agent answers after `grace_seconds` (default 8).
 - **Unsure pick** (greetings, vague or ambiguous messages): the default agent is your **core agent** (Settings >
-  *Core agent (used when unsure)*), or your preferred agent when none is set. The bot shows buttons for the three most
+  *Core agent (used when unsure)*), or your **default agent** (Settings > General) when none is set. The bot shows buttons for the three most
   likely agents (the default marked ⭐), then **↩ Continue previous chat** and **🔀 More agents**. Tap an agent to replay
   the message in a new chat with it; tap the ⭐ one to answer at once; do nothing and the default answers after
   `uncertain_grace_seconds` (default 20).
 - **First message ever**: routed and with buttons too, but without *Continue previous chat*.
-- A photo, audio or file without text (or caption) is not routed: it goes to the core agent, or to your preferred
+- A photo, audio or file without text (or caption) is not routed: it goes to the core agent, or to your default
   one.
-- It falls back silently to the old behaviour (your preferred agent, the usual buttons) when the orchestrator is
+- It falls back silently to the old behaviour (your default agent, the usual buttons) when the orchestrator is
   off, you have fewer than two agents, the API key is missing, or the router fails, times out
   (`timeout_seconds`, default 4) or answers with an agent you do not have. While it thinks the bot shows *typing*.
 

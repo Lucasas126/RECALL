@@ -6,10 +6,10 @@ across the top on narrow screens); only one section shows at a time.
 
 | Section | Settings |
 | --- | --- |
-| General | show model thinking; theme (this browser only, applied at once); language of alerts and errors |
+| General | show model thinking; theme (this browser only, applied at once); language of alerts and errors; **Default agent** (the agent new chats open with when you do not pick one, and the Telegram router's fallback when it is unsure and no core agent is set; empty means the first agent in your list) |
 | Models | default LLM model and default speech-to-text model (the model picker) |
 | Chats & memory | maximum associative memory matches (1-20); days to keep disposable chats (1-365) |
-| Telegram | choose the agent automatically (the orchestrator) and the core agent used when it is unsure |
+| Telegram | choose the agent automatically (the orchestrator) and the core agent used when it is unsure (empty: *Same as default agent*) |
 | Connections | your own account for each MCP server (see [MCP servers](mcp.md)); it has no Save button |
 
 ## defaults and reset
@@ -19,7 +19,7 @@ and the allowed range) and a **↺** button (*Reset to default*) enabled only wh
 by `GET /api/preferences` in a `defaults` object; see the [preferences API](../reference/user-yaml.md#preferences-api).
 
 A setting you never changed is stored as nothing, and a reset stores nothing again: it saves `null` for the associative matches, the
-disposable days, the orchestrator switch, the core agent and the default models, so they keep following the application (or your
+disposable days, the orchestrator switch, the default agent, the core agent and the default models, so they keep following the application (or your
 `user.yaml` models) if the default changes later. Theme, language and show model thinking always hold a value, so a reset puts the
 default value back. The theme is kept in the browser and applies immediately; the other settings are applied by **Save settings**.
 
