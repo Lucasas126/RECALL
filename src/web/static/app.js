@@ -1556,7 +1556,8 @@ async function refreshChats() {
     ...chats.map((chat) => {
       const li = document.createElement("li");
       li.classList.toggle("active", chat.id === state.chatId && chat.agent_id === state.agentId);
-      const generating = isGenerating(chat.agent_id, chat.id);
+      const generating = isGenerating(chat.agent_id, chat.id) || Boolean(chat.active);
+      li.dataset.active = String(Boolean(chat.active));
       li.classList.toggle("generating", generating);
       const meta = document.createElement("div");
       meta.className = "chat-meta";
@@ -1745,6 +1746,8 @@ async function openChat(chatId) {
   } else {
     forgetApprovals(agentId, chatId);
     renderMessages(data.messages);
+    // a reply started elsewhere (another tab, an earlier page load) is still running: replay it and follow it live
+    if (data.chat.active) followReply(agentId, chatId);
   }
   updateBusy();
   syncApprovals(agentId, chatId);
@@ -2211,7 +2214,7 @@ function updateBusy() {
   }
   for (const li of $("chat-list").querySelectorAll("li")) {
     const del = li.querySelector(".del");
-    li.classList.toggle("generating", Boolean(del) && isGenerating(del.dataset.agent, del.dataset.chat));
+    li.classList.toggle("generating", Boolean(del) && (isGenerating(del.dataset.agent, del.dataset.chat) || li.dataset.active === "true"));
   }
   setComposer(Boolean(state.chatId));
   updateEditButtons();
@@ -3285,6 +3288,11 @@ async function streamReply(content, attachments, request, editIndex = null) {
     throw httpError(body, res.status);
   }
 
+  await readEvents(res, request);
+}
+
+// Feeds the SSE frames of a response into the request's reply until the stream ends.
+async function readEvents(res, request) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -3305,6 +3313,82 @@ async function streamReply(content, attachments, request, editIndex = null) {
     }
   } finally {
     reader.releaseLock();
+  }
+}
+
+// What to do once a followed reply's stream ended: "stop" (nothing to redraw), "reload" (show the saved chat)
+// or "follow" (a new message steered the reply and another run started).
+function afterFollow({ outcome, current, generating, active, attempt }) {
+  if (!current || generating || outcome === "failed" || outcome === "aborted") return "stop";
+  return active && attempt < 5 ? "follow" : "reload";
+}
+
+// Attaches to a reply that runs without a request of this page (another tab, a page load, a reload): the server
+// replays what it produced so far and then streams the rest. Leaving the chat never stops the reply or this reader.
+async function followReply(agentId, chatId, attempt = 0) {
+  const key = chatKey(agentId, chatId);
+  const reply = addMessage("assistant", state.view);
+  const note = element("div", { className: "generating-note", textContent: tr("Generating…") });
+  note.setAttribute("role", "status");
+  reply.el.append(note);
+  const request = {
+    userId: state.user.id, agentId, chatId, session: state.session, controller: new AbortController(), reply,
+    generationId: null, done: false, follower: true,
+  };
+  state.requests.add(request);
+  state.views.set(key, state.view);
+  state.latest = request;
+  updateBusy();
+  let outcome = "ended";
+  try {
+    const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/chats/${encodeURIComponent(chatId)}/stream`, {
+      headers: { "Accept-Language": state.preferences?.language ?? "en" }, signal: request.controller.signal,
+    });
+    if (res.status === 401) {
+      if (sameSession(request)) showLogin();
+      throw new Error(tr("not logged in"));
+    }
+    if (!res.ok) throw httpError(await res.json().catch(() => ({})), res.status);
+    if (res.status !== 204) await readEvents(res, request);
+  } catch (err) {
+    request.controller.abort();
+    if (err.name === "AbortError") outcome = "aborted";
+    else {
+      outcome = "failed";
+      if (sameSession(request)) reply.error(err);
+    }
+  } finally {
+    note.remove();
+    state.requests.delete(request);
+  }
+  if (!sameSession(request) || outcome === "aborted") return;
+  syncApprovals(agentId, chatId);
+  if (isGenerating(agentId, chatId)) return;
+  if (!isCurrent(request)) {
+    state.views.delete(key);
+    state.usages.delete(key);
+  }
+  updateBusy();
+  try {
+    await refreshChats();
+    if (request.errored) return; // keep the error card visible
+    if (afterFollow({ outcome, current: isCurrent(request), generating: false, active: false, attempt }) === "stop") return;
+    // the run is over: show the saved chat, or follow the next run when a new message steered this one
+    const data = await api(chatsUrl(`/${chatId}`));
+    const next = afterFollow({
+      outcome, current: isCurrent(request), generating: isGenerating(agentId, chatId), active: data.chat.active, attempt,
+    });
+    if (next === "stop") return;
+    forgetApprovals(agentId, chatId);
+    renderMessages(data.messages);
+    if (next === "follow") followReply(agentId, chatId, attempt + 1);
+    else {
+      updateBusy();
+      syncApprovals(agentId, chatId);
+      $("input").focus();
+    }
+  } catch (err) {
+    if (isCurrent(request)) reply.error(err);
   }
 }
 
@@ -3330,10 +3414,13 @@ function handleEvent(raw, request) {
   else if (event === "tool") reply.action(payload);
   else if (event === "memory") reply.memory(payload);
   else if (event === "notice") reply.notice(payload);
-  else if (event === "approval") reply.approval(payload);
+  else if (event === "approval") reply.approval({ agent_id: request.agentId, chat_id: request.chatId, ...payload });
   else if (event === "approval_resolved") settleApproval(payload);
   else if (event === "interrupted") reply.interrupted(payload);
-  else if (event === "error") reply.error(payload);
+  else if (event === "error") {
+    request.errored = true;
+    reply.error(payload);
+  }
   else if (event === "done") {
     reply.settleMemory();
     request.done = true;

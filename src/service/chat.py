@@ -206,6 +206,67 @@ class ChatEvent:
     generation_id: str = ""
 
 
+_REPLAY_MAX_EVENTS = 5000  # replay history kept per run; older events fall off first
+_MERGED_KINDS = ("reasoning", "text")
+
+
+class _RunFeed:
+    """Fan-out of one reply's events: every subscriber gets the whole history, then the live events.
+
+    Each subscriber has its own queue, so the web request that started the reply and any viewer that
+    attaches later (another tab, a reload) never steal events from each other. The history merges
+    consecutive reasoning/text chunks and is bounded; it is dropped with the run.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._history: list[ChatEvent | Exception] = []
+        self._subscribers: list[SimpleQueue] = []
+        self._closed = False
+
+    def put(self, item: ChatEvent | Exception | None) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            if item is None:
+                self._closed = True
+            else:
+                self._remember(item)
+            for queue in self._subscribers:
+                queue.put(item)
+            if item is None:
+                self._subscribers.clear()
+
+    def _remember(self, item: ChatEvent | Exception) -> None:
+        last = self._history[-1] if self._history else None
+        if (
+            isinstance(item, ChatEvent) and isinstance(last, ChatEvent) and item.kind in _MERGED_KINDS
+            and last.kind == item.kind and last.generation_id == item.generation_id
+        ):
+            self._history[-1] = ChatEvent(item.kind, last.text + item.text, generation_id=item.generation_id)
+            return
+        self._history.append(item)
+        if len(self._history) > _REPLAY_MAX_EVENTS:
+            del self._history[0]
+
+    def subscribe(self) -> SimpleQueue:
+        """A queue holding the history so far, then live events; `None` ends it."""
+        queue: SimpleQueue = SimpleQueue()
+        with self._lock:
+            for item in self._history:
+                queue.put(item)
+            if self._closed:
+                queue.put(None)
+            else:
+                self._subscribers.append(queue)
+        return queue
+
+    def unsubscribe(self, queue: SimpleQueue) -> None:
+        with self._lock:
+            if queue in self._subscribers:
+                self._subscribers.remove(queue)
+
+
 @dataclass
 class _MessageRun:
     chat_id: str
@@ -215,7 +276,7 @@ class _MessageRun:
     continuation: bool = False
     generation_id: str = field(default_factory=lambda: uuid4().hex)
     cancellation: CancellationToken = field(default_factory=CancellationToken)
-    events: SimpleQueue[ChatEvent | Exception | None] = field(default_factory=SimpleQueue)
+    events: _RunFeed = field(default_factory=_RunFeed)
 
 
 class _AgentSlot:
@@ -692,7 +753,11 @@ class ChatService:
         with slot.state:
             conversations.prune_empty(self._kept_chats(slot, keep))
         days = self._retention_days(user_id)
-        summaries = [conversations.summary(chat_id, days) for chat_id in conversations.chats()]
+        with slot.state:
+            busy = {chat_id for chat_id in conversations.chats() if self._chat_busy(slot, chat_id)}
+        summaries = [
+            {**conversations.summary(chat_id, days), "active": chat_id in busy} for chat_id in conversations.chats()
+        ]
         return sorted(summaries, key=lambda s: s["updated"], reverse=True)
 
     def list_all_chats(self, user_id: str, keep: Optional[str] = None) -> list[dict]:
@@ -904,7 +969,11 @@ class ChatService:
             if t.get("role") in ("user", "assistant")
         ]
         return {
-            "chat": conversations.summary(chat_id, self._retention_days(user_id)), "messages": messages,
+            "chat": {
+                **conversations.summary(chat_id, self._retention_days(user_id)),
+                "active": self.chat_active(user_id, agent_id, chat_id),
+            },
+            "messages": messages,
             **self.get_chat_models(user_id, agent_id, chat_id),
         }
 
@@ -1124,7 +1193,7 @@ class ChatService:
                                 raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from e
                             slot.agents.pop(chat_id, None)  # its context still holds the removed turns
                     self._enqueue(user_id, agent_id, slot, chat_id, run)
-                    return self._events(run)
+                    return self._events(run, run.events.subscribe())
             if monotonic() > deadline:
                 raise AgentBusy("the chat is still replying; try again in a moment")
             sleep(0.02)
@@ -1361,14 +1430,36 @@ class ChatService:
         return "\n\n".join(blocks), remaining
 
     @staticmethod
-    def _events(run: _MessageRun) -> Iterator[ChatEvent]:
-        while True:
-            event = run.events.get()
-            if event is None:
-                return
-            if isinstance(event, Exception):
-                raise event
-            yield event
+    def _events(run: _MessageRun, queue: SimpleQueue) -> Iterator[ChatEvent]:
+        """Yield one subscriber's events; closing it only unsubscribes, the reply keeps running."""
+        try:
+            while True:
+                event = queue.get()
+                if event is None:
+                    return
+                if isinstance(event, Exception):
+                    raise event
+                yield event
+        finally:
+            run.events.unsubscribe(queue)
+
+    def follow(self, user_id: str, agent_id: str, chat_id: str) -> Iterator[ChatEvent] | None:
+        """Attach to the chat's running reply: replay what it produced so far, then follow it live.
+
+        Returns None when no reply is running (or queued) for the chat. The iterator ends when the
+        reply does; abandoning it never cancels the reply.
+        """
+        self._owned_agent(user_id, agent_id)
+        self._require_chat(self._conversations(user_id, agent_id), chat_id)
+        slot = self._slot(user_id, agent_id)
+        with slot.state:
+            run = slot.active.get(chat_id)
+            if run is None:
+                queued = slot.pending.get(chat_id)
+                run = queued[-1] if queued else None
+            if run is None:
+                return None
+            return self._events(run, run.events.subscribe())
 
     def _work(self, user_id: str, agent_id: str, slot: _AgentSlot, chat_id: str) -> None:
         while True:

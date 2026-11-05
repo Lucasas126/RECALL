@@ -239,6 +239,7 @@ _SPANISH = {
     "This removes the message after it.": "Esto elimina el mensaje posterior.",
     "This removes the {count} messages after it.": "Esto elimina los {count} mensajes posteriores.",
     "Interrupted by a new message": "Interrumpido por un mensaje nuevo",
+    "Generating…": "Generando…",
     "Response stream ended before completion": "La transmisión de la respuesta ha terminado antes de completarse.",
     "Generation changed within a response": "La generación ha cambiado durante una respuesta.",
     "{name}: only image, video, audio and PDF files are supported": "{name}: solo se admiten archivos de imagen, vídeo, audio y PDF.",

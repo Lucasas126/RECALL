@@ -8,7 +8,7 @@ from typing import AsyncIterator, Iterator, Literal, Optional
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.middleware.sessions import SessionMiddleware
@@ -99,6 +99,26 @@ class ApprovalIn(BaseModel):
 def _sse(event: str, data, generation_id: str = "") -> str:
     event_id = f"id: {generation_id}\n" if generation_id else ""
     return f"{event_id}event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _event_stream(events, language: str, user_id: str, agent_id: str, chat_id: str) -> Iterator[str]:
+    """Format a reply's events as SSE; failures are reported in-band and `done` always closes the stream."""
+    generation_id = ""
+    try:
+        for event in events:
+            generation_id = event.generation_id
+            if event.kind == "interrupted":
+                data = {"content": event.text, **(event.data or {})}
+            else:
+                data = (
+                    event.data if event.kind in ("tool", "memory", "approval", "approval_resolved")
+                    else event.text
+                )
+            yield _sse(event.kind, data, generation_id)
+    except Exception as e:  # the response has started: report the failure in-band
+        logger.exception("reply failed for %s/%s/%s", user_id, agent_id, chat_id)
+        yield _sse("error", _error_payload(language, e), generation_id)
+    yield _sse("done", "", generation_id)
 
 
 def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Optional[bool] = None) -> FastAPI:
@@ -468,26 +488,19 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
             rewind_to=body.edit_index,
         )
 
-        def stream() -> Iterator[str]:
-            generation_id = ""
-            try:
-                for event in events:
-                    generation_id = event.generation_id
-                    if event.kind == "interrupted":
-                        data = {"content": event.text, **(event.data or {})}
-                    else:
-                        data = (
-                            event.data if event.kind in ("tool", "memory", "approval", "approval_resolved")
-                            else event.text
-                        )
-                    yield _sse(event.kind, data, generation_id)
-            except Exception as e:  # the response has started: report the failure in-band
-                logger.exception("reply failed for %s/%s/%s", user_id, agent_id, chat_id)
-                yield _sse("error", _error_payload(language, e), generation_id)
-            yield _sse("done", "", generation_id)
-
         return StreamingResponse(
-            stream(), media_type="text/event-stream",
+            _event_stream(events, language, user_id, agent_id, chat_id), media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    @app.get("/api/agents/{agent_id}/chats/{chat_id}/stream")
+    def follow_reply(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):
+        language = service.language(user_id)
+        events = service.follow(user_id, agent_id, chat_id)
+        if events is None:
+            return Response(status_code=204)  # no reply is running: the saved chat is complete
+        return StreamingResponse(
+            _event_stream(events, language, user_id, agent_id, chat_id), media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
