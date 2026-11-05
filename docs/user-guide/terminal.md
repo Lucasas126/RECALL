@@ -255,6 +255,15 @@ Nobody can answer when there is no attached client, so the policy never waits: w
 with `smart` normal actions run and dangerous ones are denied; with `off` everything except the hardline runs. The mode is
 that of the backend the call targets. The denial text tells the model so. This applies to runs without an interactive client and to dream sessions.
 
+## subagent workers
+
+An agent with the `delegate` group can grant a [worker task](delegation.md#terminal-and-approvals) some of its backends (`task_start(backends=[...])`).
+For the worker those backends are always on `manual`, whatever mode the agent has for them (`off` and `smart` become `manual`, `local` included),
+and it only gets backends the agent itself has. Hardline rules, dangerous-command detection and protected paths apply unchanged. The approval card
+is shown in the chat that launched the task (web card or Telegram message), labelled *Task <title> (ephemeral) wants to run:*, and answering it
+resumes the worker; the task's timeout is paused while it waits. A worker run nobody watches follows the [unattended](#unattended-runs) rules:
+`manual` and dangerous actions are denied. The audit records those commands under the agent like any other.
+
 ## dream mode
 
 [Dream](dream.md) sessions get the terminal only when **both** the agent's `terminal.allow_in_dream` is `true` **and**

@@ -105,4 +105,15 @@ The `delegate` tool group (phases 1 and 2a of the [subagents design](../project/
   ignored, listeners must not block. Events: `task_started` (`task_id`, `agent_id`, `chat_id` of the parent, `status`, `followup` for a task_send), `task_finished` (`status`, `reason`),
   `task_wake` (`chat_id`, `agent_id`, `task_ids`: a wake generation was queued; attach to it with `ChatService.follow`) and `task_orphaned` (`task_ids`). The web and Telegram layers
   subscribe to these in later tasks (task cards, a push of the wake reply); nothing in phase 2a does.
-- **Not built yet** (later phases): web/Telegram task cards, terminal grants and their approvals, other agents as workers, cross-process commands.
+- **Terminal grants and approvals (phase 3).** `task_start(backends=[...])`: `TaskManager.launch` checks the names against `grantable_backends` (the parent's own `terminal.backends`, only with the
+  `terminal` group; `delegate.granted_backends`), adds `terminal` to the task's groups and records `grant.backends`; the `ChatTask` mark also stores `backends`, `title` and `unattended`. `Agent._become_worker`
+  narrows its copy of the config to those backends with every `approvals` forced to `manual` (so a child never has `off`/`smart`, `local` included) and `build_tools(worker_terminal=True)` keeps the terminal
+  group in the otherwise disposable chat (`Agent._blocked_tools`: "excluded from learning" is separate from "tools blocked"; memory/self/folder-edit/`delegate` stay blocked). `TerminalSession.decide`
+  is unchanged except for the routing: `ChatService._work` calls `TaskManager.bind_worker(context, mark)` for a task chat, which sets `RunContext.approval_target` (parent agent and chat),
+  `task` (id, title, kind, worker: the attribution put in the approval payload), `approval_emit` (task events `task_approval` / `task_approval_resolved` for the parent chat, with `agent_id`, `chat_id`,
+  `task_id`, `data`), `approval_wait` (pauses `_LiveTask.active_seconds`, which the watchdog compares with the timeout) and `interactive = not mark.unattended`. `ApprovalBroker.request` keys the
+  pending approval by (user, parent agent, parent chat), so `ChatService.list_approvals`/`resolve_approval` and the owner check work unchanged; `pending_for_task` feeds `awaiting_approval` in
+  `TaskManager.view` (task card and `/tasks`). The web polls the chat's approvals while a task with backends runs (`taskPoll` → `syncApprovals`); Telegram handles the two task events in
+  `_handle_task_event` and registers the card under the parent chat. Approvals are shown only in the channel of the parent chat (no relay between channels). Unattended (`interactive=False`, for phase 7):
+  the existing policy denies `manual` and dangerous, `smart` stays auto.
+- **Not built yet** (later phases): other agents as workers, cross-process commands.

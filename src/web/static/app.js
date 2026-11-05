@@ -3198,7 +3198,20 @@ function thinkingSegment() {
 
 // ---- task cards: pure helpers (loaded without the DOM by tests/test_task_cards.cjs)
 const TASK_FINAL = ["done", "failed", "cancelled", "timed_out"];
-const TASK_STATUS_LABELS = { running: "Running", done: "Done", failed: "Failed", cancelled: "Cancelled", timed_out: "Timed out" };
+const TASK_STATUS_LABELS = { running: "Running", done: "Done", failed: "Failed", cancelled: "Cancelled", timed_out: "Timed out", awaiting_approval: "Awaiting approval" };
+
+// The line above the command of an approval asked by a subagent task: "Task <title> (ephemeral|<agent>) wants to run:".
+// `translate` (tr in the page) maps the English template and its values to the user's language; '' for a normal approval.
+function approvalTaskLabel(approval, translate = (template, values) => template.replace(/\{(\w+)\}/g, (_, key) => values[key])) {
+  const task = approval?.task;
+  if (!task || typeof task !== "object" || !task.id) return "";
+  return translate("Task {title} ({worker}) wants to run:", { title: String(task.title || task.id), worker: String(task.worker || "ephemeral") });
+}
+
+// The status a task card shows: a running task whose worker waits for the user's approval says so.
+function taskDisplayStatus(record) {
+  return record?.status === "running" && Number(record?.awaiting_approval) > 0 ? "awaiting_approval" : (record?.status ?? "");
+}
 
 function taskIsFinal(status) {
   return TASK_FINAL.includes(status);
@@ -3267,7 +3280,8 @@ function taskCardState(record, action, nowMs, listed = false) {
     target: kind === "agent" && agent ? agent : "",
     ephemeral: !(kind === "agent" && agent),
     status,
-    statusLabel: taskStatusLabel(status),
+    statusLabel: taskStatusLabel(taskDisplayStatus(record) || status),
+    awaitingApproval: taskDisplayStatus(record) === "awaiting_approval",
     elapsed: formatElapsed(taskElapsed(record, nowMs)),
     tokens: (record?.usage?.in ?? 0) + (record?.usage?.out ?? 0),
     running,
@@ -3413,7 +3427,7 @@ function refreshTaskCard(card) {
   card.classList.toggle("failed", view.status === "failed");
   parts.title.textContent = view.title;
   parts.target.textContent = view.ephemeral ? tr("ephemeral") : view.target;
-  parts.badge.className = `task-badge ${view.status}`;
+  parts.badge.className = `task-badge ${view.awaitingApproval ? "awaiting_approval" : view.status}`;
   parts.badge.textContent = view.elapsed ? `${tr(view.statusLabel)} · ${view.elapsed}` : tr(view.statusLabel);
   parts.tokens.textContent = view.tokens ? tr("{count} tokens", { count: view.tokens }) : "";
   const text = view.result || view.error || (view.running ? "" : tr("No result"));
@@ -3486,6 +3500,8 @@ async function taskPoll() {
         for (const task of data.tasks) taskRecords.set(task.id, task);
         taskListed = chatKey(agentId, chatId);
         refreshTaskCards();
+        // a worker with a terminal grant asks its approvals in this chat: list them so the cards appear (and close)
+        if (data.tasks.some((task) => !taskIsFinal(task.status) && (task.backends?.length || task.awaiting_approval))) syncApprovals(agentId, chatId);
         again = tasksNeedPolling(data) || (data.tasks.length > 0 && data.active);
         if (!wakeAttaching && shouldAttachWake({ active: data.active, generating: isGenerating(agentId, chatId), current })) {
           await attachWake(agentId, chatId);
@@ -3653,7 +3669,9 @@ function buildApprovalCard(entry) {
   // focusable so a long command can be scrolled with the keyboard
   const command = make("pre", "approval-command", approval.command ?? "");
   command.tabIndex = 0;
-  detail.append(head, command);
+  const attribution = approvalTaskLabel(approval, tr);
+  if (attribution) detail.append(head, make("p", "approval-task", attribution), command);
+  else detail.append(head, command);
   card.append(summary, detail);
   for (const [label, value] of [[tr("Working directory"), approval.cwd], [tr("Reason"), approval.reason]]) {
     if (!value) continue;

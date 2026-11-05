@@ -769,6 +769,10 @@ _SPANISH = {
     "Unknown task: {id}. /tasks lists the tasks of this chat.": "Tarea desconocida: {id}. /tasks lista las tareas de este chat.",
     "This task is not available.": "Esta tarea no está disponible.",
     "Task {id}: {status}": "Tarea {id}: {status}",
+    # subagents (approvals)
+    "Task {title} ({worker}) wants to run:": "La tarea {title} ({worker}) quiere ejecutar:",
+    "Awaiting approval": "Esperando aprobación",
+    "status: awaiting approval": "estado: esperando aprobación",
 }
 
 

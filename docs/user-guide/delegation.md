@@ -1,7 +1,7 @@
 # Delegating tasks to a worker
 
-> **Status: phases 1 and 2a of the [subagents design](../project/design-subagents.md) (backend).** Tasks run in the background while the agent keeps talking, and a
-> finished task wakes the agent. Task cards in the web interface and Telegram, terminal access for workers and other agents as workers are planned and **not built yet**.
+> **Status: phases 1 to 3 of the [subagents design](../project/design-subagents.md).** Tasks run in the background while the agent keeps talking, a
+> finished task wakes the agent, and a worker can use the terminal with your approval of every command. Other agents as workers and cross-process control are planned and **not built yet**.
 
 The `delegate` tool group gives an agent `task_start` and six tools to manage tasks (`task_list`, `task_result`, `task_steer`, `task_send`, `task_stop`,
 `task_wait`). The agent writes a self-contained goal, the context the worker needs and the worker's own system prompt (`instructions`), and `task_start`
@@ -47,14 +47,35 @@ without the group.
 ## What a worker is
 
 - **No inherited persona.** The agent writes the worker's system prompt through `instructions`; the worker does not get the agent's SOUL, memory,
-  skills, files, MCP services or the terminal, and it cannot ask you questions.
+  skills, files or MCP services, and it cannot ask you questions. It has the terminal only if the agent grants it backends (see
+  [terminal and approvals](#terminal-and-approvals)).
 - **Same provider and model as the chat that launched it**, unless the agent names another model (checked like a chat's own model choice,
   including the zero-data-retention rule). Reasoning effort follows the launching chat too.
 - **Tools only by grant.** By default none. The agent may grant `web` (web search), and only if it has the group itself and `delegation.allowed_groups`
-  allows it. Memory, folders, the terminal, MCP and `delegate` can never be granted, so a worker cannot do more than its parent and cannot launch tasks (depth 1).
+  allows it. Memory, folders, MCP and `delegate` can never be granted, and the terminal only through `backends`, so a worker cannot do more than its parent and cannot launch tasks (depth 1).
 - **A hidden chat.** The worker's conversation is a chat file of the launching agent, marked as a task chat: it is not in the chat list, is never the
   "latest chat", is not pruned while empty, is not reviewed by Dream and not indexed, and is removed after the disposable-chat retention
   period. A disposable chat cannot launch tasks.
+
+## Terminal and approvals
+
+`task_start` takes `backends`: the [terminal backends](terminal.md#backends) to hand to the worker. Naming a backend grants the worker the
+terminal tools (`terminal` and the `sandbox_*` tools) for those backends only; it is possible only if the agent has the `terminal` group
+and the backend itself, so a worker never gets a backend its parent lacks.
+
+- **Always `manual`.** Whatever the parent's mode for that backend (`off`, `smart` or `manual`, `local` included), every command the worker runs
+  needs your approval. Hardline rules, dangerous-command detection and [protected paths](terminal.md#protected-paths-local-backend) apply unchanged:
+  a protected path is refused on `local` in every case, without asking.
+- **The card appears in the chat that launched the task**, not in the worker's hidden chat: in the web interface (live, and again after a reload),
+  or as a Telegram message in the agent's Telegram chat. It says which task asks: *Task Check the logs (ephemeral) wants to run:*, followed by
+  the command, backend, working directory and reason. Only the owner can answer; approving resumes the worker, denying makes it report the refusal.
+  An approval is shown in the channel of the launching chat only: it is not relayed to the other channel.
+- **The clock stops while you decide.** The task's 10-minute timeout does not run while a command waits for you. An approval nobody answers is
+  denied after the usual approval timeout (5 minutes by default), as for any chat.
+- **Awaiting approval.** A task card shows *Awaiting approval* while its worker waits for you, and Telegram `/tasks` says *awaiting approval*.
+- **No unattended asking.** A worker run that nobody watches (not launched from a chat) never asks: `manual` and dangerous actions are
+  denied. Tasks launched from a chat are always attended.
+- **Still no memory.** A worker with the terminal stays out of Dream and indexing and never gets memory, self, folder-edit or `delegate` tools.
 
 ## Limits
 
@@ -104,4 +125,5 @@ When a task is launched from a Telegram chat (or from the chat Telegram currentl
 - `/task <id>`: status and result of a task (capped at 1500 characters).
 - `/task <id> <text>`: corrects a running task; its current generation is interrupted, the partial reply is kept and your text is appended.
 
-Only the user the task belongs to can stop or correct it. The bot only sees tasks that run in its own process, so a task started from the web UI is managed there.
+When a worker with a terminal grant needs approval, the bot sends it to the agent's Telegram chat with the usual **Approve** / **Deny** buttons and the
+line *Task <title> (ephemeral) wants to run:*; the message closes with the outcome. Only the user the task belongs to can stop, correct or approve. The bot only sees tasks that run in its own process, so a task started from the web UI is managed there.

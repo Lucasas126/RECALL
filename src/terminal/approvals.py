@@ -72,9 +72,14 @@ class ApprovalBroker:
     # ---------------------------------------------------------------- asking
     def request(
         self, user_id: str, agent_id: str, chat_id: str, run: Any, tool: str, command: str, cwd: str,
-        reason: str, risk: Risk, *, backend: str = "", timeout_seconds: float | None = None,
+        reason: str, risk: Risk, *, backend: str = "", timeout_seconds: float | None = None, task: dict | None = None,
     ) -> Outcome:
-        """Emit an approval event and block until it is decided; `run` has `.emit(kind, data)` and `.cancellation`."""
+        """Emit an approval event and block until it is decided; `run` has `.emit(kind, data)` and `.cancellation`.
+
+        `agent_id`/`chat_id` are the chat that shows the card: for a subagent task's run, its PARENT chat, with `task`
+        (id, title, kind, worker) attributing the request. A run may route its events elsewhere (`approval_emit`) and
+        be told while it waits (`approval_wait`), which a task uses to pause its wall-clock timeout.
+        """
         timeout = self.timeout_seconds if timeout_seconds is None else timeout_seconds
         approval_id = uuid4().hex[:12]
         now = time.time()
@@ -83,22 +88,31 @@ class ApprovalBroker:
             "timeout_seconds": int(timeout), "expires_at": now + timeout, "chat_id": chat_id, "agent_id": agent_id,
             "backend": backend,
         }
+        if task:
+            payload["task"] = dict(task)
         item = _Pending(approval_id, user_id, agent_id, chat_id, payload, run)
         with self._lock:
             if self._shutdown:
                 return Outcome(False, "service shutdown")
             self._pending[approval_id] = item
+        waiting = getattr(run, "approval_wait", None)
+        if waiting is not None:
+            _safe(waiting, True)
         try:
-            run.emit("approval", dict(payload))
-        except Exception:  # an unreachable client is the same as nobody answering
-            logger.exception("could not deliver approval %s", approval_id)
-        deadline = time.monotonic() + timeout
-        cancellation = getattr(run, "cancellation", None)
-        while not item.event.wait(_POLL_SECONDS):
-            if cancellation is not None and _is_cancelled(cancellation):
-                self._close(item, Outcome(False, "cancelled"))
-            elif time.monotonic() >= deadline:
-                self._close(item, Outcome(False, "timed out"))
+            try:
+                _emitter(run)("approval", dict(payload))
+            except Exception:  # an unreachable client is the same as nobody answering
+                logger.exception("could not deliver approval %s", approval_id)
+            deadline = time.monotonic() + timeout
+            cancellation = getattr(run, "cancellation", None)
+            while not item.event.wait(_POLL_SECONDS):
+                if cancellation is not None and _is_cancelled(cancellation):
+                    self._close(item, Outcome(False, "cancelled"))
+                elif time.monotonic() >= deadline:
+                    self._close(item, Outcome(False, "timed out"))
+        finally:
+            if waiting is not None:
+                _safe(waiting, False)
         return item.outcome or Outcome(False, "cancelled")
 
     # ---------------------------------------------------------------- answering
@@ -143,7 +157,7 @@ class ApprovalBroker:
                 "risk": item.payload["risk"], "decision": outcome.status, "reason": outcome.reason,
             })
         try:  # tell every client before the tool thread resumes
-            item.run.emit("approval_resolved", {"id": item.id, "decision": outcome.status, "reason": outcome.reason})
+            _emitter(item.run)("approval_resolved", {"id": item.id, "decision": outcome.status, "reason": outcome.reason})
         except Exception:
             logger.exception("could not deliver the resolution of approval %s", item.id)
         item.event.set()
@@ -154,6 +168,12 @@ class ApprovalBroker:
         with self._lock:
             return [dict(p.payload) for p in self._pending.values()
                     if p.user_id == user_id and p.agent_id == agent_id and p.chat_id == chat_id]
+
+    def pending_for_task(self, user_id: str, task_id: str) -> int:
+        """How many approvals a subagent task is waiting on right now."""
+        with self._lock:
+            return sum(1 for p in self._pending.values()
+                       if p.user_id == user_id and (p.payload.get("task") or {}).get("id") == task_id)
 
     def get(self, approval_id: str) -> dict | None:
         with self._lock:
@@ -171,6 +191,18 @@ class ApprovalBroker:
             items = list(self._pending.values())
         for item in items:
             self._close(item, Outcome(False, "service shutdown"))
+
+
+def _emitter(run: Any):
+    """Where a run's approval events go: its `approval_emit` (a task's parent chat) or its own stream."""
+    return getattr(run, "approval_emit", None) or run.emit
+
+
+def _safe(callback, value: bool) -> None:
+    try:
+        callback(value)
+    except Exception:
+        logger.exception("approval wait callback failed")
 
 
 def _is_cancelled(token: Any) -> bool:

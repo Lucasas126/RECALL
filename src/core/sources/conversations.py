@@ -104,6 +104,9 @@ class ChatTask(BaseModel):
     depth: int = 1
     groups: list[str] = Field(default_factory=list)  # the tool groups the worker was granted
     instructions: str = ""  # the worker's system prompt, written by the parent
+    backends: list[str] = Field(default_factory=list)  # terminal backends granted (always manual); "terminal" is then in groups
+    title: str = ""  # the task's title, for attributing its approvals in the parent chat
+    unattended: bool = False  # nobody watches: manual and dangerous actions are denied (phase 7 launches these)
     created_at: str = ""
 
 

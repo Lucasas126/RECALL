@@ -1669,6 +1669,8 @@ class ChatService:
                 lambda kind, data, run=run: run.events.put(ChatEvent(kind, data=data, generation_id=run.generation_id)),
                 run.cancellation, tasks=self._tasks,
             )
+            if (mark := self._conversations(user_id, agent_id).task_mark(chat_id)) is not None:
+                self._tasks.bind_worker(context, mark)  # a worker's approvals are asked in its parent's chat
             try:
                 with run_context(context):
                     for event in self._run(user_id, agent_id, slot, run):

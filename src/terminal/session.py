@@ -105,9 +105,12 @@ class TerminalSession:
         if mode == "smart" and not dangerous:
             return True, "", "auto:smart"
         risk = "dangerous" if dangerous else "manual"
+        # a subagent task's run is answered in its parent's chat, attributed to the task
+        target_agent, target_chat = run.approval_target or (self.agent_id, run.chat_id)
         outcome = run.broker.request(
-            self.user_id, self.agent_id, run.chat_id, run, tool, display, cwd,
+            self.user_id, target_agent, target_chat, run, tool, display, cwd,
             assessment.reason or ("approvals are set to manual" if mode == "manual" else ""), risk, backend=self.name,
+            task=run.task,
         )
         if outcome.reason == "cancelled" and run.cancellation is not None:
             run.cancellation.raise_if_cancelled()  # the user interrupted: end the turn, not just this tool
