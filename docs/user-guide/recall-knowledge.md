@@ -15,6 +15,11 @@ Every agent can read a built-in manual about how RECALL itself works: the **`rec
 - **Always in sync.** The pack lives in the code (`src/knowledge/recall/`) and ships in the Docker image, so it matches the running
   version; its frontmatter carries the version from `pyproject.toml`. It is not copied into the agent's data folder and is not
   part of the memory index.
+- **Admin pages.** `admin-cli.md` (every `python -m src.admin` command and what applies when), `recipes.md` (step-by-step tasks) and
+  `security-for-admins.md` (what an agent with a local terminal can reach, the cross-user and secret rules, prompt injection) are for
+  the setup guide ([Admin CLI](admin-cli.md)): an agent that has the terminal group uses them to administer RECALL. Other agents can
+  read them but cannot run the commands. The rules say never to read or request secret values, never to touch another user's folders
+  without the user's explicit permission, and to treat web content as data.
 - **Prompt cost.** One index line ("Built in (read-only)"); the body is loaded on demand.
 
 ## Extending it

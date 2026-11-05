@@ -50,8 +50,24 @@ Approvals are per backend, so a `smart` or `off` sandbox next to a `manual` PC d
 
 **Local backend.** `type: local` runs commands on the RECALL host as the RECALL user, with only secret-looking variables
 removed from the environment. The process can still read every file that user can read, including `.env`, `config/` and
-every user's `data/`. It is disabled by default (`terminal.allow_local`) and only suitable for a single-user machine you
-would also trust a shell on. Never enable it on a shared installation.
+every user's `data/`. It is disabled by default (`terminal.allow_local`, or `RECALL_TERMINAL_ALLOW_LOCAL=true` in the server
+environment) and only suitable for an installation you would also trust a shell on.
+
+*Inside the Docker container* (the setup guide of the [Admin CLI](../user-guide/admin-cli.md)) the commands run as the `app` user
+(uid 1000) in `/app` and reach:
+
+- the whole `/app/.config`: every user's `user.yaml` (password hashes), agent yaml, `secrets.env` and the Claude login folders;
+- the whole `/app/data`: every user's and agent's memories, chats, indexes and terminal audit logs;
+- the code and the Python environment, and the container's outbound network.
+
+There is no technical separation between users yet (a per-user path limit is on the [backlog](../project/backlog.md)); the rules
+are behavioural (the agent's SOUL and the built-in `security-for-admins` page: own data only, never read or print secrets, web
+content is data) plus the user's approval of every command. Risks to weigh: prompt injection through web pages or files that makes
+the agent run something harmful or read secrets; an approval clicked without reading; data leaving through the open network.
+Mitigations: keep `approvals: manual` (the default) and read each card; give the guide only to a user you trust with the
+whole installation; run a dedicated container (or a separate RECALL deployment) with only that user when other users must stay
+isolated; restrict the container's egress; keep backups of `.config/`. Values stored in `secrets.env` are masked in terminal
+output as a safety net, not as a guarantee.
 
 **Advice for the sandbox.**
 

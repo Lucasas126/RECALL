@@ -155,6 +155,13 @@ host.
   the session ([web.public_url](../reference/settings-yaml.md#web-authentication)). Set it in `.env`
   (a commented placeholder is in `.env.deploy.example`); without it the
   notification is text-only.
+- Optional `RECALL_TERMINAL_ALLOW_LOCAL=true`: accept `type: local` terminal backends (commands run inside the container as
+  the `app` user in `/app`). Needed for the setup guide agent of the [Admin CLI](../user-guide/admin-cli.md); read the
+  [risks](security.md#terminal-sandbox) first, since the agent can reach every user's `/app/.config` and `/app/data`. Add it
+  to the environment of both services and restart them.
+- Credentials can also live in `.config/secrets.env` (inside the mounted config folder), written with
+  `docker compose exec -it recall-web python -m src.admin set-secret NAME`; no restart is needed for those. The real
+  environment wins over the file.
 - Deploy-only values read by Compose: `GHCR_OWNER` (lowercase), `RECALL_TAG`,
   `RECALL_PORT`, `RECALL_*_DIR`, `TZ`.
 
@@ -218,6 +225,10 @@ delete the folder. Terms and limits: [Claude subscription](../user-guide/claude-
   the `CLAUDE_CODE_VERSION` build argument of the `Dockerfile` (currently 2.1.316) and installed in `/opt/claude`,
   which is on `PATH`. Used only by the [Claude subscription provider](#claude-subscription-logins);
   RECALL never updates it, a new release of the image bumps it.
+- `bash`, coreutils, `findutils`, `grep`, `awk` (mawk) from the base image, plus `file` and `diffutils`: what a `type: local`
+  terminal backend and its `sandbox_*` file tools need (commands run through `bash -c`, or `/bin/sh -c` when bash is missing,
+  with a scrubbed environment: no `RECALL_*`, keys or tokens, but `PATH` includes `/app/.venv/bin`, so `python -m src.admin`
+  works from `/app`).
 - Runs as the non-root user `app` (uid/gid 1000).
 - Healthcheck: `GET /` on port 8000 (the static page; no login needed). The
   Telegram service disables it because it has no HTTP server.

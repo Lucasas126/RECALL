@@ -246,6 +246,13 @@ The password is typed twice (hidden) or generated (`--generate`, 24 characters, 
 than 8 characters or trivially weak are refused, and an existing user is never overwritten. `set-password` rewrites
 only `password_hash`; YAML comments in the file are lost. See [deployment](../deployment/docker.md#users-and-passwords).
 
+Other admin commands (see [Admin CLI](../user-guide/admin-cli.md)): `python -m src.admin user show --user <id>` prints this file
+with key variable NAMES and never the password hash; `python -m src.admin user set --user <id> --set path=value` changes non-secret
+fields (`name`, `language`, `models.*`, `provider.name`, `provider.api_key` = a variable NAME, `terminal_backends.*`,
+`claude_subscription.claude_config_dir`...) after validating the whole file with the user model (the hash, `id` and `agents` are
+refused; comments are lost). Store the key itself with `python -m src.admin set-secret NAME`, which writes
+`.config/secrets.env` (a fallback for variables that are not in the process environment, re-read when it changes).
+
 ## terminal backends
 
 `terminal_backends` maps a name (`^[a-z][a-z0-9_-]{0,31}$`) to a machine an agent's `terminal.backends` can use (a sandbox, your own PC...). Unknown keys
@@ -254,7 +261,7 @@ are rejected; key files are paths, never inline secrets.
 | type | keys |
 | --- | --- |
 | `ssh` | `host` (name or address), `port` (default 22), `user`, `key_file`, `known_hosts_file` (all required except `port`), `description` (optional); strict host-key checking and key-only login are always on |
-| `local` | `workdir`, `description` (optional); refused unless `settings.yaml` sets `terminal.allow_local: true` |
+| `local` | `workdir`, `description` (optional); refused unless `settings.yaml` sets `terminal.allow_local: true` or the server sets `RECALL_TERMINAL_ALLOW_LOCAL=true` |
 
 Every backend also accepts an optional `description` (free text, at most 200 characters, for example `User A's Windows PC, real
 files, Git Bash`). The model sees it next to the backend's name in its instructions, and the agent form shows it; use it to say

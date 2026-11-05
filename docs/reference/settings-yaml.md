@@ -219,6 +219,10 @@ terminal:
   max_output_chars: 20000        # 500-200000; ceiling for the output returned to the model
 ```
 
+`RECALL_TERMINAL_ALLOW_LOCAL=true|false` in the process environment overrides `allow_local` (so a server can enable the local
+backend without editing the tracked file); see [environment variables](environment-variables.md). A local backend gives its agent
+the whole host: inside Docker, every user's `/app/.config` and `/app/data` ([security notes](../deployment/security.md#terminal-sandbox)).
+
 ## chat naming
 
 The root `settings.yaml` holds a framework-wide small model used to generate chat

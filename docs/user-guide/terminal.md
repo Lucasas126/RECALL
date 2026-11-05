@@ -18,9 +18,10 @@ Status: phase 1. Commands run in the foreground and are killed at the timeout; t
 | type | where commands run | availability |
 | --- | --- | --- |
 | `ssh` | on another machine, through the local `ssh` binary (key only, strict host-key checking, no agent/X11 forwarding, no password prompts, a minimal local environment) | always |
-| `local` | on the RECALL host itself, in a working directory, with a scrubbed environment (no `*_KEY`, `*_TOKEN`, `RECALL_*`, provider variables...) | only when `settings.yaml` has `terminal.allow_local: true`; trusted single-user installs only |
+| `local` | on the RECALL host itself, in a working directory, with a scrubbed environment (no `*_KEY`, `*_TOKEN`, `RECALL_*`, provider variables...) | only when `settings.yaml` has `terminal.allow_local: true` or the server environment sets `RECALL_TERMINAL_ALLOW_LOCAL=true`; trusted installs only |
 
-Never point an agent at the RECALL container itself: it holds `.env` and every user's data. See
+Pointing an agent at the RECALL container itself (a `local` backend) gives it every user's `.config` and `data`. The only intended
+use is the setup guide of the [Admin CLI](admin-cli.md#templates), with `approvals: manual`. See
 [security notes](../deployment/security.md#terminal-sandbox).
 
 ## setting up an SSH sandbox

@@ -96,6 +96,9 @@ messages.
 
 ## mutability
 
-YAML config is read at load time; edit it and restart to change framework/user/
-agent defaults. Model favorites, per-chat selections and agent edits made through
+`settings.yaml` is read at start-up (restart to change it). `user.yaml` and agent files are re-read on every request, and the
+cached agent runtime of a chat is rebuilt on its next message when either file (or `.config/secrets.env`) changed on disk, whoever
+changed it: the web API, the [admin CLI](../user-guide/admin-cli.md) in another process, or a hand edit. A file left invalid by a
+hand edit does not stop the services: they keep the last good configuration, log the error and show a notice in the chat; the
+agent list keeps working. Model favorites, per-chat selections and agent edits made through
 the APIs above are persisted immediately, without restarting.
