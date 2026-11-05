@@ -107,6 +107,8 @@ class ChatTask(BaseModel):
     backends: list[str] = Field(default_factory=list)  # terminal backends granted (always manual); "terminal" is then in groups
     title: str = ""  # the task's title, for attributing its approvals in the parent chat
     unattended: bool = False  # nobody watches: manual and dangerous actions are denied (phase 7 launches these)
+    kind: str = Field(default="ephemeral", pattern=r"^(ephemeral|agent)$")  # `agent`: an existing agent of the user runs it, with its own SOUL
+    remember: bool = False  # agent kind only: an ordinary hidden chat (reviewable) whose agent may write its own memory
     created_at: str = ""
 
 
@@ -325,7 +327,7 @@ class ConversationsSource(Source):
         chat_id = f"{datetime.now():%Y%m%d-%H%M%S}-{secrets.token_hex(3)}"
         path = self._path(chat_id)
         if task is not None:
-            disposable = True
+            disposable = not task.remember  # a `remember` task chat is hidden but ordinary: Dream and the index may use it
             try:  # the mark goes first, so an empty-chat prune can never see the chat unmarked
                 atomic_write_text(self._task_path(chat_id), task.model_dump_json() + "\n")
             except OSError as exc:

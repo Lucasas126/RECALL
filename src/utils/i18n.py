@@ -773,6 +773,22 @@ _SPANISH = {
     "Task {title} ({worker}) wants to run:": "La tarea {title} ({worker}) quiere ejecutar:",
     "Awaiting approval": "Esperando aprobación",
     "status: awaiting approval": "estado: esperando aprobación",
+    # subagents (agents)
+    "Delegation": "Delegación",
+    "Delegation enabled": "Delegación activada",
+    "Switches the task tools off without removing the group.": "Desactiva las herramientas de tareas sin quitar el grupo.",
+    "Tool groups a task may be given": "Grupos de herramientas que se pueden dar a una tarea",
+    "Parallel tasks per chat": "Tareas en paralelo por chat",
+    "Can only lower the application's limit. Empty uses the application's limit.": "Solo puede bajar el límite de la aplicación. Vacío usa el límite de la aplicación.",
+    "Time limit per task": "Límite de tiempo por tarea",
+    "Token limit per task": "Límite de tokens por tarea",
+    "Agents it may hand tasks to": "Agentes a los que puede encargar tareas",
+    "Without any, it can only use fresh workers. An agent that can write its own memory keeps what it learns from the task.": "Sin ninguno, solo puede usar trabajadores nuevos. Un agente que puede escribir su propia memoria conserva lo que aprende de la tarea.",
+    "You have no other agents.": "No tienes otros agentes.",
+    "Can write its own memory": "Puede escribir su propia memoria",
+    "the application's limit": "el límite de la aplicación",
+    "none": "ninguno",
+    "delegation.targets lists agents that are not yours: {agents}. Targets must be other agents of this user.": "delegation.targets incluye agentes que no son tuyos: {agents}. Los destinos deben ser otros agentes de este usuario.",
 }
 
 

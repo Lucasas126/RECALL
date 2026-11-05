@@ -68,6 +68,7 @@ delegation:                          # the `delegate` tool group (see the delega
   max_parallel: null                 # running tasks per chat, 1-10; can only lower settings.yaml subagents.max_parallel_per_parent (3)
   timeout_seconds: null              # wall clock per task, 10-3600; can only lower subagents.timeout_seconds (600)
   max_tokens: null                   # input + output tokens per task, 1000-5000000; can only lower subagents.max_tokens (200000)
+  targets: []                        # other agents of this user a task may be handed to: [{agent: orion, remember: false}]; empty = fresh workers only
 ```
 
 `recall_knowledge` (default `true`, Basic > Advanced in the Agents tab) adds one line to the skills index and lets `skill_view` read the
@@ -84,6 +85,13 @@ terminal tools not built. `terminal.backend`, `workdir` and `approvals` at the t
 chat). The group is opt-in; selecting it without the block saves the defaults above. Unknown keys are rejected, and `allowed_groups` entries other
 than `web` are refused. The numbers can only lower the application's `subagents:` limits ([settings.yaml](settings-yaml.md#subagents)). See the
 [delegation guide](../user-guide/delegation.md).
+
+`delegation.targets` is a list of `{agent: <id>, remember: <bool>}` entries (default `[]`, at most 20, no duplicates, never the agent itself). Each `agent` must be
+another agent of the same user: saving through the web app, the API or the admin CLI refuses unknown ones, `agent check` warns about them,
+and renaming or deleting an agent rewrites (renames) or drops it in the other agents' lists. `task_start(agent=...)` only accepts a listed agent; the task runs
+as that agent (its own SOUL and settings, its tool groups intersected with the grant) and the worker chat is stored under it. `remember: false` (default) keeps the
+task excluded from learning with memory writes blocked; `remember: true` makes it a hidden but ordinary chat the target's Dream may review, and the target keeps
+its own `memory_read`/`memory_edit`/`self` tools (not `soul_edit`/`skill_manage`). A `remember` task is refused while the target is replying elsewhere.
 
 The size limits of `SOUL.md`, `MEMORY.md` and `USER.md` are not agent settings: they are application-wide and set in the
 `memory_limits` block of [settings.yaml](settings-yaml.md#memory-limits). A `memory_limits` key left over in an older agent

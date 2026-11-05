@@ -450,16 +450,34 @@ class SubagentSettings(BaseModel):
     wake_debounce_seconds: float = Field(default=1.5, ge=0, le=30)  # results ending within this window share one wake
 
 
+class DelegationTarget(BaseModel):
+    """An existing agent of the same user that `task_start(agent=...)` may hand a task to."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")  # id of one of the user's other agents
+    remember: bool = Field(default=False, strict=True)  # true: the task chat is an ordinary hidden chat and the agent may write its OWN memory
+
+
 class AgentDelegationConfig(BaseModel):
     """An agent's `delegate` tool group: switch, grantable groups and limits (each can only lower the application's)."""
 
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = Field(default=True, strict=True)  # false switches the tools off without removing the group
+    targets: list[DelegationTarget] = Field(default_factory=list, max_length=20)  # existing agents it may delegate to; empty = ephemeral workers only
     allowed_groups: list[str] = Field(default_factory=lambda: ["web"])  # groups the agent may grant a task (web only)
     max_parallel: Optional[int] = Field(default=None, ge=1, le=10, strict=True)  # per parent chat; None = application's
     timeout_seconds: Optional[int] = Field(default=None, ge=10, le=3600, strict=True)
     max_tokens: Optional[int] = Field(default=None, ge=1_000, le=5_000_000, strict=True)
+
+    @field_validator("targets")
+    @classmethod
+    def _unique_targets(cls, value: list[DelegationTarget]) -> list[DelegationTarget]:
+        ids = [target.agent for target in value]
+        if len(set(ids)) != len(ids):
+            raise ValueError("delegation.targets must not list an agent twice")
+        return value
 
     @field_validator("allowed_groups")
     @classmethod
@@ -636,7 +654,13 @@ class AgentConfig(BaseModel):
     @model_validator(mode="after")
     def _delegate_group_has_a_block(self) -> "AgentConfig":
         if "delegate" in (self.chat_config.tool_groups or ()) and self.delegation is None:
-            self.delegation = AgentDelegationConfig()  # the web form cannot send the block: the defaults apply
+            self.delegation = AgentDelegationConfig()  # a config that selects the group without a block gets the defaults
+        return self
+
+    @model_validator(mode="after")
+    def _no_self_target(self) -> "AgentConfig":
+        if self.delegation is not None and any(target.agent == self.id for target in self.delegation.targets):
+            raise ValueError("delegation.targets must not list the agent itself")
         return self
 
     @model_validator(mode="after")

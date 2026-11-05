@@ -366,6 +366,10 @@ def check_user(user_id: str) -> tuple[list[str], list[str], int]:
         except Exception as exc:
             errors.append(f"{user_id}/{agent_id}: {describe_config_error(exc)}")
         groups = config.chat_config.tool_groups or []
+        for target in (config.delegation.targets if config.delegation is not None else []):
+            if target.agent not in user.agents:
+                warnings.append(f"{user_id}/{agent_id}: delegation target '{target.agent}' is not one of the user's agents "
+                                "(task_start refuses it)")
         if "terminal" in groups:
             try:
                 resolve_backends(user, config.terminal, agent_id=agent_id, allow_local=True)

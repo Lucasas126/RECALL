@@ -510,6 +510,15 @@ function translateInterface() {
     ["agent-terminal-dream-hint", "Dream sessions run unattended: with this on, an agent whose dream tools include the terminal can run commands on its backends without you watching."],
     ["agent-effort-label", "Reasoning effort"], ["agent-effort-default", "Default"],
     ["agent-tokens-enabled-label", "Limit reasoning tokens"],
+    ["agent-delegation-legend", "Delegation"], ["agent-delegation-enabled-label", "Delegation enabled"],
+    ["agent-delegation-enabled-hint", "Switches the task tools off without removing the group."],
+    ["agent-delegation-groups-label", "Tool groups a task may be given"],
+    ["agent-delegation-parallel-label", "Parallel tasks per chat"],
+    ["agent-delegation-parallel-hint", "Can only lower the application's limit. Empty uses the application's limit."],
+    ["agent-delegation-timeout-label", "Time limit per task"], ["agent-delegation-tokens-label", "Token limit per task"],
+    ["agent-delegation-targets-label", "Agents it may hand tasks to"],
+    ["agent-delegation-targets-hint", "Without any, it can only use fresh workers. An agent that can write its own memory keeps what it learns from the task."],
+    ["agent-delegation-no-agents", "You have no other agents."],
     ["agent-retained-label", "Messages kept in context"],
     ["agent-retained-hint", "Older messages are left out of the prompt. Empty keeps all messages."], ["agent-save", "Save agent"], ["agent-delete", "Delete agent"],
     ["agent-tab-basic", "Basic"], ["agent-advanced-summary", "Advanced"], ["agent-tab-tools", "Tools"],
@@ -1076,10 +1085,12 @@ function fillAgentForm(agent) {
       text.textContent = translatedText(group.name);
       label.append(checkbox, text);
       if (group.id === "terminal") checkbox.addEventListener("change", updateTerminalBlock);
+      if (group.id === "delegate") checkbox.addEventListener("change", updateDelegationBlock);
       return label;
     }),
   );
   renderTerminalBlock(agent);
+  renderDelegationBlock(agent);
   $("agent-tool-groups").append(Object.assign(document.createElement("p"), {
     className: "model-note", textContent: tr("The folder groups need at least one folder, set in the Folders tab."),
   }));
@@ -1119,6 +1130,96 @@ function renderTerminalBlock(agent) {
   $("agent-terminal-error").textContent = "";
   refreshTerminalDefault(saved?.default_backend);
   updateTerminalBlock();
+}
+
+// The Delegation block follows the `delegate` tool group, like the Terminal block follows `terminal`.
+function delegationGroupChecked() {
+  return Boolean(document.querySelector('input[name="agent-tool-group"][value="delegate"]:checked'));
+}
+
+function updateDelegationBlock() {
+  const enabled = delegationGroupChecked();
+  $("agent-delegation").hidden = !enabled;
+  $("agent-delegation").disabled = !enabled;  // a disabled fieldset is not validated, so hidden fields never block saving
+}
+
+function renderDelegationBlock(agent) {
+  const saved = agent.delegation ?? null;
+  $("agent-delegation-enabled").checked = saved?.enabled ?? agentDefault("delegation.enabled") ?? true;
+  renderDelegationGroups(saved?.allowed_groups ?? DELEGATION_DEFAULT_GROUPS);
+  setNumberValue($("agent-delegation-parallel"), saved?.max_parallel ?? null);
+  setNumberValue($("agent-delegation-timeout"), saved?.timeout_seconds ?? null);
+  setNumberValue($("agent-delegation-tokens"), saved?.max_tokens ?? null);
+  renderDelegationTargets(delegationTargetRows(state.agentConfigs, state.agentForm.originalId, saved));
+  $("agent-delegation-error").textContent = "";
+  updateDelegationBlock();
+}
+
+function renderDelegationGroups(selected) {
+  const chosen = new Set(selected);
+  const names = new Map(state.toolGroupCatalog.map((group) => [group.id, translatedText(group.name)]));
+  $("agent-delegation-groups").replaceChildren(...DELEGATION_GRANTABLE_GROUPS.map((id) => {
+    const label = document.createElement("label");
+    label.className = "model-filter";
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.name = "agent-delegation-group";
+    box.value = id;
+    box.checked = chosen.has(id);
+    const text = document.createElement("span");
+    text.textContent = names.get(id) ?? id;
+    label.append(box, text);
+    return label;
+  }));
+}
+
+function readDelegationGroups() {
+  return [...document.querySelectorAll('input[name="agent-delegation-group"]:checked')].map((box) => box.value);
+}
+
+function renderDelegationTargets(rows) {
+  $("agent-delegation-no-agents").hidden = rows.length > 0;
+  $("agent-delegation-targets").replaceChildren(...rows.map((row) => {
+    const box = document.createElement("div");
+    box.className = "terminal-backend delegation-target";
+    box.dataset.agent = row.id;
+    const allow = document.createElement("input");
+    allow.type = "checkbox";
+    allow.className = "delegation-allow";
+    allow.checked = row.allowed;
+    const head = document.createElement("label");
+    head.className = "model-filter";
+    const name = document.createElement("span");
+    name.textContent = row.missing ? tr("{name} (not defined)", { name: row.name }) : row.name;
+    head.append(allow, name);
+    const remember = document.createElement("input");
+    remember.type = "checkbox";
+    remember.className = "delegation-remember";
+    remember.checked = row.remember;
+    remember.disabled = !row.allowed;
+    const memoryLabel = document.createElement("label");
+    memoryLabel.className = "model-filter";
+    const memoryText = document.createElement("span");
+    memoryText.textContent = tr("Can write its own memory");
+    memoryLabel.append(remember, memoryText);
+    memoryLabel.hidden = !row.allowed;
+    allow.addEventListener("change", () => {
+      remember.disabled = !allow.checked;
+      memoryLabel.hidden = !allow.checked;
+      if (!allow.checked) remember.checked = false;
+    });
+    box.append(head, memoryLabel);
+    return box;
+  }));
+}
+
+// The form's target rows as plain data (also what buildDelegationConfig takes).
+function readDelegationTargetFields() {
+  return [...document.querySelectorAll("#agent-delegation-targets .delegation-target")].map((box) => ({
+    id: box.dataset.agent,
+    allowed: box.querySelector(".delegation-allow").checked,
+    remember: box.querySelector(".delegation-remember").checked,
+  }));
 }
 
 function buildTerminalBackendRow(row) {
@@ -1508,6 +1609,12 @@ function agentFormBody() {
       backends: readTerminalBackendFields(), defaultBackend: $("agent-terminal-default").value,
       timeout: numberValue("agent-terminal-timeout"), allowInDream: $("agent-terminal-dream").checked,
     }),
+    // the saved block is sent back untouched while the group is off, and from the form while it is on
+    delegation: buildDelegationConfig(saved?.delegation, delegationGroupChecked(), {
+      enabled: $("agent-delegation-enabled").checked, allowedGroups: readDelegationGroups(),
+      maxParallel: numberValue("agent-delegation-parallel"), timeout: numberValue("agent-delegation-timeout"),
+      maxTokens: numberValue("agent-delegation-tokens"), targets: readDelegationTargetFields(),
+    }),
     chat_config: {
       model: $("agent-model").value.trim() || null,  // null follows the user's default model
       stream: $("agent-stream").checked,
@@ -1585,6 +1692,7 @@ $("agent-form").addEventListener("submit", async (event) => {
   setAgentBusy(true);
   $("agent-error").textContent = "";
   $("agent-terminal-error").textContent = "";
+  $("agent-delegation-error").textContent = "";
   $("agent-status").textContent = "";
   try {
     const saved = await api(previousId ? `/api/agents/${previousId}` : "/api/agents", {
@@ -1606,6 +1714,9 @@ $("agent-form").addEventListener("submit", async (event) => {
     if (session === state.session) {
       if (terminalGroupChecked() && isTerminalError(err.message)) {
         $("agent-terminal-error").textContent = err.message;
+        showAgentPanel("tools");
+      } else if (delegationGroupChecked() && isDelegationError(err.message)) {
+        $("agent-delegation-error").textContent = err.message;
         showAgentPanel("tools");
       } else {
         $("agent-error").textContent = err.message;
@@ -3930,6 +4041,45 @@ function buildTerminalConfig(saved, enabled, fields) {
   };
 }
 
+// ------------------------------------------------------------------ delegation settings (agent form)
+
+// the groups a task may be given (DELEGATE_GRANTABLE_GROUPS in src/agent/tool_groups.py) and the default selection
+const DELEGATION_GRANTABLE_GROUPS = ["web"];
+const DELEGATION_DEFAULT_GROUPS = ["web"];
+
+// One row per OTHER agent of the user (plus saved targets that vanished, so the error can be seen): allowed or not,
+// and whether it may write its own memory while running the task.
+function delegationTargetRows(agents, selfId, saved) {
+  const used = new Map((saved?.targets ?? []).map((target) => [target.agent, Boolean(target.remember)]));
+  const rows = (agents ?? []).filter((agent) => agent.id !== selfId).map((agent) => ({
+    id: agent.id, name: agent.name || agent.id, allowed: used.has(agent.id), remember: used.get(agent.id) ?? false, missing: false,
+  }));
+  for (const [id, remember] of used) {
+    if (!rows.some((row) => row.id === id)) rows.push({ id, name: id, allowed: true, remember, missing: true });
+  }
+  return rows;
+}
+
+// The `delegation` block to save: the form's fields while the `delegate` group is ticked, else the saved block
+// untouched, so saving the agent never drops a customised block back to the defaults.
+function buildDelegationConfig(saved, groupChecked, fields) {
+  if (!groupChecked) return saved ?? null;
+  return {
+    ...(saved ?? {}),
+    enabled: Boolean(fields.enabled),
+    allowed_groups: [...(fields.allowedGroups ?? [])],
+    max_parallel: fields.maxParallel ?? null,
+    timeout_seconds: fields.timeout ?? null,
+    max_tokens: fields.maxTokens ?? null,
+    targets: (fields.targets ?? []).filter((row) => row.allowed).map((row) => ({ agent: row.id, remember: Boolean(row.remember) })),
+  };
+}
+
+// Save errors about the delegation block belong next to it.
+function isDelegationError(message) {
+  return /delegation/i.test(String(message ?? ""));
+}
+
 // Save errors about the terminal block (missing backend, local disabled, bad fields) belong next to it.
 function isTerminalError(message) {
   return /terminal/i.test(String(message ?? ""));
@@ -5417,6 +5567,20 @@ selectRow("agent-associative-execution", chatDefault("associative_execution"));
 numberRow("agent-retained", () => agentDefaultSpec("chat_config.conversation_messages_retained"), () => "");
 checkboxRow("agent-tools", chatDefault("tools"));
 numberRow("agent-terminal-timeout", () => agentDefaultSpec("terminal.timeout_seconds"), () => "");
+// delegation block: limits can only lower the application's, so an empty value is the default
+checkboxRow("agent-delegation-enabled", () => agentDefault("delegation.enabled"));
+numberRow("agent-delegation-parallel", () => agentDefaultSpec("delegation.max_parallel"), () => tr("the application's limit"));
+numberRow("agent-delegation-timeout", () => agentDefaultSpec("delegation.timeout_seconds"), () => tr("the application's limit"));
+numberRow("agent-delegation-tokens", () => agentDefaultSpec("delegation.max_tokens"), () => tr("the application's limit"));
+registerRow("agent-delegation-groups", {
+  getDefault: () => DELEGATION_DEFAULT_GROUPS.join(","), describe: (value) => value || tr("none"),
+  read: () => readDelegationGroups().join(","), write: (value) => renderDelegationGroups(value ? value.split(",") : []),
+});
+registerRow("agent-delegation-targets", {
+  getDefault: () => "", describe: () => tr("none"),
+  read: () => readDelegationTargetFields().filter((row) => row.allowed).map((row) => `${row.id}:${row.remember}`).join(","),
+  write: () => renderDelegationTargets(delegationTargetRows(state.agentConfigs, state.agentForm.originalId, null)),
+});
 
 registerRow("dream-model", {
   getDefault: dreamDefault("model"), describe: () => tr("the agent's model, else yours"),
