@@ -23,7 +23,7 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
         self.service.list_agents.return_value = [
             {"id": "agent-a", "name": "First"}, {"id": "agent-b", "name": "Second"},
         ]
-        self.service.create_chat.side_effect = lambda user, agent: {"id": f"chat-of-{agent}"}
+        self.service.create_chat.side_effect = lambda user, agent, **kwargs: {"id": f"chat-of-{agent}"}
         self.service.chat_summary.return_value = {"id": "old-chat", "title": "Old topic", "turns": 4}
         self.service.chat_active.return_value = False
         self.service.get_chat.return_value = {"model": {"id": "llm/base", "provider": "OpenRouter"}, "model_source": "agent"}
@@ -96,7 +96,7 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
         panel.message_id = 55
         query, update = self.query(buttons[1].callback_data, 55)
         await panel_callback(update, self.context)
-        self.service.create_chat.assert_called_once_with("test-user", "agent-b")
+        self.service.create_chat.assert_called_once_with("test-user", "agent-b", origin="telegram")
         self.assertEqual((self.session.agent_id, self.session.chat_id), ("agent-b", "chat-of-agent-b"))
         self.assertEqual(self.preferences["agent_id"], "agent-b")
         text = query.edit_message_text.await_args.args[0]
@@ -161,7 +161,7 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
     async def test_newchat_with_a_single_agent_creates_the_chat_directly(self) -> None:
         self.service.list_agents.return_value = [{"id": "agent-a", "name": "First"}]
         await new_chat(self.update, self.context)
-        self.service.create_chat.assert_called_once_with("test-user", "agent-a")
+        self.service.create_chat.assert_called_once_with("test-user", "agent-a", origin="telegram")
         self.assertEqual(self.session.chat_id, "chat-of-agent-a")
         text = self.message.reply_text.await_args.args[0]
         self.assertIn("New chat created with First.", text)
@@ -270,7 +270,7 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
             await panel_callback(update, self.context)
             await _drain()
         self.service.discard_chat.assert_called_once_with("test-user", "agent-a", "chat-of-agent-a")
-        self.service.create_chat.assert_called_with("test-user", "agent-b")
+        self.service.create_chat.assert_called_with("test-user", "agent-b", origin="telegram")
         self.assertEqual((self.session.agent_id, self.session.chat_id), ("agent-b", "chat-of-agent-b"))
         self.assertEqual(generation.await_args.args[2:4], ("hello there", []))
         self.assertIsNone(self.session.pending_reroute)

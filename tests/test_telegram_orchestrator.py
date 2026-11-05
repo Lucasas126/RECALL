@@ -59,7 +59,7 @@ class TelegramOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         generation.assert_not_called()
         self.service.route_message.assert_called_once_with("test-user", "hello there")  # only the text
         self.context.bot.send_chat_action.assert_awaited_once_with(chat_id=456, action="typing")
-        self.service.create_chat.assert_called_with("test-user", "agent-b")
+        self.service.create_chat.assert_called_with("test-user", "agent-b", origin="telegram")
         self.service.discard_chat.assert_called_once_with("test-user", "agent-a", "chat-of-agent-a")
         self.assertEqual((self.session.agent_id, self.session.chat_id), ("agent-b", "chat-of-agent-b"))
         self.assertEqual(self.preferences["agent_id"], "agent-a")  # an automatic pick keeps the preference
@@ -150,7 +150,7 @@ class TelegramOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         with patch("src.telegram.bot._send_generation", new=AsyncMock()) as generation:
             await reroute_callback(update, self.context)
             await base._drain()
-        self.service.create_chat.assert_called_with("test-user", "agent-b")
+        self.service.create_chat.assert_called_with("test-user", "agent-b", origin="telegram")
         self.service.discard_chat.assert_called_with("test-user", "agent-c", "chat-of-agent-c")
         self.assertEqual((self.session.agent_id, self.session.chat_id), ("agent-b", "chat-of-agent-b"))
         self.assertEqual(generation.await_args.args[2:4], ("hi", []))

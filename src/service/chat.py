@@ -716,9 +716,14 @@ class ChatService:
             logger.warning("orchestrator failed (%s); using the preferred agent", type(exc).__name__)
         return None
 
-    def latest_chat(self, user_id: str) -> Optional[dict]:
-        """The user's most recently active chat across all agents (with `agent_id`/`agent_name`), or None."""
+    def latest_chat(self, user_id: str, origin: Optional[str] = None) -> Optional[dict]:
+        """The user's most recently active chat across all agents (with `agent_id`/`agent_name`), or None.
+
+        With `origin` only chats created for that origin (`web`, `telegram`) are considered.
+        """
         chats = self.list_all_chats(user_id)
+        if origin is not None:
+            chats = [chat for chat in chats if chat.get("origin") == origin]
         return chats[0] if chats else None
 
     def chat_active(self, user_id: str, agent_id: str, chat_id: str) -> bool:
@@ -746,17 +751,18 @@ class ChatService:
             sleep(0.02)
         self.delete_chat(user_id, agent_id, chat_id)
 
-    def create_chat(self, user_id: str, agent_id: str, *, disposable: bool = False) -> dict:
+    def create_chat(self, user_id: str, agent_id: str, *, disposable: bool = False, origin: str = "web") -> dict:
         """Create a chat, discarding any other unused empty ones so they never pile up.
 
         A disposable chat is not learned from (no Dream review, no indexing), cannot change the agent's
         persistent state and is deleted after the user's retention period of inactivity.
+        `origin` records where the chat belongs (`web` or `telegram`).
         """
         conversations = self._conversations(user_id, agent_id)
         slot = self._slot(user_id, agent_id)
         with slot.state:
             conversations.prune_empty(self._kept_chats(slot))
-            return conversations.summary(conversations.create(disposable=disposable), self._retention_days(user_id))
+            return conversations.summary(conversations.create(disposable=disposable, origin=origin), self._retention_days(user_id))
 
     def set_chat_disposable(self, user_id: str, agent_id: str, chat_id: str, disposable: bool) -> dict:
         """Convert a chat to disposable or back to normal, in place; refused while a reply is running or queued.

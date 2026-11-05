@@ -667,7 +667,7 @@ def _create_session_chat(session: TelegramSession, service: ChatService, agent_i
             raise InputError("No agents are configured for this user.")
     else:
         service.update_preferences(session.user_id, UserPreferences(agent_id=agent_id))
-    chat = service.create_chat(session.user_id, agent_id)
+    chat = service.create_chat(session.user_id, agent_id, origin="telegram")
     session.agent_id, session.chat_id = agent_id, chat["id"]
     session.last_message_at = datetime.now(timezone.utc)
     return chat
@@ -803,13 +803,14 @@ def _arm_grace(context: ContextTypes.DEFAULT_TYPE, session: TelegramSession, rec
 def _last_chat(session: TelegramSession, service: ChatService) -> tuple[dict, str] | None:
     """(summary, agent id) of the chat the next message would continue, from persisted data, or None.
 
-    A session that still knows its chat reads that one; after a restart the latest chat of any agent is used.
+    A session that still knows its chat reads that one; after a restart the latest Telegram-origin chat of any agent is used
+    (chats used only in the web UI never count).
     """
     try:
         if session.chat_id is not None and session.last_message_at is not None:
             chat, agent_id = service.chat_summary(session.user_id, session.agent_id, session.chat_id), session.agent_id
         else:
-            chat = service.latest_chat(session.user_id)
+            chat = service.latest_chat(session.user_id, origin="telegram")
             agent_id = chat.get("agent_id") if isinstance(chat, dict) else None
     except (ServiceError, OSError, ValueError) as exc:
         logger.warning("Could not look up the last Telegram chat: %s", exc)
@@ -893,7 +894,7 @@ async def _launch_generation(
 async def _switch_auto_chat(session: TelegramSession, service: ChatService, record: _Reroute, agent_id: str) -> bool:
     """Replace the empty auto-created chat by a new chat of `agent_id` (the saved preference is not changed)."""
     try:
-        created = await asyncio.to_thread(service.create_chat, session.user_id, agent_id)
+        created = await asyncio.to_thread(service.create_chat, session.user_id, agent_id, origin="telegram")
     except (ServiceError, OSError, ValueError) as exc:
         logger.warning("Could not create the orchestrator's chat: %s", exc)
         return False
@@ -985,7 +986,7 @@ async def _reroute_pending(
     created = chat_id is None
     try:
         if created:
-            chat_id = service.create_chat(session.user_id, agent_id)["id"]
+            chat_id = service.create_chat(session.user_id, agent_id, origin="telegram")["id"]
         service.update_preferences(session.user_id, UserPreferences(agent_id=agent_id))
     except (PreferencesError, ServiceError, ValueError, OSError):
         record.attachments = []

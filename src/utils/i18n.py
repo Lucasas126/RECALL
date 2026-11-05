@@ -150,6 +150,8 @@ _SPANISH = {
     "wait for this chat's active and queued replies before changing its type": "Espera a que terminen las respuestas activas y pendientes de este chat antes de cambiar su tipo.",
     "chat {chat_id} is disposable and is not reviewed": "El chat {chat_id} es desechable y no se revisa.",
     "Could not save the disposable flag for chat {chat_id}.": "No se ha podido guardar el estado desechable del chat {chat_id}.",
+    "Could not save the origin of chat {chat_id}.": "No se ha podido guardar el origen del chat {chat_id}.",
+    "Invalid chat origin: {origin}.": "Origen de chat no válido: {origin}.",
     "New disposable chat": "Nuevo chat desechable",
     "Disposable chat: it will be deleted on {date} and nothing here will be saved to the agent's memory.": "Chat desechable: se eliminará el {date} y nada de lo que hay aquí se guardará en la memoria del agente.",
     "Disposable chat, deleted on {date}": "Chat desechable, se eliminará el {date}",

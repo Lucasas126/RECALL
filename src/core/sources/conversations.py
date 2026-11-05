@@ -19,6 +19,9 @@ _CHAT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _TITLE_CHARS = 60
 DEFAULT_DISPOSABLE_RETENTION_DAYS = 30
 _DISPOSABLE_SUFFIX = ".disposable.json"
+_ORIGIN_SUFFIX = ".origin.json"
+DEFAULT_ORIGIN = "web"  # chats without an origin marker predate it and count as web chats
+_ORIGIN_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 
 
 class ChatModel(BaseModel):
@@ -75,6 +78,14 @@ class ChatDisposable(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     created_at: str
+
+
+class ChatOrigin(BaseModel):
+    """Where a chat was created / belongs to (`web`, `telegram`, ...); stored in `<chat_id>.origin.json`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    origin: str
 
 
 class ChatMetadataError(UserMessageError, RuntimeError):
@@ -220,6 +231,28 @@ class ConversationsSource(Source):
         except OSError as exc:
             raise ChatMetadataError("Could not save the disposable flag for chat {chat_id}.", chat_id=chat_id) from exc
 
+    def _origin_path(self, chat_id: str) -> Path:
+        return self.resolve(f"{chat_id}{_ORIGIN_SUFFIX}")
+
+    def origin(self, chat_id: str) -> str:
+        """The chat's origin (`web`, `telegram`, ...); `web` when it has no (readable) marker."""
+        self._path(chat_id)  # validates the id
+        try:
+            return ChatOrigin.model_validate_json(self._origin_path(chat_id).read_text(encoding="utf-8")).origin
+        except (OSError, UnicodeError, ValidationError):
+            return DEFAULT_ORIGIN
+
+    def set_origin(self, chat_id: str, origin: str) -> None:
+        """Record the chat's origin (e.g. a future hand-over from web to Telegram just sets `telegram`)."""
+        if not isinstance(origin, str) or not _ORIGIN_RE.match(origin):
+            raise InputError("Invalid chat origin: {origin}.", origin=str(origin))
+        if not self.exists_chat(chat_id):
+            raise FileNotFoundError(f"chat not found: {chat_id}")
+        try:
+            atomic_write_text(self._origin_path(chat_id), ChatOrigin(origin=origin).model_dump_json() + "\n")
+        except OSError as exc:
+            raise ChatMetadataError("Could not save the origin of chat {chat_id}.", chat_id=chat_id) from exc
+
     def last_activity(self, chat_id: str) -> datetime:
         """When the chat last changed: the modification time of its transcript."""
         return datetime.fromtimestamp(self._path(chat_id).stat().st_mtime).astimezone()
@@ -242,12 +275,13 @@ class ConversationsSource(Source):
                 continue
         return expired
 
-    def create(self, *, disposable: bool = False) -> str:
+    def create(self, *, disposable: bool = False, origin: str = DEFAULT_ORIGIN) -> str:
         """Create an empty chat and return its id."""
         chat_id = f"{datetime.now():%Y%m%d-%H%M%S}-{secrets.token_hex(3)}"
         self._path(chat_id).touch(exist_ok=False)
         if disposable:
             self.set_disposable(chat_id, True)
+        self.set_origin(chat_id, origin)
         return chat_id
 
     def delete_chat(self, chat_id: str) -> None:
@@ -258,6 +292,7 @@ class ConversationsSource(Source):
         effort = self.resolve(f"{chat_id}.effort.json")
         title = self.resolve(f"{chat_id}.title.json")
         disposable = self._disposable_path(chat_id)
+        origin = self._origin_path(chat_id)
         legacy_transcription = self.resolve(f"{chat_id}.stt.json")  # per-chat STT overrides are no longer read
         removed = self._removed_path(chat_id)
         path.unlink()
@@ -266,6 +301,7 @@ class ConversationsSource(Source):
         effort.unlink(missing_ok=True)
         title.unlink(missing_ok=True)
         disposable.unlink(missing_ok=True)
+        origin.unlink(missing_ok=True)
         legacy_transcription.unlink(missing_ok=True)
 
     def _removed_path(self, chat_id: str) -> Path:
@@ -359,7 +395,7 @@ class ConversationsSource(Source):
 
     def summary(self, chat_id: str, retention_days: int = DEFAULT_DISPOSABLE_RETENTION_DAYS) -> dict:
         """Chat metadata: title (user-chosen or generated, else first user message), turn count, last activity
-        and, for a disposable chat, `disposable` and the ISO time it will be removed (`expires_at`)."""
+        its `origin` (`web` when unmarked) and, for a disposable chat, `disposable` and the ISO time it will be removed (`expires_at`)."""
         turns = self.load(chat_id)
         title = self.generated_title(chat_id)
         if title is None:
@@ -378,5 +414,5 @@ class ConversationsSource(Source):
         expires = self.expires_at(chat_id, retention_days).isoformat(timespec="seconds") if disposable else None
         return {
             "id": chat_id, "title": title, "turns": len(turns), "updated": updated,
-            "disposable": disposable, "expires_at": expires,
+            "disposable": disposable, "expires_at": expires, "origin": self.origin(chat_id),
         }

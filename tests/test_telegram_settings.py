@@ -174,7 +174,7 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
         query = await self.press(self.action("Second (agent-b)"))
         self.assertEqual(self.preferences["agent_id"], "agent-b")
         self.assertEqual((self.session.agent_id, self.session.chat_id), ("agent-b", "new-chat"))
-        self.service.create_chat.assert_called_once_with("test-user", "agent-b")
+        self.service.create_chat.assert_called_once_with("test-user", "agent-b", origin="telegram")
         self.assertIn("New chat created with Second.", self.text)
         entities = query.edit_message_text.await_args.kwargs["entities"]
         bold = next(e for e in entities if e.type == "bold")
@@ -331,7 +331,7 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
         self.preferences["agent_id"] = "agent-b"
         self.service.list_agents.return_value = [{"id": "agent-b", "name": "Second"}]  # one agent: no picker
         await new_chat(self.update, self.context)
-        self.service.create_chat.assert_called_once_with("test-user", "agent-b")
+        self.service.create_chat.assert_called_once_with("test-user", "agent-b", origin="telegram")
         self.assertEqual((self.session.agent_id, self.session.chat_id), ("agent-b", "new-chat"))
 
     async def test_current_chat_stays_on_its_agent_until_idle_timeout(self) -> None:
@@ -343,7 +343,7 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.session.agent_id, "agent-a")
         self.session.last_message_at -= timedelta(hours=2)
         _prepare_message_session(self.session, self.service)
-        self.service.create_chat.assert_called_once_with("test-user", "agent-b")
+        self.service.create_chat.assert_called_once_with("test-user", "agent-b", origin="telegram")
         self.assertEqual(self.session.agent_id, "agent-b")
 
     async def test_hidden_thinking_does_not_remove_tools_or_interrupted_text(self) -> None:
