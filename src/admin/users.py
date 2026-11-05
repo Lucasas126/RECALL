@@ -31,6 +31,7 @@ from src.config.settings import CONFIG_DIR, TERMINAL
 from src.terminal.backends import build_backend
 from src.terminal.output import clean
 from src.utils.files import atomic_write_text
+from src.utils.version import version_label
 from src.web.auth import hash_password
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")  # same rule as AgentStore / ChatService user ids
@@ -153,6 +154,7 @@ def _print_generated(user_id: str, password: str | None) -> None:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m src.admin", description="RECALL administrator commands.")
     sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("version", help="print the RECALL version (and build id when set)")
     create = sub.add_parser("create-user", help="create a user with a hashed web password and no agents")
     create.add_argument("user_id")
     create.add_argument("--name", help="display name (default: the user id)")
@@ -269,6 +271,9 @@ def _ask_api_key_env() -> str:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+    if args.command == "version":
+        print(version_label())
+        return 0
     if args.command == "route-test":
         return route_test(args.user, args.text, force=args.force)
     if args.command == "terminal-test":

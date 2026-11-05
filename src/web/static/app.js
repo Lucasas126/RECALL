@@ -12,7 +12,7 @@ const ICONS = {
   moon: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z\"/></svg>",
 };
 const state = {
-  user: null, agentId: null, chatId: null, busy: false, session: 0,
+  versionInfo: null, user: null, agentId: null, chatId: null, busy: false, session: 0,
   requests: new Set(), latest: null, sendQueue: Promise.resolve(),
   // message containers of chats with a reply in flight, so they keep updating while another chat is open
   view: null, views: new Map(), usages: new Map(),
@@ -71,7 +71,23 @@ function tr(template, values = {}) {
   return text.replace(/\{(\w+)\}/g, (_, key) => values[key]);
 }
 
+// ---- version line
+// "RECALL v0.1.0", plus the build id (a short git sha) when the server reports one
+function versionText(info, translate) {
+  if (!info || !info.version) return "";
+  return info.build
+    ? translate("RECALL v{version} ({build})", { version: info.version, build: info.build })
+    : translate("RECALL v{version}", { version: info.version });
+}
+// ---- end version line
+
+function renderVersion() {
+  const text = versionText(state.versionInfo, tr);
+  for (const id of ["login-version", "settings-version"]) $(id).textContent = text;
+}
+
 function translateInterface() {
+  renderVersion();
   for (const [id, text] of [
     ["settings-title", "User settings"], ["settings-save", "Save settings"],
     ["settings-thinking-label", "Show model thinking"],
@@ -4320,4 +4336,5 @@ resetDream();
 
 // ------------------------------------------------------------------ boot
 
+api("/api/version").then((info) => { state.versionInfo = info; renderVersion(); }, () => {});
 api("/api/me").then(showApp, showLogin);

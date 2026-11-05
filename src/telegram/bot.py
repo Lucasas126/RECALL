@@ -44,6 +44,7 @@ from src.service.chat import ChatEvent, ChatService, RouteDecision, ServiceError
 from src.utils.logger import get_logger
 from src.terminal.approvals import ApprovalForbidden
 from src.utils.i18n import InputError, UserMessageError, error_message, message
+from src.utils.version import version_label
 
 logger = get_logger("telegram")
 _MODELS_PER_PAGE = 10
@@ -171,6 +172,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await _unauthorized(update)
         return
     await update.effective_message.reply_text(
+        f"{version_label()}\n\n"
         "Available commands:\n\n"
         "/settings — Thinking, language, new chat agent, and chat reasoning effort\n"
         "/newchat — Start a new chat (you pick the agent; also /new)\n"

@@ -42,7 +42,7 @@ python -m src.admin agent create --user ana --id travel --name Travel --set desc
 
 `password_hash`, `id` and `agents` are refused (use `set-password` and the `agent` commands). `*.api_key` values must look like a variable name, never a key.
 
-Creating users and passwords stays with `python -m src.admin create-user` and `python -m src.admin set-password`, which the user runs himself (hidden prompt). Other checks: `python -m src.admin terminal-test --user U --backend B` (ssh backends) and `python -m src.admin route-test "text" --user U`.
+Creating users and passwords stays with `python -m src.admin create-user` and `python -m src.admin set-password`, which the user runs himself (hidden prompt). `python -m src.admin version` prints the running version (and the image build id when set). Other checks: `python -m src.admin terminal-test --user U --backend B` (ssh backends) and `python -m src.admin route-test "text" --user U`.
 
 ## Secrets
 

@@ -9,7 +9,7 @@ Paths are relative to the repository root. In Docker the same tree sits under `/
 | `web.py` | web UI and HTTP API (uvicorn, `src/web/app.py`) |
 | `run_telegram.py` | Telegram bot (polling) |
 | `cli.py` | terminal chat for `USER_ID`/`AGENT_ID` in `.env` |
-| `python -m src.admin` | `create-user`, `set-password`, `route-test`, `terminal-test` (`src/admin/users.py`); `agent ...`, `user show/set` (`src/admin/agents.py`); `set-secret`, `secret list` (`src/admin/credentials.py`); usage in the skill page admin-cli |
+| `python -m src.admin` | `version`, `create-user`, `set-password`, `route-test`, `terminal-test` (`src/admin/users.py`); `agent ...`, `user show/set` (`src/admin/agents.py`); `set-secret`, `secret list` (`src/admin/credentials.py`); usage in the skill page admin-cli |
 | `main.py` | older LangGraph prototype (`src/agent/graph.py`, `src/embeddings/data_source.py`); not the live path |
 
 ## Agent runtime (`src/agent/`)

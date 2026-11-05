@@ -34,6 +34,7 @@ from src.service.chat import (
 from src.utils.logger import get_logger
 from src.terminal.approvals import ApprovalForbidden, ApprovalNotFound
 from src.utils.i18n import error_code, error_message, message, messages
+from src.utils.version import version_info
 from src.config.settings import WEB_SESSION_SECRET_ENV
 
 logger = get_logger("web")
@@ -256,6 +257,10 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     @app.get("/api/me")
     def me(user_id: str = Depends(current_user)):
         return service.login(user_id)
+
+    @app.get("/api/version")
+    def version():
+        return version_info()  # public: version and build id only
 
     @app.get("/api/localization")
     def localization(language: Literal["en", "es"] = "en"):

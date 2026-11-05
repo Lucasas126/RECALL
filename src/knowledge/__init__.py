@@ -1,28 +1,16 @@
 from __future__ import annotations
 
-import tomllib
-from functools import lru_cache
 from pathlib import Path, PurePosixPath
 
 import yaml
 
 from src.utils.i18n import InputError
+from src.utils.version import UNKNOWN, app_version
 
 # The built-in knowledge skill: shipped inside the code, read-only for agents, always the version that runs.
 BUILTIN_SKILL = "recall"
 KNOWLEDGE_DIR = Path(__file__).resolve().parent / BUILTIN_SKILL
 SKILL_FILE = "SKILL.md"
-_PYPROJECT = Path(__file__).resolve().parents[2] / "pyproject.toml"
-
-
-@lru_cache(maxsize=1)
-def app_version() -> str | None:
-    """The version in pyproject.toml, or None when the file is not shipped (nothing is invented)."""
-    try:
-        version = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))["project"]["version"]
-    except (OSError, KeyError, tomllib.TOMLDecodeError):
-        return None
-    return str(version)
 
 
 def skill_text() -> str:
@@ -30,7 +18,7 @@ def skill_text() -> str:
     text = (KNOWLEDGE_DIR / SKILL_FILE).read_text(encoding="utf-8").replace("\r\n", "\n")
     version = app_version()
     end = text.find("\n---", 3)
-    if version and end != -1 and "version:" not in text[:end]:
+    if version != UNKNOWN and end != -1 and "version:" not in text[:end]:
         text = f"{text[:end]}\nversion: {version}{text[end:]}"
     return text
 

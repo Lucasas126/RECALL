@@ -248,6 +248,8 @@ _SPANISH = {
     "HTTP {status}": "HTTP {status}",
     "Settings": "Ajustes",
     "User settings": "Ajustes de usuario",
+    "RECALL v{version}": "RECALL v{version}",
+    "RECALL v{version} ({build})": "RECALL v{version} ({build})",
     "Close": "Cerrar",
     "Show model thinking": "Mostrar el thinking del modelo",
     "Maximum associative memory matches": "Máximo de coincidencias de memoria asociativa",

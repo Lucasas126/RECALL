@@ -41,12 +41,16 @@ RUN npm install -g --prefix /opt/claude --no-audit --no-fund \
 # ---------- runtime ----------
 FROM python:3.12-slim AS runtime
 
+# Optional build identifier (CI passes the git sha); shown next to the version as the first 7 characters.
+ARG RECALL_BUILD=""
+
 # settings.yaml binds the web UI to 127.0.0.1; inside a container it must
 # listen on all interfaces so the published port reaches it.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:/opt/claude/bin:$PATH" \
-    RECALL_WEB_HOST=0.0.0.0
+    RECALL_WEB_HOST=0.0.0.0 \
+    RECALL_BUILD=$RECALL_BUILD
 
 # System programs RECALL shells out to:
 # - tesseract-ocr (+ eng/spa data, matching pdf.ocr_languages): scanned PDF pages
