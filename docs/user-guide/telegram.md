@@ -57,12 +57,14 @@ first agent in your list when none is set), not the last agent you used. The `/s
 `Default agent`.
 When a message starts a new chat because of the idle time (not after
 `/newchat`, and not for the very first chat), the bot does not answer at once:
-it creates the new chat and sends a short message with two buttons,
-**↩ Continue previous chat** and **🔀 Change agent**, saying it will answer in
-8 seconds. A tap acts immediately: the first switches to the previous chat (and
-its agent) and replays your message there; the second opens the agent picker
+it creates the new chat and sends a short message with the buttons
+**✅ Use <agent>**, **↩ Continue previous chat** and **🔀 Change agent**, saying
+it will answer in 8 seconds. A tap acts immediately: **✅ Use <agent>** accepts
+the proposed agent now (no waiting for the timer) and answers in the new chat;
+**↩ Continue previous chat** switches to the previous chat (and
+its agent) and replays your message there; **🔀 Change agent** opens the agent picker
 (giving you 60 seconds) and replays the message in a fresh chat with the chosen
-agent. Either way the auto-created chat, still empty, is deleted and the
+agent. With those two the auto-created chat, still empty, is deleted and the
 buttons are removed, so you get exactly one answer. If you do not tap, after
 the 8 seconds the bot answers in the new chat and the message becomes
 "Answering in a new chat with ..." without buttons. If you send another message
@@ -79,11 +81,11 @@ runs in the middle of a conversation, nor for `/newchat` or `/selectagent`, whic
 
 - **Confident pick** (confidence at least `orchestrator.min_confidence`, default 0.6): the bot creates the chat
   with that agent and sends first `It has been a while. I chose **Agent** for this message.` with the buttons
-  **↩ Continue previous chat** (only when a previous chat exists) and **🔀 Other agent** (the full picker, as
+  **✅ Use Agent** (accept it now), **↩ Continue previous chat** (only when a previous chat exists) and **🔀 Other agent** (the full picker, as
   before). If you do nothing, the chosen agent answers after `grace_seconds` (default 8).
 - **Unsure pick** (greetings, vague or ambiguous messages): the default agent is your **core agent** (Settings >
   *Core agent (used when unsure)*), or your **default agent** (Settings > General) when none is set. The bot shows buttons for the three most
-  likely agents (the default marked ⭐), then **↩ Continue previous chat** and **🔀 More agents**. Tap an agent to replay
+  likely agents (the default marked ⭐), preceded by **✅ Use <default agent>** and followed by **↩ Continue previous chat** and **🔀 More agents**. Tap an agent to replay
   the message in a new chat with it; tap the ⭐ one to answer at once; do nothing and the default answers after
   `uncertain_grace_seconds` (default 20).
 - **First message ever**: routed and with buttons too, but without *Continue previous chat*.

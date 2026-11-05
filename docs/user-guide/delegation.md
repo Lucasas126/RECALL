@@ -151,7 +151,7 @@ See also: the built-in `recall` skill page `delegation.md` (what agents read abo
 
 ## Telegram
 
-When a task is launched from a Telegram chat (or from the chat Telegram currently shows), the bot sends one short line when it starts (with a **Stop** button) and one when it ends: status, title, agent and elapsed time. If the chat is not the current one, the line and the reply name the agent and the chat. When the results wake the parent, its reply is streamed into the private chat like any other reply (approvals included), without you writing anything; if you are in the middle of a reply, the wake waits behind it.
+When a task is launched from a Telegram chat (or from the chat Telegram currently shows), the task appears like any other tool call: the `task_start(...)` line in the reply that launched it (shown while it runs, also for `wait=true`). That same reply message carries a **Stop** button (`Stop <title>`, one per running task) only while the task runs; the button disappears when the task ends, edited on the same message, and there are no separate "started" / "finished" messages. If the reply that launched it is long gone, nothing is added: use `/tasks`. When the results wake the parent, its reply is streamed into the private chat like any other reply (approvals included), without you writing anything; if you are in the middle of a reply, the wake waits behind it.
 
 - `/tasks`: the tasks of the current chat (status, title, elapsed), with a Stop button per running task.
 - `/task <id>`: status and result of a task (capped at 1500 characters).

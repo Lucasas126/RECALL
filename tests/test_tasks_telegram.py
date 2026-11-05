@@ -30,10 +30,13 @@ class FakeStream:
         self.chat_id, self.finished, self.started = chat_id, None, False
         FakeStream.instances.append(self)
 
+    def attach(self, state, key, content):
+        pass
+
     async def start(self):
         self.started = True
 
-    async def update(self, text, entities):
+    async def update(self, text, entities, force=False):
         pass
 
     async def finish(self, messages):
@@ -75,46 +78,117 @@ class Base(unittest.IsolatedAsyncioTestCase):
         return query, SimpleNamespace(effective_user=SimpleNamespace(id=user_id), callback_query=query,
                                       effective_message=query.message, effective_chat=SimpleNamespace(id=user_id, type="private"))
 
+    def host(self, text="working", finished=False):
+        """A real reply stream (the message the task's [Stop] lives on), registered like a turn's reply."""
+        self.bot.send_message_draft = AsyncMock()
+        message = SimpleNamespace(message_id=55, edit_text=AsyncMock())
+        self.bot.send_message = AsyncMock(return_value=message)
+        stream = bot_module._ReplyStream(self.bot, 123, use_draft=True)
+        content = bot_module._ReplyContent()
+        content.append("text", text)
+        stream.attach(self.state, (123, "test-user", "agent-a", "chat-1"), content)
+        return stream, message
 
-class StatusLineTests(Base):
-    async def test_started_and_finished_send_one_short_line_each(self) -> None:
+    @staticmethod
+    def callbacks(markup):
+        return [] if markup is None else [b.callback_data for row in markup.inline_keyboard for b in row]
+
+
+class StopButtonTests(Base):
+    async def test_stop_shows_on_the_streaming_reply_only_while_the_task_runs(self) -> None:
+        stream, message = self.host()
+        await stream.update("working", [])
+        self.bot.send_message_draft.assert_awaited()  # a plain draft until a button is needed
         await _handle_task_event(self.bot, self.state, self.event("task_started"))
-        self.assertEqual(self.bot.send_message.await_count, 1)
+        self.assertEqual(self.bot.send_message.await_count, 1)  # the reply became a real message carrying the button
         args, kwargs = self.bot.send_message.await_args
-        self.assertEqual(args[0], 123)
-        self.assertIn("Find prices", args[1])
-        self.assertIn("Aria", args[1])
-        self.assertEqual(kwargs["reply_markup"].inline_keyboard[0][0].callback_data, "tk:t1:stop")
+        self.assertEqual(self.callbacks(kwargs["reply_markup"]), ["tk:t1:stop"])
+        self.assertIn("Stop Find prices", kwargs["reply_markup"].inline_keyboard[0][0].text)
         self.assertEqual(self.state.task_cards["t1"], "test-user")
         self.records["t1"] = record(status="done")
         await _handle_task_event(self.bot, self.state, self.event("task_finished", status="done"))
-        self.assertEqual(self.bot.send_message.await_count, 2)
-        text = self.bot.send_message.await_args.args[1]
-        self.assertIn("✅", text)
-        self.assertIn("42s", text)
-        self.bot.edit_message_reply_markup.assert_awaited_once()  # the start line loses its button
+        self.assertIsNone(message.edit_text.await_args.kwargs["reply_markup"])  # same message, button gone
+        self.assertEqual(self.bot.send_message.await_count, 1)  # no separate started/finished messages
         self.assertNotIn("t1", self.state.task_cards)
+        self.assertNotIn("t1", self.state.task_hosts)
 
-    async def test_other_chat_gets_the_agent_and_chat_prefix(self) -> None:
-        self.records["t1"]["parent"]["chat_id"] = "chat-2"
-        await _handle_task_event(self.bot, self.state, self.event("task_started", chat_id="chat-2"))
-        self.assertIn("Aria · Other chat", self.bot.send_message.await_args.args[1])
+    async def test_a_finished_reply_only_gets_its_reply_markup_edited(self) -> None:
+        stream, message = self.host()
+        await stream.finish([("done talking", [])])
+        self.assertEqual(self.bot.send_message.await_count, 1)
+        await _handle_task_event(self.bot, self.state, self.event("task_started"))
+        kwargs = self.bot.edit_message_reply_markup.await_args.kwargs
+        self.assertEqual((kwargs["chat_id"], kwargs["message_id"]), (123, 55))
+        self.assertEqual(self.callbacks(kwargs["reply_markup"]), ["tk:t1:stop"])
+        await _handle_task_event(self.bot, self.state, self.event("task_finished", status="done"))
+        self.assertIsNone(self.bot.edit_message_reply_markup.await_args.kwargs["reply_markup"])
+        self.assertEqual(self.bot.send_message.await_count, 1)
+        message.edit_text.assert_not_awaited()  # the text is never rewritten
 
-    async def test_a_web_chat_of_another_user_or_origin_is_not_announced(self) -> None:
+    async def test_one_button_per_running_task_and_the_rest_stay(self) -> None:
+        self.records["t2"] = record("t2", title="Other work")
+        stream, message = self.host()
+        await stream.finish([("reply", [])])
+        await _handle_task_event(self.bot, self.state, self.event("task_started"))
+        await _handle_task_event(self.bot, self.state, self.event("task_started", task_id="t2"))
+        self.assertEqual(self.callbacks(self.bot.edit_message_reply_markup.await_args.kwargs["reply_markup"]), ["tk:t1:stop", "tk:t2:stop"])
+        await _handle_task_event(self.bot, self.state, self.event("task_finished", task_id="t1"))
+        self.assertEqual(self.callbacks(self.bot.edit_message_reply_markup.await_args.kwargs["reply_markup"]), ["tk:t2:stop"])
+
+    async def test_stopping_a_hosted_task_keeps_the_other_buttons(self) -> None:
+        stream, _ = self.host()
+        await stream.finish([("reply", [])])
+        await _handle_task_event(self.bot, self.state, self.event("task_started"))
+        self.manager.stop_task.return_value = {"id": "t1", "status": "cancelled"}
+        query, update = self.query("tk:t1:stop")
+        await task_callback(update, self.context)
+        self.manager.stop_task.assert_called_once_with("test-user", "t1")
+        query.edit_message_reply_markup.assert_not_awaited()  # the task's end event removes its own button
+
+    async def test_without_a_reply_to_host_it_nothing_is_sent(self) -> None:
+        await _handle_task_event(self.bot, self.state, self.event("task_started"))
+        await _handle_task_event(self.bot, self.state, self.event("task_finished", status="done"))
+        self.bot.send_message.assert_not_awaited()
+        self.bot.edit_message_reply_markup.assert_not_awaited()
+        self.assertNotIn("t1", self.state.task_hosts)
+
+    async def test_a_reply_that_ended_long_ago_does_not_host_a_new_task(self) -> None:
+        stream, _ = self.host()
+        await stream.finish([("reply", [])])
+        stream.ended_at -= bot_module._HOST_GRACE_SECONDS + 1
+        await _handle_task_event(self.bot, self.state, self.event("task_started"))
+        self.bot.edit_message_reply_markup.assert_not_awaited()
+
+    async def test_a_web_chat_or_another_user_is_not_hosted(self) -> None:
         self.service._conversations.return_value.origin.return_value = "web"
+        stream, _ = self.host()
         await _handle_task_event(self.bot, self.state, self.event("task_started", chat_id="web-chat"))
         await _handle_task_event(self.bot, self.state, {**self.event("task_started"), "user_id": "nobody"})
-        self.bot.send_message.assert_not_awaited()
+        self.assertEqual(self.state.task_hosts, {})
 
     async def test_events_hop_to_the_bot_loop_from_a_worker_thread(self) -> None:
+        stream, _ = self.host()
+        await stream.finish([("reply", [])])
         self.state.loop = asyncio.get_running_loop()
         done = asyncio.Event()
-        self.bot.send_message.side_effect = lambda *a, **k: (done.set(), SimpleNamespace(message_id=1))[1]
+        self.bot.edit_message_reply_markup.side_effect = lambda *a, **k: done.set()
         thread = threading.Thread(target=_on_task_event, args=(self.bot, self.state, self.event("task_started")))
         thread.start()
         await asyncio.wait_for(done.wait(), 5)
         thread.join()
-        self.bot.send_message.assert_called_once()
+
+
+class ToolLineTests(unittest.TestCase):
+    def test_a_tool_line_shows_at_tool_start_and_the_finished_event_completes_the_same_line(self) -> None:
+        content = bot_module._ReplyContent()
+        content.start_action({"id": "c1", "name": "task_start", "arguments": {"goal": "x", "wait": True}})
+        text, _ = bot_module._final_messages(content.parts)[0]
+        self.assertIn('>task_start(goal="x", wait=true)', text)
+        content.add_action({"id": "c1", "name": "task_start", "arguments": {"goal": "x", "wait": True}, "result": "ok"})
+        self.assertEqual(len(content.parts), 1)
+        self.assertEqual(len(content.actions), 1)
+        content.add_action({"id": "c2", "name": "memory", "arguments": {}})  # no tool_start seen: appended as before
+        self.assertEqual(len(content.parts), 2)
 
 
 class WakeTests(Base):

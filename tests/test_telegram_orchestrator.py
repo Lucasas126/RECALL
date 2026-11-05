@@ -66,7 +66,7 @@ class TelegramOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         call = self.message.reply_text.await_args
         self.assertEqual(call.args[0], "It has been a while. I chose Second for this message.")
         self.assertEqual([e.type for e in call.kwargs["entities"]], ["bold"])
-        self.assertEqual(self.labels(), ["↩ Continue previous chat", "🔀 Other agent"])
+        self.assertEqual(self.labels(), ["✅ Use Second", "↩ Continue previous chat", "🔀 Other agent"])
         for button in self.markup_buttons():
             self.assertLessEqual(len(button.callback_data.encode()), 64)
 
@@ -92,7 +92,7 @@ class TelegramOrchestratorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_continue_previous_still_works_after_a_pick(self) -> None:
         await self.send()
-        query, update = self.query(self.markup_buttons()[0].callback_data, 55)
+        query, update = self.query(self.markup_buttons()[1].callback_data, 55)
         with patch("src.telegram.bot._send_generation", new=AsyncMock()) as generation:
             await reroute_callback(update, self.context)
             await base._drain()
@@ -102,7 +102,7 @@ class TelegramOrchestratorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_other_agent_opens_the_full_picker_and_replays(self) -> None:
         await self.send()
-        query, update = self.query(self.markup_buttons()[1].callback_data, 55)
+        query, update = self.query(self.markup_buttons()[2].callback_data, 55)
         await reroute_callback(update, self.context)
         buttons = [b for row in query.message.reply_text.await_args.kwargs["reply_markup"].inline_keyboard for b in row]
         self.assertEqual([b.text for b in buttons][-1], "✖ Cancel (keep current chat)")
@@ -130,7 +130,7 @@ class TelegramOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.session.chat_id, "chat-of-agent-c")
         self.assertEqual(
             self.labels(),
-            ["Second", "⭐ Third", "First", "↩ Continue previous chat", "🔀 More agents"],
+            ["✅ Use Third", "Second", "⭐ Third", "First", "↩ Continue previous chat", "🔀 More agents"],
         )
         self.assertIn("Third will answer in 30 seconds", self.message.reply_text.await_args.args[0])
         for button in self.markup_buttons():
@@ -154,7 +154,7 @@ class TelegramOrchestratorTests(unittest.IsolatedAsyncioTestCase):
     async def test_tap_on_a_candidate_replays_in_a_new_chat_of_that_agent(self) -> None:
         self.uncertain(core="agent-c")
         await self.send("hi")
-        query, update = self.query(self.markup_buttons()[0].callback_data, 55)
+        query, update = self.query(self.markup_buttons()[1].callback_data, 55)
         with patch("src.telegram.bot._send_generation", new=AsyncMock()) as generation:
             await reroute_callback(update, self.context)
             await base._drain()
@@ -167,7 +167,7 @@ class TelegramOrchestratorTests(unittest.IsolatedAsyncioTestCase):
     async def test_tap_on_the_default_candidate_answers_at_once(self) -> None:
         self.uncertain(core="agent-c")
         await self.send("hi")
-        query, update = self.query(self.markup_buttons()[1].callback_data, 55)
+        query, update = self.query(self.markup_buttons()[2].callback_data, 55)
         with patch("src.telegram.bot._send_generation", new=AsyncMock()) as generation:
             await reroute_callback(update, self.context)
             await base._drain()
@@ -199,7 +199,7 @@ class TelegramOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.session.chat_id, self.session.last_message_at = None, None
         self.service.latest_chat.return_value = None
         await self.send()
-        self.assertEqual(self.labels(), ["🔀 Other agent"])
+        self.assertEqual(self.labels(), ["✅ Use Second", "🔀 Other agent"])
         self.assertEqual(self.message.reply_text.await_args.args[0], "I chose Second for this message.")
         self.assertEqual(self.session.chat_id, "chat-of-agent-b")
 
@@ -236,7 +236,7 @@ class TelegramOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.service.route_message.assert_not_called()
         self.context.bot.send_chat_action.assert_not_awaited()
         self.assertIn("Starting a new chat with First", self.message.reply_text.await_args.args[0])
-        self.assertEqual(self.labels(), ["↩ Continue previous chat", "🔀 Change agent"])
+        self.assertEqual(self.labels(), ["✅ Use First", "↩ Continue previous chat", "🔀 Change agent"])
 
     async def test_router_failures_fall_back_to_the_default_agent(self) -> None:
         self.service.route_message.return_value = None
