@@ -40,6 +40,14 @@ documents and images the user attaches, and the output of its own commands. Any 
 5. **Output hygiene and audit**: output is redacted and truncated before the model sees it; every action is logged to
    `data/<user_id>/<agent_id>/terminal_audit.jsonl`, which the agent cannot read or change.
 
+**A PC backend means the RECALL host can act on a real machine.** When an agent is allowed a backend that is your own PC (or
+any machine that is not a throwaway sandbox), the sandbox boundary above does not exist for that backend: a prompt injection
+that gets a command approved acts on real files and credentials. So: keep that backend on `approvals: manual` and read each
+command before approving; use a dedicated key pair that is used for nothing else and a dedicated, preferably unprivileged,
+account; allow inbound SSH only from the RECALL host with a firewall rule; disable password login on the PC; pin its host key.
+Approvals are per backend, so a `smart` or `off` sandbox next to a `manual` PC does not loosen the PC. Setup:
+[using your own PC as a backend](../user-guide/terminal.md#using-your-own-pc-as-a-backend).
+
 **Local backend.** `type: local` runs commands on the RECALL host as the RECALL user, with only secret-looking variables
 removed from the environment. The process can still read every file that user can read, including `.env`, `config/` and
 every user's `data/`. It is disabled by default (`terminal.allow_local`) and only suitable for a single-user machine you

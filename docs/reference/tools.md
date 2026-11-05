@@ -35,8 +35,9 @@ The web **Agents** tab configures these groups for each agent:
 - `terminal`: `terminal` (shell command in the sandbox, foreground, with timeout), `sandbox_read` (numbered lines, paginated
   by `offset`/`limit`), `sandbox_write` (atomic whole-file write), `sandbox_patch` (unique find-and-replace, whitespace-tolerant
   fallback, `replace_all`, returns a unified diff) and `sandbox_search` (regex over contents, or a glob over file names with
-  `files=true`; at most 200 results). They act only on the sandbox filesystem and need the agent's `terminal` block and a
-  backend in the user's `terminal_backends`. Every call goes through the approval policy and is audited; output is
+  `files=true`; at most 200 results). They act only on the chosen backend's filesystem (optional `backend` argument, enumerated
+  with the agent's allowed backends; default `terminal.default_backend`) and need the agent's `terminal` block and
+  backends in the user's `terminal_backends`. Every call goes through the approval policy and is audited; output is
   stripped, redacted and truncated. See the [terminal guide](../user-guide/terminal.md).
 
 In a [disposable chat](../user-guide/memory.md#disposable-chats) the write tools of

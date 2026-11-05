@@ -248,13 +248,17 @@ only `password_hash`; YAML comments in the file are lost. See [deployment](../de
 
 ## terminal backends
 
-`terminal_backends` maps a name (`^[a-z][a-z0-9_-]{0,31}$`) to a sandbox an agent's `terminal.backend` can use. Unknown keys
+`terminal_backends` maps a name (`^[a-z][a-z0-9_-]{0,31}$`) to a machine an agent's `terminal.backends` can use (a sandbox, your own PC...). Unknown keys
 are rejected; key files are paths, never inline secrets.
 
 | type | keys |
 | --- | --- |
-| `ssh` | `host` (name or address), `port` (default 22), `user`, `key_file`, `known_hosts_file` (all required except `port`); strict host-key checking and key-only login are always on |
-| `local` | `workdir`; refused unless `settings.yaml` sets `terminal.allow_local: true` |
+| `ssh` | `host` (name or address), `port` (default 22), `user`, `key_file`, `known_hosts_file` (all required except `port`), `description` (optional); strict host-key checking and key-only login are always on |
+| `local` | `workdir`, `description` (optional); refused unless `settings.yaml` sets `terminal.allow_local: true` |
+
+Every backend also accepts an optional `description` (free text, at most 200 characters, for example `User A's Windows PC, real
+files, Git Bash`). The model sees it next to the backend's name in its instructions, and the agent form shows it; use it to say
+whether the machine is a disposable sandbox or a real machine.
 
 Check a backend with `python -m src.admin terminal-test --user <user_id> --backend <name>` (runs `echo ok; uname -sr`, 15 s
 timeout, prints the exit code and the redacted output, never the key). Setup walk-through: [terminal guide](../user-guide/terminal.md).
@@ -279,7 +283,7 @@ models:
 # claude_subscription:                  # optional, advanced; see the Claude subscription guide
 #   claude_config_dir: /path/to/this-users-claude-login
 # terminal_backends:                    # optional; sandboxes the user's agents may run commands in (see below)
-#   sandbox: {type: ssh, host: 192.0.2.10, port: 22, user: agent, key_file: /app/.config/keys/sandbox_ed25519, known_hosts_file: /app/.config/keys/sandbox_known_hosts}
+#   sandbox: {type: ssh, host: 192.0.2.10, port: 22, user: agent, key_file: /app/.config/keys/sandbox_ed25519, known_hosts_file: /app/.config/keys/sandbox_known_hosts, description: Disposable sandbox}
 ```
 
 A complete, working example lives in `.config/example_user/`.

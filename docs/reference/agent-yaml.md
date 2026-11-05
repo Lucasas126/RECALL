@@ -49,17 +49,25 @@ folders:                             # user folders, each exposed as the source 
     indexed: true                    # feeds associative memory and query_memory (default true)
     read_only: false                 # never writable, whatever the tool groups (default false)
 terminal:                            # required by the `terminal` tool group (see the terminal guide)
-  backend: sandbox                   # a name from the user's `terminal_backends` in user.yaml
-  workdir: ~/workspace               # default directory inside the backend (~ = the sandbox user's home)
-  approvals: manual                  # manual (asks for everything) | smart (asks for dangerous) | off; hardline always refused
+  backends:                          # 1+ names from the user's `terminal_backends` in user.yaml, each with its own policy
+    sandbox:
+      workdir: ~/workspace           # default directory inside this backend (default ~ = its user's home)
+      approvals: smart               # manual (asks for everything, default) | smart (asks for dangerous) | off; hardline always refused
+      # timeout_seconds: 120         # optional per-backend override of the command timeout
+    pc:
+      workdir: ~
+      approvals: manual
+  default_backend: sandbox           # one of the keys above; required when more than one, used when a call names no backend
   timeout_seconds: 60                # default command timeout, 1-600 (capped by settings.yaml terminal.max_timeout_seconds)
   max_output_chars: 20000            # output returned to the model, 500-200000 (capped by settings.yaml)
   allow_in_dream: false              # dream sessions may use the tools (also needs `terminal` in dream.tools)
 ```
 
-The `terminal` block is only used when `terminal` is in `tool_groups`. A group without a usable block (missing, unknown
-backend, `local` backend while `terminal.allow_local` is off) leaves the agent loadable with the terminal tools not built and
-a warning in the log. `dream.tools: [terminal]` without `terminal.allow_in_dream: true` is rejected. See the
+The `terminal` block is only used when `terminal` is in `tool_groups`. The model picks the backend per call (the five tools
+take an optional `backend` argument limited to these names); approvals, working directory and timeout follow the backend it
+picks. A backend that does not resolve (unknown name, `local` while `terminal.allow_local` is off) is disabled with a warning
+in the log and the agent keeps the others; when none resolves, or the block is missing, the agent still loads with the
+terminal tools not built. `terminal.backend`, `workdir` and `approvals` at the top level of the block no longer exist. `dream.tools: [terminal]` without `terminal.allow_in_dream: true` is rejected. See the
 [terminal guide](../user-guide/terminal.md).
 
 The size limits of `SOUL.md`, `MEMORY.md` and `USER.md` are not agent settings: they are application-wide and set in the
