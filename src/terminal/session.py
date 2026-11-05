@@ -8,15 +8,21 @@ from pathlib import Path
 from src.config.models import AgentTerminalConfig, TerminalSettings
 from src.providers.cancellation import GenerationCancelled
 from src.terminal.audit import write_audit
-from src.terminal.backends import Backend, Result
+from src.terminal.backends import Backend, LocalBackend, Result
 from src.terminal.context import current_run
 from src.terminal.policy import Assessment, assess
+from src.terminal.protected import ProtectedPaths, build_protected
 from src.utils.logger import get_logger
 
 logger = get_logger("terminal")
 MAX_COMMAND_CHARS = 20_000
 
 DENIED_HINT = "Do not retry this action; tell the user what you wanted to do and why, and let them decide."
+PROTECTED_NOTICE = (
+    "Denied: protected path: {why}. SSH keys, secrets files, .env files, login credentials and process environments are "
+    "off limits to agents on the local backend in every approval mode, and no one can approve access to them from here. "
+    "Do not try another way to reach them (other tools, paths, globs, scripts). "
+)
 
 
 class TerminalSession:
@@ -29,6 +35,7 @@ class TerminalSession:
     def __init__(
         self, backend: Backend, config: AgentTerminalConfig, settings: TerminalSettings, *,
         user_id: str, agent_id: str, name: str, audit_file: Path | None = None, unattended: bool = False,
+        local: bool | None = None,
     ):
         self.backend = backend
         self.name = name  # the key in the user's terminal_backends
@@ -39,6 +46,19 @@ class TerminalSession:
         self.agent_id = agent_id
         self.audit_file = audit_file
         self.unattended = unattended
+        # the protected-path rules apply to the local backend only (ssh backends are other machines)
+        self.local = isinstance(backend, LocalBackend) if local is None else local
+
+    # ------------------------------------------------------------------ protected paths
+    def protected(self) -> ProtectedPaths | None:
+        """The protected set right now (recomputed on every call), or None on a backend that is not local."""
+        return build_protected(self.settings.protected_paths) if self.local else None
+
+    def local_cwd(self, cwd: str | None = None) -> str:
+        """The directory a local command really runs in (mirrors LocalBackend.run)."""
+        base = Path(self.workdir).expanduser()
+        target = Path(cwd).expanduser() if cwd and cwd != "~/workspace" else base
+        return str(target if target.is_absolute() else base / target)
 
     @property
     def workdir(self) -> str:
@@ -63,6 +83,8 @@ class TerminalSession:
     def decide(self, tool: str, display: str, assessment: Assessment, cwd: str) -> tuple[bool, str, str]:
         """(allowed, text for the model when denied, decision label for the audit trail)."""
         mode = self.policy.approvals
+        if assessment.level == "protected":  # before every mode and before the unattended handling
+            return False, PROTECTED_NOTICE.format(why=assessment.reason or "keys and secrets") + DENIED_HINT, "denied:protected"
         if assessment.level == "hardline":
             why = assessment.reason or "matches the hardline blocklist"
             return False, (
@@ -104,9 +126,11 @@ class TerminalSession:
             return None, "error: the action contains a NUL byte"
         if len(command) > MAX_COMMAND_CHARS:
             return None, f"error: command is longer than {MAX_COMMAND_CHARS} characters; use sandbox_write for large content"
-        verdict = assessment or assess(command, None)
+        verdict = assessment or assess(
+            command, None, self.protected(), self.local_cwd(cwd) if self.local else None,
+        )
         try:
-            if preapproved:  # the second step of an operation whose first step was already authorized
+            if preapproved and verdict.level != "protected":  # the second step of an operation whose first step was already authorized
                 allowed, text, decision = True, "", "approved:same-operation"
             else:
                 allowed, text, decision = self.decide(tool, display, verdict, cwd)

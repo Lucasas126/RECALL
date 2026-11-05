@@ -76,6 +76,7 @@ def build_terminal_tools(
         sessions[name] = TerminalSession(
             backend, cfg, TERMINAL, name=name, user_id=config.user_id, agent_id=config.id,
             audit_file=audit_path(DATA_DIR, config.user_id, config.id), unattended=unattended,
+            local=backend_config.type == "local",
         )
     if not sessions:
         return []

@@ -72,8 +72,17 @@ def _problem(code: int | None, path: str, stderr: str) -> str:
     }.get(code, f"error: could not access {path}" + (f": {stderr.strip()}" if stderr.strip() else ""))
 
 
+def protected_verdict(session: TerminalSession, path: str) -> Assessment | None:
+    """The `protected` verdict for a path on a local backend (key, secret, .env...), else None. Exact, not a scan."""
+    protected = session.protected()
+    if protected is None:
+        return None
+    why = protected.reason(path, session.local_cwd())
+    return Assessment("protected", f"{path} is {why}") if why else None
+
+
 def _fetch(session: TerminalSession, tool: str, display: str, path: str, body: str):
-    result, denial = session.run(tool, display, body, assessment=_NORMAL)
+    result, denial = session.run(tool, display, body, assessment=protected_verdict(session, path) or _NORMAL)
     return result, denial
 
 
@@ -140,7 +149,7 @@ def sandbox_write(session: TerminalSession, path: str, content: str) -> str:
     path = check_path(path)
     size, problem = _write(
         session, "sandbox_write", f"write {path} ({len(content.encode('utf-8'))} bytes)", path, content,
-        assess_write(posixpath.normpath(_where(session, path))),
+        protected_verdict(session, path) or assess_write(posixpath.normpath(_where(session, path))),
     )
     return problem or f"wrote {size} bytes to {path}"
 
@@ -205,7 +214,7 @@ def sandbox_patch(session: TerminalSession, path: str, old: str, new: str, repla
         _BINARY_CHECK,
         'cat -- "$f"',
     ])
-    assessment = assess_write(posixpath.normpath(_where(session, path)))
+    assessment = protected_verdict(session, path) or assess_write(posixpath.normpath(_where(session, path)))
     result, denial = session.run("sandbox_patch", f"patch {path}", fetch, assessment=assessment)
     if denial:
         return denial
@@ -241,21 +250,27 @@ def sandbox_search(session: TerminalSession, pattern: str, path: str = ".", glob
         raise ValueError("glob must not contain a NUL byte")
     p = shell_path(path)
     cap = MAX_SEARCH_RESULTS + 1
+    protected = session.protected()
+    skip_names, skip_dirs = protected.search_excludes() if protected else ([], [])
     if files:
         name = f" -name {shlex.quote(pattern)}"
+        hide = "".join(f" -not -name {shlex.quote(n)}" for n in skip_names)
+        hide += "".join(f" -not -path {shlex.quote('*/' + d + '/*')}" for d in skip_dirs)
         script = (
             f"f={p}\n[ -e \"$f\" ] || exit {_MISSING}\n"
-            f"find \"$f\"{name} -not -path '*/.git/*' 2>/dev/null | head -n {cap}"
+            f"find \"$f\"{name}{hide} -not -path '*/.git/*' 2>/dev/null | head -n {cap}"
         )
         display = f"find files named {pattern} in {path}"
     else:
         include = f" --include={shlex.quote(glob)}" if glob else ""
+        include += "".join(f" --exclude={shlex.quote(n)}" for n in skip_names)
+        include += "".join(f" --exclude-dir={shlex.quote(d)}" for d in skip_dirs)
         script = (
             f"f={p}\n[ -e \"$f\" ] || exit {_MISSING}\n"
             f"grep -rIn -E --exclude-dir=.git{include} -e {shlex.quote(pattern)} -- \"$f\" | head -n {cap}"
         )
         display = f"search {pattern} in {path}" + (f" ({glob})" if glob else "")
-    result, denial = session.run("sandbox_search", display, script, assessment=_NORMAL)
+    result, denial = session.run("sandbox_search", display, script, assessment=protected_verdict(session, path) or _NORMAL)
     if denial:
         return denial
     if result.timed_out:
@@ -263,6 +278,8 @@ def sandbox_search(session: TerminalSession, pattern: str, path: str = ".", glob
     if result.exit_code == _MISSING:
         return _problem(_MISSING, path, "")
     lines = [line for line in result.stdout.splitlines() if line]
+    if protected is not None:  # belt and braces: whatever the excludes missed (symlinks, configured patterns)
+        lines = protected.filter_results(lines, session.local_cwd(), grep_format=not files)
     if not lines:
         if result.stderr.strip():
             return "error: " + clean(result.stderr, 500)[0]

@@ -410,6 +410,18 @@ class TerminalSettings(BaseModel):
     default_timeout_seconds: int = Field(default=60, ge=1, le=3600, strict=True)
     max_timeout_seconds: int = Field(default=600, ge=1, le=3600, strict=True)
     max_output_chars: int = Field(default=20_000, ge=500, le=200_000, strict=True)
+    # extra glob patterns (relative to the repository root, or absolute) the local backend may never touch
+    protected_paths: list[str] = Field(default_factory=list, max_length=200)
+
+    @field_validator("protected_paths")
+    @classmethod
+    def _clean_protected_paths(cls, value: list[str]) -> list[str]:
+        cleaned = []
+        for item in value:
+            if not isinstance(item, str) or not item.strip() or "\x00" in item or len(item) > 1024:
+                raise ValueError("terminal.protected_paths entries must be non-empty strings without NUL bytes (max 1024 chars)")
+            cleaned.append(item.strip())
+        return cleaned
 
     @model_validator(mode="after")
     def _default_within_max(self) -> "TerminalSettings":

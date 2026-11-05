@@ -15,8 +15,8 @@ import shlex
 from dataclasses import dataclass
 from typing import Literal
 
-Level = Literal["normal", "dangerous", "hardline"]
-_RANK = {"normal": 0, "dangerous": 1, "hardline": 2}
+Level = Literal["normal", "dangerous", "hardline", "protected"]
+_RANK = {"normal": 0, "dangerous": 1, "hardline": 2, "protected": 3}
 
 # directories whose contents an agent has no business rewriting
 SYSTEM_DIRS = ("/etc", "/boot", "/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/sys", "/proc", "/dev", "/root")
@@ -459,10 +459,19 @@ def _assess(command: str, workdir: str | None, depth: int) -> Assessment:
     return result
 
 
-def assess(command: str, workdir: str | None = None) -> Assessment:
-    """The verdict and a short human reason for a shell command line."""
+def assess(command: str, workdir: str | None = None, protected=None, cwd: str | None = None) -> Assessment:
+    """The verdict and a short human reason for a shell command line.
+
+    `protected` (a `src.terminal.protected.ProtectedPaths`, local backends only) adds the level `'protected'`: the
+    command touches a key or secret file. It outranks every other level and no approval mode can allow it. Relative
+    paths in the command are resolved against `cwd` (default: `workdir`, else the process directory).
+    """
     if "\x00" in command:
         return Assessment("hardline", "NUL byte in the command")
+    if protected is not None:
+        why = protected.command_reason(command, cwd or workdir or ".")
+        if why:
+            return Assessment("protected", why)
     return _assess(command, workdir, 0)
 
 

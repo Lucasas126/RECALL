@@ -121,3 +121,4 @@ terminal:
   default_timeout_seconds: 60    # command timeout when the agent sets none
   max_timeout_seconds: 600       # ceiling for any command timeout
   max_output_chars: 20000        # ceiling for the output returned to the model
+  protected_paths: []            # extra glob patterns (repo-relative or absolute) a `local` backend may never read or use; see docs/user-guide/terminal.md

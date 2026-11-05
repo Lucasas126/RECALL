@@ -27,6 +27,10 @@ The user sees an approval card in the web chat or buttons in Telegram, and only 
 
 Refused whatever anyone approves (the hardline): recursive `rm` of `/`, `~` or system directories, writing to block devices and formatting tools, shutdown or reboot commands, fork bombs, recursive permission changes on system directories. Asking in `manual` and `smart` (dangerous): `sudo` and account tools, recursive or system-path deletions, `dd`, permission changes, stopping services or killing processes, firewall and mount tools, `ssh`/`scp` from inside the backend, `git push --force`, `git reset --hard`, global package installs and removals, downloads piped into an interpreter, destructive SQL. The exact lists live in `src/terminal/policy.py`; they are a safety net, not a security boundary.
 
+## Protected paths (local backend)
+
+On a `local` backend, `terminal` and the `sandbox_*` tools refuse, in every approval mode and in unattended runs, the SSH private keys of all users' backends (`key_file`, usually `.config/keys/`), `.config/secrets.env`, `.env` files, Claude login `.credentials.json`, `/proc/*/environ` and the extra patterns in `settings.yaml` `terminal.protected_paths`. The text `Denied: protected path: ...` means this: nobody can approve it, so do not retry, rephrase, glob, copy, archive or script around it; tell the user instead. Public keys (`*.pub`), `known_hosts`, `user.yaml` and the directory listing of `keys/` stay allowed; recursive tools (`tar`, `grep -r`, `cp -r`, `find -exec`) may not start at a folder that contains protected files, so name narrower paths. SSH backends are not affected. Audit decision: `denied:protected`.
+
 ## When a command is denied
 
 1. Do not retry it, rephrase it, or split it to get around the refusal; the denial text says so.
