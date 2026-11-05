@@ -155,11 +155,11 @@ the model not to retry or work around it. A `sandbox_patch` asks once for both i
 
 ### in the web UI
 
-- **Approval card**: when the agent asks, the chat shows a card with the command, a small badge with the backend name, the working directory, the reason and a
+- **Approval card**: when the agent asks, the chat shows a card as a step of the turn: it appears exactly where the tool call happened, between the text written before it and the text written after it, and the tool's result summary follows it. Several approvals each sit at their own step. While any approval waits, a small bar at the bottom of the chat says "1 approval pending, jump to it" and scrolls to it. The card has the command, a small badge with the backend name, the working directory, the reason and a
   countdown to the automatic denial. A flagged action is titled "Dangerous command", any other "Approval required".
   **Approve** and **Deny** answer it; once closed the card shows an outcome badge (approved, denied, timed out,
-  cancelled or expired).
-- **After a reload** the cards still waiting are restored. An approval resolved from Telegram shows up in the web card
+  cancelled or expired). A resolved card folds into one line ("Approved: terminal [backend] first 60 characters of the command") that expands to the full card, so long histories stay compact.
+- **After a reload** the cards still waiting are restored inside the last assistant message, before the matching tool step when it is identifiable, else at its end. An approval resolved from Telegram shows up in the web card
   within a few seconds.
 - **Agent form**: the **Terminal** block appears in the Tools tab once the terminal group is enabled. It lists your
   backends (name, type and description only, never host or key) each with an **Allow** checkbox that reveals its working

@@ -27,8 +27,9 @@ from the repository root. Agents with a `local` terminal backend run it the same
 ## Setting values
 
 `--set a.b.c=value` addresses a dotted path in the file. The value is parsed as YAML: `true`, `42`, `[memory_read, web]`,
-`{type: local, workdir: /app}`, `null` (clears an optional field) or a quoted string. Note that `description=Hello: world` is a map
-in YAML; quote it (`description="Hello: world"`). The whole result is validated with the real models before anything is written;
+`{type: local, workdir: /app}`, `null` (clears an optional field) or a quoted string, so wrap text containing `": "` in quotes. The exception
+is a plain string field (`description`, `name`, ...): its value is taken raw, so `description=Veterinaria: salud y cuidado` works as typed
+(one pair of surrounding quotes is stripped). If a YAML-parsed value fails validation the command retries once with the raw text. `user set` behaves the same. The whole result is validated with the real models before anything is written;
 errors are printed as `path: reason` and the files are left untouched. A model reference is checked against the provider catalog
 like in the web UI. Rewriting a file drops its YAML comments.
 
@@ -39,6 +40,8 @@ python -m src.admin agent set --user ana --agent notes --set chat_config.tool_gr
 python -m src.admin agent rename --user ana --agent guide --new-id main --name "Ana's assistant"
 python -m src.admin agent check
 ```
+
+The agent's **display name** is its `name` (shown in the web UI and Telegram); change it with `agent set --set name="New name"`. It is separate from the SOUL, which holds the personality, and from the `id` (folder and URL), which normally stays: renaming the id of the agent that runs the current chat moves its data and can break the open chat, so open a new chat afterwards. If `python -m src.admin` reports a missing module, the shell's `python` is not the app's: use `.venv/Scripts/python` (Windows) or `.venv/bin/python` (Linux) from the repo root.
 
 ## Templates
 
