@@ -554,6 +554,23 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     def get_task_chat(task_id: str, user_id: str = Depends(current_user)):
         return service.get_task_chat(user_id, task_id)
 
+    @app.get("/api/tasks/{task_id}/stream")
+    def follow_task_reply(task_id: str, user_id: str = Depends(current_user)):
+        """Read-only live view of a running task's worker reply: the chat stream's frames, ended when the reply ends.
+
+        Nothing running: only `done`. A task executed by another process: an `unavailable` frame, then `done`.
+        """
+        language = service.language(user_id)
+        events, reason = service.follow_task(user_id, task_id)
+        headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+        if events is None:
+            frames = [_sse("unavailable", "live view only in the process running the task")] if reason else []
+            return StreamingResponse(iter([*frames, _sse("done", "", "")]), media_type="text/event-stream", headers=headers)
+        agent_id, chat_id = service.tasks.child_of(user_id, task_id)
+        return StreamingResponse(
+            _event_stream(events, language, user_id, agent_id, chat_id), media_type="text/event-stream", headers=headers,
+        )
+
     # ------------------------------------------------------------------ frontend
 
     @app.get("/")

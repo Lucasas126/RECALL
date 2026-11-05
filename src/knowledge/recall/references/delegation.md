@@ -48,7 +48,7 @@ A limit error names the limit and what to do (for example `error: limit reached:
 
 ## What the user sees (web)
 
-Each `task_start` shows as a card in the reply: title, `ephemeral` or the agent's name, a status badge with elapsed time, and a collapsible result. The user can press **Stop**, **Steer** (type a correction that goes into the running worker, same as your `task_steer`) or **Open chat** (the worker's conversation, read-only, internal). The wake message appears to the user as a compact collapsed "Task result" note, not as something they wrote, and your reply to it streams live. Give each task a clear `goal` title: it is the card's title. The user's steering can arrive in a task you are waiting on; the task keeps working with it.
+Each `task_start` shows as a card in the reply: title, `ephemeral` or the agent's name, a status badge with elapsed time, and a collapsible result. The user can press **Stop**, **Steer** (type a correction that goes into the running worker, same as your `task_steer`) or **Open chat** (the worker's conversation, read-only, internal, live). The wake message appears to the user as a compact collapsed "Task result" note, not as something they wrote, and your reply to it streams live. Give each task a clear `goal` title: it is the card's title. The user's steering can arrive in a task you are waiting on; the task keeps working with it.
 
 ## When to delegate, and when not
 

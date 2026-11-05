@@ -280,6 +280,9 @@ details.action pre { margin: 2px 0 0; padding: 8px; background: var(--bg); borde
 .approval-task { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
 .task-card > summary .task-tokens { flex: none; overflow: visible; text-overflow: clip; }
 .task-card > summary .task-tokens:empty { display: none; }
+.task-card > summary { flex-wrap: wrap; }
+.task-card > summary .task-activity { flex: 1 0 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: .85em; }
+.task-card > summary .task-activity[hidden] { display: none; }
 .task-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .task-actions button, .task-steer-form button { padding: 3px 12px; border-radius: 999px; font: inherit; font-size: .9em; }
 .task-steer-form { display: flex; gap: 6px; margin-top: 6px; }

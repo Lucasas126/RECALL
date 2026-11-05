@@ -38,12 +38,13 @@ class CacheUsageTests(unittest.TestCase):
     def test_report_shows_cache_line_after_the_context_summary(self) -> None:
         report = usage.format_turn(_breakdown(5000), None, False, 200000, cache=(4000, 13))
         lines = report.split("\n")
-        self.assertTrue(lines[0].startswith("context:"))
-        self.assertEqual(lines[1], "cache: read=4000 (80% of input) write=13")
+        self.assertTrue(lines[0].startswith("context 2.5% · in 5.000"))
+        self.assertEqual(lines[1], "context      5.000 / 200.000 tokens (2.5%)")
+        self.assertEqual(lines[2], "cache        read 4.000 (80% of input) · write 13")
 
     def test_report_omits_cache_line_when_unknown_or_approximate(self) -> None:
-        self.assertNotIn("cache:", usage.format_turn(_breakdown(5000), None, False, None))
-        self.assertNotIn("cache:", usage.format_turn(_breakdown(5000), None, True, None, cache=(1, 1)))
+        self.assertNotIn("cache  ", usage.format_turn(_breakdown(5000), None, False, None))
+        self.assertNotIn("cache  ", usage.format_turn(_breakdown(5000), None, True, None, cache=(1, 1)))
 
 
 BREAKPOINT = {"type": "ephemeral"}

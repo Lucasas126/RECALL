@@ -345,6 +345,43 @@ class TaskStore:
         return until
 
 
+ACTIVITY_DETAIL_CHARS = 80
+_ACTIVITY_ARGS = ("command", "query", "path", "url", "file", "name", "text")
+
+
+def activity_of(event: Any, previous: dict | None = None) -> dict | None:
+    """What a worker's reply event says it is doing: `{kind, tool, detail}` or the previous value when it says nothing.
+
+    `reasoning` (and a finished `tool` step) -> thinking, `text` -> writing, `tool_start` -> running a tool (`detail`:
+    the first line of its main argument, capped); the other events leave the activity as it is.
+    """
+    kind = getattr(event, "kind", "")
+    if kind == "reasoning":
+        return {"kind": "reasoning", "tool": "", "detail": ""}
+    if kind == "text":
+        return {"kind": "text", "tool": "", "detail": ""}
+    if kind == "tool":  # the step ended: the model is working on what it returned
+        return {"kind": "reasoning", "tool": "", "detail": ""}
+    if kind != "tool_start":
+        return previous
+    data = getattr(event, "data", None) or {}
+    args = data.get("arguments")
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except ValueError:
+            args = {"text": args}
+    detail = ""
+    if isinstance(args, dict):
+        value = next((args[key] for key in _ACTIVITY_ARGS if isinstance(args.get(key), str) and args[key].strip()), None)
+        if value is None:
+            value = next((v for v in args.values() if isinstance(v, str) and v.strip()), "")
+        detail = (value.strip().splitlines() or [""])[0]
+    if len(detail) > ACTIVITY_DETAIL_CHARS:
+        detail = detail[: ACTIVITY_DETAIL_CHARS - 1].rstrip() + "…"
+    return {"kind": "tool", "tool": str(data.get("name") or ""), "detail": detail}
+
+
 @dataclass
 class _LiveTask:
     """What the executing process keeps of a running task (the record is the durable part)."""
@@ -371,6 +408,7 @@ class _LiveTask:
     stopped: float = 0.0  # monotonic time of the stop request
     stop_reason: str | None = None  # why a stop was requested: timeout, token_limit, stopped, parent_cancelled, shutdown
     partial: list[str] = field(default_factory=list)  # text the worker streamed, for a task that does not finish
+    activity: dict | None = None  # what the worker is doing now (`activity_of`): shown on the task card
     guard: threading.Lock = field(default_factory=threading.Lock)
     waits: int = 0  # approvals the worker is waiting on right now (the timeout is paused while there is one)
     wait_since: float = 0.0  # monotonic time the oldest of them started
@@ -958,6 +996,7 @@ class TaskManager:
                 events = iter(())
             while events is not None:  # a steering message (`steer`) adds the feed of the reply that continues the turn
                 for event in events:
+                    live.activity = activity_of(event, live.activity)
                     if event.kind == "text":
                         live.partial.append(event.text)
                     elif event.kind == "interrupted":
@@ -1790,10 +1829,13 @@ class TaskManager:
         except ValueError:
             elapsed = None
         target = record.get("target") or {}
-        awaiting, elsewhere = 0, None
+        awaiting, elsewhere, activity = 0, None, None
         if record.get("status") not in FINAL_STATES:
             if self._is_live(record.get("user_id", ""), record["id"]):
                 awaiting = self.awaiting_approval(record.get("user_id", ""), record["id"])
+                with self._guard:
+                    live = self._live.get((record.get("user_id", ""), record["id"]))
+                activity = dict(live.activity) if live is not None and live.activity else None
             elif awaiting := int(record.get("awaiting_approval") or 0):  # the executor is the other process: mirrored, never relayed
                 channel = record.get("approval_channel") or "web"
                 elsewhere = channel if channel not in self.origins else None
@@ -1816,6 +1858,7 @@ class TaskManager:
             "commands": list((record.get("commands") or [])[-5:]),
             "unattended": bool(record.get("unattended")), "trigger": record.get("trigger"),
             "created_at": record.get("created_at"),
+            "activity": activity,
         }
         if full:
             out["result"] = text[:FULL_RESULT_CHARS]
@@ -1852,6 +1895,14 @@ class TaskManager:
             (r["parent"]["agent_id"], r["parent"]["chat_id"]) == (agent_id, chat_id)
             and r["status"] in FINAL_STATES and r.get("wake", {}).get("state") in ("pending", "held", "claimed")
             for r in records
+        )
+
+    def runs_elsewhere(self, user_id: str, record: dict) -> bool:
+        """Whether the task is running in another process (its worker events cannot be followed from this one)."""
+        return (
+            record.get("status") not in FINAL_STATES
+            and not self._is_live(user_id, record["id"])
+            and self._elsewhere(user_id, record["id"])
         )
 
     def child_of(self, user_id: str, task_id: str) -> tuple[str, str]:

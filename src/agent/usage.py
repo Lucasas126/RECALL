@@ -69,8 +69,24 @@ def context_breakdown(messages: list[dict], in_tokens: int | None,
     return breakdown, approx
 
 
+def _n(value: int) -> str:
+    """Thousands with dots (12.345), easier to read than 12345."""
+    return f"{value:,}".replace(",", ".")
+
+
+def _signed(value: int) -> str:
+    return ("+" if value >= 0 else "-") + _n(abs(value))
+
+
 def _pct(tokens: int, max_context: int | None) -> str:
-    return f"{tokens / max_context * 100:.1f}% of {max_context}" if max_context else "unknown model context"
+    return f"{tokens / max_context * 100:.1f}%" if max_context else "?"
+
+
+def _context_line(tokens: int, max_context: int | None, approx: bool) -> str:
+    tilde = "~" if approx else ""
+    if not max_context:
+        return f"context      {tilde}{_n(tokens)} tokens (unknown model context)\n"
+    return f"context      {tilde}{_n(tokens)} / {_n(max_context)} tokens ({_pct(tokens, max_context)})\n"
 
 
 def cache_tokens(api_usage: dict | None) -> tuple[int, int] | None:
@@ -86,48 +102,47 @@ def subscription_note(api_usage: dict | None) -> str:
     if (api_usage or {}).get("provider") != "claude_subscription":
         return ""
     estimate = api_usage.get("list_price_estimate_usd")
-    price = f" | list-price estimate ${estimate:.4f} (not a charge)" if isinstance(estimate, (int, float)) else ""
+    price = f" · list-price estimate ${estimate:.4f} (not a charge)" if isinstance(estimate, (int, float)) else ""
     admission = api_usage.get("admission") or {}
-    blocked = f" | blocked extra requests={admission['blocked_requests']}" if admission.get("blocked_requests") else ""
-    return f"\nplan: Claude subscription (experimental), counts against the plan limits{price}{blocked}"
+    blocked = f" · blocked extra requests={admission['blocked_requests']}" if admission.get("blocked_requests") else ""
+    return f"\nplan         Claude subscription (experimental), counts against the plan limits{price}{blocked}"
 
 
 def _format_cache(cache: tuple[int, int], prompt_tokens: int) -> str:
     read, written = cache
     share = f" ({read / prompt_tokens * 100:.0f}% of input)" if prompt_tokens else ""
-    return f"cache: read={read}{share} write={written}\n"
+    return f"cache        read {_n(read)}{share} · write {_n(written)}\n"
+
+
+def _parts(b: dict, sign: bool = False) -> str:
+    fmt = _signed if sign else _n
+    return (f"system {fmt(b['system_tokens'])} · user {fmt(b['user_tokens'])} · agent {fmt(b['agent_tokens'])}"
+            f" · tools {fmt(b['tool_tokens'])}")
 
 
 def format_turn(b: dict, prev: dict | None, approx: bool, max_context: int | None,
                 cache: tuple[int, int] | None = None) -> str:
-    in_s = f"~in={b['in']}" if approx else f"in={b['in']}"
-    out_s = f"~out={b['out']}" if approx else f"out={b['out']}"
-    note = "  (approx: no api usage)" if approx else ""
+    """Usage report: the first line is the collapsed summary, the rest the details (the summary is not repeated)."""
+    tilde = "~" if approx else ""
     p = prev or {}
-    d_in = b["in"] - p.get("in", 0)
-    d_sys = b["system_tokens"] - p.get("system_tokens", 0)
-    d_usr = b["user_tokens"] - p.get("user_tokens", 0)
-    d_agt = b["agent_tokens"] - p.get("agent_tokens", 0)
-    d_tool = b["tool_tokens"] - p.get("tool_tokens", 0)
+    delta = {key: b[key] - p.get(key, 0) for key in ("system_tokens", "user_tokens", "agent_tokens", "tool_tokens")}
     cache_line = _format_cache(cache, b["in"]) if cache is not None and not approx else ""
     return (
-        f"context: {_pct(b['in'], max_context)} | {in_s} {out_s}{note}\n"
+        f"context {_pct(b['in'], max_context)} · in {tilde}{_n(b['in'])} · out {tilde}{_n(b['out'])}"
+        f"{' (approx: no api usage)' if approx else ''}\n"
+        f"{_context_line(b['in'], max_context, approx)}"
         f"{cache_line}"
-        f"  ~ system_tokens={b['system_tokens']} user_tokens={b['user_tokens']} agent_tokens={b['agent_tokens']} tool_tokens={b['tool_tokens']}"
-        f"  ·  response={b['response']} thinking={b['thinking']}\n"
-        f"turn Δ: in={d_in:+d} out={b['out']}\n"
-        f"  ~ system_tokens={d_sys:+d} user_tokens={d_usr:+d} agent_tokens={d_agt:+d} tool_tokens={d_tool:+d}"
-        f"  ·  response={b['response']} thinking={b['thinking']}"
+        f"input        ~ {_parts(b)}\n"
+        f"output       text {_n(b['response'])} · thinking {_n(b['thinking'])}\n"
+        f"this turn    in {_signed(b['in'] - p.get('in', 0))} · out {_n(b['out'])}\n"
+        f"             ~ {_parts(delta, sign=True)}"
     )
 
 
 def format_context(b: dict, approx: bool, max_context: int | None) -> str:
-    in_s = f"~in={b['in']}" if approx else f"in={b['in']}"
-    note = "  (approx)" if approx else ""
+    tilde = "~" if approx else ""
     return (
-        f"context loaded: {_pct(b['in'], max_context)} | {in_s}{note}\n"
-        f"  ~ system_tokens={b['system_tokens']} user_tokens={b['user_tokens']} agent_tokens={b['agent_tokens']} tool_tokens={b['tool_tokens']}"
+        f"context loaded {_pct(b['in'], max_context)} · in {tilde}{_n(b['in'])}{' (approx)' if approx else ''}\n"
+        f"{_context_line(b['in'], max_context, approx)}"
+        f"input        ~ {_parts(b)}"
     )
-
-
-
