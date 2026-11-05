@@ -113,6 +113,8 @@ original `messages` request is unchanged; closing a viewer does not cancel the r
 when no reply is running, meaning the saved chat is complete; `404` unknown chat; `401` not logged in. The replay is
 dropped when the reply ends, so after `204` read `GET .../chats/<chat_id>`.
 
+Stored assistant messages (in `GET /api/agents/{agent_id}/chats/{chat_id}`) may include `timeline`: the turn's segments in order, `[{"type": "reasoning", "text": "..."}, {"type": "tool", "index": 0}, {"type": "text", "text": "..."}]`, where `index` points into the message's `actions`. It is absent for turns without thinking or tools and for turns saved before 0.1.2.
+
 ```
 GET /api/agents/helper/chats/20260105-093000/stream
 event: text
