@@ -3620,6 +3620,37 @@ function taskActivityLabel(activity) {
 function taskLiveNext({ unavailable, failed }) {
   return unavailable || failed ? "poll" : "reload";
 }
+
+// The structured view of a worker chat's task message: `task_brief` / `task_message` metadata stored on the turn, else
+// a parse of the known text layout (older chats). Returns {kind: "brief", taskId, from, user, goal, context,
+// instructionsPresent}, {kind: "note", note: "followup"|"correction", text} or null for an ordinary message.
+function taskBriefState(message) {
+  if (message?.role !== "user") return null;
+  const brief = message.task_brief;
+  if (brief && typeof brief === "object") {
+    return {
+      kind: "brief", taskId: String(brief.task_id ?? ""), from: String(brief.from ?? ""), user: String(brief.user ?? ""),
+      goal: String(brief.goal ?? ""), context: String(brief.context ?? ""), instructionsPresent: Boolean(brief.instructions_present),
+    };
+  }
+  const note = message.task_message;
+  if (note && typeof note === "object" && (note.kind === "followup" || note.kind === "correction")) {
+    return { kind: "note", note: note.kind, text: String(note.text ?? "") };
+  }
+  const content = typeof message.content === "string" ? message.content : "";
+  for (const [prefix, kind] of [["Follow-up from the parent agent:\n", "followup"], ["Correction from the parent agent:\n", "correction"]]) {
+    if (content.startsWith(prefix)) return { kind: "note", note: kind, text: content.slice(prefix.length) };
+  }
+  const found = /^(?:Task from (.+?) \(([^()\n]*)\)\n\n|Scheduled task \(([^()\n]*)\) for ([^\n]*)\n\n)?Task (\w+)\n\nGoal:\n([\s\S]*)$/.exec(content);
+  if (!found) return null;
+  const [, from, askedBy, , scheduledFor, taskId, rest] = found;
+  const cut = rest.indexOf("\n\nContext:\n");
+  return {
+    kind: "brief", taskId, from: from ?? "", user: askedBy ?? scheduledFor ?? "",
+    goal: (cut < 0 ? rest : rest.slice(0, cut)).trim(), context: cut < 0 ? "" : rest.slice(cut + "\n\nContext:\n".length).trim(),
+    instructionsPresent: false,
+  };
+}
 // ---- end task cards
 
 // A tool step: closed it is one line (icon, name, backend, summary); open it shows the arguments and the result.
@@ -3907,9 +3938,44 @@ function wakeBubble(message) {
 
 let taskDialogTimer = null;
 
+// A worker chat's task message as a compact "Task brief" card (or a small follow-up / correction note).
+function taskBriefNode(info) {
+  const node = document.createElement("div");
+  if (info.kind === "note") {
+    node.className = "msg task-note";
+    const agent = info.agent || tr("the parent agent");
+    node.append(
+      element("div", { className: "task-note-label", textContent: info.note === "correction" ? tr("Correction from {agent}", { agent }) : tr("Follow-up from {agent}", { agent }) }),
+      markdown(info.text),
+    );
+    return node;
+  }
+  node.className = "msg task-brief";
+  const head = element("div", { className: "task-brief-head" }, element("span", { className: "task-brief-title", textContent: tr("Task brief") }));
+  if (info.from) head.append(element("span", { className: "task-brief-badge", textContent: tr("from {agent}", { agent: info.from }) }));
+  if (info.taskId) head.append(element("span", { className: "task-brief-badge", textContent: `#${info.taskId.slice(0, 8)}` }));
+  node.append(head, element("div", { className: "task-brief-label", textContent: tr("Goal") }), markdown(info.goal));
+  node.lastChild.classList.add("task-brief-goal");
+  if (info.context) {
+    const long = info.context.split("\n").length > 6;
+    const section = element("details", { className: "task-brief-context" }, element("summary", { textContent: tr("Context") }), markdown(info.context));
+    section.open = !long;
+    node.append(section);
+  }
+  return node;
+}
+
 function renderTaskChatMessages(container, messages) {
   container.replaceChildren();
+  let agent = "";  // the parent agent's name, known from the brief
   for (const m of messages) {
+    const brief = taskBriefState(m);
+    if (brief) {
+      if (brief.kind === "brief") agent = brief.from || agent;
+      else brief.agent = agent;
+      container.append(taskBriefNode(brief));
+      continue;
+    }
     if (isWakeMessage(m)) {
       container.append(wakeBubble(m));
       continue;

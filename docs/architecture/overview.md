@@ -274,7 +274,12 @@ token. `Agent._take_assoc_result` uses its outcome once per turn:
   `tests/test_live_tool_steps.py`). With the Claude subscription, Sonnet 5.5's upstream
   stream for a request whose last message is a tool result arrives in one burst
   (measured: `message_start` and all deltas within ~10 ms), so the answer looks
-  unstreamed on that model/hop; this is upstream timing, not RECALL buffering
+  unstreamed on that model/hop; this is upstream timing, not RECALL buffering. It is a
+  known Messages API behaviour of `claude-sonnet-5-5` reported publicly (any provider,
+  thinking on or off): anthropics/anthropic-sdk-python#1960, anthropics/claude-code#96439
+  and r/ClaudeAI "Sonnet 5.5 Streaming Broken on all providers when tool ...". Haiku
+  streams on the same hop; Opus was mostly bursty in our probes. Accepted by the owner
+  (2026-11-05): no client-side fake streaming
 - nothing found, or the search fails: the reply is never touched (a warning is logged
   for failures)
 - not finished when the reply completes, or the turn is interrupted or steered: the

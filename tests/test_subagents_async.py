@@ -392,6 +392,16 @@ class FollowUpTests(AsyncFixture):
         self.assertIn("Goal:\nfind X", texts[0])
         self.assertEqual(texts[1], "RESULT for: find X")
         self.assertIn("Follow-up from the parent agent:\nnow compare with Z", texts[2])
+        stored = [t for t in turns if t["role"] == "user"]  # structured metadata beside the unchanged text
+        self.assertEqual(stored[0]["task_brief"], {
+            "task_id": live.task_id, "from": "", "user": USER, "goal": "find X", "context": stored[0]["task_brief"]["context"],
+            "instructions_present": stored[0]["task_brief"]["instructions_present"],
+        })
+        self.assertEqual(stored[1]["task_message"], {"kind": "followup", "text": "now compare with Z"})
+        shown = self.service.get_chat(USER, AGENT, child)["messages"]
+        users = [m for m in shown if m["role"] == "user"]
+        self.assertEqual(users[0]["task_brief"]["goal"], "find X")
+        self.assertEqual(users[1]["task_message"]["kind"], "followup")
         self.assertEqual(record["usage"], {"in": 20, "out": 10}, "the usage of earlier runs stays in the record")
 
     def test_task_send_gets_a_fresh_budget_and_ends_with_a_new_wake(self) -> None:
@@ -462,6 +472,8 @@ class FollowUpTests(AsyncFixture):
         self.assertTrue(turns[1].get("interrupted"), "the partial reply stays in the worker's history")
         self.assertIn("RESULT for: find X", str(turns[1]["content"]))
         self.assertIn("Correction from the parent agent:\nuse source B", turns[2]["content"])
+        self.assertEqual(turns[2]["task_message"], {"kind": "correction", "text": "use source B"})
+        self.assertIn("task_brief", turns[0])
         self.assertTrue(until(lambda: self.settled(1)))
         with self.assertRaisesRegex(TaskError, "not running"):
             self.manager.steer(USER, live.task_id, "late", owner=self.owner())

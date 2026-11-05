@@ -1087,6 +1087,7 @@ class ChatService:
                         "role", "content", "ts", "reasoning", "actions", "timeline", "interrupted",
                         "associative_matches", "associative_skipped", "usage", "usage_report",
                         "source", "task_ids",  # a wake turn: a subagent result, not written by the user
+                        "task_brief", "task_message",  # a worker chat's first message / follow-up, structured for the UI
                     )
                     if t.get(k) is not None
                 },
@@ -1272,7 +1273,7 @@ class ChatService:
     def send(
         self, user_id: str, agent_id: str, chat_id: str, text: str,
         stream: Optional[bool] = None, attachments: Optional[list[dict]] = None,
-        rewind_to: Optional[int] = None, internal_task: bool = False,
+        rewind_to: Optional[int] = None, internal_task: bool = False, meta: Optional[dict] = None,
     ) -> Iterator[ChatEvent]:
         """Send a user message to a chat and yield the reply as events.
 
@@ -1310,7 +1311,8 @@ class ChatService:
         if not text.strip() and not attachments:
             raise InputError("message is empty")
         slot = self._slot(user_id, agent_id)
-        run = _MessageRun(chat_id, text, attachments, stream)
+        # `meta` (structured task brief / follow-up) is stored on the user turn; only the TaskManager may set it
+        run = _MessageRun(chat_id, text, attachments, stream, meta=dict(meta) if (meta and internal_task) else None)
         if notice:
             run.events.put(ChatEvent("notice", text=notice, generation_id=run.generation_id))
         deadline = monotonic() + _REWIND_WAIT_SECONDS

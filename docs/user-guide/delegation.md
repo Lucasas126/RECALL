@@ -54,6 +54,7 @@ without the group.
   including the zero-data-retention rule). Reasoning effort follows the launching chat too.
 - **Tools only by grant.** By default none. The agent may grant `web` (web search), and only if it has the group itself and `delegation.allowed_groups`
   allows it. Memory, folders, MCP and `delegate` can never be granted, and the terminal only through `backends`, so a worker cannot do more than its parent and cannot launch tasks (depth 1).
+- **A readable brief.** In *Open chat*, the task message the worker received is shown as a **Task brief** card (who asked, task id, the *Goal* and a collapsible *Context*), and follow-ups and corrections as small labelled notes, instead of a plain message bubble. The worker still receives the same plain text.
 - **A hidden chat.** The worker's conversation is a chat file of the launching agent, marked as a task chat: it is not in the chat list, is never the
   "latest chat", is not pruned while empty, is not reviewed by Dream and not indexed, and is removed after the disposable-chat retention
   period. A disposable chat cannot launch tasks.
