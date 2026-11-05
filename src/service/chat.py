@@ -210,7 +210,7 @@ class ChatEvent:
     carry a generation id so adapters can distinguish overlapping deliveries.
     """
 
-    kind: Literal["reasoning", "text", "tool", "usage", "interrupted", "memory", "notice", "approval", "approval_resolved"]
+    kind: Literal["reasoning", "text", "tool_start", "tool", "usage", "interrupted", "memory", "notice", "approval", "approval_resolved"]
     text: str = ""
     data: Optional[dict] = None
     generation_id: str = ""
@@ -1828,7 +1828,7 @@ class ChatService:
             else:
                 with closing(result) as chunks:
                     for kind, chunk in chunks:
-                        if kind in ("tool", "memory") and isinstance(chunk, dict):
+                        if kind in ("tool_start", "tool", "memory") and isinstance(chunk, dict):
                             yield ChatEvent(kind, data=chunk, generation_id=run.generation_id)
                         elif kind in ("reasoning", "content") and isinstance(chunk, str):
                             yield ChatEvent(

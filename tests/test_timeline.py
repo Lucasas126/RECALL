@@ -78,7 +78,7 @@ class AgentTimelineTests(unittest.TestCase):
         ])
         self.provider.invoke.side_effect = lambda *args, **kwargs: next(hops)
         events = list(self.agent.invoke("Question"))
-        self.assertEqual([kind for kind, _ in events], ["reasoning", "reasoning", "tool", "reasoning", "content", "content"])
+        self.assertEqual([kind for kind, _ in events], ["reasoning", "reasoning", "tool_start", "tool", "reasoning", "content", "content"])
         stored = self.turns()[-1]
         self.assertEqual(stored["timeline"], [
             {"type": "reasoning", "text": "first thought"}, {"type": "tool", "index": 0},

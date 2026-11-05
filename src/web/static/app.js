@@ -3227,6 +3227,58 @@ function buildTimeline(events) {
   return segments;
 }
 
+// ---- live tool steps: a step exists from its `tool_start` event, the final `tool` event completes the SAME step.
+// A step is {id, phase: "running" | "done" | "failed" | "stopped", action, startedAt}; the helpers are pure.
+function toolStepStart(payload, nowMs = Date.now()) {
+  const { id, name, arguments: args } = payload ?? {};
+  return { id: id == null ? "" : String(id), phase: "running", action: { name, arguments: args ?? {}, pending: true, startedAt: nowMs }, startedAt: nowMs };
+}
+
+// Index of the step a final `tool` payload completes: same call id, else (no id) the oldest running step of that name.
+function findToolStep(steps, payload) {
+  if (payload?.id != null && payload.id !== "") {
+    const index = steps.findIndex((step) => step.id === String(payload.id));
+    if (index >= 0) return index;
+  }
+  if (payload?.id != null && payload.id !== "") return -1;
+  return steps.findIndex((step) => step.phase === "running" && step.action?.name === payload?.name);
+}
+
+// The step after its final event: "failed" when the tool reported an error, else "done".
+function toolStepFinish(step, payload) {
+  const { id: _id, ...action } = payload ?? {};
+  return { ...step, phase: payload?.error ? "failed" : "done", action };
+}
+
+// A step still running when the stream ends or the turn is interrupted will not finish any more.
+function toolStepStop(step) {
+  return step.phase === "running" ? { ...step, phase: "stopped" } : step;
+}
+
+// Seconds a running step has been going ("" once it is not running), e.g. 7 -> "7s", 75 -> "1m 15s".
+function toolStepElapsed(step, nowMs) {
+  if (step.phase !== "running") return "";
+  const total = Math.max(0, Math.floor((nowMs - step.startedAt) / 1000));
+  return total < 60 ? `${total}s` : `${Math.floor(total / 60)}m ${String(total % 60).padStart(2, "0")}s`;
+}
+
+// Applies one stream event to the list of steps: returns {steps, index} (index of the touched step).
+// A final `tool` without a matching start (older server, replies that are not streamed) becomes a finished step.
+function toolStepsApply(steps, kind, payload, nowMs = Date.now()) {
+  if (kind === "tool_start") {
+    const existing = steps.findIndex((step) => step.id && step.id === String(payload?.id));
+    if (existing >= 0) return { steps, index: existing };  // a replayed duplicate
+    return { steps: [...steps, toolStepStart(payload, nowMs)], index: steps.length };
+  }
+  const index = findToolStep(steps, payload);
+  if (index < 0) {
+    const { id: _id, ...action } = payload ?? {};
+    const step = { id: payload?.id == null ? "" : String(payload.id), phase: payload?.error ? "failed" : "done", action, startedAt: nowMs };
+    return { steps: [...steps, step], index: steps.length };
+  }
+  return { steps: steps.map((step, i) => (i === index ? toolStepFinish(step, payload) : step)), index };
+}
+
 // What to draw for a stored message, in order. Messages saved before `timeline` existed keep the old layout:
 // thinking, then every tool step, then the text.
 function historySteps(message) {
@@ -3314,7 +3366,7 @@ function thinkingSegment() {
 
 // ---- task cards: pure helpers (loaded without the DOM by tests/test_task_cards.cjs)
 const TASK_FINAL = ["done", "failed", "cancelled", "timed_out"];
-const TASK_STATUS_LABELS = { running: "Running", done: "Done", failed: "Failed", cancelled: "Cancelled", timed_out: "Timed out", awaiting_approval: "Awaiting approval", awaiting_approval_web: "Awaiting approval (answer it in the web)", awaiting_approval_telegram: "Awaiting approval (answer it in Telegram)" };
+const TASK_STATUS_LABELS = { starting: "Starting", stopped: "Stopped", running: "Running", done: "Done", failed: "Failed", cancelled: "Cancelled", timed_out: "Timed out", awaiting_approval: "Awaiting approval", awaiting_approval_web: "Awaiting approval (answer it in the web)", awaiting_approval_telegram: "Awaiting approval (answer it in Telegram)" };
 
 // The line above the command of an approval asked by a subagent task: "Task <title> (ephemeral|<agent>) wants to run:".
 // `translate` (tr in the page) maps the English template and its values to the user's language; '' for a normal approval.
@@ -3391,9 +3443,11 @@ function taskActionId(action) {
 function taskCardState(record, action, nowMs, listed = false) {
   const args = action?.arguments && typeof action.arguments === "object" ? action.arguments : {};
   const goal = String(args.goal ?? "").replace(/\s+/g, " ").trim();
-  const launchFailed = !taskActionId(action);
-  let status = record?.status ?? (launchFailed ? "failed" : listed ? "unknown" : "running");
-  const final = taskIsFinal(status) || status === "unknown";
+  const pending = action?.pending === true;  // live step: `task_start` was called and has not returned yet
+  const stopped = action?.stopped === true;   // the stream ended before it returned
+  const launchFailed = !pending && !stopped && !taskActionId(action);
+  let status = record?.status ?? (pending ? "starting" : stopped ? "stopped" : launchFailed ? "failed" : listed ? "unknown" : "running");
+  const final = taskIsFinal(status) || status === "unknown" || status === "stopped";
   const kind = record?.target?.kind ?? (args.agent ? "agent" : "ephemeral");
   const agent = record?.target?.agent_id ?? args.agent ?? "";
   const running = status === "running";
@@ -3405,7 +3459,7 @@ function taskCardState(record, action, nowMs, listed = false) {
     status,
     statusLabel: taskStatusLabel(taskDisplayStatus(record) || status),
     awaitingApproval: taskDisplayStatus(record).startsWith("awaiting_approval"),
-    elapsed: formatElapsed(taskElapsed(record, nowMs)),
+    elapsed: formatElapsed(record ? taskElapsed(record, nowMs) : pending && Number.isFinite(action.startedAt) ? Math.max(0, (nowMs - action.startedAt) / 1000) : null),
     tokens: (record?.usage?.in ?? 0) + (record?.usage?.out ?? 0),
     running,
     final,
@@ -3518,7 +3572,7 @@ function actionStep(action) {
   if (isTaskStartAction(action)) return taskCardStep(action);
   const info = actionSummary(action);
   const item = document.createElement("details");
-  item.className = "action" + (action.error ? " failed" : "");
+  item.className = "action" + (action.error ? " failed" : "") + (action.pending ? " running" : "");
   const summary = document.createElement("summary");
   summary.title = info.full;
   const icon = document.createElement("span");
@@ -3527,6 +3581,15 @@ function actionStep(action) {
   summary.append(icon, Object.assign(document.createElement("span"), { className: "action-name", textContent: info.name }));
   if (info.backend) summary.append(Object.assign(document.createElement("span"), { className: "action-backend", textContent: info.backend }));
   summary.append(Object.assign(document.createElement("span"), { className: "action-args", textContent: info.line }));
+  if (action.pending) {
+    // running indicator at the end of the line: pulsing dot, "Running" and the seconds so far
+    const status = element("span", { className: "action-status" });
+    status.setAttribute("role", "status");
+    summary.append(status);
+    item._status = status;
+    item._startedAt = action.startedAt ?? Date.now();
+    watchRunningStep(item);
+  }
   item.append(summary);
   const argsText = actionArgsText(action);
   for (const [label, text] of [[tr("Arguments"), argsText], [tr("Result"), String(action.result ?? "")]]) {
@@ -3542,6 +3605,50 @@ function actionStep(action) {
   item.dataset.tool = action.name;
   item.dataset.command = String(action.arguments?.command ?? "");
   return item;
+}
+
+// Live steps (started, not finished): one shared 1 s timer repaints their elapsed seconds while any is on the page.
+const runningSteps = new Set();
+let runningTimer = null;
+
+function watchRunningStep(node) {
+  runningSteps.add(node);
+  paintRunningStep(node);
+  if (!runningTimer) runningTimer = setInterval(tickRunningSteps, 1000);
+}
+
+function paintRunningStep(node) {
+  if (node._parts) refreshTaskCard(node);  // a task card shows "Starting" and the seconds in its badge
+  else if (node._status) node._status.textContent = `${tr("Running")} · ${toolStepElapsed({ phase: "running", startedAt: node._startedAt }, Date.now())}`;
+}
+
+function tickRunningSteps() {
+  for (const node of [...runningSteps]) {
+    if (!node.isConnected) runningSteps.delete(node);
+    else paintRunningStep(node);
+  }
+  if (!runningSteps.size) {
+    clearInterval(runningTimer);
+    runningTimer = null;
+  }
+}
+
+function unwatchRunningStep(node) {
+  runningSteps.delete(node);
+}
+
+// The step will never get its final event (stream ended, turn interrupted): it stops pulsing and says "Stopped".
+function stopRunningStep(node) {
+  runningSteps.delete(node);
+  if (node._parts) {
+    node._action.pending = false;
+    node._action.stopped = true;
+    refreshTaskCard(node);
+    return;
+  }
+  node.classList.remove("running");
+  node.classList.add("stopped");
+  if (node._status) node._status.textContent = tr("Stopped");
 }
 
 // ---- task cards: DOM, polling and the worker-chat dialog
@@ -3606,6 +3713,7 @@ function taskCardStep(action) {
   card._taskId = taskActionId(action);
   taskCards.add(card);
   refreshTaskCard(card);
+  if (action.pending) watchRunningStep(card);
   if (card._taskId) ensureTaskPolling();
   return card;
 }
@@ -3621,7 +3729,7 @@ function refreshTaskCard(card) {
   parts.badge.className = `task-badge ${view.awaitingApproval ? "awaiting_approval" : view.status}`;
   parts.badge.textContent = view.elapsed ? `${tr(view.statusLabel)} · ${view.elapsed}` : tr(view.statusLabel);
   parts.tokens.textContent = view.tokens ? tr("{count} tokens", { count: view.tokens }) : "";
-  const text = view.result || view.error || (view.running ? "" : tr("No result"));
+  const text = view.result || view.error || (view.running || view.status === "starting" ? "" : tr("No result"));
   parts.result.hidden = !text;
   parts.resultText.textContent = text;
   parts.stop.hidden = !view.canStop;
@@ -4347,6 +4455,8 @@ function addMessage(role, parent = state.view ?? $("messages")) {
   let thinkingRaw = "";
   let memoryIndicator = null;
   let actionCount = 0;
+  let liveSteps = [];  // tool steps of this reply (state from toolStepsApply) and their DOM nodes, same indexes
+  const liveNodes = [];
   let attachmentBox = null;
   el.append(body);
   parent.append(el);
@@ -4453,9 +4563,38 @@ function addMessage(role, parent = state.view ?? $("messages")) {
       // a search still running when the reply ends, fails or is interrupted was not used
       if (memoryIndicator?.dataset.state === "searching") this.memory({ state: "skipped" });
     },
+    // `tool_start`: the step appears now, at its place in the timeline, with a running indicator.
+    toolStart(p) {
+      const { steps, index } = toolStepsApply(liveSteps, "tool_start", p);
+      if (index < liveNodes.length) return;  // a replayed duplicate
+      liveSteps = steps;
+      liveNodes[index] = actionStep(steps[index].action);
+      addStep(liveNodes[index]);
+    },
+    // The final `tool` event: completes the step started above in place (same position, same open/closed state).
     action(a) {
       actionCount++;
-      addStep(actionStep(a));
+      const { steps, index } = toolStepsApply(liveSteps, "tool", a);
+      const started = index < liveNodes.length;
+      liveSteps = steps;
+      const node = actionStep(a);
+      if (started) {
+        const old = liveNodes[index];
+        node.open = old.open;
+        unwatchRunningStep(old);
+        old.replaceWith(node);
+      } else {
+        addStep(node);
+      }
+      liveNodes[index] = node;
+    },
+    // The stream ended or the turn was interrupted: a step without its final event will not get one.
+    settleSteps() {
+      liveSteps = liveSteps.map((step, index) => {
+        if (step.phase !== "running") return step;
+        stopRunningStep(liveNodes[index]);
+        return toolStepStop(step);
+      });
     },
     approval(approval) {
       showApproval(approval, (node) => addStep(node));
@@ -4469,6 +4608,7 @@ function addMessage(role, parent = state.view ?? $("messages")) {
     },
     interrupted(snapshot = null) {
       this.settleMemory();
+      this.settleSteps();
       if (snapshot) {
         raw = snapshot.content;
         for (let i = starts.length - 1; i > 0; i--) if (starts[i] > raw.length) starts[i] = raw.length;
@@ -4488,6 +4628,7 @@ function addMessage(role, parent = state.view ?? $("messages")) {
     },
     error(source) {
       this.settleMemory();
+      this.settleSteps();
       // with nothing streamed yet the card replaces the reply bubble; otherwise it follows the partial reply
       const bare = !raw && !el.querySelector(".action, .thinking, .approval-card");
       if (bare) el.classList.add("error-only");
@@ -4823,6 +4964,7 @@ async function readEvents(res, request) {
     }
   } finally {
     reader.releaseLock();
+    request.reply?.settleSteps?.();  // a step still running when the stream ends (error, abort) becomes "stopped"
   }
 }
 
@@ -4921,6 +5063,7 @@ function handleEvent(raw, request) {
   const payload = data ? JSON.parse(data) : "";
   if (event === "text") reply.text(payload);
   else if (event === "reasoning") reply.thinking(payload);
+  else if (event === "tool_start") reply.toolStart(payload);
   else if (event === "tool") reply.action(payload);
   else if (event === "memory") reply.memory(payload);
   else if (event === "notice") reply.notice(payload);

@@ -106,13 +106,15 @@ steering (a new message) or `interrupted` ends it early. Chat summaries (`GET /a
 `GET .../chats/<chat_id>`) carry `active` (boolean), true while the chat has a reply running or queued.
 
 `GET /api/agents/<agent_id>/chats/<chat_id>/stream` attaches another viewer (another tab, a page load) to the reply that is
-running now. It returns the same SSE frames as the `messages` stream (`reasoning`, `text`, `tool`, `memory`, `approval`,
+running now. It returns the same SSE frames as the `messages` stream (`reasoning`, `text`, `tool_start`, `tool`, `memory`, `approval`,
 `approval_resolved`, `notice`, `usage`, `interrupted`, `error`, then `done`, each with the generation `id:`), starting with
 the events produced so far (consecutive `reasoning`/`text` chunks arrive merged, and the replay keeps at most the last
 5000 events) and continuing live until the reply ends. Viewers do not take events from each other and the stream of the
 original `messages` request is unchanged; closing a viewer does not cancel the reply. Codes: `200` SSE; `204` (empty body)
 when no reply is running, meaning the saved chat is complete; `404` unknown chat; `401` not logged in. The replay is
 dropped when the reply ends, so after `204` read `GET .../chats/<chat_id>`.
+
+Tool steps are announced live: `tool_start` (`{"id", "name", "arguments"}`) is sent right before a tool runs, and the `tool` event that follows when it finishes (`{"id", "name", "arguments", "result", "error"}`) carries the same `id` (the provider's tool call id, else `call-<n>`). Tools run one after another, so each start is followed by its own final event. A tool that was interrupted never gets a final event: the stream then ends with `interrupted` (or `error`), and clients mark any step still running as stopped. A `tool_start` is part of the replay of `.../stream`, so a viewer that attaches mid-run sees the running steps. Stored `actions` are unchanged (finished tools only, without `id`), and Telegram ignores `tool_start`.
 
 Stored assistant messages (in `GET /api/agents/{agent_id}/chats/{chat_id}`) may include `timeline`: the turn's segments in order, `[{"type": "reasoning", "text": "..."}, {"type": "tool", "index": 0}, {"type": "text", "text": "..."}]`, where `index` points into the message's `actions`. It is absent for turns without thinking or tools and for turns saved before 0.1.2.
 
