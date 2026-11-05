@@ -38,6 +38,7 @@ class Result:
     stderr: str = ""
     timed_out: bool = False
     truncated: bool = False
+    approval: str = ""  # one line telling the agent how the command was authorized (set by TerminalSession.run)
 
 
 class Backend(Protocol):

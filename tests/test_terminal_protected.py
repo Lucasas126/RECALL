@@ -348,5 +348,48 @@ class FileToolTests(ProtectedCase):
         self.assertIn("protected path", files.sandbox_read(session, str(self.key)))
 
 
+class GlobResolutionTests(ProtectedCase):
+    """Globs are resolved against the real filesystem: refused only when an actual match is protected."""
+
+    def make_skills(self) -> Path:
+        skills = self.root / "skills"
+        for name in ("alpha", "beta"):
+            write(skills / name / "SKILL.md", "# " + name + "\n")
+        return skills
+
+    def test_reported_loop_is_allowed_without_secrets(self) -> None:
+        skills = self.make_skills()
+        session = self.session("off")
+        command = (f"cd {skills.as_posix()}; for s in */; do echo \"$s: $(grep -m1 -n '^# ' $s/SKILL.md)\"; done")
+        self.assertRuns(session, command)
+
+    def test_glob_that_expands_to_an_env_file_is_denied_and_named(self) -> None:
+        skills = self.make_skills()
+        write(skills / ".env", "TOKEN=1")
+        session = self.session("off")
+        self.assertRuns(session, f"cd {skills.as_posix()}; cat *")  # the shell skips dotfiles in `*`
+        result, denial = self.run_cmd(session, f"cd {skills.as_posix()}; cat .*")
+        self.assertIsNone(result)
+        self.assertIn(".env", denial)
+        self.assertIn("protected path", denial)
+
+    def test_star_in_the_keys_folder_is_denied(self) -> None:
+        session = self.session("off")
+        result, denial = self.run_cmd(session, "cat *", str(self.cfg / "keys"))
+        self.assertIsNone(result)
+        self.assertIn("pc_ed25519", denial)
+
+    def test_ls_of_dirs_in_a_normal_folder_is_allowed(self) -> None:
+        self.make_skills()
+        self.assertRuns(self.session("off"), "ls */", str(self.root / "skills"))
+
+    def test_unresolvable_glob_falls_back_to_protected_names_only(self) -> None:
+        session = self.session("off")
+        for command in ("cat $D/*", "cat $D/*/", "cat $D/*.md", "cd $D; cat *", "ls $(pwd)/*"):
+            self.assertRuns(session, command)
+        for command in ("cat $D/*.env", "cat $D/.env*", "cat $D/*_ed25519", "cat $D/keys/*", "cd $D; cat *.env"):
+            self.assertDenied(session, command)
+
+
 if __name__ == "__main__":
     unittest.main()

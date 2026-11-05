@@ -308,6 +308,8 @@ Every executed or refused action appends one JSON line (`backend` is the configu
 {"ts": 1767225600.123, "user": "ana", "agent": "aria", "backend": "sandbox", "tool": "terminal", "command": "ls -la", "cwd": "~/workspace", "decision": "approved", "exit_code": 0, "duration_ms": 412, "timed_out": false}
 ```
 
+The `terminal` result starts with one line telling the agent how the command was authorized (`[approved by the user]`, `[ran without approval: smart mode, normal command]` or `[approvals off]`).
+
 `decision` is one of `approved`, `approved:same-operation`, `auto:smart`, `auto:off`, `hardline`, `denied:protected`, `denied:unattended`,
 `denied:<reason>` (`denied by user`, `timed out`, `cancelled`, `service shutdown`) or `cancelled`. The command is redacted
 for known secret formats and cut at 2000 characters; the output is not recorded. The agent's own tools cannot read or edit
