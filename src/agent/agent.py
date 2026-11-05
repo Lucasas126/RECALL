@@ -524,7 +524,13 @@ class Agent:
                             zdr=self.zdr_required,
                         )))
                         for chunk in chunks:
-                            call_token.raise_if_cancelled()
+                            # A chunk the provider already produced is never thrown away because a memory hit
+                            # cancelled the call meanwhile: providers that emit reasoning and the finished tool
+                            # calls only at the end of the call (Claude subscription) would otherwise lose both.
+                            # The user's own interrupt still stops at once.
+                            cancellation.raise_if_cancelled()
+                            if not (isinstance(chunk, dict) or (isinstance(chunk, tuple) and chunk[0] == "reasoning")):
+                                call_token.raise_if_cancelled()
                             if isinstance(chunk, tuple):
                                 kind, text = chunk
                                 if kind == "reasoning":
@@ -535,7 +541,9 @@ class Agent:
                                 yield chunk
                                 if job is not None and job.ready() and not job.has_hit():
                                     yield from self._take_assoc_result()  # nothing to add: settle the indicator now
-                                if job is not None and cut_ok.is_set() and job.has_hit():
+                                # an already cancelled call is not broken off here: its remaining chunks (the finished
+                                # tool calls) are still read, and the provider raises when there is nothing left
+                                if job is not None and cut_ok.is_set() and job.has_hit() and not call_token.is_cancelled():
                                     paused = True  # the hit arrived while mid-sentence; this is the next sentence end
                                     break
                             elif isinstance(chunk, dict):

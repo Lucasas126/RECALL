@@ -149,6 +149,43 @@ class ParallelRecallTests(unittest.TestCase):
         self.assertEqual(self.contexts[1][-1], {"role": "system", "content": HINT})
         self.assertEqual(self.agent.last_reply, "Continuation")
 
+    def test_hit_during_a_call_that_emits_reasoning_and_tools_at_its_end_loses_neither(self) -> None:
+        # Claude subscription style: nothing streams until the call is done, so a hit that lands meanwhile
+        # cancels the call before its reasoning and tool calls are read
+        self.agent._tool_handlers = {"echo": lambda **kwargs: "echoed"}
+        self.agent._tool_specs = [{"type": "function", "function": {"name": "echo", "parameters": {}}}]
+        call = {"id": "c1", "name": "echo", "arguments": {"text": "hi"}}
+
+        started = threading.Event()
+
+        def first_call(cancellation):
+            started.set()
+            deadline = time.monotonic() + 3
+            while not cancellation.is_cancelled() and time.monotonic() < deadline:
+                time.sleep(0.005)
+            self.assertTrue(cancellation.is_cancelled())
+            yield "reasoning", "I should look."
+            yield {"tool_calls": [call]}
+
+        def recall(agent, user_input, cancellation, history=None, chat_id=None):
+            self.assertTrue(started.wait(3))
+            return HINT, 1
+
+        self._model(first_call)
+        with patch("src.agent.agent.associative.recall", side_effect=recall):
+            events = list(self.agent.invoke("What is my cat called?"))
+
+        kinds = [e[0] for e in events]
+        self.assertEqual(kinds[:2], ["memory", "reasoning"])
+        self.assertIn(("reasoning", "I should look."), events)
+        self.assertEqual([e[1]["name"] for e in events if e[0] == "tool"], ["echo"])
+        self.assertEqual(len(self.contexts), 2)  # the finished call was kept: no restart before the tool ran
+        self.assertEqual(self.contexts[1][-1]["role"], "system")  # the hint reaches the next hop
+        self.assertTrue(self.contexts[1][-1]["content"].startswith(HINT))
+        self.assertEqual(self.agent.last_reply, "Continuation")
+        timeline = self.conversations.load(self.agent.chat_id)[-1]["timeline"]
+        self.assertEqual([s["type"] for s in timeline], ["reasoning", "tool", "text"])
+
     def test_no_hit_never_pauses_the_reply(self) -> None:
         def first_call(cancellation):
             yield "content", "Answer"

@@ -264,7 +264,11 @@ token. `Agent._take_assoc_result` uses its outcome once per turn:
   The final `memory` event is emitted, followed by a blank-line content chunk when the text ended
   a sentence, so channels show one continuous reply and the stored turn is the partial
   text, that gap and the continuation. Reasoning written before the pause is kept with
-  the turn but not resent
+  the turn but not resent. A chunk the provider already produced is never discarded
+  because the hit cancelled the call meanwhile: providers that deliver reasoning and the
+  finished tool calls only when the call ends (Claude subscription) still show them, and
+  a call that already finished its tool calls is not restarted; the hint then reaches
+  the model on the next hop
 - nothing found, or the search fails: the reply is never touched (a warning is logged
   for failures)
 - not finished when the reply completes, or the turn is interrupted or steered: the

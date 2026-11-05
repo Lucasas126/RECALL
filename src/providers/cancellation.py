@@ -52,6 +52,10 @@ class CancellationToken:
             yield
             self._finished = True
 
+    def is_cancelled(self) -> bool:
+        with self._lock:
+            return self._cancelled
+
     def raise_if_cancelled(self) -> None:
         with self._lock:
             if self._cancelled:
