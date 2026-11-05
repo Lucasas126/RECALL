@@ -1,13 +1,41 @@
 # Delegating tasks to a worker
 
-> **Status: phase 1 of the [subagents design](../project/design-subagents.md).** An agent can hand one task to a worker and wait for the
-> result. Tasks that run while the agent keeps talking, results that wake the agent, listing, steering and stopping tasks,
-> terminal access for workers, other agents as workers and Telegram/web task cards are planned and **not built yet**.
+> **Status: phases 1 and 2a of the [subagents design](../project/design-subagents.md) (backend).** Tasks run in the background while the agent keeps talking, and a
+> finished task wakes the agent. Task cards in the web interface and Telegram, terminal access for workers and other agents as workers are planned and **not built yet**.
 
-The `delegate` tool group gives an agent one tool, `task_start`. The agent writes a self-contained goal, the context the worker needs
-and the worker's own system prompt (`instructions`), and `task_start` runs a **worker** (a fresh, short-lived agent) in a hidden chat
-and returns its result as the tool result. The agent then tells you what matters. It is useful for work that is big and independent:
-reading many pages, researching one question in depth, drafting alternatives.
+The `delegate` tool group gives an agent `task_start` and six tools to manage tasks (`task_list`, `task_result`, `task_steer`, `task_send`, `task_stop`,
+`task_wait`). The agent writes a self-contained goal, the context the worker needs and the worker's own system prompt (`instructions`), and `task_start`
+runs a **worker** (a fresh, short-lived agent) in a hidden chat. It returns an id at once and the agent keeps talking to you; the result comes back
+later. It is useful for work that is big and independent: reading many pages, researching one question in depth, drafting alternatives.
+
+## Results wake the agent
+
+When a task ends, its result is written into the parent chat as a **result message** (stored as a user-role turn marked `source: "task"` with the task ids, framed
+as data from a worker, not something you wrote) and the agent gets a turn to report it. What you can rely on:
+
+- A result **never cuts a reply in progress** and never blocks your messages: it waits behind the reply that is running. Results that end at about the same time
+  (within 1.5 s), or while the agent is busy, are delivered as **one** message and one reply.
+- If you write while a result message is queued or being answered, your message wins as usual (the unfinished reply is kept as interrupted) and the agent still
+  sees the result in the conversation when it answers you. The message tells the agent to answer your latest request first, then report the result briefly.
+- At most 3 result-started turns in a row without a message from you (`subagents.max_auto_wakes`); further results are held and delivered after the reply to your next message.
+- A result the agent read itself (`task_wait`, `task_result`, `wait=true`) sends no message. `wake=false` on `task_start` is fire-and-forget: no message at all.
+- If you delete the chat, its running tasks are cancelled; a result that finds no chat is kept in the task record only.
+- After a restart of the process, results that were waiting for their message are delivered at start-up, and a task whose process died is reported as `failed` (`owner_lost`).
+
+## Managing tasks
+
+- `task_wait(ids, timeout_s)`: block for results, **at most 120 s** (a message from you ends the wait). Use it only when the agent cannot go on without the result.
+- `task_steer(id, text)`: correct a **running** task. Its current reply is interrupted and kept, the correction is appended and it continues.
+- `task_send(id, text)`: talk to a task that has **finished** (`done`, `timed_out`, `failed`) and keep it working with its full context, instead of starting a new task. It counts
+  against the parallel limits, gets a fresh timeout and token budget, is limited to 5 follow-ups per task (`subagents.max_followups`) and ends with a new result message.
+- `task_stop(id)`, `task_list(status)`, `task_result(id, full)`.
+
+## In the web app
+
+- **Task card.** Each `task_start` step in a reply is a one-line card: the task title, `ephemeral` or the agent's name, and a status badge with the elapsed time (Running · 1m 05s, Done, Failed, Cancelled, Timed out). Open it to see the result. The card updates by itself (the page asks the server every ~3 seconds while a task of the open chat runs).
+- **Stop, Steer, Open chat.** *Stop* ends a running task and keeps its partial result. *Steer* opens a small field: what you type is sent into the running worker as a correction (its current reply is interrupted and kept, your text is appended and it continues), the same as the agent's `task_steer`. *Open chat* shows the worker's own conversation in a dialog marked as internal and read-only; it is never in your chat list.
+- **Task result bubble.** When a task ends, the result that reaches the agent appears as a compact, collapsed "Task result" note listing the task titles, not as a message of yours. The agent's reply to it follows as a normal message and streams live if the chat is open, also after a reload.
+- Everything works in history after a reload, in both themes and on narrow screens. The same actions are available through the API ([subagent tasks](../reference/api.md#subagent-tasks)).
 
 ## Turning it on
 
@@ -40,10 +68,13 @@ only lower them.
 | wall clock per task | 600 s (10 min) |
 | input + output tokens per task | 200 000 |
 | result text returned to the agent | 8000 characters (the full text stays in the hidden chat) |
+| follow-ups per task (`task_send`) | 5 |
+| `task_wait` | 120 s at most |
+| result-started turns in a row without a user message | 3 |
 | depth | 1 |
 
 The agent is told the numbers in the `task_start` description and in a short notice in its system prompt, and a limit error says which limit was hit and what
-to do (`limit reached: 3 running task(s) in this chat; wait for one to finish, then launch again`). A task that hits the wall clock or the token cap is
+to do (`limit reached: 3 running task(s) in this chat; wait for one to finish (task_wait), then launch again`). A task that hits the wall clock or the token cap is
 stopped and ends `timed_out` with its partial result; a user stopping the parent's reply cancels the task.
 
 **Provider limits and rate limits.** If the provider answers with a plan or rate limit (for example the 5-hour window of a Claude subscription, which workers share with
@@ -53,7 +84,7 @@ your own chats), the task ends `failed` with reason `rate_limit`, and **no new t
 ## Where the data lives
 
 `data/<user_id>/.tasks/<task_id>.json`: one record per task (goal, status, reason, usage, capped result; no secrets), written under a lock. A running task also
-holds `<task_id>.run.lock`; if the process dies, the next launch marks the orphan `failed` with reason `owner_lost` (nothing is resumed or re-run). Records are not
+holds `<task_id>.run.lock`; if the process dies, the next launch or start-up marks the orphan `failed` with reason `owner_lost` (nothing is resumed or re-run). Records are not
 removed automatically yet.
 
 ## Security notes
@@ -64,3 +95,13 @@ A worker never has more access than its parent and has no secrets, memory or fil
 
 See also: the built-in `recall` skill page `delegation.md` (what agents read about this), [tools](../reference/tools.md#delegate), and the
 [architecture note](../architecture/agents-and-users.md#subagent-tasks).
+
+## Telegram
+
+When a task is launched from a Telegram chat (or from the chat Telegram currently shows), the bot sends one short line when it starts (with a **Stop** button) and one when it ends: status, title, agent and elapsed time. If the chat is not the current one, the line and the reply name the agent and the chat. When the results wake the parent, its reply is streamed into the private chat like any other reply (approvals included), without you writing anything; if you are in the middle of a reply, the wake waits behind it.
+
+- `/tasks`: the tasks of the current chat (status, title, elapsed), with a Stop button per running task.
+- `/task <id>`: status and result of a task (capped at 1500 characters).
+- `/task <id> <text>`: corrects a running task; its current generation is interrupted, the partial reply is kept and your text is appended.
+
+Only the user the task belongs to can stop or correct it. The bot only sees tasks that run in its own process, so a task started from the web UI is managed there.

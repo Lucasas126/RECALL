@@ -68,7 +68,7 @@ If any check fails the call is rejected before touching data.
 
 ## subagent tasks
 
-The `delegate` tool group (phase 1 of the [subagents design](../project/design-subagents.md): synchronous `task_start`) adds a second kind of chat run, owned by the
+The `delegate` tool group (phases 1 and 2a of the [subagents design](../project/design-subagents.md): async `task_start`, the wake, task tools) adds a second kind of chat run, owned by the
 `TaskManager` in `src/service/tasks.py`, which `ChatService` creates and binds to every reply through `RunContext.tasks`:
 
 - **Store.** `data/<user_id>/.tasks/` holds one JSON record per task (read-modify-write under `.state.lock`, atomic writes), `<id>.run.lock` held by the executing process
@@ -80,4 +80,29 @@ The `delegate` tool group (phase 1 of the [subagents design](../project/design-s
 - **Run.** The manager drives the worker through the public `ChatService.send` in a daemon thread and a watchdog thread (wall clock; the token cap is enforced from a usage hook the agent calls after each
   model call, set up in `ChatService._run`). A stop uses `ChatService.cancel_chat_run`, which cancels without deleting. Provider rate limits end the task as `failed`/`rate_limit` and
   block new launches for a cooldown; nothing is retried.
-- **Not built yet** (later phases): `wait=false`, the wake message, `task_list/steer/stop/wait`, cross-process commands and approvals for terminal grants.
+- **Async tools (phase 2a).** `task_start` returns the id at once (`wait=true` still blocks, `wake=false` is fire-and-forget). `task_list`, `task_result`, `task_wait` (max 120 s, polls like
+  `ApprovalBroker.request` and honours the parent's `CancellationToken`), `task_stop`, `task_steer` and `task_send` are methods of the manager (`list_for`, `result`, `wait`, `stop_task`,
+  `steer`, `send`) that take an `owner` (agent id, chat id) the tools fill from `RunContext`, so a task is only reachable from the chat that launched it. A UI passes `owner=None` after its
+  own user check. `steer` reuses `ChatService.send` on the worker chat: the unfinished reply is interrupted and kept, the correction is appended, and the driver thread follows the continuation's
+  feed, so the task only ends when the corrected reply ends. `send` (task_send) is another `ChatService.send` into the same persisted worker chat (full context) with a new run lock, a fresh
+  timeout and token budget (`base_in/base_out` keep the earlier usage in the record), at most `subagents.max_followups` per task.
+- **Wake.** When a task with `wake.state = pending` ends, `TaskManager._schedule_wake` starts a ~1.5 s debounce timer (`subagents.wake_debounce_seconds`) per parent chat. The flush
+  (`_deliver`) claims every unread result of the chat atomically under the store lock (`pending -> claimed`, so two flushes or two processes never deliver the same result), builds one
+  text (`wake_frame`/`wake_block`: header `[RECALL task result, not written by the user]`, one `<task_result untrusted="true">` block per task, an instruction to answer the user's latest request first)
+  and calls `ChatService.send_system(..., source="task", meta={"task_ids", "task_runs"}, steer=False, frame=wake_frame)`. That builds a `_MessageRun` and goes through `_enqueue(steer=False)`: it
+  is only appended behind the chat's runs and never cancels the active reply. A wake that is still queued when a second result arrives is merged into (one generation); the turn is logged by
+  `Agent.invoke(meta=...)` as a user-role turn with `source: "task"` and `task_ids` (`get_chat` returns both). A user message keeps ordinary steering priority: a queued or generating wake is
+  cancelled like any run, and the user's turn finds the wake turn in the history because `invoke` logs it before generating. Rules: results read through `task_wait`, `task_result` or
+  `wait=true` become `consumed` and never wake (tasks a `task_wait` is blocked on are skipped by the flush; a cancelled wait re-schedules); at most `subagents.max_auto_wakes` (3) wake turns in a
+  row without a user message, the rest are `held` and delivered after the reply to the next user message (`release_held`, called by `ChatService.send`); delivery is idempotent (a run id
+  `<task>:<follow-up n>` already listed in a turn of the chat is marked delivered, never rewritten); a cancelled task (stop, shutdown) sends no wake. Wake states: `none | pending | claimed |
+  delivered | consumed | held | orphaned`.
+- **Parent chat deleted.** `ChatService.delete_chat` (also `discard_chat`) first calls `TaskManager.cancel_for_parent`: the chat's running tasks are stopped (`cancelled`/`parent_deleted`,
+  wake `orphaned`). A result whose chat is gone when the flush runs is `orphaned` too (the record and the worker chat stay readable); the chat is never recreated.
+- **Recovery.** `TaskManager.recover()` (called from `ChatService.start_dream_scheduler`, i.e. at start of the web and Telegram processes) fails non-terminal tasks whose run lock is free
+  (`owner_lost`, the parent is told) and schedules delivery of terminal tasks whose wake is `pending`, `held` or a stale `claimed`. Same process only; cross-process commands are phase 4.
+- **Task event hook.** `TaskManager.subscribe(callback)` (returns an unsubscribe function; `ChatService._tasks`) calls `callback(event: dict)` on the thread that raised it, errors are logged and
+  ignored, listeners must not block. Events: `task_started` (`task_id`, `agent_id`, `chat_id` of the parent, `status`, `followup` for a task_send), `task_finished` (`status`, `reason`),
+  `task_wake` (`chat_id`, `agent_id`, `task_ids`: a wake generation was queued; attach to it with `ChatService.follow`) and `task_orphaned` (`task_ids`). The web and Telegram layers
+  subscribe to these in later tasks (task cards, a push of the wake reply); nothing in phase 2a does.
+- **Not built yet** (later phases): web/Telegram task cards, terminal grants and their approvals, other agents as workers, cross-process commands.

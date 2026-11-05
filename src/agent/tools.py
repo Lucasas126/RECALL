@@ -25,7 +25,7 @@ _ORDER = (
     "folder_write", "folder_append", "folder_edit", "folder_move", "folder_delete",
     "web_search", "web_retrieve",
     "terminal", "sandbox_read", "sandbox_write", "sandbox_patch", "sandbox_search",
-    "task_start",
+    "task_start", "task_list", "task_result", "task_steer", "task_send", "task_stop", "task_wait",
 )
 
 

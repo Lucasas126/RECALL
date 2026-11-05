@@ -1,6 +1,7 @@
 """The `delegate` tool group: hand a self-contained task to a short-lived worker in a hidden chat.
 
-Phase 1 exposes only `task_start` and only synchronously (`wait=true`): the call blocks until the worker ends and
+`task_start` returns an id at once (the result wakes the parent later) or blocks with `wait=true`; `task_list`,
+`task_result`, `task_steer`, `task_send`, `task_stop` and `task_wait` manage the tasks. A call blocks until the worker ends and
 returns its result. The work itself (store, limits, hidden chat, watchdog) lives in `src/service/tasks.py`, reached
 through the `RunContext` the chat service binds around each reply.
 """
@@ -15,7 +16,7 @@ from src.agent.tool_groups import DELEGATE_GRANTABLE_GROUPS
 from src.agent.tooling import tool
 from src.config.models import AgentDelegationConfig, ResolvedAgent
 from src.config.settings import SUBAGENTS
-from src.terminal.context import current_run
+from src.terminal.context import RunContext, current_run
 
 # bounds on what the model writes into a task (the text goes into the store and the worker's prompt)
 MAX_GOAL_CHARS = 8000
@@ -39,6 +40,7 @@ class TaskLimits:
     result_max_chars: int
     rate_limit_cooldown_seconds: int
     depth: int = 1
+    max_followups: int = 5  # task_send follow-ups per task
 
 
 def task_limits(delegation: AgentDelegationConfig | None) -> TaskLimits:
@@ -53,6 +55,7 @@ def task_limits(delegation: AgentDelegationConfig | None) -> TaskLimits:
         max_tokens=min(base.max_tokens, agent.max_tokens or base.max_tokens),
         result_max_chars=base.result_max_chars,
         rate_limit_cooldown_seconds=base.rate_limit_cooldown_seconds,
+        max_followups=base.max_followups,
     )
 
 
@@ -60,8 +63,13 @@ DELEGATE_NOTICE = (
     "## Delegating tasks\n\n"
     "With `task_start` you can hand a self-contained task to a worker: a fresh, short-lived agent that runs in a hidden "
     "chat and sees only what you give it. Write its system prompt yourself in `instructions`, and put everything it "
-    "needs in `goal` and `context`, because it cannot see this conversation. Phase 1 is synchronous: pass `wait=true` "
-    "and the call returns when the worker ends, with its result (or why it stopped). Limits: {parallel} running "
+    "needs in `goal` and `context`, because it cannot see this conversation. `task_start` returns an id at once and "
+    "the result arrives later as a message that starts with `[RECALL task result, not written by the user]`: keep "
+    "helping the user meanwhile, never poll in a loop; answer the user's latest request first, then report the result "
+    "briefly. Use `task_wait` (max 120 s) only when you cannot continue without the result, `wait=true` to block at "
+    "once, and `wake=false` for fire-and-forget (read it later with `task_result`). `task_send` continues a finished "
+    "task with its full context (up to {followups} follow-ups), `task_steer` corrects a running one, `task_stop` ends "
+    "it, `task_list` shows yours. Limits: {parallel} running "
     "task(s) per chat and {user_parallel} per user, {launches} launches per turn, {minutes} minutes and {tokens} "
     "tokens per task, results cut at {chars} characters, depth 1 (a worker cannot launch tasks). The worker has no "
     "memory, files or terminal; it gets only the tool groups you name in `tools` ({grantable}). A plan or rate limit "
@@ -85,6 +93,7 @@ def delegate_notice(config: ResolvedAgent) -> str | None:
         launches=limits.max_launches_per_turn, minutes=limits.timeout_seconds // 60 or 1,
         tokens=f"{limits.max_tokens:,}".replace(",", " "), chars=limits.result_max_chars,
         grantable=", ".join(grantable) or "none available", cooldown=limits.rate_limit_cooldown_seconds // 60,
+        followups=limits.max_followups,
     )
 
 
@@ -103,7 +112,8 @@ def worker_prompt(instructions: str) -> str:
 
 def _task_start_description(limits: TaskLimits, grantable: list[str]) -> str:
     return (
-        "Run a task in a separate hidden worker agent and return its result (wait=true is the only mode for now). "
+        "Run a task in a separate hidden worker agent. Returns an id at once; the result arrives later as a message "
+        "(wake=false: no message; wait=true: block and return the result). "
         "The worker sees only `goal`, `context` and the system prompt you write in `instructions`; give a "
         "self-contained goal. It has no tools unless you name groups in `tools`"
         + (f" (allowed: {', '.join(grantable)})" if grantable else " (none can be granted to this agent)")
@@ -131,19 +141,22 @@ def build_delegate_tools(config: ResolvedAgent) -> list[Callable[..., str]]:
         tools: Annotated[Optional[list[str]], "tool groups to grant the worker; none by default"] = None,
         model: Annotated[str, "model for the worker; empty = the model of this chat"] = "",
         timeout_s: Annotated[int, "seconds before the task is stopped; 0 = the default limit"] = 0,
-        wait: Annotated[bool, "block until the worker ends and return its result (required for now)"] = True,
+        wait: Annotated[bool, "block until the worker ends and return its result; default: return the id at once"] = False,
+        wake: Annotated[bool, "tell this chat when it ends; false = fire-and-forget (read it with task_result)"] = True,
     ) -> str:
         """Run a task in a separate worker agent."""
         run = current_run()
         if run is None or run.tasks is None:
             return "error: delegation is not available in this run"
-        if not wait:
-            return "error: asynchronous tasks arrive later; use wait=true"
+        values = dict(
+            limits=limits, grantable=grantable, goal=goal, context=context, instructions=instructions,
+            groups=list(tools or []), model=model, timeout_s=timeout_s,
+        )
         try:
-            result = run.tasks.run(
-                run, config=config, limits=limits, grantable=grantable, goal=goal, context=context,
-                instructions=instructions, groups=list(tools or []), model=model, timeout_s=timeout_s,
-            )
+            if wait:
+                result = run.tasks.run(run, config=config, **values)
+            else:
+                result = run.tasks.start(run, wake=wake, **values)
         except TaskError as exc:
             return f"error: {exc}"
         return json.dumps(result, ensure_ascii=False)
@@ -151,4 +164,72 @@ def build_delegate_tools(config: ResolvedAgent) -> list[Callable[..., str]]:
     task_start.tool_spec["function"]["description"] = _task_start_description(limits, grantable)
     if grantable:
         task_start.tool_spec["function"]["parameters"]["properties"]["tools"]["items"]["enum"] = grantable
-    return [task_start]
+
+    def _call(action: Callable[[RunContext], object]) -> str:
+        run = current_run()
+        if run is None or run.tasks is None:
+            return "error: delegation is not available in this run"
+        try:
+            result = action(run)
+        except TaskError as exc:
+            return f"error: {exc}"
+        return result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+
+    @tool
+    def task_list(status: Annotated[str, "only tasks in this status (running, done, failed, ...); empty = all"] = "") -> str:
+        """List the tasks of this chat."""
+        return _call(lambda run: run.tasks.list_for(run, status.strip()))
+
+    @tool
+    def task_result(
+        id: Annotated[str, "task id"],
+        full: Annotated[bool, "the worker's whole final answer instead of the capped result"] = False,
+    ) -> str:
+        """Get a task's result or status."""
+        return _call(lambda run: run.tasks.result(run, id, full))
+
+    @tool
+    def task_steer(
+        id: Annotated[str, "id of a running task"], text: Annotated[str, "the correction, as an instruction to the worker"],
+    ) -> str:
+        """Send a correction to a running task."""
+        return _call(lambda run: run.tasks.steer(run.user_id, id, text, owner=(run.agent_id, run.chat_id)))
+
+    @tool
+    def task_send(
+        id: Annotated[str, "id of a finished task (done, timed_out or failed)"],
+        text: Annotated[str, "the follow-up message for the worker"],
+    ) -> str:
+        """Reply to a finished task so it keeps working."""
+        return _call(lambda run: run.tasks.send(
+            run.user_id, id, text, limits=limits, owner=(run.agent_id, run.chat_id),
+        ))
+
+    @tool
+    def task_stop(id: Annotated[str, "task id"]) -> str:
+        """Stop a task."""
+        return _call(lambda run: run.tasks.stop_task(run.user_id, id, owner=(run.agent_id, run.chat_id)))
+
+    @tool
+    def task_wait(
+        ids: Annotated[list[str], "task ids to wait for"],
+        timeout_s: Annotated[int, "seconds to wait, at most 120"] = 60,
+    ) -> str:
+        """Block until the tasks end."""
+        return _call(lambda run: run.tasks.wait(run, ids, timeout_s))
+
+    descriptions = {
+        task_list: "List your tasks of this chat: id, status, age, title ('unread' = result not seen yet).",
+        task_result: "Get a task's result (capped; full=true for the worker's whole answer) or its status while it runs.",
+        task_steer: "Send a correction to a RUNNING task: its current reply is interrupted, kept, and it continues with your text.",
+        task_send: (
+            "Reply to a task that has finished (done, timed_out or failed) so it keeps working with its full context; "
+            f"no need to launch a new one. At most {limits.max_followups} follow-ups per task; counts as a running task and "
+            "ends with a new message."
+        ),
+        task_stop: "Stop a running task; its partial result is kept.",
+        task_wait: "Block until the tasks end or the timeout (max 120 s). Returns the results that ended and the ids still running; a result read here sends no message.",
+    }
+    for function, description in descriptions.items():
+        function.tool_spec["function"]["description"] = description
+    return [task_start, task_list, task_result, task_steer, task_send, task_stop, task_wait]

@@ -451,6 +451,7 @@ function translateInterface() {
   renderVersion();
   for (const [id, text] of [
     ["settings-title", "User settings"], ["settings-save", "Save settings"],
+    ["task-dialog-banner-text", "Internal worker chat: read-only, not part of your chat list. Use Steer on the task card to correct it."],
     ["settings-thinking-label", "Show model thinking"],
     ["settings-thinking-hint", "Shows the model's reasoning above its replies in the chat."],
     ["settings-assoc-max-label", "Maximum associative memory matches"],
@@ -2328,6 +2329,7 @@ async function openChat(chatId) {
   }
   updateBusy();
   syncApprovals(agentId, chatId);
+  ensureTaskPolling();  // task cards and wake replies of this chat
   await refreshChats();
   $("input").focus();
 }
@@ -2875,6 +2877,10 @@ function renderMessages(messages) {
   $("messages").replaceChildren(container);
   $("usage").hidden = true;
   for (const m of messages) {
+    if (isWakeMessage(m)) {  // a subagent result, not something the user wrote
+      container.append(wakeBubble(m));
+      continue;
+    }
     const view = addMessage(m.role, container);
     if (m.role === "user" && m.index != null) setEditable(view.el, m.index);
     if (m.associative_skipped) view.memory({ state: "skipped" });
@@ -3190,8 +3196,121 @@ function thinkingSegment() {
   };
 }
 
+// ---- task cards: pure helpers (loaded without the DOM by tests/test_task_cards.cjs)
+const TASK_FINAL = ["done", "failed", "cancelled", "timed_out"];
+const TASK_STATUS_LABELS = { running: "Running", done: "Done", failed: "Failed", cancelled: "Cancelled", timed_out: "Timed out" };
+
+function taskIsFinal(status) {
+  return TASK_FINAL.includes(status);
+}
+
+// The English template of a status badge (callers pass it through tr()).
+function taskStatusLabel(status) {
+  return TASK_STATUS_LABELS[status] ?? "Unknown";
+}
+
+// 45 -> "45s", 185 -> "3m 05s", 3720 -> "1h 02m"; null when the time is unknown.
+function formatElapsed(seconds) {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) return "";
+  const total = Math.floor(seconds);
+  const two = (value) => String(value).padStart(2, "0");
+  if (total < 60) return `${total}s`;
+  if (total < 3600) return `${Math.floor(total / 60)}m ${two(total % 60)}s`;
+  return `${Math.floor(total / 3600)}h ${two(Math.floor((total % 3600) / 60))}m`;
+}
+
+// Seconds a task ran: fixed once it ended, otherwise counted up from its start (the server value is the fallback).
+function taskElapsed(record, nowMs) {
+  if (!record) return null;
+  if (!taskIsFinal(record.status) && record.started_at && Number.isFinite(Date.parse(record.started_at))) {
+    return Math.max(0, Math.round((nowMs - Date.parse(record.started_at)) / 1000));
+  }
+  return typeof record.elapsed_s === "number" ? record.elapsed_s : null;
+}
+
+function taskResultJson(action) {
+  const value = action?.result;
+  if (value && typeof value === "object") return value;
+  if (typeof value !== "string") return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function isTaskStartAction(action) {
+  return action?.name === "task_start";
+}
+
+// The task id a stored `task_start` step returned; null when the launch failed (no task exists).
+function taskActionId(action) {
+  const id = taskResultJson(action)?.id;
+  return typeof id === "string" && id ? id : null;
+}
+
+// What a card shows: from the task record when known, else from the step itself. `listed` says that the chat's task
+// list was already fetched, so a task that is still missing there no longer exists.
+function taskCardState(record, action, nowMs, listed = false) {
+  const args = action?.arguments && typeof action.arguments === "object" ? action.arguments : {};
+  const goal = String(args.goal ?? "").replace(/\s+/g, " ").trim();
+  const launchFailed = !taskActionId(action);
+  let status = record?.status ?? (launchFailed ? "failed" : listed ? "unknown" : "running");
+  const final = taskIsFinal(status) || status === "unknown";
+  const kind = record?.target?.kind ?? (args.agent ? "agent" : "ephemeral");
+  const agent = record?.target?.agent_id ?? args.agent ?? "";
+  const running = status === "running";
+  return {
+    id: record?.id ?? taskActionId(action),
+    title: record?.title || (goal.length > 80 ? `${goal.slice(0, 79)}…` : goal) || "task",
+    target: kind === "agent" && agent ? agent : "",
+    ephemeral: !(kind === "agent" && agent),
+    status,
+    statusLabel: taskStatusLabel(status),
+    elapsed: formatElapsed(taskElapsed(record, nowMs)),
+    tokens: (record?.usage?.in ?? 0) + (record?.usage?.out ?? 0),
+    running,
+    final,
+    canStop: running,
+    canSteer: running,
+    canOpen: Boolean(record?.child?.chat_id),
+    result: record?.result ?? record?.result_preview ?? "",
+    error: record?.error ?? (launchFailed ? String(taskResultJson(action)?.error ?? action?.result ?? "") : ""),
+    reason: record?.reason ?? "",
+  };
+}
+
+// A wake turn: a subagent result delivered to the parent, stored as a user turn but not written by the user.
+function isWakeMessage(message) {
+  return message?.role === "user" && message?.source === "task";
+}
+
+// The task titles and the readable body of a wake turn (the framing paragraphs for the model are cut off).
+function wakeBubbleState(message) {
+  const content = typeof message?.content === "string" ? message.content : "";
+  const titles = [...content.matchAll(/^task (\w+) "(.*)" - /gm)].map((found) => ({ id: found[1], title: found[2] }));
+  const parts = content.split("\n\n");
+  if (parts[0]?.startsWith("[RECALL task result")) parts.shift();
+  if (parts.length && parts[parts.length - 1].startsWith("If the user's latest request")) parts.pop();
+  return { ids: Array.isArray(message?.task_ids) ? message.task_ids : titles.map((t) => t.id), titles: titles.map((t) => t.title), body: parts.join("\n\n").trim() };
+}
+
+// Keep polling while a task of the chat runs or its result is still on the way to the parent.
+function tasksNeedPolling(response) {
+  const tasks = response?.tasks ?? [];
+  return tasks.some((task) => !taskIsFinal(task.status)) || Boolean(response?.pending_wake);
+}
+
+// A wake reply started in the open chat without a request of this page: attach to it (never when one is attached).
+function shouldAttachWake({ active, generating, current = true }) {
+  return Boolean(active) && !generating && current;
+}
+// ---- end task cards
+
 // A tool step: closed it is one line (icon, name, backend, summary); open it shows the arguments and the result.
 function actionStep(action) {
+  if (isTaskStartAction(action)) return taskCardStep(action);
   const info = actionSummary(action);
   const item = document.createElement("details");
   item.className = "action" + (action.error ? " failed" : "");
@@ -3219,6 +3338,249 @@ function actionStep(action) {
   item.dataset.command = String(action.arguments?.command ?? "");
   return item;
 }
+
+// ---- task cards: DOM, polling and the worker-chat dialog
+const taskRecords = new Map();  // task id -> last record fetched for the open chat
+const taskCards = new Set();
+let taskListed = null;          // chat key of the last fetched task list
+let taskPollTimer = null;
+let taskPollRunning = false;
+let taskPollAgain = false;
+let wakeAttaching = false;
+
+function taskUrl(id, suffix = "") {
+  return `/api/tasks/${encodeURIComponent(id)}${suffix}`;
+}
+
+// The card of a `task_start` step: one line closed (title, worker, status badge); open it holds the result and the buttons.
+function taskCardStep(action) {
+  const card = document.createElement("details");
+  card.className = "action task-card";
+  card.dataset.tool = "task_start";
+  card.dataset.command = "";
+  const summary = document.createElement("summary");
+  const icon = element("span", { className: "action-icon" });
+  icon.innerHTML = ICONS.tool;
+  const title = element("span", { className: "action-name task-title" });
+  const target = element("span", { className: "action-backend task-target" });
+  const badge = element("span", { className: "task-badge" });
+  badge.setAttribute("role", "status");
+  const tokens = element("span", { className: "action-args task-tokens" });
+  summary.append(icon, title, target, badge, tokens);
+  const result = element("div", { className: "action-block task-result-block" });
+  const resultLabel = element("div", { className: "action-label", textContent: tr("Result") });
+  const resultText = element("pre");
+  result.append(resultLabel, resultText);
+  const error = element("div", { className: "task-error", hidden: true });
+  error.setAttribute("role", "alert");
+  const button = (text, className, handler) => {
+    const node = element("button", { type: "button", className, textContent: text });
+    node.addEventListener("click", handler);
+    return node;
+  };
+  const stop = button(tr("Stop"), "secondary task-stop", () => taskStop(card, error));
+  const steer = button(tr("Steer"), "secondary task-steer-toggle", () => {
+    form.hidden = !form.hidden;
+    if (!form.hidden) field.focus();
+  });
+  const open = button(tr("Open chat"), "secondary task-open", () => openTaskChat(card._taskId));
+  const field = element("input", { type: "text", className: "task-steer-input", maxLength: 2000, placeholder: tr("Tell the worker what to change") });
+  field.setAttribute("aria-label", tr("Steer"));
+  const send = button(tr("Send"), "primary task-steer-send", () => taskSteer(card, field, form, error));
+  field.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.isComposing) {
+      event.preventDefault();
+      send.click();
+    }
+  });
+  const form = element("div", { className: "task-steer-form", hidden: true }, field, send);
+  const buttons = element("div", { className: "task-actions" }, stop, steer, open);
+  card.append(summary, result, buttons, form, error);
+  card._parts = { title, target, badge, tokens, resultText, result, stop, steer, open, form, error };
+  card._action = action;
+  card._taskId = taskActionId(action);
+  taskCards.add(card);
+  refreshTaskCard(card);
+  if (card._taskId) ensureTaskPolling();
+  return card;
+}
+
+function refreshTaskCard(card) {
+  const parts = card._parts;
+  const view = taskCardState(taskRecords.get(card._taskId), card._action, Date.now(), taskListed === chatKey(state.agentId, state.chatId));
+  card._taskId = view.id;
+  card.dataset.status = view.status;
+  card.classList.toggle("failed", view.status === "failed");
+  parts.title.textContent = view.title;
+  parts.target.textContent = view.ephemeral ? tr("ephemeral") : view.target;
+  parts.badge.className = `task-badge ${view.status}`;
+  parts.badge.textContent = view.elapsed ? `${tr(view.statusLabel)} · ${view.elapsed}` : tr(view.statusLabel);
+  parts.tokens.textContent = view.tokens ? tr("{count} tokens", { count: view.tokens }) : "";
+  const text = view.result || view.error || (view.running ? "" : tr("No result"));
+  parts.result.hidden = !text;
+  parts.resultText.textContent = text;
+  parts.stop.hidden = !view.canStop;
+  parts.steer.hidden = !view.canSteer;
+  parts.open.hidden = !view.canOpen;
+  if (!view.canSteer) parts.form.hidden = true;
+}
+
+function refreshTaskCards() {
+  for (const card of [...taskCards]) {
+    if (!card.isConnected) taskCards.delete(card);
+    else refreshTaskCard(card);
+  }
+}
+
+function showTaskError(box, err) {
+  box.textContent = err?.message ?? String(err);
+  box.hidden = false;
+}
+
+async function taskStop(card, box) {
+  box.hidden = true;
+  try {
+    await api(taskUrl(card._taskId, "/stop"), { method: "POST" });
+  } catch (err) {
+    showTaskError(box, err);
+  }
+  ensureTaskPolling();
+}
+
+async function taskSteer(card, field, form, box) {
+  const text = field.value.trim();
+  if (!text) return;
+  box.hidden = true;
+  try {
+    await api(taskUrl(card._taskId, "/steer"), { method: "POST", body: JSON.stringify({ text }) });
+    field.value = "";
+    form.hidden = true;
+  } catch (err) {
+    showTaskError(box, err);
+  }
+  ensureTaskPolling();
+}
+
+// Polls the open chat's tasks every ~3 s while one runs or a result is on its way; a wake reply that started
+// without a request of this page is then attached to like a reply that runs after a reload.
+function ensureTaskPolling() {
+  if (!state.user) return;
+  if (taskPollRunning) {
+    taskPollAgain = true;
+    return;
+  }
+  clearTimeout(taskPollTimer);
+  taskPoll();
+}
+
+async function taskPoll() {
+  taskPollRunning = true;
+  taskPollAgain = false;
+  const { agentId, chatId, session } = state;
+  let again = false;
+  try {
+    if (agentId && chatId) {
+      const data = await api(`/api/tasks?agent=${encodeURIComponent(agentId)}&chat=${encodeURIComponent(chatId)}`);
+      const current = session === state.session && agentId === state.agentId && chatId === state.chatId;
+      if (current) {
+        for (const task of data.tasks) taskRecords.set(task.id, task);
+        taskListed = chatKey(agentId, chatId);
+        refreshTaskCards();
+        again = tasksNeedPolling(data) || (data.tasks.length > 0 && data.active);
+        if (!wakeAttaching && shouldAttachWake({ active: data.active, generating: isGenerating(agentId, chatId), current })) {
+          await attachWake(agentId, chatId);
+        }
+      }
+    }
+  } catch {
+    again = false;
+  }
+  taskPollRunning = false;
+  taskPollTimer = again || taskPollAgain ? setTimeout(taskPoll, taskPollAgain ? 0 : 3000) : null;
+}
+
+// A wake turn is being answered: draw the saved chat (it holds the wake bubble) and follow the reply live.
+async function attachWake(agentId, chatId) {
+  wakeAttaching = true;
+  try {
+    const data = await api(chatsUrl(`/${chatId}`));
+    const current = agentId === state.agentId && chatId === state.chatId && !isGenerating(agentId, chatId);
+    if (!current || !data.chat.active) return;
+    state.chatInfo = data.chat;
+    forgetApprovals(agentId, chatId);
+    renderMessages(data.messages);
+    followReply(agentId, chatId);
+  } finally {
+    wakeAttaching = false;
+  }
+}
+
+// A wake turn in the history: a compact collapsible "Task result" note, not a user bubble.
+function wakeBubble(message) {
+  const info = wakeBubbleState(message);
+  const node = document.createElement("details");
+  node.className = "msg task-wake";
+  node.dataset.taskIds = info.ids.join(",");
+  const summary = element("summary", {}, element("span", { className: "task-wake-label", textContent: tr("Task result") }));
+  if (info.titles.length) summary.append(element("span", { className: "task-wake-titles", textContent: info.titles.join(" · ") }));
+  node.append(summary, element("pre", { className: "task-wake-body", textContent: info.body || String(message.content ?? "") }));
+  return node;
+}
+
+let taskDialogTimer = null;
+
+function renderTaskChatMessages(container, messages) {
+  container.replaceChildren();
+  for (const m of messages) {
+    if (isWakeMessage(m)) {
+      container.append(wakeBubble(m));
+      continue;
+    }
+    const view = addMessage(m.role, container);
+    if (m.role === "assistant") {
+      for (const step of historySteps(m)) {
+        if (step.type === "reasoning") view.thinking(step.text);
+        else if (step.type === "tool") view.action(step.action);
+        else view.text(step.text);
+      }
+    } else {
+      view.text(m.content);
+    }
+  }
+}
+
+// Read-only view of a task's hidden worker chat; refreshed every 3 s while the task runs.
+async function openTaskChat(id) {
+  if (!id) return;
+  const dialog = $("task-dialog");
+  const box = $("task-dialog-messages");
+  const load = async () => {
+    try {
+      const data = await api(taskUrl(id, "/chat"));
+      if (!dialog.open) return;
+      const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+      renderTaskChatMessages(box, data.messages);
+      if (stick) box.scrollTop = box.scrollHeight;
+      return data.chat.active;
+    } catch (err) {
+      box.replaceChildren(element("div", { className: "task-error", textContent: err.message }));
+    }
+  };
+  const record = taskRecords.get(id);
+  $("task-dialog-title").textContent = tr("Worker chat: {title}", { title: record?.title || id });
+  box.replaceChildren(element("p", { className: "model-note", textContent: tr("Loading…") }));
+  if (!dialog.open) dialog.showModal();
+  const schedule = async () => {
+    clearTimeout(taskDialogTimer);
+    const active = await load();
+    if (dialog.open && active) taskDialogTimer = setTimeout(schedule, 3000);
+  };
+  await schedule();
+}
+
+$("task-dialog-close").addEventListener("click", () => $("task-dialog").close());
+$("task-dialog").addEventListener("close", () => clearTimeout(taskDialogTimer));
+// ---- end task cards: DOM
 
 function approvalInitialState() {
   return { phase: "pending", kind: null, error: null, decision: null };

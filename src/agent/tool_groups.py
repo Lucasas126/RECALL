@@ -62,7 +62,7 @@ TOOL_GROUP_TOOLS: Final[dict[str, tuple[str, ...]]] = {
         "folder_write", "folder_append", "folder_edit", "folder_move", "folder_delete",
     ),
     "terminal": ("terminal", "sandbox_read", "sandbox_write", "sandbox_patch", "sandbox_search"),
-    "delegate": ("task_start",),
+    "delegate": ("task_start", "task_list", "task_result", "task_steer", "task_send", "task_stop", "task_wait"),
 }
 
 # the groups a parent may hand to a subagent (phase 1: read-only web access); memory, self, folders, terminal,

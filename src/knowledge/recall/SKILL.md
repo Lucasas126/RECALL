@@ -25,7 +25,7 @@ Read this page, then load only the reference you need: `skill_view("recall", "re
 | what a tool or tool group does, and its limits | `references/tools-and-groups.md` |
 | memory files, limits, associative memory, dreams, disposable chats | `references/memory-and-dream.md` |
 | the terminal, backends, approvals, being denied | `references/terminal-and-approvals.md` |
-| handing a task to a worker (`task_start`): limits, grants, results, rate limits, when not to | `references/delegation.md` |
+| handing a task to a worker (`task_start`, `task_wait`, `task_send`...): async results and the wake message, limits, grants, rate limits, when not to | `references/delegation.md` |
 | something is broken: logs, errors, what the user must do | `references/troubleshooting.md` |
 | which source file implements a behaviour | `references/code-map.md` |
 | administering RECALL: `python -m src.admin` for agents, users, secrets; what applies when | `references/admin-cli.md` |
