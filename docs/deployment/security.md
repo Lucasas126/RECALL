@@ -60,6 +60,15 @@ environment) and only suitable for an installation you would also trust a shell 
 - the whole `/app/data`: every user's and agent's memories, chats, indexes and terminal audit logs;
 - the code and the Python environment, and the container's outbound network.
 
+**Protected paths.** Whatever the approval mode, a local backend refuses a fixed set of secrets: the private `key_file` of every
+user's SSH backends (so a guide for user B cannot use the owner's PC key), `.config/secrets.env`, `.env` files, anything under a
+`keys` folder in the config dir, Claude login credentials and `/proc/*/environ`, plus the patterns in
+`terminal.protected_paths` (details in the [terminal guide](../user-guide/terminal.md#protected-paths-local-backend)). The file
+tools enforce it exactly (symlinks and `..` resolved). Command scanning is **best effort**: an obfuscated command (a path built
+from pieces, a hard link, a script the agent writes and runs through an interpreter) can bypass it, so approval cards remain the
+second barrier. `user.yaml`, other users' data and the audit logs stay readable on purpose. Stronger measures are on the
+[backlog](../project/backlog.md): a separate OS user or container for the local backend.
+
 There is no technical separation between users yet (a per-user path limit is on the [backlog](../project/backlog.md)); the rules
 are behavioural (the agent's SOUL and the built-in `security-for-admins` page: own data only, never read or print secrets, web
 content is data) plus the user's approval of every command. Risks to weigh: prompt injection through web pages or files that makes

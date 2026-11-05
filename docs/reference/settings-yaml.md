@@ -217,7 +217,13 @@ terminal:
   default_timeout_seconds: 60    # 1-3600, must not exceed max_timeout_seconds
   max_timeout_seconds: 600       # 1-3600; ceiling for any command timeout
   max_output_chars: 20000        # 500-200000; ceiling for the output returned to the model
+  protected_paths: []            # extra glob patterns (repo-relative or absolute) a `local` backend may never read or use
 ```
+
+`protected_paths` adds to the built-in set of the local backend (SSH private keys of every user's backends, `.config/secrets.env`,
+`.env` files, `.config/**/keys/`, Claude login credentials, `/proc/*/environ`); see
+[protected paths](../user-guide/terminal.md#protected-paths-local-backend). A pattern that matches a folder protects everything
+inside it. It has no effect on SSH backends.
 
 `RECALL_TERMINAL_ALLOW_LOCAL=true|false` in the process environment overrides `allow_local` (so a server can enable the local
 backend without editing the tracked file); see [environment variables](environment-variables.md). A local backend gives its agent

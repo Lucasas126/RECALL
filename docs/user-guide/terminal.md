@@ -139,7 +139,7 @@ The tools are never built in [disposable chats](memory.md#disposable-chats).
 | --- | --- |
 | `manual` (default) | every command and every file operation, reads included |
 | `smart` | only the *dangerous* actions listed below |
-| `off` | nothing asks; the hardline still applies |
+| `off` | nothing asks; the hardline (and, on a local backend, the [protected paths](#protected-paths-local-backend)) still applies |
 
 An approval is shown to the chat's owner while the reply waits:
 
@@ -182,6 +182,47 @@ Commands are split into segments (`&&`, `||`, `;`, `|`, `&`, newlines, subshells
 - recursive `chmod`/`chown`/`chgrp` on `/` or a system directory; `mv` of those directories;
 - `find /` with `-delete` or `-exec rm`;
 - a NUL byte in the command.
+
+### protected paths (local backend)
+
+A `type: local` backend runs as the RECALL user, so an agent there could read the SSH key of someone else's PC backend or the
+secrets of the installation. On a local backend (**only**; SSH backends are other machines) these paths are refused in **every**
+approval mode, `off` included, without asking anyone, also in unattended runs and dreams. The set is recomputed on every call:
+
+| protected | note |
+| --- | --- |
+| the private `key_file` of every SSH backend of every user (`.config/*/user.yaml`, broken users skipped) | the `.pub` sibling and the `known_hosts_file` stay readable |
+| `.config/secrets.env`, any file named `.env` or `.env.*`, `/app/.env`, `<repo>/.env` | `.env.example`, `.env.sample`, `.env.template`, `.env.dist` are templates and stay readable |
+| any file inside a directory named `keys` under the config folder | listing the folder (`ls .config/keys`) is allowed |
+| `id_rsa`, `id_ed25519`, `id_ecdsa`, `id_dsa` (no `.pub`) anywhere | |
+| `*/claude-login/.credentials.json`, any `.credentials.json` | |
+| `/proc/<pid>/environ`, `/proc/self/environ` | `/proc/*/cmdline` is fine |
+| patterns in `settings.yaml` `terminal.protected_paths` | globs, repo-relative or absolute; a folder protects its contents |
+
+`user.yaml` is **not** protected (agents need it for admin work; the admin CLI never prints password hashes). Cross-user access
+to config and data is still allowed by the rules of the setup guide.
+
+What is checked:
+
+- **File tools** (`sandbox_read`, `sandbox_write`, `sandbox_patch`, `sandbox_search`): exact. The path is made absolute (`~`,
+  relative to the working directory, `..`) and checked as written and with symlinks resolved. A search whose root is a protected
+  path is refused; a search over a parent folder skips protected files (`--exclude`, `-not -name`) and drops them from the results.
+- **`terminal`**: best effort. Every word, redirect target and `option=value` of every parsed segment (also inside `$(...)`,
+  backticks and `bash -c`) is resolved like the shell would (`~`, `$HOME`, relative paths, `..`, symlinks) and compared; glob
+  words (`keys/pc_*`) are matched against the protected files; obvious references (`keys/<file>`, `_ed25519`, `id_rsa`, `.env`,
+  `secrets.env`, `/environ`, `.credentials.json`) are refused anywhere in the command; `tar`, `zip`, `rsync`, `scp`, `cp -r`,
+  `grep -r`, `rg` and `find -exec` may not start at a folder that contains protected files (name narrower paths); a script run
+  by an interpreter and an `ssh -F` config that mention a protected path or an `IdentityFile` are refused. `ssh`/`scp`/`sftp`/
+  `ssh-add`/`ssh-keygen` with `-i`, `-F` or `-o IdentityFile` pointing at a protected path are refused like any other mention.
+  `env`, `printenv` and `set` are fine (the local backend already removes secret-looking variables).
+
+The refusal reads `Denied: protected path: <what>...`, tells the model not to retry or work around it, and the audit decision
+is `denied:protected`. No approval card is shown: nobody can approve it from the chat.
+
+**Limits, honestly.** The command scan is a heuristic. A determined obfuscated command (a path assembled from pieces,
+`printf` + `eval` tricks, a hard link, a program written and run in two steps by an interpreter the scan cannot read) can bypass
+it; the file tools cannot be bypassed this way. The approval card (`manual`) stays the second barrier, and the real boundary is
+separation: see the ideas in the [backlog](../project/backlog.md) (a separate OS user or container for local backends).
 
 ### dangerous: asks in `manual` and `smart`
 
@@ -267,7 +308,7 @@ Every executed or refused action appends one JSON line (`backend` is the configu
 {"ts": 1767225600.123, "user": "ana", "agent": "aria", "backend": "sandbox", "tool": "terminal", "command": "ls -la", "cwd": "~/workspace", "decision": "approved", "exit_code": 0, "duration_ms": 412, "timed_out": false}
 ```
 
-`decision` is one of `approved`, `approved:same-operation`, `auto:smart`, `auto:off`, `hardline`, `denied:unattended`,
+`decision` is one of `approved`, `approved:same-operation`, `auto:smart`, `auto:off`, `hardline`, `denied:protected`, `denied:unattended`,
 `denied:<reason>` (`denied by user`, `timed out`, `cancelled`, `service shutdown`) or `cancelled`. The command is redacted
 for known secret formats and cut at 2000 characters; the output is not recorded. The agent's own tools cannot read or edit
 this file: the memory/palace/folder tools only reach their sources, and the sandbox tools only reach the sandbox. Each
