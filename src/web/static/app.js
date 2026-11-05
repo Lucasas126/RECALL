@@ -111,7 +111,7 @@ function defaultAgentId(preferences, agents) {
 }
 
 // True when the scroll position is within `slack` pixels of the bottom (the user is following the latest content).
-function nearBottom(scrollHeight, scrollTop, clientHeight, slack = 80) {
+function nearBottom(scrollHeight, scrollTop, clientHeight, slack = 30) {
   return scrollHeight - scrollTop - clientHeight <= slack;
 }
 
