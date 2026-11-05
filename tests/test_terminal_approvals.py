@@ -30,7 +30,7 @@ class Asker:
 
     def _go(self, user, timeout):
         self.outcome = self.broker.request(user, "a", "chat1", self.run, "terminal", "ls", "~/w", "why", "manual",
-                                           timeout_seconds=timeout)
+                                           backend="pc", timeout_seconds=timeout)
 
     def join(self):
         self.thread.join(3)
@@ -47,11 +47,13 @@ class BrokerTests(unittest.TestCase):
         asker = Asker(self.broker)
         payload = asker.run.events[0]
         self.assertEqual(payload[0], "approval")
-        for key in ("id", "tool", "command", "cwd", "reason", "risk", "timeout_seconds", "expires_at", "chat_id", "agent_id"):
+        for key in ("id", "tool", "command", "cwd", "reason", "risk", "timeout_seconds", "expires_at", "chat_id", "agent_id", "backend"):
             self.assertIn(key, payload[1])
+        self.assertEqual(payload[1]["backend"], "pc")
         self.assertEqual(self.broker.resolve(asker.id, "u", "approve"), "approved")
         outcome = asker.join()
         self.assertTrue(outcome.approved)
+        self.assertEqual(self.broker.recent_decisions("u")[-1]["backend"], "pc")
         self.assertEqual(asker.run.kinds(), ["approval", "approval_resolved"])
         self.assertEqual(asker.run.events[1][1], {"id": asker.id, "decision": "approved", "reason": "approved"})
         self.assertEqual(self.broker.pending("u", "a", "chat1"), [])
@@ -161,6 +163,10 @@ class SessionPolicyTests(unittest.TestCase):
         self.assertEqual([r["risk"] for r in broker.requests], ["manual"])
         self.assertIsNotNone(result)
         self.assertEqual(len(backend.calls), 1)
+
+    def test_the_request_names_the_backend(self) -> None:
+        _, broker, _, _ = self.run_in_mode("manual", "ls")
+        self.assertEqual(broker.requests[0]["backend"], "box")
 
     def test_smart_asks_only_for_dangerous_commands(self) -> None:
         _, broker, result, _ = self.run_in_mode("smart", "ls")

@@ -191,7 +191,7 @@ class ChatEvent:
     took, in `data`: name, arguments, result, error), `usage` (context report, emitted once
     after the reply), `interrupted` (partial answer in `text`, reasoning/actions in `data`) or
     `notice` (a warning about how the request was handled, in `text`, sent before the reply),
-    `approval` (a tool waits for the user's go-ahead; `data`: id, tool, command, cwd, reason, risk, timeout_seconds,
+    `approval` (a tool waits for the user's go-ahead; `data`: id, tool, backend, command, cwd, reason, risk, timeout_seconds,
     expires_at) or `approval_resolved` (`data`: id, decision approved|denied, reason). The reply resumes by itself
     once the approval is answered through `resolve_approval`, times out or is cancelled.
     Non-streaming replies arrive as `tool` events followed by one `text` event. All events
@@ -318,9 +318,10 @@ class ChatService:
             "provider": user.provider.name,
             "require_zdr": user.require_zdr,
             "agents": self.list_agents(user_id),
-            # names and types only, to choose a backend in the agent form; never hosts, users or key paths
+            # names, types and descriptions only, to choose backends in the agent form; never hosts, users or key paths
             "terminal_backends": [
-                {"name": name, "type": backend.type} for name, backend in sorted(user.terminal_backends.items())
+                {"name": name, "type": backend.type, "description": backend.description}
+                for name, backend in sorted(user.terminal_backends.items())
             ],
         }
 

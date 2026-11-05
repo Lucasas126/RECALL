@@ -28,15 +28,21 @@ class TerminalSession:
 
     def __init__(
         self, backend: Backend, config: AgentTerminalConfig, settings: TerminalSettings, *,
-        user_id: str, agent_id: str, audit_file: Path | None = None, unattended: bool = False,
+        user_id: str, agent_id: str, name: str, audit_file: Path | None = None, unattended: bool = False,
     ):
         self.backend = backend
+        self.name = name  # the key in the user's terminal_backends
         self.config = config
+        self.policy = config.backends[name]  # this backend's workdir and approval mode
         self.settings = settings
         self.user_id = user_id
         self.agent_id = agent_id
         self.audit_file = audit_file
         self.unattended = unattended
+
+    @property
+    def workdir(self) -> str:
+        return self.policy.workdir
 
     # ------------------------------------------------------------------ limits
     @property
@@ -44,7 +50,7 @@ class TerminalSession:
         return min(self.config.max_output_chars, self.settings.max_output_chars)
 
     def timeout_for(self, requested: int | float | None) -> float:
-        default = min(self.config.timeout_seconds, self.settings.max_timeout_seconds)
+        default = min(self.config.timeout_for_backend(self.name), self.settings.max_timeout_seconds)
         if requested is None:
             return float(default)
         try:
@@ -56,11 +62,11 @@ class TerminalSession:
     # ------------------------------------------------------------------ policy
     def decide(self, tool: str, display: str, assessment: Assessment, cwd: str) -> tuple[bool, str, str]:
         """(allowed, text for the model when denied, decision label for the audit trail)."""
-        mode = self.config.approvals
+        mode = self.policy.approvals
         if assessment.level == "hardline":
             why = assessment.reason or "matches the hardline blocklist"
             return False, (
-                f"Blocked: this action ({why}) is on the hardline blocklist and can never run in this sandbox, "
+                f"Blocked: this action ({why}) is on the hardline blocklist and can never run on this backend, "
                 f"whatever the approval mode. {DENIED_HINT}"
             ), "hardline"
         if mode == "off":
@@ -79,7 +85,7 @@ class TerminalSession:
         risk = "dangerous" if dangerous else "manual"
         outcome = run.broker.request(
             self.user_id, self.agent_id, run.chat_id, run, tool, display, cwd,
-            assessment.reason or ("approvals are set to manual" if mode == "manual" else ""), risk,
+            assessment.reason or ("approvals are set to manual" if mode == "manual" else ""), risk, backend=self.name,
         )
         if outcome.reason == "cancelled" and run.cancellation is not None:
             run.cancellation.raise_if_cancelled()  # the user interrupted: end the turn, not just this tool
@@ -93,7 +99,7 @@ class TerminalSession:
         stdin: bytes | str | None = None, assessment: Assessment | None = None, preapproved: bool = False,
     ) -> tuple[Result | None, str | None]:
         """Authorize and execute; returns (result, None) or (None, denial text for the model)."""
-        cwd = cwd or self.config.workdir
+        cwd = cwd or self.workdir
         if "\x00" in command or "\x00" in display:
             return None, "error: the action contains a NUL byte"
         if len(command) > MAX_COMMAND_CHARS:
@@ -109,22 +115,22 @@ class TerminalSession:
             raise
         if not allowed:
             self._audit(tool, display, cwd, decision, None, 0.0)
-            logger.info("terminal %s not run (%s): %s", self.agent_id, decision, display[:200])
+            logger.info("terminal %s/%s not run (%s): %s", self.agent_id, self.name, decision, display[:200])
             return None, text
         started = time.monotonic()
         result = self.backend.run(command, cwd, self.timeout_for(timeout), stdin)
         elapsed = time.monotonic() - started
         self._audit(tool, display, cwd, decision, result.exit_code, elapsed, timed_out=result.timed_out)
         logger.info(
-            "terminal %s/%s %s exit=%s decision=%s %.1fs: %s",
-            self.user_id, self.agent_id, tool, result.exit_code, decision, elapsed, display[:200],
+            "terminal %s/%s [%s] %s exit=%s decision=%s %.1fs: %s",
+            self.user_id, self.agent_id, self.name, tool, result.exit_code, decision, elapsed, display[:200],
         )
         return result, None
 
     def _audit(self, tool: str, command: str, cwd: str, decision: str, exit_code: int | None, elapsed: float,
                *, timed_out: bool = False) -> None:
         write_audit(
-            self.audit_file, user=self.user_id, agent=self.agent_id, backend=getattr(self.backend, "name", ""),
+            self.audit_file, user=self.user_id, agent=self.agent_id, backend=self.name,
             tool=tool, command=command, cwd=cwd, decision=decision, exit_code=exit_code,
             duration_ms=int(elapsed * 1000), timed_out=timed_out,
         )

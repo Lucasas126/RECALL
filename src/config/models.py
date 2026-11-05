@@ -349,6 +349,7 @@ class SshBackendConfig(BaseModel):
     user: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$")
     key_file: str = Field(min_length=1, max_length=1024)
     known_hosts_file: str = Field(min_length=1, max_length=1024)
+    description: str = Field(default="", max_length=200)  # free text shown to the model and in the agent form
 
 
 class LocalBackendConfig(BaseModel):
@@ -358,22 +359,45 @@ class LocalBackendConfig(BaseModel):
 
     type: Literal["local"]
     workdir: str = Field(min_length=1, max_length=1024)
+    description: str = Field(default="", max_length=200)
 
 
 TerminalBackendConfig = Annotated[Union[SshBackendConfig, LocalBackendConfig], Field(discriminator="type")]
 
 
-class AgentTerminalConfig(BaseModel):
-    """An agent's terminal tool group: which of the user's backends it uses and how commands are approved."""
+class AgentTerminalBackend(BaseModel):
+    """How one agent uses one of the user's backends: its working directory and approval mode."""
 
     model_config = ConfigDict(extra="forbid")
 
-    backend: str = Field(pattern=_BACKEND_NAME)
-    workdir: str = Field(default="~/workspace", min_length=1, max_length=1024)  # a path inside the backend
+    workdir: str = Field(default="~", min_length=1, max_length=1024)  # a path inside the backend
     approvals: TerminalApprovals = "manual"
+    timeout_seconds: Optional[int] = Field(default=None, ge=1, le=600, strict=True)  # overrides the agent-wide one
+
+
+class AgentTerminalConfig(BaseModel):
+    """An agent's terminal tool group: which of the user's backends it may use, each with its own policy."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    backends: dict[Annotated[str, StringConstraints(pattern=_BACKEND_NAME)], AgentTerminalBackend] = Field(min_length=1)
+    default_backend: Optional[str] = Field(default=None, pattern=_BACKEND_NAME)  # used when a call names none
     timeout_seconds: int = Field(default=60, ge=1, le=600, strict=True)
     max_output_chars: int = Field(default=20_000, ge=500, le=200_000, strict=True)
     allow_in_dream: bool = Field(default=False, strict=True)  # unattended dream sessions may use the tools
+
+    @model_validator(mode="after")
+    def _default_is_allowed(self) -> "AgentTerminalConfig":
+        if self.default_backend is None:
+            if len(self.backends) > 1:
+                raise ValueError("terminal.default_backend is required when more than one backend is allowed")
+            self.default_backend = next(iter(self.backends))
+        elif self.default_backend not in self.backends:
+            raise ValueError(f"terminal.default_backend '{self.default_backend}' is not one of terminal.backends")
+        return self
+
+    def timeout_for_backend(self, name: str) -> int:
+        return self.backends[name].timeout_seconds or self.timeout_seconds
 
 
 class TerminalSettings(BaseModel):
@@ -602,8 +626,8 @@ class ResolvedAgent(BaseModel):
     dream: DreamConfig = Field(default_factory=DreamConfig)
     folders: list[FolderConfig] = Field(default_factory=list)
     terminal: Optional[AgentTerminalConfig] = None
-    # the user's backend named by `terminal.backend`, resolved by the loader; None = the tools are not built
-    terminal_backend: Optional[TerminalBackendConfig] = None
+    # the user's backends named by `terminal.backends` that resolved, by name; empty = the tools are not built
+    terminal_backends: dict[str, TerminalBackendConfig] = Field(default_factory=dict)
     claude_subscription: ClaudeSubscriptionConfig = Field(default_factory=ClaudeSubscriptionConfig)
     openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)  # key env var already resolved for a main OpenRouter
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)

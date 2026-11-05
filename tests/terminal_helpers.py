@@ -8,7 +8,7 @@ import re
 import shlex
 from types import SimpleNamespace
 
-from src.config.models import AgentTerminalConfig, ModelsConfig, ResolvedAgent, SshBackendConfig, TerminalSettings
+from src.config.models import AgentTerminalBackend, AgentTerminalConfig, ModelsConfig, ResolvedAgent, SshBackendConfig, TerminalSettings
 from src.providers.cancellation import CancellationToken
 from src.terminal.approvals import ApprovalBroker, Outcome
 from src.terminal.backends import Result
@@ -23,10 +23,20 @@ def ssh_config(**changes) -> SshBackendConfig:
 
 
 def resolved_agent(approvals: str = "manual", **terminal) -> ResolvedAgent:
+    """An agent with the single backend `box` (workdir ~/workspace)."""
+    return resolved_multi(options=terminal, box=(approvals, "~/workspace"))
+
+
+def resolved_multi(default: str | None = None, descriptions: dict[str, str] | None = None, options: dict | None = None,
+                   **policies) -> ResolvedAgent:
+    """An agent with several backends: `name=(approvals, workdir)` each; the first one is the default."""
+    entries = {name: AgentTerminalBackend(approvals=a, workdir=w) for name, (a, w) in policies.items()}
+    terminal = options or {}
     return ResolvedAgent(
         user_id="u", id="a", name="A", models=ModelsConfig(), provider_name="ollama", api_key="",
         embeddings_provider_name="ollama", embeddings_api_key="", tools=True, tool_groups=["terminal"],
-        terminal=AgentTerminalConfig(backend="box", approvals=approvals, **terminal), terminal_backend=ssh_config(),
+        terminal=AgentTerminalConfig(backends=entries, default_backend=default or next(iter(entries)), **terminal),
+        terminal_backends={name: ssh_config(description=(descriptions or {}).get(name, "")) for name in entries},
     )
 
 
@@ -115,13 +125,15 @@ class StubBroker:
         self.outcome = Outcome(approved, reason or ("approved" if approved else "denied by user"), by_user=True)
 
     def request(self, user_id, agent_id, chat_id, run, tool, command, cwd, reason, risk, **kwargs):
-        self.requests.append({"tool": tool, "command": command, "cwd": cwd, "reason": reason, "risk": risk})
+        self.requests.append({"tool": tool, "command": command, "cwd": cwd, "reason": reason, "risk": risk,
+                              "backend": kwargs.get("backend")})
         return self.outcome
 
 
 def make_session(backend=None, approvals: str = "manual", *, unattended: bool = False, audit_file=None,
                  **terminal) -> TerminalSession:
     return TerminalSession(
-        backend or FakeBackend(), AgentTerminalConfig(backend="box", approvals=approvals, **terminal),
-        TerminalSettings(), user_id="u", agent_id="a", audit_file=audit_file, unattended=unattended,
+        backend or FakeBackend(),
+        AgentTerminalConfig(backends={"box": AgentTerminalBackend(approvals=approvals, workdir="~/workspace")}, **terminal),
+        TerminalSettings(), user_id="u", agent_id="a", name="box", audit_file=audit_file, unattended=unattended,
     )

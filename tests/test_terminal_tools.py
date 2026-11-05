@@ -13,12 +13,12 @@ from unittest.mock import patch
 
 from pydantic import ValidationError
 
-from terminal_helpers import FakeBackend, FakeSandbox, Responder, make_session, resolved_agent, ssh_config
+from terminal_helpers import FakeBackend, FakeSandbox, Responder, StubBroker, make_session, resolved_agent, resolved_multi, ssh_config
 from src.admin import users as admin
 from src.agent import dream
 from src.agent.toolsets.terminal import build_terminal_tools, terminal_notice
 from src.config.models import (
-    AgentConfig, AgentTerminalConfig, DreamConfig, LocalBackendConfig, ProviderConfig, SshBackendConfig,
+    AgentConfig, AgentTerminalBackend, AgentTerminalConfig, DreamConfig, LocalBackendConfig, ProviderConfig, SshBackendConfig,
     TerminalSettings, UserConfig,
 )
 from src.core.sources.registry import SourceRegistry
@@ -28,7 +28,7 @@ from src.terminal.audit import audit_path
 from src.terminal.backends import LocalBackend, Result, SshBackend, build_backend, minimal_env, scrubbed_env
 from src.terminal.context import run_context
 from src.terminal.output import REDACTED, clean, redact, strip_ansi, truncate
-from src.terminal.resolve import check_agent_terminal, resolve_backend
+from src.terminal.resolve import check_agent_terminal, resolve_backend, resolve_backends
 from src.utils.i18n import InputError
 
 HOSTILE = "'; rm -rf / #"
@@ -42,7 +42,7 @@ class ToolFixture(unittest.TestCase):
         patcher = patch("src.agent.toolsets.terminal.DATA_DIR", self.data_dir)
         patcher.start()
         self.addCleanup(patcher.stop)
-        tools = build_terminal_tools(resolved_agent(approvals, **terminal), backend=backend)
+        tools = build_terminal_tools(resolved_agent(approvals, **terminal), backends={"box": backend})
         self.tools = {tool.__name__: tool for tool in tools}
         return self.tools
 
@@ -54,10 +54,10 @@ class TerminalToolTests(ToolFixture):
         self.assertEqual(tools["terminal"].tool_spec["function"]["parameters"]["required"], ["command"])
 
     def test_no_backend_no_tools(self) -> None:
-        config = resolved_agent().model_copy(update={"terminal_backend": None})
+        config = resolved_agent().model_copy(update={"terminal_backends": {}})
         self.assertEqual(build_terminal_tools(config), [])
         self.assertIsNone(terminal_notice(config))
-        self.assertIn("sandbox", terminal_notice(resolved_agent("smart")))
+        self.assertIn("`box` (default)", terminal_notice(resolved_agent("smart")))
 
     def test_result_format_and_cwd(self) -> None:
         backend = FakeBackend(lambda c, cwd, t, s: Result(2, "out\n", "boom\n"))
@@ -271,21 +271,33 @@ class ResolveAndConfigTests(unittest.TestCase):
 
     def test_local_backend_is_refused_unless_allowed(self) -> None:
         user = self.user(here={"type": "local", "workdir": "/srv/w"}, box=ssh_config().model_dump())
-        term = AgentTerminalConfig(backend="here")
         with self.assertRaises(InputError):
-            resolve_backend(user, term, agent_id="a", allow_local=False)
-        self.assertEqual(resolve_backend(user, term, agent_id="a", allow_local=True).type, "local")
-        self.assertEqual(resolve_backend(user, AgentTerminalConfig(backend="box"), agent_id="a", allow_local=False).type, "ssh")
+            resolve_backend(user, "here", allow_local=False)
+        self.assertEqual(resolve_backend(user, "here", allow_local=True).type, "local")
+        self.assertEqual(resolve_backend(user, "box", allow_local=False).type, "ssh")
 
     def test_missing_block_or_backend(self) -> None:
         user = self.user(box=ssh_config().model_dump())
+        both = AgentTerminalConfig(backends={"box": {}, "other": {}}, default_backend="box")
         with self.assertRaises(InputError):
-            resolve_backend(user, None, agent_id="a", allow_local=False)
-        with self.assertRaises(InputError):
-            resolve_backend(user, AgentTerminalConfig(backend="other"), agent_id="a", allow_local=False)
+            resolve_backends(user, None, agent_id="a", allow_local=False)
+        with self.assertRaisesRegex(InputError, "not defined"):
+            resolve_backend(user, "other", allow_local=False)
+        with self.assertRaises(InputError):  # none resolves
+            resolve_backends(user, AgentTerminalConfig(backends={"other": {}}), agent_id="a", allow_local=False)
+        self.assertEqual(list(resolve_backends(user, both, agent_id="a", allow_local=False)), ["box"])
         check_agent_terminal(user, ["memory_read"], None, agent_id="a", allow_local=False)  # group absent: nothing to check
         with self.assertRaises(InputError):
             check_agent_terminal(user, ["terminal"], None, agent_id="a", allow_local=False)
+
+    def test_one_backend_failing_keeps_the_others_and_logs_a_warning(self) -> None:
+        user = self.user(here={"type": "local", "workdir": "/srv/w"}, box=ssh_config().model_dump())
+        term = AgentTerminalConfig(backends={"here": {}, "box": {}, "gone": {}}, default_backend="box")
+        with self.assertLogs("recall.terminal", "WARNING") as logs:
+            resolved = resolve_backends(user, term, agent_id="a", allow_local=False)
+        self.assertEqual(list(resolved), ["box"])
+        self.assertEqual(len(logs.records), 2)
+        self.assertEqual(list(resolve_backends(user, term, agent_id="a", allow_local=True)), ["here", "box"])
 
     def test_ssh_config_validation(self) -> None:
         good = ssh_config().model_dump()
@@ -295,13 +307,30 @@ class ResolveAndConfigTests(unittest.TestCase):
                 SshBackendConfig.model_validate({**good, **change})
 
     def test_agent_terminal_validation_and_defaults(self) -> None:
-        term = AgentTerminalConfig(backend="box")
-        self.assertEqual((term.approvals, term.workdir, term.timeout_seconds, term.allow_in_dream),
-                         ("manual", "~/workspace", 60, False))
-        for bad in ({"approvals": "always"}, {"backend": "Bad Name"}, {"timeout_seconds": 0}, {"timeout_seconds": 601},
-                    {"max_output_chars": 10}, {"extra": 1}):
+        term = AgentTerminalConfig(backends={"box": {}})
+        entry = term.backends["box"]
+        self.assertEqual((entry.approvals, entry.workdir, entry.timeout_seconds), ("manual", "~", None))
+        self.assertEqual((term.default_backend, term.timeout_seconds, term.allow_in_dream), ("box", 60, False))
+        two = {"sandbox": {"approvals": "smart", "timeout_seconds": 5}, "pc": {}}
+        self.assertEqual(AgentTerminalConfig(backends=two, default_backend="pc").timeout_for_backend("sandbox"), 5)
+        self.assertEqual(AgentTerminalConfig(backends=two, default_backend="pc").timeout_for_backend("pc"), 60)
+        for bad in ({"backends": {}}, {"backends": {"Bad Name": {}}}, {"backends": {"box": {"approvals": "always"}}},
+                    {"backends": {"box": {"timeout_seconds": 0}}}, {"backends": {"box": {"extra": 1}}},
+                    {"backends": two},  # several backends need a default
+                    {"backends": two, "default_backend": "nas"},  # default must be allowed
+                    {"backends": {"box": {}}, "default_backend": "pc"},
+                    {"backend": "box"},  # the old shape is gone
+                    {"timeout_seconds": 0}, {"timeout_seconds": 601}, {"max_output_chars": 10}, {"extra": 1}):
             with self.subTest(bad=bad), self.assertRaises(ValidationError):
-                AgentTerminalConfig.model_validate({"backend": "box", **bad})
+                AgentTerminalConfig.model_validate({"backends": {"box": {}}, **bad})
+
+    def test_backend_description_is_limited_to_200_characters(self) -> None:
+        self.assertEqual(ssh_config(description="x" * 200).description, "x" * 200)
+        with self.assertRaises(ValidationError):
+            ssh_config(description="x" * 201)
+        with self.assertRaises(ValidationError):
+            LocalBackendConfig(type="local", workdir="/w", description="x" * 201)
+        self.assertEqual(ssh_config().description, "")
 
     def test_user_backend_names_are_validated(self) -> None:
         with self.assertRaises(ValidationError):
@@ -316,9 +345,9 @@ class ResolveAndConfigTests(unittest.TestCase):
 
     def test_dream_terminal_needs_the_agent_opt_in(self) -> None:
         with self.assertRaises(ValidationError):
-            AgentConfig(id="a", name="A", dream=DreamConfig(tools=["terminal"]), terminal={"backend": "box"})
+            AgentConfig(id="a", name="A", dream=DreamConfig(tools=["terminal"]), terminal={"backends": {"box": {}}})
         agent = AgentConfig(id="a", name="A", dream=DreamConfig(tools=["terminal"]),
-                            terminal={"backend": "box", "allow_in_dream": True})
+                            terminal={"backends": {"box": {}}, "allow_in_dream": True})
         self.assertTrue(agent.terminal.allow_in_dream)
 
 
@@ -326,7 +355,7 @@ class DreamGatingTests(unittest.TestCase):
     def tools(self, *, dream_tools, allow_in_dream, backend=True):
         config = resolved_agent(allow_in_dream=allow_in_dream).model_copy(update={"dream": DreamConfig(tools=dream_tools)})
         if not backend:
-            config = config.model_copy(update={"terminal_backend": None})
+            config = config.model_copy(update={"terminal_backends": {}})
         host = SimpleNamespace(config=config, sources=SimpleNamespace(folders=lambda: []))
         with contextlib.ExitStack() as stack:
             for name in ("build_review_tools", "build_memory_tools", "build_tag_tools", "build_edit_tools",
@@ -347,7 +376,7 @@ class DreamGatingTests(unittest.TestCase):
         config = resolved_agent("manual", allow_in_dream=True)
         with patch("src.agent.toolsets.terminal.DATA_DIR", Path("unused")), \
                 patch("src.terminal.audit.write_audit"), patch("src.terminal.session.write_audit"):
-            tools = {t.__name__: t for t in build_terminal_tools(config, unattended=True, backend=backend)}
+            tools = {t.__name__: t for t in build_terminal_tools(config, unattended=True, backends={"box": backend})}
             broker = ApprovalBroker(1)
             responder = Responder(broker, "approve")
             with run_context(responder.context()):  # even inside an interactive run

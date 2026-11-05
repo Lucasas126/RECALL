@@ -12,7 +12,7 @@ from src.config.preferences import UserPreferencesStore
 from src.config.settings import ASSOC, CHAT_NAMING, CONFIG_DIR, DATA_DIR, MCP, TERMINAL
 from src.config.zdr import ensure_zdr_compatible, zdr_required
 from src.agent.tool_groups import DEFAULT_TOOL_GROUPS
-from src.terminal.resolve import resolve_backend
+from src.terminal.resolve import resolve_backends
 from src.utils.i18n import InputError
 from src.utils.logger import get_logger
 
@@ -116,10 +116,10 @@ def load_agent(user_id: str, agent_id: Optional[str] = None, *, check_agent_mode
     unknown_mcp = sorted(set(agent.chat_config.mcp) - set(MCP.servers))
     if unknown_mcp:
         raise ValueError(f"agent '{agent.id}' enables unknown MCP servers: {', '.join(unknown_mcp)}")
-    terminal_backend = None
+    terminal_backends = {}
     if "terminal" in (selected_tool_groups or ()):
         try:  # an unusable terminal block never breaks the agent: its tools are simply not built
-            terminal_backend = resolve_backend(user, agent.terminal, agent_id=agent.id, allow_local=TERMINAL.allow_local)
+            terminal_backends = resolve_backends(user, agent.terminal, agent_id=agent.id, allow_local=TERMINAL.allow_local)
         except InputError as exc:
             logger.warning("agent %s/%s: terminal tools disabled: %s", user.id, agent.id, exc)
     return ResolvedAgent(
@@ -150,7 +150,7 @@ def load_agent(user_id: str, agent_id: Optional[str] = None, *, check_agent_mode
         dream=agent.dream,
         folders=agent.folders,
         terminal=agent.terminal,
-        terminal_backend=terminal_backend,
+        terminal_backends=terminal_backends,
         claude_subscription=user.claude_subscription,
         openrouter=user.openrouter_settings(),
         ollama=user.ollama,

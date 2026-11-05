@@ -72,7 +72,7 @@ class ApprovalBroker:
     # ---------------------------------------------------------------- asking
     def request(
         self, user_id: str, agent_id: str, chat_id: str, run: Any, tool: str, command: str, cwd: str,
-        reason: str, risk: Risk, *, timeout_seconds: float | None = None,
+        reason: str, risk: Risk, *, backend: str = "", timeout_seconds: float | None = None,
     ) -> Outcome:
         """Emit an approval event and block until it is decided; `run` has `.emit(kind, data)` and `.cancellation`."""
         timeout = self.timeout_seconds if timeout_seconds is None else timeout_seconds
@@ -81,6 +81,7 @@ class ApprovalBroker:
         payload = {
             "id": approval_id, "tool": tool, "command": command, "cwd": cwd, "reason": reason, "risk": risk,
             "timeout_seconds": int(timeout), "expires_at": now + timeout, "chat_id": chat_id, "agent_id": agent_id,
+            "backend": backend,
         }
         item = _Pending(approval_id, user_id, agent_id, chat_id, payload, run)
         with self._lock:
@@ -138,7 +139,7 @@ class ApprovalBroker:
             log = self._log.setdefault(item.user_id, deque(maxlen=DECISION_LOG_SIZE))
             log.append({
                 "id": item.id, "ts": time.time(), "agent_id": item.agent_id, "chat_id": item.chat_id,
-                "tool": item.payload["tool"], "command": item.payload["command"][:500],
+                "tool": item.payload["tool"], "backend": item.payload["backend"], "command": item.payload["command"][:500],
                 "risk": item.payload["risk"], "decision": outcome.status, "reason": outcome.reason,
             })
         try:  # tell every client before the tool thread resumes

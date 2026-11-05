@@ -13,7 +13,7 @@ import test_service_steering as steering
 from auth_helpers import login
 from src.agent.agent import Agent
 from src.agent.tool_groups import DISPOSABLE_BLOCKED_TOOLS
-from src.config.models import AgentTerminalConfig, ModelsConfig, ResolvedAgent, SshBackendConfig
+from src.config.models import AgentTerminalBackend, AgentTerminalConfig, ModelsConfig, ResolvedAgent, SshBackendConfig
 from src.config.preferences import UserPreferences
 from src.core.review import ReviewQueue
 from src.core.sources.conversations import DEFAULT_DISPOSABLE_RETENTION_DAYS
@@ -179,10 +179,10 @@ class DisposableToolTests(unittest.TestCase):
     def test_a_disposable_chat_never_builds_the_terminal_tools(self) -> None:
         chats = self.sources.conversations()
         extra = {
-            "terminal": AgentTerminalConfig(backend="box"),
-            "terminal_backend": SshBackendConfig(
+            "terminal": AgentTerminalConfig(backends={"box": AgentTerminalBackend()}),
+            "terminal_backends": {"box": SshBackendConfig(
                 type="ssh", host="192.0.2.10", user="agent", key_file="/k/id", known_hosts_file="/k/kh",
-            ),
+            )},
         }
         groups = ("memory_read", "terminal")
         open_ = self._agent(chats.create(), groups, **extra)

@@ -61,7 +61,7 @@ def _guard(path: str) -> str:
 
 
 def _where(session: TerminalSession, path: str) -> str:
-    return path if path.startswith(("/", "~")) else posixpath.join(session.config.workdir, path)
+    return path if path.startswith(("/", "~")) else posixpath.join(session.workdir, path)
 
 
 def _problem(code: int | None, path: str, stderr: str) -> str:
