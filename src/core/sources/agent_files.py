@@ -9,6 +9,7 @@ from typing import Literal
 
 import yaml
 
+from src import knowledge
 from src.config.settings import memory_limits
 from src.core.sources.base import Source, scan_files
 from src.utils.files import atomic_write_text, exclusive_file_lock
@@ -21,6 +22,11 @@ MemoryTarget = Literal["memory", "user"]
 MEMORY_FILES: dict[str, str] = {"memory": "memories/MEMORY.md", "user": "memories/USER.md"}
 SKILL_FILE = "SKILL.md"
 SKILL_MAX_CHARS = 50_000
+BUILTIN_SKILL = knowledge.BUILTIN_SKILL
+BUILTIN_READ_ONLY = (
+    "'{name}' is a built-in skill and is read-only. "
+    "Create a skill of your own with a different name to record your own procedures."
+)
 _SKILL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _VERSION_RE = re.compile(r"^\d{8}-\d{6}-\d{6}$")
 # top-level entries of the agent folder that belong to this source; the rest (chats, dream state, index) do not
@@ -33,6 +39,7 @@ class SkillInfo:
 
     name: str
     description: str
+    builtin: bool = False  # shipped with RECALL: read-only, listed first
 
 
 def parse_skill(text: str) -> tuple[dict, str]:
@@ -192,13 +199,18 @@ class AgentFilesSource(Source):
 
     # ------------------------------------------------------------------ skills
 
-    def skills(self) -> list[SkillInfo]:
-        """Index of valid skills, sorted by name; malformed SKILL.md files are skipped."""
+    def skills(self, *, include_builtin: bool = False) -> list[SkillInfo]:
+        """Index of valid skills, sorted by name; malformed SKILL.md files are skipped.
+
+        With `include_builtin` the read-only `recall` skill comes first; an own folder of that name is ignored.
+        """
+        found = [SkillInfo(BUILTIN_SKILL, knowledge.description(), builtin=True)] if include_builtin else []
         folder = self.resolve("skills")
         if not folder.is_dir():
-            return []
-        found = []
+            return found
         for path in sorted(folder.glob(f"*/{SKILL_FILE}")):
+            if path.parent.name == BUILTIN_SKILL:
+                continue
             try:
                 meta, _ = parse_skill(path.read_text(encoding="utf-8"))
             except (InputError, OSError, UnicodeError):
@@ -206,7 +218,14 @@ class AgentFilesSource(Source):
             found.append(SkillInfo(path.parent.name, " ".join(str(meta["description"]).split())))
         return found
 
+    def reject_builtin(self, name: str) -> None:
+        """Raise InputError when `name` is the built-in skill, which agents cannot create or change."""
+        if name == BUILTIN_SKILL:
+            raise InputError(BUILTIN_READ_ONLY, name=name)
+
     def skill_text(self, name: str) -> str:
+        if name == BUILTIN_SKILL:
+            return knowledge.skill_text()
         path = self._skill_dir(name) / SKILL_FILE
         if not path.is_file():
             raise FileNotFoundError(f"skill not found: {name}")
@@ -214,6 +233,8 @@ class AgentFilesSource(Source):
 
     def skill_files(self, name: str) -> list[str]:
         """Supporting files of a skill (everything but SKILL.md), relative to its folder."""
+        if name == BUILTIN_SKILL:
+            return knowledge.files()
         folder = self._skill_dir(name)
         if not folder.is_dir():
             raise FileNotFoundError(f"skill not found: {name}")
@@ -223,6 +244,8 @@ class AgentFilesSource(Source):
         )
 
     def read_skill_file(self, name: str, file_path: str) -> str:
+        if name == BUILTIN_SKILL:
+            return knowledge.read_file(file_path)
         path = self._skill_path(name, file_path)
         if not path.is_file():
             raise FileNotFoundError(f"file not found in skill {name}: {file_path}")
@@ -230,6 +253,7 @@ class AgentFilesSource(Source):
 
     def write_skill(self, name: str, content: str) -> None:
         """Create or replace a skill's SKILL.md after validating its frontmatter."""
+        self.reject_builtin(name)
         meta, _ = parse_skill(content)
         if meta["name"].strip() != name:
             raise InputError("the frontmatter name '{found}' must match the skill name '{name}'", found=meta["name"], name=name)
@@ -240,6 +264,7 @@ class AgentFilesSource(Source):
         atomic_write_text(folder / SKILL_FILE, content)
 
     def write_skill_file(self, name: str, file_path: str, content: str) -> None:
+        self.reject_builtin(name)
         if not (self._skill_dir(name) / SKILL_FILE).is_file():
             raise FileNotFoundError(f"skill not found: {name}")
         if len(content) > SKILL_MAX_CHARS:
@@ -249,12 +274,14 @@ class AgentFilesSource(Source):
         atomic_write_text(path, content)
 
     def remove_skill_file(self, name: str, file_path: str) -> None:
+        self.reject_builtin(name)
         path = self._skill_path(name, file_path)
         if not path.is_file():
             raise FileNotFoundError(f"file not found in skill {name}: {file_path}")
         path.unlink()
 
     def delete_skill(self, name: str) -> None:
+        self.reject_builtin(name)
         folder = self._skill_dir(name)
         if not folder.is_dir():
             raise FileNotFoundError(f"skill not found: {name}")

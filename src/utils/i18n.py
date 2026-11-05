@@ -659,6 +659,9 @@ _SPANISH = {
     "❌ Deny": "❌ Denegar",
     "This approval expired.": "Esta aprobación ha caducado.",
     "Only the chat's owner can answer this.": "Solo el propietario del chat puede responder a esto.",
+    "'{name}' is a built-in skill and is read-only. Create a skill of your own with a different name to record your own procedures.": "'{name}' es una habilidad integrada y es de solo lectura. Crea una habilidad propia con otro nombre para guardar tus propios procedimientos.",
+    "RECALL knowledge (how RECALL works)": "Conocimiento de RECALL (cómo funciona RECALL)",
+    "Gives the agent a built-in, read-only guide to how RECALL works. Takes effect in new chats.": "Da al agente una guía integrada y de solo lectura sobre cómo funciona RECALL. Se aplica en los chats nuevos.",
 }
 
 

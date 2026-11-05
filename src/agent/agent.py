@@ -269,7 +269,7 @@ class Agent:
         config = load_agent(user_id, agent_id, check_agent_model=False)
         provider = main_provider(config)
         sources = SourceRegistry.for_agent(config.user_id, config.id, **chat_folder_options(config))
-        profile = load_profile(sources)
+        profile = load_profile(sources, recall_knowledge=config.recall_knowledge)
         logger.debug(
             "loaded agent user=%s agent=%s provider=%s model=%s",
             config.user_id, config.id, config.provider_name, config.models.chat,

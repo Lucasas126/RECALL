@@ -100,6 +100,8 @@ function translateInterface() {
     ["soul-default", "Insert default template"],
     ["agent-stream-label", "Stream replies"], ["agent-memory-label", "Use memory"],
     ["agent-reasoning-label", "Reasoning"], ["agent-keep-reasoning-label", "Keep reasoning in memory"],
+    ["agent-recall-knowledge-label", "RECALL knowledge (how RECALL works)"],
+    ["agent-recall-knowledge-hint", "Gives the agent a built-in, read-only guide to how RECALL works. Takes effect in new chats."],
     ["agent-tools-label", "Use tools"], ["agent-associative-label", "Associative memory"],
     ["agent-associative-off", "Off"], ["agent-associative-llm", "Query from a small model"],
     ["agent-associative-question", "Search with your message"],
@@ -530,7 +532,7 @@ function openNewAgent() {
     chat_config: {
       stream: true, has_memory: true, reasoning: true, reasoning_effort: "medium", reasoning_tokens: null,
       keep_reasoning_in_memory: false, conversation_messages_retained: 30, tools: true, associative_memory: "llm",
-      associative_execution: "parallel",
+      associative_execution: "parallel", recall_knowledge: true,
     },
   });
   $("agent-delete").hidden = true;
@@ -559,6 +561,7 @@ function fillAgentForm(agent) {
   $("agent-memory").checked = config.has_memory;
   $("agent-reasoning").checked = config.reasoning;
   $("agent-keep-reasoning").checked = config.keep_reasoning_in_memory;
+  $("agent-recall-knowledge").checked = config.recall_knowledge !== false;
   $("agent-tools").checked = config.tools;
   const selected = new Set(config.tool_groups
     ?? state.toolGroupCatalog.filter((group) => group.default !== false).map((group) => group.id));
@@ -1021,6 +1024,7 @@ function agentFormBody() {
       reasoning_effort: $("agent-effort").value || null,
       reasoning_tokens: $("agent-tokens-enabled").checked ? optionalNumber("agent-reasoning-tokens") : null,
       keep_reasoning_in_memory: $("agent-keep-reasoning").checked,
+      recall_knowledge: $("agent-recall-knowledge").checked,
       conversation_messages_retained: optionalNumber("agent-retained"),
       tools: $("agent-tools").checked,
       tool_groups: [...document.querySelectorAll('input[name="agent-tool-group"]:checked')].map((input) => input.value),

@@ -446,7 +446,7 @@ class DreamRunner:
                 deadline_at=deadline_at,
             )
             before = _snapshot(self.sources)
-            profile = load_profile(self.sources)
+            profile = load_profile(self.sources, recall_knowledge=self.config.recall_knowledge)
             index = self._index_factory() if self._index_factory is not None else _NoIndex()
             index.reconcile()  # queued stat-only scan; the session searches what is already indexed
             host = _ToolHost(self.config, self.sources, index)

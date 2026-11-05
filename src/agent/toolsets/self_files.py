@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Annotated, Callable, Optional
 from src.agent.tooling import tool
 from src.agent.toolsets.common import mark_written
 from src.config.settings import memory_limits
-from src.core.sources.agent_files import SKILL_FILE, join_memory
+from src.core.sources.agent_files import BUILTIN_SKILL, SKILL_FILE, join_memory
 from src.utils.i18n import InputError
 
 if TYPE_CHECKING:
@@ -125,6 +125,8 @@ def build_self_tools(agent: Agent) -> list[Callable[..., str]]:
     ) -> str:
         """Load a skill's full SKILL.md (or one of its supporting files) before following it."""
         files = sources.agent_files()
+        if name == BUILTIN_SKILL and not agent.config.recall_knowledge:
+            raise FileNotFoundError(f"skill not found: {name}")
         if file_path:
             return files.read_skill_file(name, file_path)
         text = files.skill_text(name)
@@ -149,6 +151,7 @@ def build_self_tools(agent: Agent) -> list[Callable[..., str]]:
         an existing skill over creating a near-duplicate."""
         files = sources.agent_files()
         try:
+            files.reject_builtin(name)
             if action == "create":
                 try:
                     files.skill_text(name)

@@ -37,7 +37,7 @@ def open_questions(text: str, limit: int = MAX_PROMPT_QUESTIONS) -> list[str]:
     return found
 
 
-def load_profile(sources: SourceRegistry) -> AgentProfile:
+def load_profile(sources: SourceRegistry, *, recall_knowledge: bool = True) -> AgentProfile:
     """Read SOUL, memories, skill index and open questions; a missing SOUL.md is an empty personality."""
     files = sources.agent_files()
     palace = sources.mind_palace()
@@ -46,7 +46,7 @@ def load_profile(sources: SourceRegistry) -> AgentProfile:
         soul=files.soul_text(),
         memory=files.memory_entries("memory"),
         user=files.memory_entries("user"),
-        skills=files.skills(),
+        skills=files.skills(include_builtin=recall_knowledge),
         questions=open_questions(questions),
         limits=memory_limits(),
     )
@@ -67,12 +67,24 @@ def profile_blocks(profile: AgentProfile) -> list[str]:
             f"## About the user ({len(text)}/{profile.limits.user_chars} chars)\n\n"
             f"What you know about the user, kept with the `memory` tool (target `user`).\n\n{text}"
         )
-    if profile.skills:
-        index = "\n".join(f"- {skill.name}: {skill.description}" for skill in profile.skills)
-        blocks.append(
-            "## Skills\n\nProcedures you wrote for yourself. When a task matches one, load it with "
-            f"`skill_view(name)` before acting and follow it.\n\n{index}"
-        )
+    builtin = [skill for skill in profile.skills if skill.builtin]
+    own = [skill for skill in profile.skills if not skill.builtin]
+    if builtin or own:
+        parts = ["## Skills"]
+        if builtin:
+            index = "\n".join(f"- {skill.name}: {skill.description}" for skill in builtin)
+            parts.append(
+                "Built in (read-only), shipped with RECALL and always matching the running version. Load it with "
+                "`skill_view(name)` and its references with `skill_view(name, file_path)`; you cannot edit it, "
+                f"so keep your own notes in a skill of your own.\n\n{index}"
+            )
+        if own:
+            index = "\n".join(f"- {skill.name}: {skill.description}" for skill in own)
+            parts.append(
+                "Procedures you wrote for yourself. When a task matches one, load it with "
+                f"`skill_view(name)` before acting and follow it.\n\n{index}"
+            )
+        blocks.append("\n\n".join(parts))
     if profile.questions:
         items = "\n".join(f"- {question}" for question in profile.questions)
         blocks.append(

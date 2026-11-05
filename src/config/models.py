@@ -469,6 +469,8 @@ class ChatConfig(BaseModel):
     # the agent's default chat model (`<provider>:<model>` or a bare id of the main provider); None follows the
     # user's default. A model chosen inside a chat still wins over it.
     model: Optional[str] = Field(default=None, strict=True, min_length=1, max_length=256)
+    # the built-in, read-only `recall` skill (how RECALL works): listed in the prompt and readable with skill_view
+    recall_knowledge: bool = True
 
     @field_validator("model")
     @classmethod
@@ -623,6 +625,7 @@ class ResolvedAgent(BaseModel):
     mcp: dict[str, AgentMcpConfig] = Field(default_factory=dict)
     associative_memory: AssociativeMode = "llm"
     associative_execution: AssociativeExecution = "parallel"
+    recall_knowledge: bool = True
     dream: DreamConfig = Field(default_factory=DreamConfig)
     folders: list[FolderConfig] = Field(default_factory=list)
     terminal: Optional[AgentTerminalConfig] = None

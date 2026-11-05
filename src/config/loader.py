@@ -147,6 +147,7 @@ def load_agent(user_id: str, agent_id: Optional[str] = None, *, check_agent_mode
         mcp=agent.chat_config.mcp,
         associative_memory=agent.chat_config.associative_memory,
         associative_execution=agent.chat_config.associative_execution,
+        recall_knowledge=agent.chat_config.recall_knowledge,
         dream=agent.dream,
         folders=agent.folders,
         terminal=agent.terminal,
