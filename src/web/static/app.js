@@ -4949,6 +4949,26 @@ $("messages").addEventListener("scroll", () => {
 new MutationObserver(() => scrollDown()).observe($("messages"), { childList: true, subtree: true, characterData: true });
 $("jump-latest").addEventListener("click", () => scrollDown(true));
 
+// Phones: when the on-screen keyboard opens, some browsers shrink only the VISUAL viewport and scroll the page up, which
+// pushes the top bar (menu button, agent name) out of sight. Size the app to the visual viewport instead, and keep the
+// page scrolled to the top. `interactive-widget=resizes-content` in index.html does the same where it is supported.
+function fitToVisualViewport() {
+  const viewport = window.visualViewport;
+  if (!viewport || !window.matchMedia("(max-width: 800px)").matches) {
+    document.documentElement.style.removeProperty("--app-h");
+    return;
+  }
+  if (viewport.scale > 1.01) return; // pinch-zoomed: leave the layout alone
+  document.documentElement.style.setProperty("--app-h", `${Math.round(viewport.height)}px`);
+  if (viewport.offsetTop > 0) window.scrollTo(0, 0);
+}
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", fitToVisualViewport);
+  window.visualViewport.addEventListener("scroll", fitToVisualViewport);
+  window.addEventListener("orientationchange", fitToVisualViewport);
+  fitToVisualViewport();
+}
+
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_TOTAL_FILE_BYTES = 25 * 1024 * 1024;
 
