@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="72" height="48" viewBox="0 0 72 48" shape-rendering="crispEdges">
+  <!-- placeholder: isometric plinth. Semi-transparent neutral faces so it reads on dark and light themes; the logo is a separate <img> on top -->
+  <polygon points="36,33 52,41 36,46 20,41" fill="#000" fill-opacity=".28"/>
+  <polygon points="6,25 36,40 36,48 6,33" fill="#8a8a84" fill-opacity=".34" stroke="#8a8a84" stroke-opacity=".6" stroke-width=".5"/>
+  <polygon points="36,40 66,25 66,33 36,48" fill="#8a8a84" fill-opacity=".48" stroke="#8a8a84" stroke-opacity=".6" stroke-width=".5"/>
+  <polygon points="36,10 66,25 36,40 6,25" fill="#8a8a84" fill-opacity=".2" stroke="#8a8a84" stroke-opacity=".6" stroke-width=".5"/>
+</svg>
