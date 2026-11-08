@@ -11,12 +11,17 @@
     // and the collapsed state of the left panel
     try { if (localStorage.getItem("panelCollapsed") === "1") document.documentElement.classList.add("panel-collapsed"); } catch (e) {}
   </script>
+  <link rel="icon" href="/favicon.ico" sizes="48x48">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/static/icons/favicon-16.png">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon-180.png">
+  <link rel="manifest" href="/static/icons/manifest.webmanifest">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
   <section id="login" hidden>
     <form id="login-form">
-      <h1>RECALL</h1>
+      <h1><img class="brand-logo" src="/static/icons/recall-logo.svg" alt="" width="24" height="21"><span>RECALL</span></h1>
       <input id="login-user" placeholder="user" aria-label="user" autocomplete="username" autofocus required>
       <input id="login-password" type="password" placeholder="password" aria-label="password" autocomplete="current-password" required>
       <button type="submit">Enter</button>
@@ -28,7 +33,7 @@
   <section id="app" hidden>
     <div id="nav-scrim"></div>
     <aside id="sidebar">
-      <div class="bar"><span class="brand">RECALL</span></div>
+      <div class="bar"><span class="brand"><img class="brand-logo" src="/static/icons/recall-logo.svg" alt="" width="24" height="21"><span>RECALL</span></span></div>
       <nav class="tabs" aria-label="Sections">
         <button id="tab-chats" type="button" aria-pressed="true">Chats</button>
         <button id="tab-agents" type="button" aria-pressed="false">Agents</button>

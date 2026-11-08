@@ -577,6 +577,15 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     def index():
         return FileResponse(_STATIC / "index.html")
 
+    # Browsers ask for these two at the site root even when the page does not link them.
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon():
+        return FileResponse(_STATIC / "icons" / "favicon.ico")
+
+    @app.get("/apple-touch-icon.png", include_in_schema=False)
+    def apple_touch_icon():
+        return FileResponse(_STATIC / "icons" / "apple-touch-icon-180.png")
+
     app.mount("/static", StaticFiles(directory=_STATIC), name="static")
     return app
 

@@ -41,7 +41,7 @@ button.link { background: none; border: none; color: var(--muted); padding: 0; }
 #login { height: 100%; display: grid; place-items: center; padding: 16px; }
 #login-form { display: flex; flex-direction: column; gap: 12px; width: min(340px, 100%); padding: 28px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
 .app-version { margin: 8px 0 0; color: var(--muted); font-size: .75em; text-align: center; }
-#login-form h1 { margin: 0 0 6px; font-size: 1.6em; letter-spacing: .18em; }
+#login-form h1 { margin: 0 0 6px; font-size: 1.6em; letter-spacing: .18em; display: flex; align-items: center; gap: .5em; }
 
 #app { height: 100%; display: grid; grid-template-columns: 300px minmax(0, 1fr); --col-max: 1100px; --bubble-max: min(1100px, 105ch); --gutter: max(16px, calc((100% - var(--col-max)) / 2)); transition: grid-template-columns .2s ease; }
 aside { background: var(--panel); border-right: 1px solid var(--line); padding: 14px 12px; min-width: 0; display: flex; flex-direction: column; gap: 10px; overflow: hidden; min-height: 0; }
@@ -495,7 +495,9 @@ details.action, details.thinking { border-left: 2px solid var(--line); padding-l
 #disposable-banner button { padding: 4px 12px; border-radius: 999px; font-size: .9em; }
 
 /* Sidebar: brand on top, account and settings at the bottom */
-.brand { font-weight: 700; letter-spacing: .22em; font-size: .95em; }
+.brand { font-weight: 700; letter-spacing: .22em; font-size: .95em; display: inline-flex; align-items: center; gap: .6em; }
+/* 24x21 = the logo's own pixel grid at 1:1, so every cell is a whole number of screen pixels */
+.brand-logo { width: 24px; height: 21px; flex: none; image-rendering: pixelated; }
 .sidebar-footer { display: flex; align-items: center; gap: 2px; padding-top: 10px; border-top: 1px solid var(--line); }
 #user-avatar { display: grid; place-items: center; flex-shrink: 0; width: 32px; height: 32px; margin-right: 8px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 700; }
 .sidebar-footer #user-name { flex: 1; min-width: 0; margin-right: 4px; }
