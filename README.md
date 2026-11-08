@@ -22,6 +22,11 @@ Start at the [documentation map](docs/README.md).
 - Administrator setting RECALL up: [installation and first run](docs/getting-started/installation.md).
 - Configuration: [settings.yaml](docs/reference/settings-yaml.md), [user.yaml](docs/reference/user-yaml.md), [agent.yaml](docs/reference/agent-yaml.md), [environment variables](docs/reference/environment-variables.md).
 
+## Fonts
+
+The web UI bundles Fraunces, Inter and Geist Mono (`src/web/static/fonts/`), all under the SIL Open Font License 1.1; see
+[LICENSES.md](src/web/static/fonts/LICENSES.md) and [OFL.txt](src/web/static/fonts/OFL.txt). Nothing is loaded from a CDN.
+
 ## Tesseract OCR
 
 Scanned PDF pages need the Tesseract OCR program installed on the machine that runs RECALL.
