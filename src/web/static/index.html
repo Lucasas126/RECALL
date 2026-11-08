@@ -16,18 +16,29 @@
   <link rel="icon" type="image/png" sizes="16x16" href="/static/icons/favicon-16.png">
   <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon-180.png">
   <link rel="manifest" href="/static/icons/manifest.webmanifest">
+  <link rel="preload" href="/static/fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/static/fonts/fraunces.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/appearance.js"></script>
 </head>
 <body>
   <section id="login" hidden>
-    <form id="login-form">
-      <h1><img class="brand-logo" src="/static/icons/recall-logo.svg" alt="" width="24" height="21"><span>RECALL</span></h1>
-      <input id="login-user" placeholder="user" aria-label="user" autocomplete="username" autofocus required>
-      <input id="login-password" type="password" placeholder="password" aria-label="password" autocomplete="current-password" required>
-      <button type="submit">Enter</button>
-      <p id="login-error" class="error" role="alert"></p>
-      <p id="login-version" class="app-version"></p>
-    </form>
+    <div class="login-stage">
+      <div class="login-arch" aria-hidden="true"></div>
+      <div class="login-art" aria-hidden="true">
+        <div class="art-capital"></div>
+        <div class="art-plinth"><img class="brand-logo" src="/static/icons/recall-logo.svg" alt="" width="24" height="21"></div>
+      </div>
+      <form id="login-form">
+        <h1>RECALL</h1>
+        <p class="login-lede">A private assistant that remembers.</p>
+        <div class="field"><label for="login-user">User</label><input id="login-user" aria-label="User" autocomplete="username" autofocus required></div>
+        <div class="field"><label for="login-password">Password</label><input id="login-password" type="password" aria-label="Password" autocomplete="current-password" required></div>
+        <button type="submit">Enter</button>
+        <p id="login-error" class="error" role="alert"></p>
+        <p id="login-version" class="app-version"></p>
+      </form>
+    </div>
   </section>
 
   <section id="app" hidden>
@@ -55,6 +66,7 @@
       </div>
     </aside>
     <main>
+      <div class="ornaments" aria-hidden="true"><div class="art-column l"></div><div class="art-column r"></div></div>
       <div id="chat-view">
       <header id="model-bar">
         <button class="nav-toggle" type="button" aria-controls="sidebar" aria-expanded="false" title="Menu" aria-label="Menu"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
@@ -67,6 +79,7 @@
           <span id="agent-chevron" aria-hidden="true">&#9662;</span>
           <select id="agent-select"></select>
         </div>
+        <div class="art-arcade" aria-hidden="true"></div>
       </header>
       <div id="disposable-banner" role="status" hidden>
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
@@ -576,6 +589,22 @@
                 <button type="button" class="icon-btn setting-reset">↺</button>
               </div>
               <p class="setting-default model-note"></p>
+            </div>
+            <div class="appearance" role="group" aria-labelledby="appearance-title">
+              <h3 id="appearance-title">Appearance</h3>
+              <p class="model-note">These apply immediately and need no Save; they are stored in this browser only.</p>
+              <fieldset class="ap-accent">
+                <legend>Accent colour</legend>
+                <div class="ap-swatches">
+                  <label class="sw" style="--d:#ff6b9d;--l:#b0205e"><input type="radio" name="accent" value="pink" aria-label="Pink accent" checked><span class="dot" aria-hidden="true"></span><span>Pink</span></label>
+                  <label class="sw" style="--d:#7c9cd6;--l:#3b5ba5"><input type="radio" name="accent" value="blue" aria-label="Blue accent"><span class="dot" aria-hidden="true"></span><span>Blue</span></label>
+                  <label class="sw" style="--d:#d9a441;--l:#8a5a12"><input type="radio" name="accent" value="gold" aria-label="Gold accent"><span class="dot" aria-hidden="true"></span><span>Gold</span></label>
+                  <label class="sw" style="--d:#6fbf8e;--l:#277340"><input type="radio" name="accent" value="green" aria-label="Green accent"><span class="dot" aria-hidden="true"></span><span>Green</span></label>
+                  <label class="sw" style="--d:#b79cff;--l:#5b3fc4"><input type="radio" name="accent" value="violet" aria-label="Violet accent"><span class="dot" aria-hidden="true"></span><span>Violet</span></label>
+                  <label class="sw" style="--d:#5fd0e0;--l:#0b6b7a"><input type="radio" name="accent" value="cyan" aria-label="Cyan accent"><span class="dot" aria-hidden="true"></span><span>Cyan</span></label>
+                </div>
+              </fieldset>
+              <label class="tgl"><span class="tgl-text"><span id="appearance-ornaments-label">Architecture ornaments</span><span class="tgl-desc">Decorative columns and arcade lines around the chat.</span></span><input id="appearance-ornaments" type="checkbox" role="switch" checked><span class="track" aria-hidden="true"></span></label>
             </div>
             <div class="setting-row">
               <div class="setting-main">
