@@ -21,10 +21,10 @@ class DefaultSoulTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         root = Path(directory.name)
         self.config_dir, self.data_dir = root / "config", root / "data"
-        agents = self.config_dir / "ana" / "agents"
+        agents = self.config_dir / "user-a" / "agents"
         agents.mkdir(parents=True)
-        (self.config_dir / "ana" / "user.yaml").write_text(
-            f"id: ana\nname: Ana\nprovider: {{name: ollama}}\nagents: [old]\npassword_hash: '{TEST_PASSWORD_HASH}'\n",
+        (self.config_dir / "user-a" / "user.yaml").write_text(
+            f"id: user-a\nname: User A\nprovider: {{name: ollama}}\nagents: [old]\npassword_hash: '{TEST_PASSWORD_HASH}'\n",
             encoding="utf-8",
         )
         (agents / "old.yaml").write_text(yaml.safe_dump({"id": "old", "name": "Old"}), encoding="utf-8")
@@ -40,10 +40,10 @@ class DefaultSoulTests(unittest.TestCase):
         self.client = TestClient(create_app(self.service))
         self.client.__enter__()
         self.addCleanup(self.client.__exit__, None, None, None)
-        login(self.client, "ana")
+        login(self.client, "user-a")
 
     def soul_path(self, agent: str) -> Path:
-        return self.data_dir / "ana" / agent / "SOUL.md"
+        return self.data_dir / "user-a" / agent / "SOUL.md"
 
     def test_new_agent_gets_the_template_and_it_is_the_first_history_version(self) -> None:
         self.assertEqual(self.client.post("/api/agents", json={"id": "new", "name": "New"}).status_code, 201)

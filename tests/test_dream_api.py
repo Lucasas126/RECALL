@@ -37,14 +37,14 @@ class DreamApiTests(unittest.TestCase):
         self.root = Path(directory.name)
         self.config_dir = self.root / "config"
         self.data_dir = self.root / "data"
-        agents = self.config_dir / "ana" / "agents"
+        agents = self.config_dir / "user-a" / "agents"
         agents.mkdir(parents=True)
-        (self.config_dir / "ana" / "user.yaml").write_text(
-            f"id: ana\nname: Ana\nprovider: {{name: ollama}}\nagents: [aria]\npassword_hash: '{TEST_PASSWORD_HASH}'\n",
+        (self.config_dir / "user-a" / "user.yaml").write_text(
+            f"id: user-a\nname: User A\nprovider: {{name: ollama}}\nagents: [aria]\npassword_hash: '{TEST_PASSWORD_HASH}'\n",
             encoding="utf-8",
         )
         (agents / "aria.yaml").write_text(yaml.safe_dump({"id": "aria", "name": "Aria"}), encoding="utf-8")
-        self.soul_file = self.data_dir / "ana" / "aria" / "SOUL.md"
+        self.soul_file = self.data_dir / "user-a" / "aria" / "SOUL.md"
         self.soul_file.parent.mkdir(parents=True)
         self.soul_file.write_text("I am Aria.", encoding="utf-8")
         for target in (
@@ -67,7 +67,7 @@ class DreamApiTests(unittest.TestCase):
         self.client = TestClient(create_app(self.service))
         self.client.__enter__()
         self.addCleanup(self.client.__exit__, None, None, None)
-        login(self.client, "ana")
+        login(self.client, "user-a")
         self.base = "/api/agents/aria"
 
     def test_soul_md_is_the_only_personality_source(self) -> None:
@@ -76,7 +76,7 @@ class DreamApiTests(unittest.TestCase):
         agent["description"] = "edited"
         response = self.client.put(self.base, json=agent)
         self.assertEqual(response.status_code, 200, response.text)
-        saved = yaml.safe_load((self.config_dir / "ana" / "agents" / "aria.yaml").read_text(encoding="utf-8"))
+        saved = yaml.safe_load((self.config_dir / "user-a" / "agents" / "aria.yaml").read_text(encoding="utf-8"))
         self.assertEqual(saved["description"], "edited")
         self.assertNotIn("personality_prompt", saved)
         self.assertEqual(self.soul_file.read_text(encoding="utf-8"), "I am Aria.")  # saving the agent never touches SOUL.md
@@ -90,11 +90,11 @@ class DreamApiTests(unittest.TestCase):
         # a new agent starts with the default SOUL.md and its owner replaces it through the soul route
         created = self.client.post("/api/agents", json={"id": "bea", "name": "Bea"})
         self.assertEqual(created.status_code, 201, created.text)
-        self.assertEqual((self.data_dir / "ana" / "bea" / "SOUL.md").read_text(encoding="utf-8"), default_soul())
+        self.assertEqual((self.data_dir / "user-a" / "bea" / "SOUL.md").read_text(encoding="utf-8"), default_soul())
         self.assertEqual(self.client.get("/api/agents/bea/soul").json()["content"], default_soul())
         self.client.put("/api/agents/bea/soul", json={"content": "I am Bea."})
-        self.assertEqual((self.data_dir / "ana" / "bea" / "SOUL.md").read_text(encoding="utf-8"), "I am Bea.")
-        bea = yaml.safe_load((self.config_dir / "ana" / "agents" / "bea.yaml").read_text(encoding="utf-8"))
+        self.assertEqual((self.data_dir / "user-a" / "bea" / "SOUL.md").read_text(encoding="utf-8"), "I am Bea.")
+        bea = yaml.safe_load((self.config_dir / "user-a" / "agents" / "bea.yaml").read_text(encoding="utf-8"))
         self.assertNotIn("personality_prompt", bea)
 
     def test_tool_group_catalog_marks_the_default_groups(self) -> None:
@@ -119,8 +119,8 @@ class DreamApiTests(unittest.TestCase):
         self.assertEqual(self.client.put(f"{self.base}/soul", json={"content": "x" * 20001}).status_code, 400)
 
     def test_memories_round_trip_with_limit(self) -> None:
-        saved = self.client.put(f"{self.base}/memories/user", json={"content": "Name: Ana\n§\nLikes tea"}).json()
-        self.assertEqual(saved["entries"], ["Name: Ana", "Likes tea"])
+        saved = self.client.put(f"{self.base}/memories/user", json={"content": "Name: User A\n§\nLikes tea"}).json()
+        self.assertEqual(saved["entries"], ["Name: User A", "Likes tea"])
         self.assertEqual(saved["limit"], 2500)
         self.assertEqual(self.client.get(f"{self.base}/memories/memory").json()["content"], "")
         self.assertEqual(self.client.put(f"{self.base}/memories/user", json={"content": "x" * 2501}).status_code, 400)
@@ -129,7 +129,7 @@ class DreamApiTests(unittest.TestCase):
     def test_dream_settings_validation(self) -> None:
         settings = self.client.get(f"{self.base}/dream/settings").json()
         self.assertFalse(settings["dream"]["enabled"])
-        self.assertEqual(settings["dream"]["tools"], ["web", "folders"])
+        self.assertEqual(settings["dream"]["tools"], ["folders"])
         self.assertNotIn("vault", settings)
         self.assertNotIn("memory_limits", settings)
         self.assertIn("## Dream session", settings["default_prompt"])
@@ -143,7 +143,7 @@ class DreamApiTests(unittest.TestCase):
         }
         saved = self.client.put(f"{self.base}/dream/settings", json=body)
         self.assertEqual(saved.status_code, 200, saved.text)
-        stored = yaml.safe_load((self.config_dir / "ana" / "agents" / "aria.yaml").read_text(encoding="utf-8"))
+        stored = yaml.safe_load((self.config_dir / "user-a" / "agents" / "aria.yaml").read_text(encoding="utf-8"))
         self.assertEqual(stored["dream"]["daily_at"], "04:00")
         self.assertNotIn("vault", stored)
         self.assertNotIn("memory_limits", stored)
@@ -154,14 +154,14 @@ class DreamApiTests(unittest.TestCase):
 
     def test_start_sessions_and_detail(self) -> None:
         chat = self.client.post(f"{self.base}/chats").json()["id"]
-        conversations = SourceRegistry.for_agent("ana", "aria").conversations()
+        conversations = SourceRegistry.for_agent("user-a", "aria").conversations()
         conversations.append(chat, "user", "hello")
         self.provider.steps = [{"tool_calls": [{"id": "c1", "name": "dream_pending", "arguments": "{}"}]}, {"response": "All done."}]
         self.assertEqual(self.client.get(f"{self.base}/dream/status").json()["pending_chats"], 1)
         started = self.client.post(f"{self.base}/dream/start")
         self.assertEqual(started.status_code, 202)
         self.assertEqual(started.json()["status"], "started")
-        self.assertTrue(self.dream.wait("ana", "aria", 5))
+        self.assertTrue(self.dream.wait("user-a", "aria", 5))
         sessions = self.client.get(f"{self.base}/dream/sessions").json()
         self.assertEqual(sessions[0]["status"], "completed")
         self.assertNotIn("diffs", sessions[0])
@@ -194,7 +194,7 @@ class DreamApiTests(unittest.TestCase):
         cancelled = self.client.post(f"{self.base}/dream/cancel")
         self.assertEqual(cancelled.status_code, 202)
         self.assertEqual(cancelled.json(), {"status": "cancelling", "session_id": started["session_id"]})
-        self.assertTrue(self.dream.wait("ana", "aria", 5))
+        self.assertTrue(self.dream.wait("user-a", "aria", 5))
         sessions = self.client.get(f"{self.base}/dream/sessions").json()
         self.assertEqual(sessions[0]["status"], "cancelled")
         self.assertIsNotNone(sessions[0]["timing"]["stop_requested_at"])
@@ -217,7 +217,7 @@ class DreamApiTests(unittest.TestCase):
         self.assertIn("Use /dream cancel to stop the running session.", status)
         reply = _events(self.client.post(url, json={"content": "/dream cancel"}))[0]["data"]
         self.assertTrue(reply.startswith("Cancelling the dream session"))
-        self.assertTrue(self.dream.wait("ana", "aria", 5))
+        self.assertTrue(self.dream.wait("user-a", "aria", 5))
         self.assertIn("(cancelled)", _events(self.client.post(url, json={"content": "/dream"}))[0]["data"])
         self.agent_factory.assert_not_called()
 
@@ -232,14 +232,14 @@ class DreamApiTests(unittest.TestCase):
         self.provider.steps = [{"response": "Nothing to do."}]
         started = _events(self.client.post(url, json={"content": "/dream start"}))
         self.assertEqual(started[0]["data"], "Nothing is pending; starting a dream session anyway.")
-        self.assertTrue(self.dream.wait("ana", "aria", 5))
+        self.assertTrue(self.dream.wait("user-a", "aria", 5))
         status = _events(self.client.post(url, json={"content": "/dream"}))[0]["data"]
         self.assertIn("(completed)", status)
         self.assertIn("Nothing to do.", status)
         unknown = _events(self.client.post(url, json={"content": "/dream sometimes"}))[0]["data"]
         self.assertIn("Unknown /dream option", unknown)
         self.agent_factory.assert_not_called()
-        self.assertEqual(SourceRegistry.for_agent("ana", "aria").conversations().load(chat), [])
+        self.assertEqual(SourceRegistry.for_agent("user-a", "aria").conversations().load(chat), [])
 
 
 if __name__ == "__main__":

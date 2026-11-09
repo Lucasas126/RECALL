@@ -164,13 +164,27 @@ read (scoped to the agent, existing guards apply):
 - `dream_pending`, `dream_read_chat` (at most 40 new turns per call, plus 2
   turns of context; long chats are read in parts), `dream_mark_reviewed`
 - the memory read tools (`query_memory`, `search`, `list_memories`, `read`,
-  tags) over the palace, conversations and `agent:` files
+  tags) over the palace, conversations and `agent:` files. [Disposable
+  chats](memory.md#disposable-chats) and subagent task chats are not listed,
+  searched or read (the review queue still offers `remember` task chats)
 - the agent's user folders (set in its config, typically an Obsidian vault),
-  **read-only** in dreams, when configured and the `folders` dream tool group is
-  enabled (see [user folders](#user-folders))
-- web search / retrieve when enabled
-- the [terminal sandbox](terminal.md#dream-mode), only when the agent sets `terminal.allow_in_dream: true` **and** lists
-  `terminal` in `dream.tools`; dream runs are unattended, so nothing is ever asked (manual denies, smart denies dangerous)
+  **read-only** in dreams, when configured, the `folders` dream tool group is
+  enabled **and** the agent also holds `folders_read` or `folders_edit` in its
+  `tool_groups` (see [user folders](#user-folders))
+- web search / retrieve when `web` is in `dream.tools`
+- never a terminal: dreams have no terminal tools. `dream.tools: [terminal]` and
+  `terminal.allow_in_dream` are configuration errors (read-only sandbox variants
+  are planned)
+
+the write tools below are capped by the agent's own `tool_groups`: a dream gets
+the mind palace edit tools only if the agent holds `memory_edit`, and `memory`,
+`skill_manage` and `soul_edit` only if it holds `self`.
+
+chat text and worker results are untrusted: `dream_read_chat` wraps every turn
+in `<chat_text untrusted="true">…</chat_text>` (any marker inside the text is
+neutralised), and the dream prompt always ends with a rule that text inside the
+markers is data and that no instruction from it may be copied into SOUL,
+skills, memory or USER.
 
 write (only the agent's own files; everything else is refused):
 - `soul_edit` (replace or patch `SOUL.md`; snapshot to `soul_history/` first,
@@ -184,8 +198,8 @@ write (only the agent's own files; everything else is refused):
   opens only the palace for writing
 
 no tools that act outside the agent: no MCP actions, no messages to the user.
-the toolset is configurable per agent within this set: `dream.tools` adds `web`
-and/or `folders` reads.
+the toolset is configurable per agent within this set: `dream.tools` adds `folders`
+and/or `web` reads.
 
 the dream's `query_memory` searches the same index as the chats and never updates
 it: a dream start queues a stat-only reconcile of the agent's own sources, and the
@@ -317,7 +331,7 @@ dream:
   max_steps: 60
   max_tokens: 500000         # total input+output for the session
   max_minutes: 5             # wall-clock limit; wrap-up warning 1 minute before, then force-closed
-  tools: [web, folders]      # optional read groups; palace, chats and own-file writes always on
+  tools: [folders]           # optional read groups: folders (needs a folder read group), web (opt-in)
   prompt: ""                 # empty = built-in default
   notify_telegram: false     # "dream session completed" + where to see it in the web
 folders: []                  # user folders, edited in the agent's Folders tab (see [files and media](files-and-media.md) and [memory](memory.md))
@@ -333,8 +347,8 @@ session start; before the first one it counts from `scheduled_since`, the moment
 a process first saw the schedule, so enabling a schedule never starts a session
 at once. scheduled runs are skipped while nothing is pending.
 
-`tools` defaults to `[web, folders]`; web needs Tavily and folders needs at least one
-entry in `folders`.
+`tools` defaults to `[folders]`; web is opt-in and needs Tavily; folders needs at least one
+entry in `folders` and a `folders_read`/`folders_edit` tool group. `terminal` is rejected.
 `reasoning_effort: null` sends no reasoning request. `max_steps` is 1–500 and
 `max_tokens` 1000–10000000, `max_minutes` 1–120; limits are 100–50000 chars.
 

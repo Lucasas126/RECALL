@@ -122,6 +122,26 @@ class ConversationsSource(Source):
     def __init__(self, root: Path):
         # not writable to the agent's tools; chats are managed via the methods below
         super().__init__("conversations", root, readable=True, writable=False, indexed=True)
+        self.reviewable_only = False  # a dream's tools: disposable and task chats are neither listed, searched nor read
+
+    def _private_names(self) -> set[str]:
+        return self.disposable_chats() | self.task_chats() if self.reviewable_only else set()
+
+    def _is_private_file(self, rel_path: str, private: set[str]) -> bool:
+        return bool(private) and rel_path.split("/")[-1].split(".")[0] in private
+
+    def walk(self, exts: set[str] | None = None) -> list[str]:
+        private = self._private_names()
+        return [rel for rel in super().walk(exts) if not self._is_private_file(rel, private)]
+
+    def list(self, subpath: str = "") -> list[str]:
+        private = self._private_names()
+        return [rel for rel in super().list(subpath) if not self._is_private_file(rel.rstrip("/"), private)]
+
+    def read(self, rel_path: str) -> str:
+        if self._is_private_file(rel_path, self._private_names()):
+            raise PermissionError(f"{rel_path} belongs to a disposable or task chat, which a dream never reads")
+        return super().read(rel_path)
 
     def _path(self, chat_id: str) -> Path:
         if not _CHAT_ID_RE.match(chat_id):

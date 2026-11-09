@@ -507,8 +507,7 @@ function translateInterface() {
     ["agent-tool-groups-label", "Tool groups"],
     ["agent-terminal-legend", "Terminal"], ["agent-terminal-default-label", "Default backend"],
     ["agent-terminal-no-backends", "No terminal backends are configured. Add one under terminal_backends in your user configuration; see docs/user-guide/terminal.md."],
-    ["agent-terminal-timeout-label", "Command timeout (seconds)"], ["agent-terminal-dream-label", "Allow in dream"],
-    ["agent-terminal-dream-hint", "Dream sessions run unattended: with this on, an agent whose dream tools include the terminal can run commands on its backends without you watching."],
+    ["agent-terminal-timeout-label", "Command timeout (seconds)"],
     ["agent-effort-label", "Reasoning effort"], ["agent-effort-default", "Default"],
     ["agent-tokens-enabled-label", "Limit reasoning tokens"],
     ["agent-delegation-legend", "Delegation"], ["agent-delegation-enabled-label", "Delegation enabled"],
@@ -1131,7 +1130,6 @@ function renderTerminalBlock(agent) {
   $("agent-terminal-no-backends").hidden = rows.length > 0;
   $("agent-terminal-backends").replaceChildren(...rows.map(buildTerminalBackendRow));
   setNumberValue($("agent-terminal-timeout"), saved?.timeout_seconds ?? agentDefault("terminal.timeout_seconds") ?? 60);
-  $("agent-terminal-dream").checked = saved?.allow_in_dream ?? false;
   $("agent-terminal-error").textContent = "";
   refreshTerminalDefault(saved?.default_backend);
   updateTerminalBlock();
@@ -1612,7 +1610,7 @@ function agentFormBody() {
     folders: agentFoldersBody(),
     terminal: buildTerminalConfig(saved?.terminal, terminalGroupChecked(), {
       backends: readTerminalBackendFields(), defaultBackend: $("agent-terminal-default").value,
-      timeout: numberValue("agent-terminal-timeout"), allowInDream: $("agent-terminal-dream").checked,
+      timeout: numberValue("agent-terminal-timeout"),
     }),
     // the saved block is sent back untouched while the group is off, and from the form while it is on
     delegation: buildDelegationConfig(saved?.delegation, delegationGroupChecked(), {
@@ -4597,13 +4595,12 @@ function buildTerminalConfig(saved, enabled, fields) {
       approvals: field.approvals,
     };
   }
-  const { backend: _old, workdir: _oldWorkdir, approvals: _oldApprovals, ...rest } = saved ?? {};
+  const { backend: _old, workdir: _oldWorkdir, approvals: _oldApprovals, allow_in_dream: _oldDream, ...rest } = saved ?? {};
   return {
     ...rest,
     backends,
     default_backend: terminalDefaultBackend(allowed.map((field) => field.name), fields.defaultBackend),
     timeout_seconds: Number(fields.timeout),
-    allow_in_dream: Boolean(fields.allowInDream),
   };
 }
 

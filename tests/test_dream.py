@@ -23,8 +23,13 @@ def _config(**dream) -> ResolvedAgent:
     return ResolvedAgent(
         user_id="u", id="a", name="Aria", models=ModelsConfig(chat="vendor/chat"),
         provider_name="ollama", api_key="", embeddings_provider_name="ollama", embeddings_api_key="",
-        dream=DreamConfig(**dream),
+        dream=DreamConfig(**dream), tool_groups=["memory_read", "memory_edit", "self"],
     )
+
+
+def _plain(content: str) -> str:
+    """A turn's text without its untrusted-data wrapper."""
+    return content.removeprefix('<chat_text untrusted="true">\n').removesuffix("\n</chat_text>")
 
 
 class ScriptedProvider:
@@ -93,8 +98,8 @@ class ReviewQueueTests(DreamFixture):
         self.assertEqual(self.queue.pending(), [])
         self.add(chat_id, "five", "six")
         part = self.queue.read(chat_id)
-        self.assertEqual([turn["content"] for turn in part["context"]], ["three", "four"])
-        self.assertEqual([turn["content"] for turn in part["turns"]], ["five", "six"])
+        self.assertEqual([_plain(turn["content"]) for turn in part["context"]], ["three", "four"])
+        self.assertEqual([_plain(turn["content"]) for turn in part["turns"]], ["five", "six"])
         self.assertEqual(part["turns"][0]["n"], 5)
 
     def test_long_chats_are_read_in_parts_and_watermarks_never_go_back(self) -> None:

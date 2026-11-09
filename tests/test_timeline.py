@@ -126,7 +126,9 @@ class TimelineReadersTests(ModelFixture):
     def test_dream_view_ignores_the_timeline(self) -> None:
         turn = {"role": "assistant", "content": "Answer", "ts": "t", "timeline": [{"type": "text", "text": "Answer"}],
                 "actions": [{"name": "echo"}]}
-        self.assertEqual(render_turn(3, turn), {"n": 3, "role": "assistant", "ts": "t", "content": "Answer", "tools": ["echo"]})
+        rendered = render_turn(3, turn)
+        self.assertIn("Answer", rendered.pop("content"))
+        self.assertEqual(rendered, {"n": 3, "role": "assistant", "ts": "t", "tools": ["echo"]})
 
 
 if __name__ == "__main__":
