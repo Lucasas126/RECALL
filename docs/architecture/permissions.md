@@ -1,7 +1,7 @@
-# Permission levels (design, planned)
+# Permission levels (design; step 1 implemented)
 
-Status: **design only**. Nothing on this page is implemented yet; each section says what exists today. The work is split into the
-steps listed under [implementation plan](#implementation-plan). Research behind it: Claude Code permission rules, the Codex
+Status: **step 1 (schema, validation, migration, API read side) is implemented; nothing is enforced yet**. Every other part of this
+page is design. The steps are listed under [implementation plan](#implementation-plan). Research behind it: Claude Code permission rules, the Codex
 approval/sandbox split, Meta's *Agents Rule of Two*, OWASP LLM06 (excessive agency) and an audit of RECALL's own code.
 
 ## Principles
@@ -102,7 +102,7 @@ cannot do in one line each, and an explicit reminder that **even if it finds a w
 more it tells the user which level would be required. The block links to an internal page of the built-in `recall` skill
 (`references/permissions.md`) with every level, the service table, the dream table and the approval rules, read only when needed.
 
-## Configuration shape (proposal)
+## Configuration shape (implemented in step 1)
 
 ```yaml
 # user.yaml, set only by an administrator
@@ -111,6 +111,14 @@ max_level: operator          # minimal | reader | assistant | collaborator | ope
 # agent.yaml
 level: collaborator          # must not exceed the owner's max_level
 ```
+
+`max_level` is set only through the admin CLI and the web API never exposes a way to change it; `level` is validated against it when
+an agent is loaded, created or updated. If either is missing it is resolved at load: the user's falls back to `admin` on a
+single-user installation and `collaborator` otherwise (one warning per user), the agent's to the lowest level covering its
+configuration. The minimum level of each service is the table in `src/config/levels.py`, taken from the table above. An agent
+without a declared `level` that needs more than the owner's `max_level` only logs a warning until step 2. Details:
+[user.yaml](../reference/user-yaml.md#max_level-permission-levels), [agent.yaml](../reference/agent-yaml.md#level),
+[admin CLI](../user-guide/admin-cli.md#permission-levels).
 
 Resources stay where they are today (`terminal_backends`, `folders`, MCP servers); a backend gains a `kind` (`sandbox` or
 `machine`) and a privilege field. Level data must never live under `chat_config`, which accepts unknown keys.
@@ -131,7 +139,7 @@ Resources stay where they are today (`terminal_backends`, `folders`, MCP servers
 | Step | Content |
 | --- | --- |
 | 0 | This specification (done with this page). |
-| 1 | Schema and migration: `max_level` (admin only), agent `level`, validation, a migration that gives existing agents the lowest level covering their current groups. |
+| 1 (done) | Schema and migration: `max_level` (admin only), agent `level`, validation, a migration that gives existing agents the lowest level covering their current groups. |
 | 2 | Ceiling enforcement in one module: when tools are built (chats, workers, dreams), at dispatch, on config save and on load; `permissions` prompt block and skill page. |
 | 3 | Rule engine: layers, deny/ask/allow, matching, the three legacy modes as presets. |
 | 4 | Approvals with memory: once / session / always for this agent, web and Telegram, audit. |

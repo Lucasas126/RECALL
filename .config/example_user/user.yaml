@@ -6,6 +6,9 @@ models:
   stt: openai/whisper-large-v3-turbo
   embeddings: openai/text-embedding-3-small
 name: user-a
+# max_level: highest permission level of this user's agents (minimal, reader, assistant, collaborator, operator, admin);
+# set only by an administrator (`python -m src.admin user set`). See docs/reference/user-yaml.md
+max_level: collaborator
 provider:
   name: openrouter
   api_key: OPENROUTER_USER_A_API_KEY
