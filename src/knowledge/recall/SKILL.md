@@ -25,6 +25,7 @@ Read this page, then load only the reference you need: `skill_view("recall", "re
 | what a tool or tool group does, and its limits | `references/tools-and-groups.md` |
 | memory files, limits, associative memory, dreams, disposable chats | `references/memory-and-dream.md` |
 | the terminal, backends, approvals, being denied | `references/terminal-and-approvals.md` |
+| your permission level, what each level allows, dreams, how to ask for more | `references/permissions.md` |
 | handing a task to a worker (`task_start`, `task_wait`, `task_send`...): async results and the wake message, limits, grants, rate limits, when not to | `references/delegation.md` |
 | handing a task to another of your agents (`task_start(agent=...)`): allowlist, its own SOUL and tools, `remember` memory writes | `references/delegation-targets.md` |
 | tasks across the web and Telegram programs: queued stop/steer, who delivers the wake, executor crash, approvals only where the task runs; the Tasks panel, the daily token budget, unattended tasks (`task run`) | `references/delegation-processes.md` |
