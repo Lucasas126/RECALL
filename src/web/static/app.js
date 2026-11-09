@@ -2245,8 +2245,19 @@ async function refreshChats() {
   const chats = await api(`/api/chats${keep}`);
   if (session !== state.session) return;
   const list = $("chat-list");
+  let section = null;
   list.replaceChildren(
-    ...chats.map((chat) => {
+    ...chats.flatMap((chat) => {
+      const items = [];
+      const label = chatSection(chat.updated);
+      if (label !== section) {
+        section = label;
+        const heading = document.createElement("li");
+        heading.className = "chat-section";
+        heading.setAttribute("role", "presentation");
+        heading.textContent = tr(label);
+        items.push(heading);
+      }
       const li = document.createElement("li");
       li.classList.toggle("active", chat.id === state.chatId && chat.agent_id === state.agentId);
       const generating = isGenerating(chat.agent_id, chat.id) || Boolean(chat.active);
@@ -2298,9 +2309,23 @@ async function refreshChats() {
       }
       li.append(del);
       li.addEventListener("click", () => openChatFromList(chat));
-      return li;
+      items.push(li);
+      return items;
     })
   );
+}
+
+// the date group a chat belongs to in the sidebar, from the day of its last activity (local time)
+function chatSection(updated) {
+  const when = new Date(updated);
+  if (Number.isNaN(when.getTime())) return "Older";
+  const startOfDay = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const days = Math.round((startOfDay(new Date()) - startOfDay(when)) / 86400000);
+  if (days <= 0) return "Today";
+  if (days === 1) return "Yesterday";
+  if (days <= 7) return "Previous 7 days";
+  if (days <= 30) return "Previous 30 days";
+  return "Older";
 }
 
 function startRenameChat(chat, title) {
@@ -2392,7 +2417,7 @@ function renderDisposable() {
   $("disposable-banner-text").textContent = view.banner ?? "";
   $("disposable-convert").textContent = tr("Make it a normal chat");
   $("chat-make-disposable").hidden = !view.canMakeDisposable;
-  $("chat-make-disposable").textContent = tr("Make it disposable");
+  $("chat-make-disposable-text").textContent = tr("Make it disposable");
   $("chat-make-disposable").title = tr("Make it disposable");
   const locked = state.busy || state.modelBusy;
   $("disposable-convert").disabled = locked;
@@ -2491,6 +2516,7 @@ function updateModelControls() {
   const sourceHint = { chat: "Chat override", agent: "Agent default", user: "User default" }[state.modelSource];
   if (state.model && sourceHint) parts.push(tr(sourceHint));
   $("model-policy").textContent = parts.filter(Boolean).join(" · ");
+  $("model-picker").title = [tr("Choose a model and routing policy for this chat"), ...parts.filter(Boolean)].join(" · ");
   updateReasoningEffortControls();
   renderDisposable();
   $("model-policy").classList.toggle("privacy-warning", openrouter && Boolean(state.model.require_zdr) && !state.model.zdr);
@@ -6220,3 +6246,52 @@ registerRow("dream-schedule-row", {
 
 api("/api/version").then((info) => { state.versionInfo = info; renderVersion(); }, () => {});
 api("/api/me").then(showApp, showLogin);
+
+
+// ---- resizable side panel: drag the edge (or use the arrow keys); the width is remembered in this browser
+(() => {
+  const handle = document.getElementById("sidebar-resizer");
+  if (!handle) return;
+  const MIN = 220, MAX = 560, KEY = "sidebarWidth";
+  const root = document.documentElement;
+  const apply = (px) => root.style.setProperty("--sidebar-w", `${Math.min(MAX, Math.max(MIN, Math.round(px)))}px`);
+  const width = () => parseInt(getComputedStyle(root).getPropertyValue("--sidebar-w"), 10) || 300;
+  const save = () => { try { localStorage.setItem(KEY, String(width())); } catch { /* storage may be blocked */ } };
+  try { const saved = Number(localStorage.getItem(KEY)); if (saved) apply(saved); } catch { /* ignore */ }
+  handle.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    handle.setPointerCapture(event.pointerId);
+    handle.classList.add("dragging");
+    root.classList.add("resizing-sidebar");
+  });
+  handle.addEventListener("pointermove", (event) => {
+    if (handle.hasPointerCapture(event.pointerId)) apply(event.clientX);
+  });
+  const stop = (event) => {
+    if (!handle.hasPointerCapture(event.pointerId)) return;
+    handle.releasePointerCapture(event.pointerId);
+    handle.classList.remove("dragging");
+    root.classList.remove("resizing-sidebar");
+    save();
+  };
+  handle.addEventListener("pointerup", stop);
+  handle.addEventListener("pointercancel", stop);
+  handle.addEventListener("dblclick", () => { root.style.removeProperty("--sidebar-w"); try { localStorage.removeItem(KEY); } catch { /* ignore */ } });
+  handle.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    apply(width() + (event.key === "ArrowRight" ? 16 : -16));
+    save();
+  });
+})();
+
+// ---- composer: once the message needs more than one line it spans the box and the chat options move under it
+(() => {
+  const input = document.getElementById("input"), composer = document.getElementById("composer");
+  if (!input || !composer || typeof ResizeObserver === "undefined") return;
+  new ResizeObserver(() => {
+    if (!input.value) composer.classList.remove("multiline");
+    else if (input.clientHeight > 44) composer.classList.add("multiline");
+  }).observe(input);
+  input.addEventListener("input", () => { if (!input.value) composer.classList.remove("multiline"); });
+})();

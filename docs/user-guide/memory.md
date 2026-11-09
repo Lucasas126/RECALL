@@ -188,7 +188,7 @@ What a disposable chat changes:
 
 Use **Make it a normal chat** in the banner to keep a disposable chat: it counts for Dream
 and the index from then on (a Dream reviews all its turns, since none were reviewed before).
-A normal chat has a small **Make it disposable** chip in the composer for the opposite
+A normal chat has a **Make it disposable** button (clock icon) in the top bar for the opposite
 conversion. Converting is refused while the chat has an active or queued reply. This is
 independent of the model provider: the text of a disposable chat is still sent to the model
 provider like any other chat. Telegram always creates normal chats.
