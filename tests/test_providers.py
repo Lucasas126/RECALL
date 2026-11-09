@@ -66,7 +66,7 @@ class RoutingTests(unittest.TestCase):
 
     def settings(self, **changes) -> dict:
         return {"main": "openrouter", "main_api_key": "main-key", "openrouter": OpenRouterConfig(),
-                "ollama": OllamaConfig(), "claude": ClaudeSubscriptionConfig()} | changes
+                "ollama": OllamaConfig(), "claude": ClaudeSubscriptionConfig()} | changes  # no config_dir: default login
 
     def test_any_provider_can_be_routed_without_an_enabled_switch(self) -> None:
         provider = provider_for("ollama", **self.settings(ollama=OllamaConfig(host="http://box:11434")))
@@ -105,10 +105,17 @@ class ClaudeStatusTests(unittest.TestCase):
         patcher = patch.dict(os.environ, env, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
-        self.settings = ClaudeSubscriptionConfig(command=sys.executable)
+        self.settings = ClaudeSubscriptionConfig()
+        self.admin_command(sys.executable)
+
+    def admin_command(self, path: str) -> None:
+        from types import SimpleNamespace
+        patcher = patch("src.config.settings.CLAUDE_LOGIN", SimpleNamespace(default_login_users=[], command=path))
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_logged_in_status_never_carries_account_identifiers(self) -> None:
-        auth = '{"loggedIn": true, "authMethod": "claude.ai", "email": "someone@example.com", "orgName": "Org", "subscriptionType": "pro"}'
+        auth = '{"loggedIn": true, "authMethod": "claude.ai", "email": "user@example.com", "orgName": "Org", "subscriptionType": "pro"}'
         with patch("src.providers.claude_subscription.status._run", side_effect=_status_run(
                 {"version": (0, "2.1.316 (Claude Code)\n"), "auth": (0, auth)})):
             status = cli_status(self.settings)
@@ -125,9 +132,11 @@ class ClaudeStatusTests(unittest.TestCase):
         self.assertIn("CLAUDE_CONFIG_DIR=/logins/me", status["hint"])
 
     def test_missing_cli_and_conflicting_env(self) -> None:
-        status = cli_status(ClaudeSubscriptionConfig(command=str(Path(tempfile.gettempdir()) / "no-such-claude.exe")))
+        self.admin_command(str(Path(tempfile.gettempdir()) / "no-such-claude.exe"))
+        status = cli_status(ClaudeSubscriptionConfig())
         self.assertFalse(status["cli_found"])
         self.assertIn("npm install -g @anthropic-ai/claude-code", status["hint"])
+        self.admin_command(sys.executable)
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": SECRET}):
             status = cli_status(self.settings)
         self.assertIn("ANTHROPIC_API_KEY", status["hint"])

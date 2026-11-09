@@ -19,7 +19,7 @@ from src.config.models import UserConfig
 from src.config.secrets import get_secret
 from src.providers.catalog import CatalogUnavailable, list_openrouter_models, list_openrouter_transcription_models
 from src.providers.claude_subscription.catalog import catalog_entries as claude_catalog_entries
-from src.providers.claude_subscription.login import NO_OWN_LOGIN_CODE, NO_OWN_LOGIN_MESSAGE, login_allowed
+from src.providers.claude_subscription.login import NO_OWN_LOGIN_CODE, NO_OWN_LOGIN_MESSAGE, login_allowed, resolved_settings
 from src.providers.claude_subscription.status import cli_status
 from src.providers.ollama import OllamaUnavailable, is_ollama_cloud, list_ollama_models, ollama_host
 from src.utils.i18n import InputError
@@ -63,7 +63,7 @@ def _claude(user: UserConfig) -> dict:
     main = user.provider.name
     if not login_allowed(user.id, user.claude_subscription):  # before any CLI process is started
         return _row(CLAUDE_SUBSCRIPTION, main, available=False, reason="no_own_login")
-    status = cli_status(user.claude_subscription)
+    status = cli_status(resolved_settings(user.id, user.claude_subscription))
     if not status["cli_found"]:
         return _row(CLAUDE_SUBSCRIPTION, main, available=False, reason="cli_missing", detail=status["hint"])
     if status["logged_in"] is None:

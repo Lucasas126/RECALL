@@ -42,12 +42,12 @@ class SecretsFileTests(AdminFixture):
             self.assertEqual(secrets.get_secret("SOME_KEY"), "")
 
     def test_provider_key_resolves_from_the_file(self) -> None:
-        self.secrets_path().write_text(f"ANA_KEY_NAME={LONG}\n", encoding="utf-8")
+        self.secrets_path().write_text(f"USER_A_KEY_NAME={LONG}\n", encoding="utf-8")
         with patch.dict(os.environ):
-            os.environ.pop("ANA_KEY_NAME", None)
-            self.assertEqual(load_agent("ana", "bot").api_key, LONG)
-            os.environ["ANA_KEY_NAME"] = "env-wins"
-            self.assertEqual(load_agent("ana", "bot").api_key, "env-wins")
+            os.environ.pop("USER_A_KEY_NAME", None)
+            self.assertEqual(load_agent("user-a", "bot").api_key, LONG)
+            os.environ["USER_A_KEY_NAME"] = "env-wins"
+            self.assertEqual(load_agent("user-a", "bot").api_key, "env-wins")
 
     def test_set_secret_with_stdin_saves_without_printing_the_value(self) -> None:
         code, out, err = self.run_cli(["set-secret", "MY_NEW_KEY", "--stdin"], stdin=f"{LONG}\n")
@@ -83,12 +83,12 @@ class SecretsFileTests(AdminFixture):
         self.assertFalse(self.secrets_path().exists())
 
     def test_secret_list_shows_names_and_status_but_never_values(self) -> None:
-        self.secrets_path().write_text(f"ANA_KEY_NAME={LONG}\nSTRAY_KEY=stray-value-999\n", encoding="utf-8")
+        self.secrets_path().write_text(f"USER_A_KEY_NAME={LONG}\nSTRAY_KEY=stray-value-999\n", encoding="utf-8")
         with patch.dict(os.environ, {"TAVILY_API_KEY": "tavily-env-value-1"}):
-            os.environ.pop("ANA_KEY_NAME", None)
+            os.environ.pop("USER_A_KEY_NAME", None)
             code, out, err = self.run_cli(["secret", "list"])
         self.assertEqual(code, 0)
-        self.assertRegex(out, r"ANA_KEY_NAME\s+set \(secrets\.env\)")
+        self.assertRegex(out, r"USER_A_KEY_NAME\s+set \(secrets\.env\)")
         self.assertRegex(out, r"TAVILY_API_KEY\s+set \(environment\)")
         self.assertIn("STRAY_KEY", out)
         for value in (LONG, "stray-value-999", "tavily-env-value-1"):

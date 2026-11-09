@@ -8,6 +8,7 @@ import subprocess
 from src.config.models import ClaudeSubscriptionConfig
 from src.providers.claude_subscription import native
 from src.providers.claude_subscription.catalog import parse_version
+from src.providers.claude_subscription.login import command_for
 
 LOGIN_HINT = "Run `claude auth login` on the computer running RECALL, as the account RECALL runs as."
 # the only fields of `claude auth status` passed on; the account e-mail and organization never leave here
@@ -32,7 +33,7 @@ def cli_status(settings: ClaudeSubscriptionConfig, *, timeout: float = 20.0) -> 
         env = native.child_env(dict(os.environ), config_dir=settings.claude_config_dir, telemetry=settings.claude_code_telemetry)
     except native.ClaudeSubscriptionError as exc:
         return status | {"hint": str(exc)}
-    command = native.resolve_command([settings.command] if settings.command else None, env)
+    command = native.resolve_command(command_for(settings), env)
     if command is None:
         return status | {"hint": native.INSTALL_HINT}
     status |= {"cli_found": True, "command": command[0]}

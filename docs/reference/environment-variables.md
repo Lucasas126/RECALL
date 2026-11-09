@@ -17,7 +17,7 @@ environment and, for the normal entry points, from the ignored `.env` file. Exce
 | `RECALL_PUBLIC_URL` | overrides `web.public_url` (links in Telegram dream notifications); process environment only |
 | `RECALL_TELEGRAM_CHAT_IDLE_MINUTES` | overrides `telegram.chat_idle_minutes`: any positive number of minutes, fractions allowed (e.g. `1` to test the idle flow); process environment only |
 | `RECALL_TERMINAL_ALLOW_LOCAL` | `true`/`false` (also `1`/`0`, `yes`/`no`, `on`/`off`): overrides `terminal.allow_local`, the switch that accepts `type: local` terminal backends (commands run on this host); process environment only. An empty value keeps the yaml setting; a value that is not a boolean stops the start-up |
-| `RECALL_CLAUDE_COMMAND` | path of the `claude` executable ([Claude subscription](../user-guide/claude-subscription.md)) |
+| `RECALL_CLAUDE_COMMAND` | absolute path of the `claude` executable (administrator-only; `user.yaml` accepts only a bare name) ([Claude subscription](../user-guide/claude-subscription.md)) |
 | `CLAUDE_CONFIG_DIR` | used by the `claude` CLI itself to choose a login folder; RECALL passes the user's `claude_subscription.claude_config_dir` |
 | `USER_ID`, `AGENT_ID` | which user and agent the terminal client `cli.py` opens (read from `.env`) |
 

@@ -88,11 +88,18 @@ names the variables (never their values). Remove them to use the login.
 1. Install Claude Code (needs Node.js): `npm install -g @anthropic-ai/claude-code`.
    `claude` is looked up on `PATH`, then in the usual install folders
    (`~/.local/bin`, `~/.claude/local`, `~/.npm-global/bin`, ...). Set
-   `claude_subscription.command` (or the `RECALL_CLAUDE_COMMAND` env var) to the
-   executable if it lives elsewhere.
+   `RECALL_CLAUDE_COMMAND` (process environment) or the administrator key
+   `claude_subscription.command` in `settings.yaml` (an absolute path) to the
+   executable if it lives elsewhere. A user's own `user.yaml` `command` accepts
+   only a bare executable name found on `PATH` (no `/`, `\`, or drive letter),
+   so a user file can never run an arbitrary program on the server.
 2. Log in as the account RECALL runs as: `claude auth login`. For a separate login
    folder, run `CLAUDE_CONFIG_DIR=<dir> claude auth login` and set
-   `claude_config_dir: <dir>` below.
+   `claude_config_dir: <dir>` below. The folder must lie inside that user's own
+   config folder (`<config dir>/<user_id>/`; a relative value is relative to it,
+   symlinks are resolved). Any other location, including another user's folder or
+   the server's default login, is refused with `claude_no_own_login`, even for ids
+   listed in `default_login_users`.
    **Docker**: the image already contains the CLI (step 1 is not needed); log each user in inside the container
    with their own account, using a folder under the config volume:
    `docker compose exec -it recall-web sh -c 'CLAUDE_CONFIG_DIR=/app/.config/<user_id>/claude-login claude auth login'`
@@ -111,7 +118,7 @@ provider:
   api_key: OPENROUTER_API_KEY
 claude_subscription:                # every key optional; there is no `enabled` key
   claude_config_dir: null           # optional CLAUDE_CONFIG_DIR of this user's own login; null = the CLI default
-  command: null                     # optional path to the claude executable; null = PATH / usual folders
+  command: null                     # optional bare executable name (no path); null = RECALL_CLAUDE_COMMAND / admin setting / PATH
   claude_code_telemetry: false      # false (default) starts claude with telemetry-off flags
   timeout_seconds: 300              # longest silence from claude before the request fails (10-3600)
 ```

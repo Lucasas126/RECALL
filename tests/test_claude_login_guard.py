@@ -38,11 +38,11 @@ class LoginRuleTests(unittest.TestCase):
         set_default_login_users(self, ["owner"])
         self.assertTrue(login_allowed("owner", ClaudeSubscriptionConfig()))
         self.assertFalse(login_allowed("guest", ClaudeSubscriptionConfig()))
-        self.assertTrue(login_allowed("guest", ClaudeSubscriptionConfig(claude_config_dir="/guest-login")))
+        self.assertTrue(login_allowed("guest", ClaudeSubscriptionConfig(claude_config_dir="claude-login")))
         self.assertFalse(login_allowed(None, ClaudeSubscriptionConfig()))  # fails closed
         set_default_login_users(self, [])
         self.assertFalse(login_allowed("owner", ClaudeSubscriptionConfig()))
-        self.assertTrue(login_allowed("owner", ClaudeSubscriptionConfig(claude_config_dir="/own")))
+        self.assertTrue(login_allowed("owner", ClaudeSubscriptionConfig(claude_config_dir="claude-login")))
 
     def test_the_setting_rejects_unknown_keys_and_blank_ids(self) -> None:
         self.assertEqual(ClaudeLoginSettings().default_login_users, [])
@@ -61,7 +61,7 @@ class PickerStatusTests(unittest.TestCase):
 
     def test_non_allowed_user_sees_the_coded_reason_without_starting_the_cli(self) -> None:
         mocks = isolate_providers(self, claude=CLAUDE_LOGGED_IN, default_login_users=["owner"])
-        owner, guest, own = _user("owner"), _user("guest"), _user("user-b", claude_config_dir="/user-b-login")
+        owner, guest, own = _user("owner"), _user("guest"), _user("user-b", claude_config_dir="claude-login")
         self.assertEqual(self.reasons(owner, guest, own), [(True, None), (False, "no_own_login"), (True, None)])
         self.assertEqual(mocks["claude"].call_count, 2)  # the guest never reached the CLI check
         mocks["claude"].reset_mock()
@@ -70,7 +70,7 @@ class PickerStatusTests(unittest.TestCase):
 
     def test_empty_list_means_nobody_uses_the_default_login(self) -> None:
         isolate_providers(self, claude=CLAUDE_LOGGED_IN, default_login_users=[])
-        self.assertEqual(self.reasons(_user("owner"), _user("user-b", claude_config_dir="/x")),
+        self.assertEqual(self.reasons(_user("owner"), _user("user-b", claude_config_dir="claude-login")),
                          [(False, "no_own_login"), (True, None)])
 
     def test_the_cache_does_not_leak_the_owners_result_to_another_user(self) -> None:
@@ -100,8 +100,8 @@ class RuntimeRefusalTests(unittest.TestCase):
 
     def test_factory_allows_the_owner_and_an_own_folder(self) -> None:
         self.assertIsInstance(claude_subscription_provider(ClaudeSubscriptionConfig(), user_id="owner"), ClaudeSubscriptionProvider)
-        provider = claude_subscription_provider(ClaudeSubscriptionConfig(claude_config_dir="/g"), user_id="guest")
-        self.assertEqual(provider.config_dir, "/g")
+        provider = claude_subscription_provider(ClaudeSubscriptionConfig(claude_config_dir="claude-login"), user_id="guest")
+        self.assertTrue(provider.config_dir.endswith("/guest/claude-login"))
 
     def test_chat_dream_and_associative_route_through_the_same_guard(self) -> None:
         # Agent.provider_named / claude_provider (chat, dream, associative query) all end in named_provider
@@ -109,7 +109,7 @@ class RuntimeRefusalTests(unittest.TestCase):
             named_provider(_resolved("guest"), "claude_subscription", "the model claude_subscription:sonnet")
         self.assertEqual(error_code(caught.exception), "claude_no_own_login")
         self.assertIsInstance(named_provider(_resolved("owner"), "claude_subscription", "x"), ClaudeSubscriptionProvider)
-        self.assertIsInstance(named_provider(_resolved("user-b", claude_config_dir="/s"), "claude_subscription", "x"),
+        self.assertIsInstance(named_provider(_resolved("user-b", claude_config_dir="claude-login"), "claude_subscription", "x"),
                               ClaudeSubscriptionProvider)
 
     def test_routing_without_a_user_id_fails_closed(self) -> None:
@@ -139,7 +139,7 @@ class TelegramAvailabilityTests(unittest.TestCase):
         isolate_providers(self, claude=CLAUDE_LOGGED_IN, ollama=[], default_login_users=["owner"])
         service = ChatService(agent_factory=Mock(), dream=Mock())
         shown: dict[str, list[str]] = {}
-        for user in (_user("owner"), _user("guest"), _user("user-b", claude_config_dir="/s")):
+        for user in (_user("owner"), _user("guest"), _user("user-b", claude_config_dir="claude-login")):
             with patch.object(service, "_user", return_value=user), \
                     patch("src.service.chat.provider_settings.provider_rows",
                           side_effect=lambda u, provider, *a, **k: [{"id": f"{provider}:m", "provider": provider}]):

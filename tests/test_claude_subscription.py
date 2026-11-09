@@ -268,9 +268,11 @@ class ClaudeSubscriptionConfigTests(unittest.TestCase):
     def test_provider_takes_the_advanced_options_and_has_no_enabled_switch(self) -> None:
         with self.assertRaises(ValidationError):
             ClaudeSubscriptionConfig(enabled=True)
-        provider = claude_subscription_provider(ClaudeSubscriptionConfig(claude_config_dir="~/c", command="/opt/claude"),
+        provider = claude_subscription_provider(ClaudeSubscriptionConfig(claude_config_dir="c", command="claude-x"),
                                                 user_id="u")
-        self.assertEqual((provider.config_dir, provider.command, provider.telemetry), ("~/c", ["/opt/claude"], False))
+        from src.config import settings as app_settings
+        self.assertEqual(provider.config_dir, (app_settings.CONFIG_DIR / "u" / "c").resolve().as_posix())
+        self.assertEqual((provider.command, provider.telemetry), (["claude-x"], False))
 
     def test_user_chat_model_accepts_references_but_not_for_embeddings_or_stt(self) -> None:
         self.assertEqual(ModelsConfig(chat="claude_subscription:sonnet").chat, "claude_subscription:sonnet")
@@ -362,9 +364,9 @@ class ClaudeSubscriptionWiringTests(unittest.TestCase):
         from src.agent.agent import model_provider
         from src.providers.openrouter import OpenRouterProvider
         self.assertIsInstance(model_provider(self._config(), "vendor/model"), OpenRouterProvider)
-        provider = model_provider(self._config(claude_config_dir="/x"), "claude_subscription:sonnet")
+        provider = model_provider(self._config(claude_config_dir="x"), "claude_subscription:sonnet")
         self.assertIsInstance(provider, ClaudeSubscriptionProvider)
-        self.assertEqual(provider.config_dir, "/x")
+        self.assertTrue(provider.config_dir.endswith("/u/x"))
 
     def test_agent_switches_providers_by_model_reference(self) -> None:
         from types import SimpleNamespace

@@ -6,10 +6,14 @@ whoever runs the server, so that is allowed only for the user ids listed in sett
 """
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 from src.config import settings
 from src.config.models import ClaudeSubscriptionConfig
 from src.utils.i18n import InputError
 
+_SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 NO_OWN_LOGIN_CODE = "claude_no_own_login"
 NO_OWN_LOGIN_MESSAGE = (
     "Claude subscription models are not available to you: you have no Claude login folder of your own, and the "
@@ -18,11 +22,45 @@ NO_OWN_LOGIN_MESSAGE = (
 )
 
 
+def own_login_dir(user_id: str | None, claude: ClaudeSubscriptionConfig) -> str | None:
+    """The user's login folder resolved, or None when none is configured.
+
+    The folder must lie inside the user's own config folder (`<CONFIG_DIR>/<user_id>/`; a relative path is
+    relative to it), so a user can never point at another user's login or at the server's default one.
+    Raises the coded `claude_no_own_login` error when it resolves anywhere else.
+    """
+    if not claude.claude_config_dir:
+        return None
+    if not user_id or not _SAFE_ID.match(user_id):
+        raise no_own_login()
+    base = (settings.CONFIG_DIR / user_id).resolve()
+    target = (base / Path(claude.claude_config_dir)).resolve()  # an absolute path replaces `base` in the join
+    if target == base or not target.is_relative_to(base):
+        raise no_own_login()
+    return target.as_posix()
+
+
 def login_allowed(user_id: str | None, claude: ClaudeSubscriptionConfig) -> bool:
-    """True when `user_id` has its own login folder or is listed to use the default login."""
+    """True when `user_id` has a login folder inside its own config folder or is listed for the default login."""
     if claude.claude_config_dir:
-        return True
+        try:
+            return own_login_dir(user_id, claude) is not None
+        except InputError:
+            return False
     return bool(user_id) and user_id in settings.CLAUDE_LOGIN.default_login_users
+
+
+def resolved_settings(user_id: str | None, claude: ClaudeSubscriptionConfig) -> ClaudeSubscriptionConfig:
+    """`claude` with its login folder resolved and checked (raises like `require_login`)."""
+    require_login(user_id, claude)
+    folder = own_login_dir(user_id, claude)
+    return claude.model_copy(update={"claude_config_dir": folder}) if folder else claude
+
+
+def command_for(claude: ClaudeSubscriptionConfig) -> list[str] | None:
+    """The executable to run: the user's bare name, else the administrator's absolute path, else the default lookup."""
+    command = claude.command or settings.CLAUDE_LOGIN.command
+    return [command] if command else None
 
 
 def require_login(user_id: str | None, claude: ClaudeSubscriptionConfig) -> None:

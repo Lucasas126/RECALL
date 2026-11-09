@@ -26,7 +26,7 @@ class _Everyone(list):
 
 def set_default_login_users(testcase, users) -> None:
     """Make `users` (a list of ids) the users allowed to use Claude Code's default login for one test."""
-    login = patch("src.config.settings.CLAUDE_LOGIN", SimpleNamespace(default_login_users=users))
+    login = patch("src.config.settings.CLAUDE_LOGIN", SimpleNamespace(default_login_users=users, command=None))
     login.start()
     testcase.addCleanup(login.stop)
 

@@ -9,7 +9,7 @@ from src.config.models import ClaudeSubscriptionConfig
 from src.providers.claude_subscription.native import (
     ClaudeCodeLoggedOut, ClaudeCodeMissing, ClaudeCodeTooOld, ClaudeSubscriptionError,
 )
-from src.providers.claude_subscription.login import require_login
+from src.providers.claude_subscription.login import command_for, resolved_settings
 from src.providers.claude_subscription.provider import ClaudeSubscriptionProvider
 
 __all__ = [
@@ -29,9 +29,9 @@ def claude_subscription_provider(
     Whether the CLI is installed and logged in is checked when it runs: `ClaudeCodeMissing` and
     `ClaudeCodeLoggedOut` (both `ProviderUnavailable`) carry the actionable fix.
     """
-    require_login(user_id, settings)
+    settings = resolved_settings(user_id, settings)
     return ClaudeSubscriptionProvider(
-        command=[settings.command] if settings.command else None,
+        command=command_for(settings),
         config_dir=settings.claude_config_dir,
         telemetry=settings.claude_code_telemetry,
         timeout_seconds=settings.timeout_seconds,
