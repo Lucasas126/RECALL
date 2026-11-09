@@ -277,6 +277,8 @@ class RunAsTheTargetTests(AgentTargetFixture):
 
 
 class RememberTests(AgentTargetFixture):
+    groups = ["delegate", "web", "memory_read", "memory_edit", "self"]  # a remember target keeps only the memory groups its launcher holds
+
     def _tools(self, remember: bool) -> tuple[set[str], str]:
         targets = [REMEMBER if remember else TARGET]
         record = self.finish(self.to_agent(targets=targets))
@@ -371,25 +373,25 @@ class FormRoundTripTests(unittest.TestCase):
             user_dir = root / "config" / "user-a"
             (user_dir / "agents").mkdir(parents=True)
             (user_dir / "user.yaml").write_text(
-                "id: user-a\nname: User A\nprovider: {name: openrouter}\nagents: [orion, nova]\n", encoding="utf-8",
+                "id: user-a\nname: User A\nprovider: {name: openrouter}\nagents: [scout, planner]\n", encoding="utf-8",
             )
-            (user_dir / "agents" / "orion.yaml").write_text("id: orion\nname: Orion\n", encoding="utf-8")
-            (user_dir / "agents" / "nova.yaml").write_text(
-                "id: nova\nname: the assistant\nchat_config:\n  tool_groups: [web, delegate]\n"
+            (user_dir / "agents" / "scout.yaml").write_text("id: scout\nname: Scout\n", encoding="utf-8")
+            (user_dir / "agents" / "planner.yaml").write_text(
+                "id: planner\nname: Planner\nchat_config:\n  tool_groups: [web, delegate]\n"
                 "delegation:\n  enabled: true\n  allowed_groups: [web]\n  max_parallel: 2\n  timeout_seconds: 120\n"
-                "  targets:\n    - {agent: orion, remember: true}\n", encoding="utf-8",
+                "  targets:\n    - {agent: scout, remember: true}\n", encoding="utf-8",
             )
             from src.config.agents import AgentStore
 
             store = AgentStore(root / "config", root / "data")
-            view = store.load("user-a", "nova").model_dump(mode="json")  # GET /api/agents/nova
+            view = store.load("user-a", "planner").model_dump(mode="json")  # GET /api/agents/planner
             view["description"] = "edited in the form"
-            saved = store.update("user-a", "nova", AgentConfig.model_validate(view))  # PUT with that body
-            again = store.load("user-a", "nova")
+            saved = store.update("user-a", "planner", AgentConfig.model_validate(view))  # PUT with that body
+            again = store.load("user-a", "planner")
             self.assertEqual(again.description, "edited in the form")
             self.assertEqual(again.delegation, saved.delegation)
             self.assertEqual((again.delegation.max_parallel, again.delegation.timeout_seconds), (2, 120))
-            self.assertEqual([(t.agent, t.remember) for t in again.delegation.targets], [("orion", True)])
+            self.assertEqual([(t.agent, t.remember) for t in again.delegation.targets], [("scout", True)])
 
 
 class RenameAndDeleteTests(AgentTargetFixture):

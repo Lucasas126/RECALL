@@ -29,7 +29,7 @@ class TaskApprovalTelegramTests(Base):
         self.assertEqual((card.user_id, card.agent_id, card.chat_id), ("test-user", "agent-a", "chat-1"))
 
     async def test_the_attribution_names_a_worker_agent_and_is_absent_for_a_normal_approval(self) -> None:
-        self.assertIn("(Orion)", task_attribution("en", {**TASK, "kind": "agent", "worker": "Orion"}))
+        self.assertIn("(Scout)", task_attribution("en", {**TASK, "kind": "agent", "worker": "Scout"}))
         self.assertEqual(task_attribution("en", None), "")
         plain = {k: v for k, v in DATA.items() if k != "task"}
         self.assertNotIn("wants to run", _approval_text("en", plain))

@@ -37,9 +37,29 @@ def select_tools(tools: list[McpTool], selection: AgentMcpConfig) -> list[McpToo
     ]
 
 
-def build_mcp_tools(manager: McpManager, user_id: str, selections: dict[str, AgentMcpConfig]) -> McpToolset:
-    """Build the tools of every MCP server an agent enables; unavailable servers become notes."""
+class McpToolNameError(ValueError):
+    """Two tools would get the same model-facing name (or one would shadow a built-in tool)."""
+
+
+def build_mcp_tools(
+    manager: McpManager, user_id: str, selections: dict[str, AgentMcpConfig], *,
+    allow: list[str] | None = None, deny: list[str] | None = None,
+    disposable: bool = False, reserved: frozenset[str] | set[str] = frozenset(),
+) -> McpToolset:
+    """Build the tools of every MCP server an agent enables; unavailable servers become notes.
+
+    MCP tools are external and may act on the user's accounts, so a `disposable` chat gets none at all (the
+    whole class is refused, not a list of names). `allow`/`deny` are the agent's own tool lists and apply to the
+    model-facing names (`<server>__<tool>`) exactly as they do to built-in tools. `reserved` are the names of
+    the built-in tools. A name used twice (two tools of one server that sanitize to the same name, or a tool
+    that shadows a built-in one) raises `McpToolNameError` instead of one silently replacing the other.
+    """
     toolset = McpToolset()
+    if disposable:
+        return toolset
+    denied = set(deny or ())
+    allowed = set(allow) if allow is not None else None
+    taken: dict[str, str] = {}
     for server_id, selection in selections.items():
         server = manager.server(server_id)
         try:
@@ -53,6 +73,15 @@ def build_mcp_tools(manager: McpManager, user_id: str, selections: dict[str, Age
             continue
         for tool in tools:
             name = mcp_tool_name(server_id, tool.name)
+            if name in reserved or name in taken:
+                other = "a built-in tool" if name in reserved else f"{taken[name]}"
+                raise McpToolNameError(
+                    f"MCP tool '{tool.name}' of server '{server_id}' would be named '{name}', which is already used by "
+                    f"{other}; rename or disable one of them (tools list in the agent's mcp settings)"
+                )
+            taken[name] = f"'{tool.name}' of server '{server_id}'"
+            if name in denied or (allowed is not None and name not in allowed):
+                continue
             toolset.specs.append({
                 "type": "function",
                 "function": {

@@ -43,6 +43,8 @@ from src.terminal.context import RunContext
 from src.utils.files import NonBlockingFileLock, atomic_write_text, exclusive_file_lock
 from src.utils.logger import get_logger
 
+MEMORY_GROUPS = ("memory_read", "memory_edit", "self")  # a remember target keeps these only if the launching agent holds them
+
 if TYPE_CHECKING:
     from src.service.chat import ChatService
 
@@ -649,8 +651,9 @@ class TaskManager:
                         f"{', '.join(target['backends']) or 'none'}"
                     )
                 self._check_backend_match(parent, target, backends)
-            if target["remember"]:  # it keeps its own memory tools: that is what lets it write its own memory
-                groups = [*groups, *(group for group in ("memory_read", "memory_edit", "self") if group in target["groups"])]
+            if target["remember"]:  # it keeps its own memory tools, but only those the LAUNCHING agent holds itself
+                held = self._agent_groups(user_id, parent.agent_id)
+                groups = [*groups, *(group for group in MEMORY_GROUPS if group in target["groups"] and group in held)]
         if backends:  # a terminal grant: only backends the parent has, and only with the parent's own terminal group
             if bad := [name for name in backends if name not in (grantable_backends or [])]:
                 raise TaskError(
@@ -891,6 +894,14 @@ class TaskManager:
             "id": config.id, "name": config.name, "groups": groups, "backends": backends, "remember": allowed[agent_id],
             "backend_configs": defined,
         }
+
+    def _agent_groups(self, user_id: str, agent_id: str) -> list[str]:
+        """The tool groups an agent holds by its own configuration (empty when it has no tools or cannot be read)."""
+        try:
+            chat = self._service._agent_config(user_id, agent_id).chat_config
+        except Exception:
+            return []
+        return [] if not chat.tools else list(DEFAULT_TOOL_GROUPS if chat.tool_groups is None else chat.tool_groups)
 
     def _check_backend_match(self, parent: RunContext, target: dict, names: list[str]) -> None:
         """A backend name granted to an agent target must mean the same for both agents (workdir and approval mode).
@@ -1608,6 +1619,13 @@ class TaskManager:
         self.check_budget(user_id)
         agent_id, chat_id = record["child"]["agent_id"], record["child"]["chat_id"]
         if (record.get("target") or {}).get("remember"):  # its memory writes are only safe while that agent is otherwise idle
+            held = self._agent_groups(user_id, record["parent"]["agent_id"])
+            granted = [g for g in (record.get("grant") or {}).get("groups") or [] if g in MEMORY_GROUPS]
+            if lost := [g for g in granted if g not in held]:  # the launching agent lost them since: the worker must not keep them
+                raise TaskError(
+                    f"task {record['id']} cannot be continued: its parent agent no longer holds {', '.join(lost)}; "
+                    "start a new task"
+                )
             self._check_idle(user_id, {"id": agent_id})
         conversations = self._service._conversations(user_id, agent_id)
         try:

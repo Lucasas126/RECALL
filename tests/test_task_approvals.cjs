@@ -14,7 +14,7 @@ const task = { id: "abc123", title: "Check the logs", kind: "ephemeral", worker:
 
 test("attribution label of an approval asked by a task", () => {
   assert.equal(context.approvalTaskLabel({ task }), "Task Check the logs (ephemeral) wants to run:");
-  assert.equal(context.approvalTaskLabel({ task: { ...task, kind: "agent", worker: "Orion" } }), "Task Check the logs (Orion) wants to run:");
+  assert.equal(context.approvalTaskLabel({ task: { ...task, kind: "agent", worker: "Scout" } }), "Task Check the logs (Scout) wants to run:");
 });
 
 test("an approval that is not a task's has no label", () => {

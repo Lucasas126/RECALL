@@ -15,7 +15,7 @@ from src.agent import usage
 from src.agent import associative
 from src.agent.profile import AgentProfile, load_profile, system_prompt
 from src.agent.tool_groups import DISPOSABLE_BLOCKED_TOOLS, TOOL_GROUP_TOOLS
-from src.agent.tools import build_tools, chat_folder_options
+from src.agent.tools import TOOL_ORDER, build_tools, chat_folder_options
 from src.agent.toolsets.delegate import delegate_notice, worker_prompt
 from src.agent.toolsets.terminal import terminal_notice
 from src.agent.toolsets.mcp import build_mcp_tools
@@ -178,6 +178,7 @@ class Agent:
         self._tool_specs, self._tool_handlers = list(self._base_tool_specs), dict(self._base_tool_handlers)
         # MCP notes appended to the system prompt; refreshed with the MCP tools at each turn
         self._mcp_notes: list[str] = []
+        self._mcp_tool_names: frozenset[str] = frozenset()  # this turn's MCP tools: a class a disposable chat refuses
         self._max_context = None  # model context window, fetched lazily from the provider
         self.open_chat(chat_id)
         logger.debug(
@@ -378,9 +379,13 @@ class Agent:
         """Rebuild this turn's MCP tools, so connecting or disconnecting a service applies at once."""
         if self._mcp is None or not self.config.tools or not self.config.mcp:
             return
-        toolset = build_mcp_tools(self._mcp, self.config.user_id, self.config.mcp)
+        toolset = build_mcp_tools(
+            self._mcp, self.config.user_id, self.config.mcp, allow=self.config.allow, deny=self.config.deny,
+            disposable=self._disposable, reserved=frozenset(TOOL_ORDER),
+        )
         self._tool_specs = [*self._base_tool_specs, *toolset.specs]
         self._tool_handlers = {**self._base_tool_handlers, **toolset.handlers}
+        self._mcp_tool_names = frozenset(toolset.handlers)
         self._mcp_notes = toolset.notes
         self.messages[0] = {"role": "system", "content": self._system_prompt()}
 
@@ -801,7 +806,7 @@ class Agent:
             yield "tool_start", {"id": call_id, "name": name, "arguments": args}
             handler = self._tool_handlers.get(name)
             failed = False
-            if self._disposable and name in self._blocked_tools():  # defence in depth: the specs already omit these
+            if self._disposable and (name in self._blocked_tools() or name in self._mcp_tool_names):  # defence in depth: the specs already omit these
                 result, failed = f"error: '{name}' is not available in a disposable chat", True
             elif handler is None:
                 result, failed = f"error: unknown tool '{name}'", True

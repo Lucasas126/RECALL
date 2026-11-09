@@ -13,20 +13,20 @@ vm.runInContext(`${names.map(take).join("\n")}\n${names.map((n) => `this.${n} = 
 const f = context;
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
-const agents = [{ id: "nova", name: "Nova" }, { id: "orion", name: "Orion" }, { id: "atlas", name: "" }];
+const agents = [{ id: "planner", name: "Planner" }, { id: "scout", name: "Scout" }, { id: "atlas", name: "" }];
 const saved = {
   enabled: false, allowed_groups: [], max_parallel: 2, timeout_seconds: 120, max_tokens: 50000,
-  targets: [{ agent: "orion", remember: true }, { agent: "gone", remember: false }],
+  targets: [{ agent: "scout", remember: true }, { agent: "gone", remember: false }],
 };
 
 test("target rows list the other agents, mark the saved ones and keep a vanished target visible", () => {
-  const rows = plain(f.delegationTargetRows(agents, "nova", saved));
-  assert.deepEqual(rows.map((row) => row.id), ["orion", "atlas", "gone"]);
-  assert.deepEqual(rows[0], { id: "orion", name: "Orion", allowed: true, remember: true, missing: false });
+  const rows = plain(f.delegationTargetRows(agents, "planner", saved));
+  assert.deepEqual(rows.map((row) => row.id), ["scout", "atlas", "gone"]);
+  assert.deepEqual(rows[0], { id: "scout", name: "Scout", allowed: true, remember: true, missing: false });
   assert.deepEqual(rows[1], { id: "atlas", name: "atlas", allowed: false, remember: false, missing: false });
   assert.deepEqual(rows[2], { id: "gone", name: "gone", allowed: true, remember: false, missing: true });
-  assert.deepEqual(plain(f.delegationTargetRows(agents, "nova", null)).map((row) => row.allowed), [false, false]);
-  assert.deepEqual(plain(f.delegationTargetRows(undefined, "nova", null)), []);
+  assert.deepEqual(plain(f.delegationTargetRows(agents, "planner", null)).map((row) => row.allowed), [false, false]);
+  assert.deepEqual(plain(f.delegationTargetRows(undefined, "planner", null)), []);
 });
 
 test("a saved block comes back unchanged while the delegate group is off", () => {
@@ -38,7 +38,7 @@ test("the form fields round-trip the block: limits, groups, targets and the memo
   const fields = {
     enabled: false, allowedGroups: [], maxParallel: 2, timeout: 120, maxTokens: 50000,
     targets: [
-      { id: "orion", allowed: true, remember: true }, { id: "atlas", allowed: false, remember: true },
+      { id: "scout", allowed: true, remember: true }, { id: "atlas", allowed: false, remember: true },
       { id: "gone", allowed: true, remember: false },
     ],
   };
@@ -54,7 +54,7 @@ test("untouched defaults send nulls for the limits and no targets", () => {
 
 test("an unchecked target is dropped and its memory flag never survives alone", () => {
   const body = plain(f.buildDelegationConfig(saved, true, {
-    enabled: true, allowedGroups: ["web"], targets: [{ id: "orion", allowed: false, remember: true }],
+    enabled: true, allowedGroups: ["web"], targets: [{ id: "scout", allowed: false, remember: true }],
   }));
   assert.deepEqual(body.targets, []);
 });

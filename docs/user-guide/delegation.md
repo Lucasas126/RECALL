@@ -61,7 +61,7 @@ without the group.
 
 ## Handing a task to another agent
 
-A fresh worker is not the only choice: an agent can hand a task to **another agent of the same user** (for example the assistant asking Orion),
+A fresh worker is not the only choice: an agent can hand a task to **another agent of the same user** (for example Planner asking Scout),
 with `task_start(agent="<id>")`. It is opt-in and explicit:
 
 - **Allowlist.** The agent's `delegation.targets` lists the agents it may use; empty (the default) means fresh workers only. Pick them
@@ -78,7 +78,9 @@ with `task_start(agent="<id>")`. It is opt-in and explicit:
   (`remember: true` on that target) the worker chat is a hidden but ordinary chat of the target: Dream may review it, and the target keeps its own
   `memory_read`/`memory_edit`/`self` memory tools (never `soul_edit` or `skill_manage`) and writes to **its own** memory. Because memory
   files are not locked against concurrent edits across chats, such a task is refused while the target is replying in another chat
-  (or already runs another memory-writing task), and the same applies to `task_send` follow-ups.
+  (or already runs another memory-writing task), and the same applies to `task_send` follow-ups. The target gets only those of
+  these memory groups that the **launching** agent holds itself (a launcher without `memory_edit` cannot hand a target write access to memory); `task_send`
+  re-checks this and is refused when the launcher has lost a group the task was granted.
 - **No loops.** Depth stays 1: a task never launches tasks. An agent cannot delegate to itself, and `A -> B` is refused while `B` is
   waiting on a task that `A` is running. Per-user and per-chat limits still apply, and the target may be busy in another chat (each chat has its own worker).
 

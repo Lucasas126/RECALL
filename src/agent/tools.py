@@ -28,6 +28,8 @@ _ORDER = (
     "task_start", "task_list", "task_result", "task_steer", "task_send", "task_stop", "task_wait",
 )
 
+TOOL_ORDER = _ORDER  # every built-in tool name; MCP tools must not reuse one
+
 
 def chat_folder_options(config: ResolvedAgent) -> dict:
     """Registry options for a chat: every folder is registered; the folder tool groups decide access."""

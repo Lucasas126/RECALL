@@ -66,12 +66,12 @@ test("a card of a running task offers stop, steer and (with a worker chat) open"
 
 test("a finished task shows its result and no stop or steer; an agent target is named", () => {
   const record = {
-    id: "abc123", title: "T", status: "done", target: { kind: "agent", agent_id: "orion" }, elapsed_s: 90,
+    id: "abc123", title: "T", status: "done", target: { kind: "agent", agent_id: "scout" }, elapsed_s: 90,
     started_at: "2026-11-05T10:00:00+01:00", result_preview: "all good", child: { chat_id: "c1" },
   };
   const view = plain(context.taskCardState(record, started, Date.now()));
   assert.equal(view.elapsed, "1m 30s");
-  assert.equal(view.target, "orion");
+  assert.equal(view.target, "scout");
   assert.equal(view.ephemeral, false);
   assert.equal(view.result, "all good");
   assert.deepEqual([view.canStop, view.canSteer, view.final], [false, false, true]);
