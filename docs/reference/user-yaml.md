@@ -12,9 +12,22 @@ Agent files are described in [agent.yaml](agent-yaml.md); framework-wide values 
 | `mcp/<server_id>/` | the user's MCP credentials, see [MCP servers](../user-guide/mcp.md) |
 | `agents.lock`, `preferences.lock` | coordination files for atomic writes; never delete them between requests |
 
-Keys of `user.yaml`: `id`, `name`, `password_hash` (optional), `language`, `require_zdr`, `provider`, `embeddings_provider`
+Keys of `user.yaml`: `id`, `name`, `password_hash` (optional), `language`, `require_zdr`, `max_level`, `provider`, `embeddings_provider`
 (optional, falls back to `provider`), `agents`, `models`, `openrouter`, `ollama`, `claude_subscription` and `terminal_backends`. Unknown keys inside
 the provider blocks are rejected.
+
+## max_level (permission levels)
+
+`max_level` is the highest [permission level](../architecture/permissions.md) the user may give their agents: `minimal`, `reader`,
+`assistant`, `collaborator`, `operator` or `admin` (lowercase in the file; any case is accepted as input). **Only an administrator
+sets it**, with the [admin CLI](../user-guide/admin-cli.md) (`user set --user U --set max_level=operator`, `create-user --max-level`).
+The web API and the Settings dialog never read or write it, so a user cannot raise their own ceiling.
+
+When the key is missing, the effective value is `admin` if the installation has exactly one user and `collaborator` otherwise, and
+the first load of that user logs one warning that names `python -m src.admin migrate-levels` (writes the value for every user and
+agent) and `user set --set max_level=...`. A declared agent `level` above this value is an error (the agent is not loaded, nor saved
+by the API or the CLI); `user set` refuses a `max_level` below the declared level of one of the user's agents. Step 1 of the
+design only stores and validates the levels; nothing is filtered by them yet.
 
 ## storage layout
 
@@ -260,11 +273,12 @@ Instead of hand-editing, run inside the container (or `python -m src.admin ...` 
 
 ```bash
 docker compose exec -it recall-web python -m src.admin create-user <user_id> [--name N] [--language en] \
-    [--api-key-env VAR] [--claude-login] [--generate]
+    [--api-key-env VAR] [--claude-login] [--generate] [--max-level LEVEL]
 docker compose exec -it recall-web python -m src.admin set-password <user_id> [--generate]
 ```
 
-`create-user` writes a valid `user.yaml` with the default `models`, `agents: []`, an Argon2 `password_hash` and
+`create-user` writes a valid `user.yaml` with the default `models`, `agents: []`, `max_level` (`--max-level`; default `admin` for the first
+user of the installation and `collaborator` for the others), an Argon2 `password_hash` and
 `provider.api_key` set to the variable NAME (`OPENROUTER_API_KEY` by default; the key is never asked for or
 stored). `--claude-login` sets `claude_subscription.claude_config_dir` to `<config dir>/<user_id>/claude-login`.
 The password is typed twice (hidden) or generated (`--generate`, 24 characters, printed once); passwords shorter
@@ -304,6 +318,7 @@ name: User A
 password_hash: "$argon2id$..."          # web login; create it with `python -m src.admin set-password <user_id>`
 language: en
 require_zdr: false                      # optional; true requires zero-data-retention routes everywhere
+max_level: collaborator                 # highest permission level of this user's agents; set only by an administrator
 provider:
   name: openrouter                      # main provider: openrouter or ollama
   api_key: OPENROUTER_USER_A_API_KEY   # env var NAME holding the key; omit for ollama

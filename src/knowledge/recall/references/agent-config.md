@@ -1,16 +1,16 @@
 # Configuration fields
 
-Unknown keys are rejected in the agent yaml and in most blocks (except `chat_config`, which tolerates extras). The user edits these files or the Agents tab. An agent with the `terminal` group and a local backend (the setup guide) changes them with `python -m src.admin` (`references/admin-cli.md`); any other agent cannot. Keys use dotted names below.
+Unknown keys are rejected in the agent yaml and most blocks (not in `chat_config`). The user edits these files or uses the Agents tab. Only an agent with the `terminal` group and a local backend (the setup guide) changes them with `python -m src.admin` (`references/admin-cli.md`). Keys use dotted names below.
 
 ## When a change takes effect
 
 | Change | Applies |
 | --- | --- |
 | Agent yaml saved from the Agents tab | next message (cached runtime is rebuilt); refused with 409 while a reply is active or queued |
-| Agent yaml edited by hand or with `python -m src.admin agent set` (another process) | next message: the services compare the file with what the cached runtime was built from and rebuild it between replies; an INVALID file keeps the last good config (error logged, notice in the chat) |
+| Agent yaml edited by hand or with `python -m src.admin agent set` (another process) | next message: the file is compared with what the cached runtime was built from and rebuilt between replies; an INVALID file keeps the last good config (error logged, notice in the chat) |
 | `user.yaml` (`user set`, by hand) | same: next message |
 | `settings.yaml`, `.env`, `RECALL_*` variables | restart web and Telegram |
-| a key stored with `python -m src.admin set-secret` | next message (see `references/admin-cli.md`) |
+| a key stored with `set-secret` | next message (`references/admin-cli.md`) |
 | SOUL, memories, skills (yours or the user's edits) | new chats; a running chat keeps its prompt |
 | `chat_config.recall_knowledge` | prompt is built per chat: new chats |
 
@@ -20,16 +20,17 @@ Unknown keys are rejected in the agent yaml and in most blocks (except `chat_con
 | --- | --- |
 | `id` | `[A-Za-z0-9_-]{1,64}`, names the data folder |
 | `name` | 1-100 chars; the DISPLAY NAME shown in the web UI and Telegram. Separate from the SOUL: when renaming an agent update both (`soul_edit` and `agent set --set name="New"`). The `id` is the folder/URL and normally stays |
-| `description` | 0-500 chars; shown in the agent list; read by the Telegram orchestrator, not by you |
+| `description` | 0-500 chars; shown in the agent list and read by the Telegram orchestrator |
 | `chat_config` | block below |
 | `dream` | block below |
 | `folders` | up to 20 user folders |
 | `terminal` | block below; needed by the `terminal` tool group |
 | `delegation` | block below; the `delegate` tool group, which gets the defaults when this is omitted |
+| `level` | `minimal`, `reader`, `assistant`, `collaborator`, `operator` or `admin`; at most the owner's `max_level`. Unset = the lowest level covering its tools; saving without it keeps the stored one. Not enforced yet |
 
 ### `chat_config` (Agents tab: Basic, Basic > Advanced and Tools)
 
-Basic holds Identity (name, description, personality) and Model and reasoning (`model`, `reasoning_effort`, `reasoning`, `keep_reasoning_in_memory`, `reasoning_tokens`); the collapsed Advanced section holds `stream`, `has_memory`, `recall_knowledge`, `associative_memory`, `associative_execution` and `conversation_messages_retained`. Every setting row shows its default and a reset button (the defaults come from `GET /api/agents/defaults`).
+Basic holds Identity (name, description, personality) and Model and reasoning (`model`, `reasoning_effort`, `reasoning`, `keep_reasoning_in_memory`, `reasoning_tokens`); the collapsed Advanced section holds `stream`, `has_memory`, `recall_knowledge`, `associative_memory`, `associative_execution` and `conversation_messages_retained`. Rows show their default (from `GET /api/agents/defaults`) and a reset button.
 
 | Field | Meaning (default) |
 | --- | --- |
@@ -112,9 +113,10 @@ MCP entry fields: `tools` (list; omitted means all of the server's tools), `read
 | `models` | defaults `chat`, `stt`, `embeddings` |
 | `openrouter`, `ollama`, `claude_subscription` | provider options |
 | `terminal_backends` | named machines agents may use |
+| `max_level` | highest agent `level`; only an admin sets it (`user set`). Unset: `admin` for a sole user, else `collaborator` |
 
-Provider options: `ollama.host`; `claude_subscription` takes `claude_config_dir` (must resolve inside the user's own config folder), `command` (a bare executable name only; absolute paths are admin-only via `settings.yaml` or `RECALL_CLAUDE_COMMAND`), `claude_code_telemetry`, `timeout_seconds`; `openrouter.api_key` is an env var NAME.
+Provider options: `ollama.host`; `claude_subscription` takes `claude_config_dir` (inside the user's own config folder), `command` (a bare executable name; absolute paths are admin-only via `settings.yaml` or `RECALL_CLAUDE_COMMAND`), `claude_code_telemetry`, `timeout_seconds`; `openrouter.api_key` is an env var NAME.
 
 Backends (`terminal_backends.<name>`): `type` is `ssh` (`host`, `port`, `user`, `key_file`, `known_hosts_file`) or `local` (`workdir`; refused unless `terminal.allow_local` in `settings.yaml`); both take `description`.
 
-Preferences (`preferences.json`, Settings dialog and Telegram `/settings`) are separate from the yaml and apply from the next read. The Settings dialog has sections General (thinking, theme, accent colour and architecture ornaments under Appearance (both browser-only, applied at once), language, default agent for new chats), Models (default LLM and speech-to-text), Chats & memory (associative matches, disposable days), Telegram (orchestrator, core agent) and Connections; each row shows its default and a reset button, and a reset stores nothing (null), so the setting follows the default again.
+Preferences (`preferences.json`, Settings dialog and Telegram `/settings`) are separate from the yaml and apply from the next read. The Settings dialog has General (thinking, theme, accent colour and ornaments, language, default agent), Models (default LLM and speech-to-text), Chats & memory (associative matches, disposable days), Telegram (orchestrator, core agent) and Connections; a row's reset button stores nothing (null), so the setting follows the default again.

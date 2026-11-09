@@ -22,6 +22,7 @@ from src.agent.dream import DEFAULT_DREAM_PROMPT
 from src.agent.default_soul import default_soul
 from src.config.agents import AgentStore
 from src.config.errors import describe_config_error
+from src.config.levels import check_agent_level, effective_agent_level
 from src.config.favorites import ModelFavorites
 from src.config.loader import agent_default_model, load_agent, load_agent_config, load_user, user_models
 from src.config.model_refs import CLAUDE_SUBSCRIPTION, OPENROUTER, PROVIDERS, is_claude_subscription, model_name, provider_of
@@ -408,6 +409,7 @@ class ChatService:
             "language": user.language,
             "provider": user.provider.name,
             "require_zdr": user.require_zdr,
+            "max_level": self._agents.max_level(user).label,  # read-only: only an administrator changes it
             "agents": self.list_agents(user_id),
             # names, types and descriptions only, to choose backends in the agent form; never hosts, users or key paths
             "terminal_backends": [
@@ -523,7 +525,9 @@ class ChatService:
 
     def _agent_view(self, user_id: str, config: AgentConfig) -> dict:
         """An agent's config as the API shows it (the personality is SOUL.md, served by the soul routes)."""
-        return config.model_dump(mode="json")
+        view = config.model_dump(mode="json")
+        view["level"] = effective_agent_level(config, self._user(user_id)).label  # declared, else what its config needs
+        return view
 
     def _check_agent_model(self, user: UserConfig, config: AgentConfig, current: str | None) -> AgentConfig:
         """Validate a new or changed agent default model (provider usable, model offered, ZDR policy).
@@ -544,6 +548,7 @@ class ChatService:
         self._check_mcp(config)
         self._check_folders(config.folders)
         self._check_delegation_targets(user, config)
+        self._agents._check_level(user, config)
         config = self._check_agent_model(user, config, None)
         created = self._agents.create(user_id, config)
         files = self._agent_files(user_id, created.id)
@@ -558,7 +563,11 @@ class ChatService:
         self._check_folders(config.folders)
         previously_indexed = {f.name for f in self._agent_config(user_id, agent_id).folders if f.indexed}
         self._check_delegation_targets(user, config)
-        config = self._check_agent_model(user, config, self._agent_config(user_id, agent_id).chat_config.model)
+        stored = self._agent_config(user_id, agent_id)
+        if config.level is None:  # a payload without `level` (the web form) keeps the stored one
+            config = config.model_copy(update={"level": stored.level})
+        self._agents._check_level(user, config)
+        config = self._check_agent_model(user, config, stored.chat_config.model)
         slot = self._slot(user_id, agent_id)
         with slot.state:
             if slot.active or slot.pending:
@@ -619,8 +628,8 @@ class ChatService:
     def _config_error_on_disk(self, user_id: str, agent_id: str) -> str | None:
         """None when the user and agent files on disk load fine now, else a readable, secret-free reason."""
         try:
-            load_user(user_id)
-            load_agent_config(user_id, agent_id)
+            user = load_user(user_id)
+            check_agent_level(load_agent_config(user_id, agent_id), user, self._agents.max_level(user))
         except FileNotFoundError:
             return None  # deleted: the rebuild reports it
         except Exception as exc:

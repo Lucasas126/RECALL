@@ -61,6 +61,7 @@ terminal:                            # required by the `terminal` tool group (se
   default_backend: sandbox           # one of the keys above; required when more than one, used when a call names no backend
   timeout_seconds: 60                # default command timeout, 1-600 (capped by settings.yaml terminal.max_timeout_seconds)
   max_output_chars: 20000            # output returned to the model, 500-200000 (capped by settings.yaml)
+level: collaborator                  # optional permission level (minimal|reader|assistant|collaborator|operator|admin); at most the owner's max_level
 delegation:                          # the `delegate` tool group (see the delegation guide); optional, defaults apply when the group is selected
   enabled: true                      # false removes `task_start` without removing the group
   allowed_groups: [web]              # groups a task may be granted; only `web` is grantable (never memory, folders, terminal, mcp, delegate)
@@ -102,11 +103,23 @@ with its memories and skills next to it; see [dream mode](../user-guide/dream.md
 layout and the prompt assembly. when `tool_groups` is omitted, the default is
 `[memory_read, memory_edit, web, self]`; folder groups are always explicit.
 
+## level
+
+`level` is a top-level field (never under `chat_config`, which accepts unknown keys). It is optional and must not exceed the owner's
+[`max_level`](user-yaml.md#max_level-permission-levels): such an agent is invalid when loaded and is refused by the web API
+(HTTP 400, code `level_exceeds_max`) and by the admin CLI. Without it the agent's effective level is the lowest level that covers
+its configuration (tool groups, terminal backends, MCP servers, delegation targets; see
+[permissions](../architecture/permissions.md#levels-and-services)). An agent with no declared level whose configuration needs more
+than the owner's `max_level` only logs a warning and shows up in `agent check`; it is not blocked yet (a later step enforces it).
+
+Saving an agent without `level` (the current web form) keeps the stored level; changing it needs a new value, and removing it means
+editing the file. `python -m src.admin migrate-levels` writes the computed level into agents that lack one.
+
 ## loading
 
-`load_agent(user_id, agent_id?)` reads `user.yaml` and the agent file, resolves the provider key from the environment, and returns a `ResolvedAgent` (used to build the `Agent` and its `SourceRegistry`). if `agent_id` is omitted, the user's first agent is used.
+`load_agent(user_id, agent_id?)` reads `user.yaml` and the agent file, resolves the provider key from the environment and the effective `level` / `max_level`, and returns a `ResolvedAgent` (used to build the `Agent` and its `SourceRegistry`). if `agent_id` is omitted, the user's first agent is used.
 
-checks today: the agent belongs to the user, and the provider key env var (if configured) is set.
+checks today: the agent belongs to the user, the provider key env var (if configured) is set, and a declared `level` does not exceed the owner's `max_level`.
 
 planned: a `defaults.yaml < user.yaml < agent.yaml` merge, resource/folder
 references, and a `ConfigStore` with a channel→user index for routing incoming

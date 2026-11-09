@@ -8,6 +8,7 @@ from pathlib import Path
 import yaml
 from pydantic import ValidationError
 
+from src.config.levels import check_agent_level, installation_user_count, effective_user_level
 from src.config.models import AgentConfig, UserConfig
 from src.utils.files import atomic_write_text, exclusive_file_lock
 from src.utils.i18n import UserMessageError
@@ -113,6 +114,7 @@ class AgentStore:
     def create(self, user_id: str, config: AgentConfig) -> AgentConfig:
         with self._locked(user_id):
             user = self._read_user(user_id)
+            self._check_level(user, config)
             self._ensure_free(user_id, config.id, user)
             path = self._agents_dir(user_id) / f"{config.id}.yaml"
             if path.exists():
@@ -129,6 +131,9 @@ class AgentStore:
         with self._locked(user_id):
             user = self._read_user(user_id)
             old_path = self.path_for(user_id, agent_id)
+            if config.level is None:  # callers that do not know the field (the web form) must not drop the stored level
+                config = config.model_copy(update={"level": self._read(old_path).level})
+            self._check_level(user, config)
             renamed = config.id != agent_id
             new_path = old_path
             if renamed:
@@ -195,6 +200,14 @@ class AgentStore:
     def _agent_files(self, user_id: str) -> list[Path]:
         agents_dir = self._agents_dir(user_id)
         return sorted(agents_dir.glob("*.yaml")) if agents_dir.is_dir() else []
+
+    def max_level(self, user: UserConfig, *, warn: bool = True):
+        """The owner's effective `max_level` (declared, else resolved from the installation's user count)."""
+        return effective_user_level(user, installation_user_count(self.config_dir), warn=warn)
+
+    def _check_level(self, user: UserConfig, config: AgentConfig) -> None:
+        """Raise LevelExceedsMax for a declared level above the owner's max_level; an undeclared one only warns."""
+        check_agent_level(config, user, self.max_level(user))
 
     def _ensure_free(self, user_id: str, agent_id: str, user: UserConfig) -> None:
         if agent_id in user.agents or self._is_defined(user_id, agent_id):

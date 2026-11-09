@@ -790,6 +790,7 @@ _SPANISH = {
     "Can write its own memory": "Puede escribir su propia memoria",
     "the application's limit": "el límite de la aplicación",
     "none": "ninguno",
+    "The level '{level}' of agent '{agent_id}' is above your maximum level '{max_level}'. Choose '{max_level}' or lower, or ask an administrator to raise your maximum.": "El nivel '{level}' del agente '{agent_id}' supera tu nivel máximo '{max_level}'. Elige '{max_level}' o uno inferior, o pide a un administrador que suba tu máximo.",
     "delegation.targets lists agents that are not yours: {agents}. Targets must be other agents of this user.": "delegation.targets incluye agentes que no son tuyos: {agents}. Los destinos deben ser otros agentes de este usuario.",
     # subagents (cross-process)
     "status: queued": "estado: en cola",

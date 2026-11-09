@@ -8,7 +8,7 @@ plus an optional `"code"` (see [error codes](#error-codes)).
 
 | area | routes |
 | --- | --- |
-| session | `POST /api/login`, `POST /api/logout`, `GET /api/me` (the profile and agents, plus `terminal_backends`: `[{"name", "type", "description"}]` sorted by name, the user's terminal backends for the agent form; never hosts, users or key paths), `GET /api/localization?language=en\|es`, `GET /api/version` (public: `{"version": "0.1.0", "build": null}`; `version` comes from `pyproject.toml`, `build` is the first 7 characters of `RECALL_BUILD` or `null`) |
+| session | `POST /api/login`, `POST /api/logout`, `GET /api/me` (the profile and agents, plus the user's effective `max_level` (read-only, [permission levels](../architecture/permissions.md)) and `terminal_backends`: `[{"name", "type", "description"}]` sorted by name, the user's terminal backends for the agent form; never hosts, users or key paths), `GET /api/localization?language=en\|es`, `GET /api/version` (public: `{"version": "0.1.0", "build": null}`; `version` comes from `pyproject.toml`, `build` is the first 7 characters of `RECALL_BUILD` or `null`) |
 | preferences | `GET`/`PATCH /api/preferences` ([details](user-yaml.md#preferences-api), including the Telegram orchestrator's `default_agent_id`, `orchestrator` / `core_agent_id` and the read-only `orchestrator_default`; the response also carries a read-only `limits` object `{soul_chars, memory_chars, user_chars}` from the `memory_limits` block of settings.yaml and a read-only `defaults` object with the effective defaults and number bounds), `GET /api/speech-to-text/models` |
 | models | `GET /api/providers/status`, `GET /api/models/catalog`, `GET /api/models`, `GET`/`POST /api/models/favorites`, `DELETE /api/models/favorites/<model_id>` ([models and providers](../user-guide/models-and-providers.md)) |
 | agents | `GET`/`POST /api/agents`, `GET`/`PUT`/`DELETE /api/agents/<agent_id>`, `GET /api/tool-groups`, `GET /api/agents/<agent_id>/index`, `POST /api/agents/<agent_id>/index/reindex` (table below) |
@@ -58,6 +58,7 @@ message. Errors render as a dismissable card (`role="alert"`) in the transcript,
 | `rate_limited` | the upstream provider answered 429 | Choose another model |
 | `agent_busy` | the agent or chat still has active/queued replies (also when converting a chat to or from disposable) | none (wait) |
 | `mcp_not_connected` | an MCP tool needs an account the user has not connected | Open Settings |
+| `level_exceeds_max` | an agent's `level` is above the user's `max_level` (HTTP 400, on `POST`/`PUT /api/agents`) | none (choose a lower level) |
 
 New codes are set with `UserMessageError(..., code="...")` or a class-level `code`.
 
@@ -70,17 +71,23 @@ New codes are set with `UserMessageError(..., code="...")` or a class-level `cod
 | `GET` | `/api/mcp/<server_id>/tools` | tools of a server the user has connected (`409` when not connected) |
 | `POST` | `/api/mcp/<server_id>/connect` | starts the server's sign-in for the user; returns the status and sign-in URL |
 | `DELETE` | `/api/mcp/<server_id>/connection` | stops the user's server and deletes their stored credentials |
-| `GET` | `/api/agents` | full configuration of each agent the user owns, including `chat_config.tool_groups` |
+| `GET` | `/api/agents` | full configuration of each agent the user owns, including `chat_config.tool_groups` and `level`, its effective permission level: the declared one, else the lowest level covering its configuration |
 | `GET` | `/api/agents/defaults` | defaults and bounds of the agent form fields, generated from the configuration models: `{chat_config, dream, terminal}`, each field `{default, min, max}` (`null` where the model has no default or bound), e.g. `dream.max_steps` `{default: 60, min: 1, max: 500}`, `chat_config.conversation_messages_retained` `{default: 30, min: 1, max: null}` |
 | `POST` | `/api/agents` | creates `agents/<id>.yaml` and appends the id to `agents` in `user.yaml` (`201`) |
-| `GET` | `/api/agents/<agent_id>` | one agent's configuration |
-| `PUT` | `/api/agents/<agent_id>` | replaces the agent; the body `id` may differ, which renames it |
+| `GET` | `/api/agents/<agent_id>` | one agent's configuration, with the effective `level` |
+| `PUT` | `/api/agents/<agent_id>` | replaces the agent; the body `id` may differ, which renames it. A body without `level` keeps the stored level |
 | `DELETE` | `/api/agents/<agent_id>` | removes the agent from `user.yaml` and deletes its file (`204`) |
 | `GET` | `/api/agents/<agent_id>/index` | memory index status: `sources`, `files`, `chats`, `chunks`, `last_reconcile`, `folders_reconciled_at`, `rebuilding`, `busy`, `model`, `error` |
 | `POST` | `/api/agents/<agent_id>/index/reindex` | queues a reconcile of every source, folders included (`202`); body `{"full": true}` drops the index and rebuilds it |
 
 The rules these routes follow (ids, renames, deletion, locks, `409` while replies run) are in
 [managing agents](../user-guide/agents.md#managing-agents).
+
+**Permission levels.** `POST`/`PUT /api/agents` accept an optional top-level `level` (`minimal`, `reader`, `assistant`, `collaborator`,
+`operator`, `admin`; any case, always returned lowercase). One above the user's `max_level` is refused with HTTP 400 and code
+`level_exceeds_max`; an unknown name is a `422`. A `PUT` without `level` keeps the stored one. Reads always return the effective
+`level`. The user's `max_level` is only exposed by `POST /api/login` and `GET /api/me`; no route accepts or changes it (it is not an
+agent field and `PATCH /api/preferences` rejects it with `422`): only an administrator sets it, with the admin CLI.
 
 ## Disposable chats
 

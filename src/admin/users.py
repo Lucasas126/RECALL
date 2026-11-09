@@ -1,7 +1,8 @@
 """Administrator command: create RECALL users and set their web password.
 
     python -m src.admin create-user <user_id> [--name N] [--language en] [--api-key-env VAR]
-                                    [--claude-login] [--generate]
+                                    [--claude-login] [--generate] [--max-level LEVEL]
+    python -m src.admin migrate-levels [--dry-run]                             (src/admin/levels.py)
     python -m src.admin set-password <user_id> [--generate]
     python -m src.admin route-test "message text" --user <user_id> [--force]
     python -m src.admin terminal-test --user <user_id> --backend <name>
@@ -26,6 +27,7 @@ from pathlib import Path
 
 import yaml
 
+from src.config.levels import LEVEL_NAMES, Level, installation_user_count, parse_level
 from src.config.loader import load_user
 from src.config.models import ModelsConfig
 from src.config.settings import CONFIG_DIR, TERMINAL
@@ -98,7 +100,7 @@ def _user_file(user_id: str) -> Path:
 
 def create_user(
     user_id: str, *, name: str | None = None, language: str = "en", api_key_env: str = DEFAULT_API_KEY_ENV,
-    claude_login: bool = False, generate: bool = False,
+    claude_login: bool = False, generate: bool = False, max_level: str | None = None,
 ) -> dict:
     """Create `<CONFIG_DIR>/<user_id>/user.yaml`; returns what the caller needs to print."""
     path = _user_file(user_id)
@@ -108,6 +110,12 @@ def create_user(
         raise AdminError("Invalid language: use a code such as 'en' or 'es'.")
     if not _ENV_NAME_RE.match(api_key_env):
         raise AdminError("--api-key-env takes the NAME of an environment variable, never the key itself.")
+    try:
+        level = parse_level(max_level) if max_level is not None else None
+    except ValueError as exc:
+        raise AdminError(f"Invalid --max-level: {exc}") from exc
+    if level is None:  # the first user of an installation is its administrator; later ones start as collaborators
+        level = Level.ADMIN if installation_user_count(CONFIG_DIR) == 0 else Level.COLLABORATOR
     hashed, generated = _hash_new_password(generate)
     login_dir = (CONFIG_DIR / user_id / "claude-login").resolve()
     models = ModelsConfig()
@@ -116,6 +124,7 @@ def create_user(
         "name": name or user_id,
         "password_hash": hashed,
         "language": language,
+        "max_level": level.label,
         "provider": {"name": "openrouter", "api_key": api_key_env},
         "models": {"chat": models.chat, "stt": models.stt, "embeddings": models.embeddings},
         "agents": [],
@@ -131,7 +140,10 @@ def create_user(
     except Exception as exc:  # never leave a user file that the app cannot load
         path.unlink(missing_ok=True)
         raise AdminError(f"The generated user.yaml is not valid, nothing was kept: {exc}") from exc
-    return {"user_id": user_id, "generated": generated, "login_dir": login_dir.as_posix() if claude_login else None}
+    return {
+        "user_id": user_id, "generated": generated, "max_level": level.label,
+        "login_dir": login_dir.as_posix() if claude_login else None,
+    }
 
 
 def set_password(user_id: str, *, generate: bool = False) -> str | None:
@@ -165,6 +177,9 @@ def _build_parser() -> argparse.ArgumentParser:
     create.add_argument("--claude-login", action="store_true",
                         help="give the user their own Claude login folder under the config dir")
     create.add_argument("--generate", action="store_true", help="generate a strong password and print it once")
+    create.add_argument("--max-level", default=None, metavar="LEVEL",
+                        help=f"highest permission level the user's agents may have: {', '.join(LEVEL_NAMES)} "
+                             "(default: admin for the first user of the installation, collaborator for the others)")
     setp = sub.add_parser("set-password", help="replace a user's web password (other keys are kept)")
     setp.add_argument("user_id")
     setp.add_argument("--generate", action="store_true", help="generate a strong password and print it once")
@@ -185,6 +200,9 @@ def _build_parser() -> argparse.ArgumentParser:
     from src.admin import tasks as task_commands  # lazy too: it imports this module
 
     task_commands.add_parsers(sub)
+    from src.admin import levels as level_commands  # lazy too
+
+    level_commands.add_parsers(sub)
     secret_set = sub.add_parser(
         "set-secret", help="store a credential in .config/secrets.env (hidden prompt or --stdin; never an argument)",
     )
@@ -290,6 +308,10 @@ def main(argv: list[str] | None = None) -> int:
         from src.admin import tasks as task_commands
 
         return task_commands.run(args)
+    if args.command == "migrate-levels":
+        from src.admin import levels as level_commands
+
+        return level_commands.run(args)
     if args.command in ("set-secret", "secret"):
         from src.admin import credentials
 
@@ -306,10 +328,10 @@ def main(argv: list[str] | None = None) -> int:
             env_name = args.api_key_env or _ask_api_key_env()
             result = create_user(
                 args.user_id, name=args.name, language=args.language, api_key_env=env_name,
-                claude_login=args.claude_login, generate=args.generate,
+                claude_login=args.claude_login, generate=args.generate, max_level=args.max_level,
             )
             _print_generated(args.user_id, result["generated"])
-            print(f"Created {_user_file(args.user_id)}\n\nNext steps:")
+            print(f"Created {_user_file(args.user_id)} (max_level: {result['max_level']})\n\nNext steps:")
             print(f"  1. Put the key in .env under the name {env_name} (this command never stores keys).")
             print(f"  2. Telegram (optional): add `<telegram_id>={args.user_id}` to TELEGRAM_ALLOWED_USERS in .env "
                   "(comma-separated); .env is never edited for you.")

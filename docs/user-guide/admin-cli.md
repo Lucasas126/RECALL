@@ -10,20 +10,35 @@ from the repository root. Agents with a `local` terminal backend run it the same
 
 | command | purpose |
 | --- | --- |
-| `create-user`, `set-password` | create a user / replace the web password (hidden prompt or `--generate`); see [user.yaml](../reference/user-yaml.md#creating-users-administrator) |
+| `create-user [--max-level L]`, `set-password` | create a user / replace the web password (hidden prompt or `--generate`); `--max-level` sets the [permission ceiling](../reference/user-yaml.md#max_level-permission-levels) (default `admin` for the first user, else `collaborator`); see [user.yaml](../reference/user-yaml.md#creating-users-administrator) |
+| `migrate-levels [--dry-run]` | [permission levels](#permission-levels): write the missing `max_level` of users and `level` of agents |
 | `agent list --user U` | the user's agents |
 | `agent show --user U --agent A` | the agent yaml as the loader sees it |
-| `agent create --user U --id A [--name N] [--from-template default\|guide] [--set path=value ...]` | create an agent (same checks as the web UI) |
-| `agent set --user U --agent A --set path=value [--set ...]` | change an agent's settings |
+| `agent create --user U --id A [--name N] [--from-template default\|guide] [--level L] [--set path=value ...]` | create an agent (same checks as the web UI); `--level` is the same as `--set level=L` |
+| `agent set --user U --agent A [--level L] --set path=value [--set ...]` | change an agent's settings; other settings keep a stored `level` |
 | `agent rename --user U --agent A --new-id B [--name N]` | change the id and move the data folder, like the web UI |
 | `agent delete --user U --agent A --yes` | delete the configuration (the data folder stays) |
-| `agent check [--user U]` | load everything with the real loader; `OK` or the precise errors, exit code 1 on error |
+| `agent check [--user U]` | load everything with the real loader; prints each agent's effective level, then `OK` or the precise errors (exit code 1 on error); warns about agents whose configuration needs more than the owner's `max_level` and about users without one |
 | `user show --user U` | `user.yaml` with key variable names; never the password hash |
 | `user set --user U --set path=value` | non-secret fields (`name`, `language`, `models.*`, `provider.name`, `provider.api_key` = a variable NAME, `terminal_backends.*`, ...) |
 | `set-secret NAME [--stdin]` | store a credential in `.config/secrets.env` |
 | `secret list` | credential names and whether they are set, never values |
 | `task run --user U --agent A --goal "..." [--context C] [--instructions I] [--notify AGENT:CHAT] [--wait]` | start an **unattended** [task](delegation.md#limits) with no parent chat (the entry point future scheduled jobs will use; for testing). It prints `task: <id>`; with `--wait` it blocks and prints the status, tokens and result. Without `--instructions` the task runs as agent `A` itself (its own SOUL, web tools and its own terminal; memory read-only); with them an ephemeral worker runs on `A`'s model. Manual and dangerous terminal actions are denied, `smart` normal ones run. The same limits and the daily token budget apply. `--notify` delivers the result to that chat as a wake; otherwise it only stays in the web Tasks panel. The task runs inside the command, so without `--wait` it stops when the command exits |
 | `terminal-test`, `route-test` | connection check of a backend / Telegram routing preview |
+
+## Permission levels
+
+`max_level` (user) and `level` (agent) take `minimal`, `reader`, `assistant`, `collaborator`, `operator` or `admin`
+(see [permissions](../architecture/permissions.md)). Only this CLI changes a user's `max_level`:
+`user set --user U --set max_level=operator`. A declared agent `level` above it is refused by `agent create|set` (and by the web), and
+`user set` refuses a `max_level` below the declared level of one of the user's agents (lower those first).
+
+`migrate-levels [--dry-run]` is idempotent. For every user without `max_level` it writes the effective value (`admin` when the
+installation has one user, else `collaborator`). For every agent without a `level` it writes the lowest level covering its
+configuration, unless that is above the owner's `max_level`: the agent is left untouched and a line
+`conflict: user=U agent=A required=L max_level=M` is printed. It then prints a summary table. Conflicts are reported, not fatal: the
+exit code is 0 (it is 1 only for a file that cannot be read or written). Resolve a conflict by raising the user's `max_level`,
+reducing the agent's tools or setting its `level` by hand. Files are edited by appending one top-level line, so comments survive.
 
 ## Setting values
 

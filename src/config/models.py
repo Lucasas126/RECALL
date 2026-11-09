@@ -6,6 +6,7 @@ from typing import Annotated, Literal, Optional, Union
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from src.agent.tool_groups import validate_tool_groups
+from src.config.levels import LevelField
 from src.config.zdr import ensure_zdr_compatible
 from src.config.model_refs import (
     CAPABILITIES, CLAUDE_SUBSCRIPTION, MAIN_PROVIDERS, OPENROUTER, prefix_of, validate_reference,
@@ -410,10 +411,12 @@ class AgentTerminalConfig(BaseModel):
     @classmethod
     def _no_dream_terminal(cls, data: object) -> object:
         if isinstance(data, dict) and "allow_in_dream" in data:
-            raise ValueError(
-                "terminal.allow_in_dream was removed: dream sessions have no terminal; delete the key "
-                "(read-only sandbox variants for dreams are planned)"
-            )
+            if data["allow_in_dream"]:
+                raise ValueError(
+                    "terminal.allow_in_dream was removed: dream sessions have no terminal; delete the key "
+                    "(read-only sandbox variants for dreams are planned)"
+                )
+            data = {key: value for key, value in data.items() if key != "allow_in_dream"}  # old files saved `false`
         return data
 
     @model_validator(mode="after")
@@ -539,11 +542,17 @@ class UserConfig(BaseModel):
     models: ModelsConfig = Field(default_factory=ModelsConfig)
     openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
+    # effective permission levels (declared or resolved at load); None only when built by hand
+    level: Optional[LevelField] = None
+    max_level: Optional[LevelField] = None
     claude_subscription: ClaudeSubscriptionConfig = Field(default_factory=ClaudeSubscriptionConfig)
     # sandboxes the user's agents may run commands in, by name (see docs/user-guide/terminal.md)
     terminal_backends: dict[Annotated[str, StringConstraints(pattern=_BACKEND_NAME)], TerminalBackendConfig] = Field(
         default_factory=dict,
     )
+    # highest level the user's agents may have; set only by an administrator (see config/levels.py). None = not
+    # declared yet: `effective_user_level` resolves it at load.
+    max_level: Optional[LevelField] = None
 
     def openrouter_settings(self) -> OpenRouterConfig:
         """OpenRouter settings with the key env var actually used (`provider.api_key` when it is main)."""
@@ -683,6 +692,8 @@ class AgentConfig(BaseModel):
     folders: list[FolderConfig] = Field(default_factory=list, max_length=20)  # user folders, each a source
     terminal: Optional[AgentTerminalConfig] = None  # required by the `terminal` tool group
     delegation: Optional[AgentDelegationConfig] = None  # the `delegate` tool group; defaults when the group is selected
+    # permission level, at most the owner's max_level; None = not declared (the lowest level covering the config applies)
+    level: Optional[LevelField] = None
 
     @model_validator(mode="after")
     def _delegate_group_has_a_block(self) -> "AgentConfig":
@@ -752,3 +763,6 @@ class ResolvedAgent(BaseModel):
     claude_subscription: ClaudeSubscriptionConfig = Field(default_factory=ClaudeSubscriptionConfig)
     openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)  # key env var already resolved for a main OpenRouter
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
+    # effective permission levels (declared or resolved at load); None only when built by hand
+    level: Optional[LevelField] = None
+    max_level: Optional[LevelField] = None

@@ -2,11 +2,11 @@
 
     python -m src.admin agent list --user U
     python -m src.admin agent show --user U --agent A
-    python -m src.admin agent create --user U --id A [--name N] [--from-template default|guide] [--set path=value ...]
-    python -m src.admin agent set --user U --agent A --set path=value [--set ...]
+    python -m src.admin agent create --user U --id A [--name N] [--from-template default|guide] [--level L] [--set path=value ...]
+    python -m src.admin agent set --user U --agent A [--level L] --set path=value [--set ...]
     python -m src.admin agent rename --user U --agent A --new-id B [--name N]
     python -m src.admin agent delete --user U --agent A --yes
-    python -m src.admin agent check [--user U]
+    python -m src.admin agent check [--user U]      (prints each agent's effective level)
     python -m src.admin user show --user U
     python -m src.admin user set --user U --set path=value [--set ...]
 
@@ -30,6 +30,7 @@ from src.admin.users import AdminError, _ENV_NAME_RE, check_user_id
 from src.agent import templates as agent_templates
 from src.config.agents import AgentConfigError, AgentStore
 from src.config.errors import describe_config_error
+from src.config.levels import Level, effective_agent_level, installation_user_count, effective_user_level, required_level
 from src.config.loader import agent_default_model, load_agent_config, load_user
 from src.config.models import AgentConfig, UserConfig
 from src.config.secrets import is_set
@@ -42,6 +43,10 @@ from src.utils.i18n import InputError, error_message
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _PROTECTED_USER_PATHS = {"password_hash": "use `set-password` (the hash is never shown or set here)",
                          "id": "the user id cannot change", "agents": "use the `agent` commands to change the agent list"}
+
+
+class _Refused(AdminError):
+    """A change that is well formed but refused; retrying the values as raw text cannot help."""
 
 
 class _IndentDumper(yaml.SafeDumper):
@@ -133,6 +138,8 @@ def apply_validated(data: dict, assignments: list[str], model, validate):
     value is not a string (a value like `a: b` that YAML turned into a map), and uses the first retry that validates."""
     try:
         return validate(apply_assignments(data, assignments, model))
+    except _Refused:
+        raise
     except AdminError as first:
         candidates = []
         for i, item in enumerate(assignments):
@@ -183,7 +190,10 @@ def _validate_agent(data: dict) -> AgentConfig:
 
 
 def _agent_data(service, user_id: str, agent_id: str) -> dict:
-    return service.get_agent(user_id, agent_id)
+    data = service.get_agent(user_id, agent_id)
+    if load_agent_config(user_id, agent_id).level is None:
+        data.pop("level", None)  # the view shows the effective level; only a declared one is written back
+    return data
 
 
 def _clean(config: AgentConfig) -> dict:
@@ -202,7 +212,8 @@ def agent_list(service, user_id: str) -> int:
     for row in rows:
         chat = row.get("chat_config") or {}
         groups = chat.get("tool_groups")
-        print(f"{row['id']}  name={row['name']!r}  model={chat.get('model') or '(user default)'}  "
+        print(f"{row['id']}  name={row['name']!r}  level={row.get('level')}  "
+              f"model={chat.get('model') or '(user default)'}  "
               f"tool_groups={','.join(groups) if groups is not None else '(defaults)'}")
     return 0
 
@@ -234,9 +245,11 @@ def _ensure_guide_backend(user_id: str, name: str, definition: dict) -> bool:
 
 def _write_validated_user(path: Path, previous: str, raw: dict) -> None:
     try:
-        UserConfig.model_validate(raw)
+        model = UserConfig.model_validate(raw)
     except ValidationError as exc:
         raise AdminError("user.yaml would be invalid, nothing was written: " + describe_config_error(exc)) from exc
+    if model.max_level is not None:
+        raw["max_level"] = model.max_level.label  # canonical lowercase, whatever case was typed
     atomic_write_text(path, dump_yaml(raw))
     try:
         load_user(path.parent.name)
@@ -327,8 +340,10 @@ def _user_ids() -> list[str]:
     return [d.name for d in sorted(CONFIG_DIR.iterdir()) if _ID_RE.match(d.name) and (d / "user.yaml").is_file()]
 
 
-def check_user(user_id: str) -> tuple[list[str], list[str], int]:
-    """(errors, warnings, agent count) for one user, loading everything through the real loader."""
+def check_user(user_id: str, levels: list[str] | None = None) -> tuple[list[str], list[str], int]:
+    """(errors, warnings, agent count) for one user, loading everything through the real loader.
+
+    When `levels` is given, one line per agent with its effective level is appended to it."""
     errors: list[str] = []
     warnings: list[str] = []
     try:
@@ -336,6 +351,10 @@ def check_user(user_id: str) -> tuple[list[str], list[str], int]:
     except Exception as exc:
         return [f"{user_id}/user.yaml: {describe_config_error(exc)}"], warnings, 0
     store = _store()
+    max_level = store.max_level(user, warn=False)  # reported below as a check warning
+    if user.max_level is None:
+        warnings.append(f"{user_id}/user.yaml: no max_level; using {max_level.label}. Run `python -m src.admin "
+                        "migrate-levels` or `user set --set max_level=...`")
     agents_dir = CONFIG_DIR / user_id / "agents"
     listed = set(user.agents)
     if len(listed) != len(user.agents):
@@ -365,6 +384,21 @@ def check_user(user_id: str) -> tuple[list[str], list[str], int]:
             agent_default_model(user, config)
         except Exception as exc:
             errors.append(f"{user_id}/{agent_id}: {describe_config_error(exc)}")
+        needed = required_level(config, user.terminal_backends)
+        if config.level is not None:
+            if config.level > max_level:
+                errors.append(f"{user_id}/{agent_id}: level {config.level.label} is above the user's max_level "
+                              f"{max_level.label}")
+            elif config.level < needed:
+                warnings.append(f"{user_id}/{agent_id}: level {config.level.label} is below what its configuration "
+                                f"needs ({needed.label}); a later release will restrict it")
+        elif needed > max_level:
+            warnings.append(f"{user_id}/{agent_id}: no level, and its configuration needs {needed.label}, above the "
+                            f"user's max_level {max_level.label}; a later release will enforce this")
+        if levels is not None:
+            source = "declared" if config.level is not None else f"computed, needs {needed.label}"
+            levels.append(f"level: {user_id}/{agent_id} = {effective_agent_level(config, user).label} ({source}); "
+                          f"max_level of {user_id}: {max_level.label}")
         groups = config.chat_config.tool_groups or []
         for target in (config.delegation.targets if config.delegation is not None else []):
             if target.agent not in user.agents:
@@ -394,11 +428,14 @@ def agent_check(user_id: str | None) -> int:
     errors: list[str] = []
     warnings: list[str] = []
     agent_count = 0
+    levels: list[str] = []
     for uid in users:
-        e, w, n = check_user(uid)
+        e, w, n = check_user(uid, levels)
         errors += e
         warnings += w
         agent_count += n
+    for line in levels:
+        print(line)
     for line in warnings:
         print(f"warning: {line}")
     if errors:
@@ -427,6 +464,29 @@ def user_show(user_id: str) -> int:
     return 0
 
 
+def _check_agents_fit_max_level(user_id: str, updated_user: dict) -> None:
+    """Refuse a max_level below the declared level of one of the user's agents (it would stop loading)."""
+    try:
+        model = UserConfig.model_validate(updated_user)
+    except ValidationError:
+        return  # reported by the validation that follows
+    new_max = effective_user_level(model, installation_user_count(CONFIG_DIR))
+    store = _store()
+    too_high = []
+    for path in store._agent_files(user_id):
+        try:
+            config = store._read(path)
+        except Exception:
+            continue
+        if config.level is not None and config.level > new_max:
+            too_high.append(f"{config.id} ({config.level.label})")
+    if too_high:
+        raise _Refused(
+            f"max_level {new_max.label} is below the declared level of: {', '.join(too_high)}. "
+            "Lower those agents first (`agent set --level ...`), then lower the maximum. Nothing was written."
+        )
+
+
 def user_set(user_id: str, assignments: list[str]) -> int:
     _require_user(user_id)
     if not assignments:
@@ -442,7 +502,11 @@ def user_set(user_id: str, assignments: list[str]) -> int:
     with exclusive_file_lock(_user_dir(user_id) / "agents.lock"):
         text = path.read_text(encoding="utf-8")
         raw = yaml.safe_load(text) or {}
-        apply_validated(raw, assignments, UserConfig, lambda updated: _write_validated_user(path, text, updated))
+        def write(updated: dict) -> None:
+            _check_agents_fit_max_level(user_id, updated)
+            _write_validated_user(path, text, updated)
+
+        apply_validated(raw, assignments, UserConfig, write)
     print(f"Updated user '{user_id}': {', '.join(_paths(assignments))}. Comments in user.yaml are not kept. "
           "Applies on the next message.")
     return 0
@@ -469,9 +533,11 @@ def add_parsers(sub) -> None:
     create.add_argument("--from-template", default="default", help="default (plain agent) or guide (setup guide)")
     create.add_argument("--set", action="append", default=[], metavar="PATH=VALUE", dest="sets",
                         help="extra setting, dotted path = YAML value (repeatable)")
+    create.add_argument("--level", help="permission level of the agent (at most the user's max_level)")
     setp = with_user(asub.add_parser("set", help="change settings of an existing agent"), True)
     setp.add_argument("--set", action="append", default=[], metavar="PATH=VALUE", dest="sets",
                       help="dotted path = YAML value, e.g. chat_config.tool_groups=[memory_read,web] (repeatable)")
+    setp.add_argument("--level", help="permission level of the agent (at most the user's max_level)")
     rename = with_user(asub.add_parser("rename", help="change an agent id (moves its data folder) and/or name"), True)
     rename.add_argument("--new-id", required=True, help="the new agent id")
     rename.add_argument("--name", help="also set a new display name")
@@ -499,6 +565,8 @@ def run(args, service=None) -> int:
         if command == "check":
             return agent_check(args.user)
         service = service or _make_service()
+        if command in ("create", "set") and getattr(args, "level", None):
+            args.sets = [*args.sets, f"level={args.level}"]  # same validation as `--set level=...`
         if command == "list":
             return agent_list(service, args.user)
         if command == "show":
