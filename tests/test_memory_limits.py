@@ -66,7 +66,7 @@ class AppLimitsAreUsedTests(unittest.TestCase):
 
     def test_prompt_counters_follow_settings(self) -> None:
         self.files.write_memory_text("memory", "Likes tea")
-        self.files.write_memory_text("user", "Ana")
+        self.files.write_memory_text("user", "User A")
         with _limits(memory_chars=300, user_chars=400):
             prompt = system_prompt(load_profile(self.sources))
             self.assertEqual(AgentProfile().limits.memory_chars, 300)

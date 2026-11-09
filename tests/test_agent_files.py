@@ -124,11 +124,11 @@ class MemoryToolTests(AgentFilesFixture):
 
     def test_tool_writes_entries_with_the_section_separator(self) -> None:
         memory = self.memory()
-        self.assertIn("saved user", memory(target="user", action="add", content="Name: Ana"))
+        self.assertIn("saved user", memory(target="user", action="add", content="Name: User A"))
         memory(target="user", action="add", content="Prefers Spanish")
         text = (self.agent_dir / "memories" / "USER.md").read_text(encoding="utf-8")
-        self.assertEqual(text, "Name: Ana\n§\nPrefers Spanish")
-        self.assertEqual(self.files.memory_entries("user"), ["Name: Ana", "Prefers Spanish"])
+        self.assertEqual(text, "Name: User A\n§\nPrefers Spanish")
+        self.assertEqual(self.files.memory_entries("user"), ["Name: User A", "Prefers Spanish"])
 
     def test_char_limit_is_checked_on_the_final_result_and_reports_entries(self) -> None:
         memory = self.memory(100)
@@ -190,7 +190,7 @@ class SkillToolTests(AgentFilesFixture):
 class PromptAssemblyTests(AgentFilesFixture):
     def test_order_is_soul_memories_skills_questions_then_extra_blocks(self) -> None:
         self.files.write_memory_text("memory", "Use metric units")
-        self.files.write_memory_text("user", "Name: Ana")
+        self.files.write_memory_text("user", "Name: User A")
         self.files.write_skill("weekly-plan", SKILL)
         self.sources.mind_palace().write(
             "questions.md", "# Questions\n- [x] answered one\n- first?\n  - why: curious\n- [ ] second?\n- third?\n- fourth?\n",
@@ -200,7 +200,7 @@ class PromptAssemblyTests(AgentFilesFixture):
         self.assertEqual(profile.questions, ["first?", "second?", "third?"])
         prompt = system_prompt(profile, ["## Connected services (MCP)\n\nnotes"])
         positions = [prompt.index(part) for part in (
-            "I am the soul.", "Use metric units", "Name: Ana", "weekly-plan: Plan the user's week",
+            "I am the soul.", "Use metric units", "Name: User A", "weekly-plan: Plan the user's week",
             "Ask at most one", "- first?", "## Connected services",
         )]
         self.assertEqual(positions, sorted(positions))
@@ -224,13 +224,13 @@ class PromptAssemblyTests(AgentFilesFixture):
 
         first = build()
         self.assertIn("memory", first._tool_handlers)
-        self.assertEqual(first._tool_handlers["memory"](target="user", action="add", content="Name: Ana").split(":")[0], "saved user")
-        self.assertNotIn("Name: Ana", first.messages[0]["content"])
+        self.assertEqual(first._tool_handlers["memory"](target="user", action="add", content="Name: User A").split(":")[0], "saved user")
+        self.assertNotIn("Name: User A", first.messages[0]["content"])
         first.open_chat(first.chat_id)
-        self.assertNotIn("Name: Ana", first.messages[0]["content"])
+        self.assertNotIn("Name: User A", first.messages[0]["content"])
         second = build()
         self.assertTrue(second.messages[0]["content"].startswith("I am the soul."))
-        self.assertIn("Name: Ana", second.messages[0]["content"])
+        self.assertIn("Name: User A", second.messages[0]["content"])
 
     def test_empty_profile_is_only_the_soul(self) -> None:
         self.assertEqual(system_prompt(AgentProfile(soul="Hi")), "Hi")
@@ -340,7 +340,7 @@ class FolderTests(AgentFilesFixture):
             chat_folder_options(_config(folders=self.folders, tool_groups=["folders_edit"]))["folders_writable"], True,
         )
         self.assertFalse(chat_folder_options(_config(folders=self.folders, tool_groups=["folders_edit"], tools=False))["folders_readable"])
-        dream = dream_folder_options(_config(folders=self.folders, dream=DreamConfig(tools=["folders"])))
+        dream = dream_folder_options(_config(folders=self.folders, dream=DreamConfig(tools=["folders"]), tool_groups=["folders_read"]))
         self.assertEqual(dream, {"folders": self.folders, "folders_readable": True, "folders_writable": False})
         self.assertFalse(dream_folder_options(_config(folders=self.folders, dream=DreamConfig(tools=["web"])))["folders_readable"])
 

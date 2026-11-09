@@ -79,12 +79,21 @@ def build_edit_tools(agent: Agent) -> list[Callable[..., str]]:
     def move(
         memory_path: Annotated[str, "the current 'source:path' address"],
         new_path: Annotated[str, "the new 'source:path' address"],
+        overwrite: Annotated[bool, "replace the destination when it already exists (default false)"] = False,
     ) -> str:
-        """Move or rename a memory from one address to another. Use it to reorganize your mind palace."""
+        """Move or rename a memory from one address to another. Use it to reorganize your mind palace.
+        It refuses to replace an existing destination unless overwrite is true."""
         if error := readonly_error(sources, memory_path) or readonly_error(sources, new_path):
             return error
         source, rel = sources.resolve(memory_path)
+        target, target_rel = sources.resolve(new_path)
         with locked():
+            if source.resolve(rel) == target.resolve(target_rel):
+                return f"error: {new_path} is the same file as {memory_path}; nothing to move"
+            if not source.resolve(rel).is_file():
+                return f"error: {memory_path} is not a file"
+            if target.exists(target_rel) and not overwrite:
+                return f"error: {new_path} already exists; pass overwrite=true to replace it"
             content = source.read(rel)
             destination = sources.write(new_path, content)
             source.delete(rel)

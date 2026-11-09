@@ -56,7 +56,7 @@ def build_memory_tools(agent: Agent) -> list[Callable[..., str]]:
         It embeds your query into a vector and returns the chunks whose embeddings are
         closest, so matching is by meaning, not exact words. For best results query with
         the key concepts/entities (keywords or a short noun phrase), not a full
-        conversational sentence or question. E.g. use 'user-a home city favorite color'
+        conversational sentence or question. E.g. use 'user home city favorite color'
         instead of 'where does the user live and what is their favorite color?'.
         Run several focused queries rather than one long one when you need different facts."""
         # the current chat is already in context: searching it would only echo the conversation back

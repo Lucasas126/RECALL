@@ -28,10 +28,10 @@ class IndexApiTests(unittest.TestCase):
         self.root = Path(directory.name)
         self.config_dir = self.root / "config"
         self.data_dir = self.root / "data"
-        agents = self.config_dir / "ana" / "agents"
+        agents = self.config_dir / "user-a" / "agents"
         agents.mkdir(parents=True)
-        (self.config_dir / "ana" / "user.yaml").write_text(
-            f"id: ana\nname: Ana\nprovider: {{name: ollama}}\nagents: [aria]\npassword_hash: '{TEST_PASSWORD_HASH}'\n",
+        (self.config_dir / "user-a" / "user.yaml").write_text(
+            f"id: user-a\nname: User A\nprovider: {{name: ollama}}\nagents: [aria]\npassword_hash: '{TEST_PASSWORD_HASH}'\n",
             encoding="utf-8",
         )
         self.notes = self.root / "notes"
@@ -48,9 +48,9 @@ class IndexApiTests(unittest.TestCase):
             patcher = patch(target, self.data_dir)
             patcher.start()
             self.addCleanup(patcher.stop)
-        SourceRegistry.for_agent("ana", "aria").mind_palace().write("pets.md", "# Pets\nLuna the cat.\n")
+        SourceRegistry.for_agent("user-a", "aria").mind_palace().write("pets.md", "# Pets\nLuna the cat.\n")
         self.embeddings = FakeEmbeddings()
-        self.index_path = self.data_dir / "ana" / "aria" / ".index"
+        self.index_path = self.data_dir / "user-a" / "aria" / ".index"
         self.addCleanup(close_index, self.index_path)
 
         def index_factory(config: ResolvedAgent, sources: SourceRegistry) -> VectorIndex:
@@ -64,7 +64,7 @@ class IndexApiTests(unittest.TestCase):
         self.client = TestClient(create_app(self.service))
         self.client.__enter__()
         self.addCleanup(self.client.__exit__, None, None, None)
-        login(self.client, "ana")
+        login(self.client, "user-a")
         self.base = "/api/agents/aria"
 
     def test_status_and_reindex(self) -> None:
@@ -74,7 +74,7 @@ class IndexApiTests(unittest.TestCase):
         self.assertEqual(set(status.json()["sources"]), {"mind_palace", "conversations", "agent", "notes"})
         queued = self.client.post(f"{self.base}/index/reindex")
         self.assertEqual(queued.status_code, 202, queued.text)
-        self.assertTrue(VectorIndex(self.index_path, SourceRegistry.for_agent("ana", "aria"), self.embeddings, "x").wait(20))
+        self.assertTrue(VectorIndex(self.index_path, SourceRegistry.for_agent("user-a", "aria"), self.embeddings, "x").wait(20))
         done = self.client.get(f"{self.base}/index").json()
         self.assertEqual(done["files"], 2)  # mind_palace:pets.md and notes:Plan.md
         self.assertGreaterEqual(done["chunks"], 2)
@@ -106,7 +106,7 @@ class IndexApiTests(unittest.TestCase):
             **agent, "folders": [{"name": "notes", "path": str(self.notes), "indexed": False, "read_only": True}],
         })
         self.assertEqual(saved.status_code, 200, saved.text)
-        stored = yaml.safe_load((self.config_dir / "ana" / "agents" / "aria.yaml").read_text(encoding="utf-8"))
+        stored = yaml.safe_load((self.config_dir / "user-a" / "agents" / "aria.yaml").read_text(encoding="utf-8"))
         self.assertEqual(stored["folders"], [{"name": "notes", "path": str(self.notes), "indexed": False, "read_only": True}])
         self.assertNotIn("notes", self.client.get(f"{self.base}/index").json()["sources"])
 

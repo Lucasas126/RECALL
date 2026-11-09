@@ -9,7 +9,7 @@ from src.core.sources.base import Source
 from src.config.settings import DATA_DIR
 from src.core.sources.conversations import ConversationsSource
 from src.core.sources.dream import DreamStateSource
-from src.core.sources.folders import FolderSource
+from src.core.sources.folders import FolderSource, folder_path_problem
 from src.core.sources.mind_palace import MindPalaceSource
 from src.utils.logger import get_logger
 
@@ -19,8 +19,10 @@ logger = get_logger("sources")
 class SourceRegistry:
     """Per-agent access point to the data plane: address resolution + typed accessors."""
 
-    def __init__(self, sources: dict[str, Source]):
+    def __init__(self, sources: dict[str, Source], *, unavailable_folders: frozenset[str] = frozenset()):
         self._sources = sources
+        # configured folders that are temporarily missing: their indexed chunks are kept, unlike removed folders
+        self.unavailable_folders = unavailable_folders
 
     @classmethod
     def for_agent(
@@ -39,6 +41,7 @@ class SourceRegistry:
             "agent": AgentFilesSource(base),
             "dream": DreamStateSource(base / "dream"),
         }
+        unavailable: set[str] = set()
         for folder in folders:
             if folder.name in sources:
                 raise ValueError(f"folder name {folder.name!r} clashes with another source")
@@ -49,13 +52,19 @@ class SourceRegistry:
                     "folder %r of %s/%s not found at %s; skipped until it is available",
                     folder.name, user_id, agent_id, folder.path,
                 )
+                unavailable.add(folder.name)
+                continue
+            if problem := folder_path_problem(folder.path):
+                logger.warning(
+                    "folder %r of %s/%s at %s skipped: %s", folder.name, user_id, agent_id, folder.path, problem,
+                )
                 continue
             sources[folder.name] = FolderSource(
                 folder.name, Path(folder.path), readable=folders_readable or folders_writable,
                 writable=folders_writable and not folder.read_only, indexed=folder.indexed,
             )
         logger.debug("registry for %s/%s -> %s", user_id, agent_id, list(sources))
-        return cls(sources)
+        return cls(sources, unavailable_folders=frozenset(unavailable))
 
     # ------------------------------------------------------------------ access
 
@@ -67,6 +76,10 @@ class SourceRegistry:
     def names(self) -> list[str]:
         """Names of the sources the agent's tools can read."""
         return [name for name, source in self._sources.items() if source.readable]
+
+    def source_names(self) -> list[str]:
+        """Every registered source, readable or not."""
+        return list(self._sources)
 
     def has(self, name: str) -> bool:
         return name in self._sources

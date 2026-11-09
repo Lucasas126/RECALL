@@ -262,6 +262,12 @@ class _Store:
             (address, source, mtime, size, md5, chunks),
         )
 
+    def file_sources(self) -> list[str]:
+        return [row[0] for row in self._db.execute("SELECT DISTINCT source FROM files")]
+
+    def forget_source(self, source: str) -> None:
+        self._db.execute("DELETE FROM files WHERE source = ?", (source,))
+
     def forget_file(self, address: str) -> None:
         self._db.execute("DELETE FROM files WHERE address = ?", (address,))
 
@@ -487,7 +493,7 @@ class VectorIndex:
             res = store.collection.query(
                 query_embeddings=[vector],
                 n_results=min(top_k, count),
-                where={"chat": {"$ne": exclude_chat}} if exclude_chat else None,
+                where=self._query_filter(exclude_chat),
                 include=["documents", "distances", "metadatas"],
             )
         out: list[dict] = []
@@ -501,6 +507,19 @@ class VectorIndex:
                 "score": round(1.0 - dist, 4),
             })
         return out
+
+    def _query_filter(self, exclude_chat: str | None) -> dict:
+        """Chunks the caller may see: own sources, and folders that are readable (and indexed) right now."""
+        readable = [
+            source.name for source in self._registry.indexed_sources()
+            if not isinstance(source, FolderSource) or source.readable
+        ]
+        own = [name for name in self._registry.source_names() if name not in {f.name for f in self._registry.folders()}]
+        allowed = sorted({*readable, *own})
+        by_source: dict = {"source": {"$in": allowed}}
+        if not exclude_chat:
+            return by_source
+        return {"$and": [by_source, {"chat": {"$ne": exclude_chat}}]}
 
     # ------------------------------------------------------------------ status
 
@@ -560,8 +579,26 @@ class VectorIndex:
             store.set_meta("rebuild_folders", "1" if self._indexed_folders() else None)
             store.set_meta("folders_reconciled_at_epoch", None)
 
+    def _purge_stale_folders(self) -> None:
+        """Drop the chunks of folders no longer configured, no longer indexed, or refused as unsafe.
+
+        A configured folder that is only missing for now (unmounted drive) keeps its chunks.
+        """
+        keep = {source.name for source in self._indexed_folders()} | set(self._registry.unavailable_folders)
+        own = set(self._registry.source_names()) - {f.name for f in self._registry.folders()}
+        with self._store.writing(), self._store.session() as store:
+            stale = [name for name in store.file_sources() if name not in own and name not in keep]
+            if not stale or store.identity != self.identity:
+                return
+            for name in stale:
+                logger.info("dropping the indexed chunks of folder %r: it is no longer an indexed folder", name)
+                store.collection.delete(where={"source": name})
+                store.forget_source(name)
+            store.bump()
+
     def _reconcile_own(self) -> None:
         self._ensure_identity()
+        self._purge_stale_folders()
         for source in self._registry.indexed_sources():
             if isinstance(source, FolderSource):
                 continue
