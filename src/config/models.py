@@ -410,10 +410,12 @@ class AgentTerminalConfig(BaseModel):
     @classmethod
     def _no_dream_terminal(cls, data: object) -> object:
         if isinstance(data, dict) and "allow_in_dream" in data:
-            raise ValueError(
-                "terminal.allow_in_dream was removed: dream sessions have no terminal; delete the key "
-                "(read-only sandbox variants for dreams are planned)"
-            )
+            if data["allow_in_dream"]:
+                raise ValueError(
+                    "terminal.allow_in_dream was removed: dream sessions have no terminal; delete the key "
+                    "(read-only sandbox variants for dreams are planned)"
+                )
+            data = {key: value for key, value in data.items() if key != "allow_in_dream"}  # old files saved `false`
         return data
 
     @model_validator(mode="after")
