@@ -1,12 +1,12 @@
-id: johndoe
+id: user-a
 # require_zdr: true  # optional: only use zero-data-retention routes (OpenRouter); off by default. See docs/user-guide/models-and-providers.md
 # password_hash: "$argon2id$..."
 models:
   chat: openai/gpt-4o-mini
   stt: openai/whisper-large-v3-turbo
   embeddings: openai/text-embedding-3-small
-name: johndoe
+name: user-a
 provider:
   name: openrouter
-  api_key: OPENROUTER_JOHNDOE_API_KEY
+  api_key: OPENROUTER_USER_A_API_KEY
 agents: [example_agent]

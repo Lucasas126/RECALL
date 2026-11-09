@@ -41,7 +41,7 @@ def agent_defaults() -> dict[str, dict[str, dict[str, Any]]]:
             "enabled", "every_hours", "daily_at", "model", "reasoning_effort", "max_steps", "max_tokens",
             "max_minutes", "notify_telegram",
         )),
-        "terminal": _specs(AgentTerminalConfig, ("timeout_seconds", "max_output_chars", "allow_in_dream")),
+        "terminal": _specs(AgentTerminalConfig, ("timeout_seconds", "max_output_chars")),
         "delegation": _specs(AgentDelegationConfig, ("enabled", "max_parallel", "timeout_seconds", "max_tokens")),
         "subagents": _specs(SubagentSettings, ("daily_token_budget",)),
     }

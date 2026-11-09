@@ -89,7 +89,7 @@ ollama:
   host: null                      # null = OLLAMA_HOST, else http://localhost:11434 (also for a main Ollama)
 claude_subscription:      # advanced options only, see claude-subscription.md
   claude_config_dir: null
-  command: null
+  command: null           # bare executable name only (no path separators); absolute paths are admin-only
   claude_code_telemetry: false
   timeout_seconds: 300
 ```
@@ -97,6 +97,8 @@ claude_subscription:      # advanced options only, see claude-subscription.md
 Who may use the CLI's default login (no `claude_config_dir`) is a server-wide
 setting, `claude_subscription.default_login_users: [<user_id>]` in `settings.yaml`
 (empty by default = nobody; see [claude subscription](../user-guide/claude-subscription.md)).
+`claude_config_dir` must resolve inside `<config dir>/<user_id>/`; `command` must be a bare executable name. An administrator
+can set an absolute `claude_subscription.command` in `settings.yaml` (or `RECALL_CLAUDE_COMMAND`).
 
 The blocks have no `enabled` key (the strict schema rejects it). A model whose
 provider is not available fails with `provider not available: <provider>: <what to
@@ -297,14 +299,14 @@ timeout, prints the exit code and the redacted output, never the key). Setup wal
 
 ```yaml
 # .config/<user_id>/user.yaml
-id: johndoe
-name: John Doe
+id: user-a
+name: User A
 password_hash: "$argon2id$..."          # web login; create it with `python -m src.admin set-password <user_id>`
 language: en
 require_zdr: false                      # optional; true requires zero-data-retention routes everywhere
 provider:
   name: openrouter                      # main provider: openrouter or ollama
-  api_key: OPENROUTER_JOHNDOE_API_KEY   # env var NAME holding the key; omit for ollama
+  api_key: OPENROUTER_USER_A_API_KEY   # env var NAME holding the key; omit for ollama
 agents: [aria]
 models:
   chat: openai/gpt-4o-mini              # or ollama:llama3:8b / claude_subscription:sonnet

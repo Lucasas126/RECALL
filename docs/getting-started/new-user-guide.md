@@ -94,7 +94,7 @@ Otherwise Claude Code must be installed on the server. Read
 
 1. Find your numeric Telegram id: message a bot such as `@userinfobot`, which replies with it.
 2. *Administrator*: add `<telegram_id>=<user_id>` to `TELEGRAM_ALLOWED_USERS` in `.env` (comma-separated for several people,
-   for example `111111111=alice,222222222=bob`) and restart the Telegram bot.
+   for example `1000001=user-a,1000002=user-b`) and restart the Telegram bot.
 3. Open the bot in Telegram and write to it. Useful commands: `/help`, `/newchat`, `/selectagent`, `/selectmodel`,
    `/settings`, `/dream`. Messages from ids that are not listed are ignored.
 

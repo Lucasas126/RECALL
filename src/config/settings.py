@@ -34,6 +34,12 @@ CONFIG_DIR = Path(_paths["config_dir"])  # user & agent yaml configs
 DATA_DIR = Path(_paths["data_dir"])      # per-agent data plane (sources + index)
 LOGS_DIR = Path(_paths["logs_dir"])      # per-run log folders
 
+# ------------------------------------------------------------------ user folders
+_folders = _raw.get("folders") or {}
+FOLDERS_ALLOWED_ROOTS: list[str] = list(_folders.get("allowed_roots") or [])  # empty: any path outside the reserved ones
+if not all(isinstance(_item, str) and _item.strip() and "\x00" not in _item for _item in FOLDERS_ALLOWED_ROOTS):
+    raise ValueError("folders.allowed_roots must be a list of non-empty path strings")
+
 # ------------------------------------------------------------------ vector index
 INDEX = IndexConfig.model_validate(_raw["index"])
 INDEX_DIR_NAME = INDEX.dir_name                  # index folder inside each agent's data dir

@@ -10,7 +10,7 @@ dream:                 # background self-review sessions (see docs/user-guide/dr
   every_hours: null
   daily_at: null       # e.g. "04:00" (local time); do not set it together with every_hours
   max_minutes: 5       # wall-clock limit per session (1-120); the agent is told to wrap up 1 minute before
-  tools: [web, folders]  # dreams read the user folders (never write them)
+  tools: [folders]       # dreams read the user folders (never write them); needs a folder read group; `web` is opt-in
   notify_telegram: false
 folders: []            # user folders, each a source named after it; e.g.
 #  - name: notes        # addresses notes:path/note.md; ^[a-z0-9_-]{1,32}$

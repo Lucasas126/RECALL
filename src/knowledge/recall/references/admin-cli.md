@@ -20,10 +20,10 @@ Values after `=` are YAML: `true`, `42`, `[a, b]`, `{k: v}`, `null`, or a quoted
 Examples:
 
 ```
-python -m src.admin agent set --user ana --agent notes --set chat_config.model=openrouter:vendor/model
-python -m src.admin agent set --user ana --agent notes --set chat_config.tool_groups=[memory_read,web]
-python -m src.admin agent set --user ana --agent notes --set terminal.backends.local.approvals=manual
-python -m src.admin agent create --user ana --id travel --name Travel --set description="Trip planning"
+python -m src.admin agent set --user user-a --agent notes --set chat_config.model=openrouter:vendor/model
+python -m src.admin agent set --user user-a --agent notes --set chat_config.tool_groups=[memory_read,web]
+python -m src.admin agent set --user user-a --agent notes --set terminal.backends.local.approvals=manual
+python -m src.admin agent create --user user-a --id travel --name Travel --set description="Trip planning"
 ```
 
 - A model is checked against the provider catalog like in the web UI, so a typo or an unavailable provider is refused with a message.

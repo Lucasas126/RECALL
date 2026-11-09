@@ -4,7 +4,7 @@ For an agent that administers RECALL through a `type: local` terminal backend (t
 
 ## What the local backend can reach
 
-Commands run as the app user (uid 1000 in Docker) in `/app`, with a scrubbed environment (no API keys, no `RECALL_*` variables) but with:
+Commands run as the app user (uid 1000 in Docker) in `/app`, with an allowlisted environment (no API keys, no `RECALL_*` variables, no agent sockets) but with:
 
 - all of `/app/.config`: every user's `user.yaml` (Argon2 password hashes), agent yaml, `secrets.env` with the stored credentials, Claude login folders;
 - all of `/app/data`: every user's and agent's memories, chats and indexes;

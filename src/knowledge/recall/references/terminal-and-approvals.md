@@ -7,7 +7,7 @@ The `terminal` group runs commands and edits files on a **backend** chosen by th
 | Type | Where commands run | Availability |
 | --- | --- | --- |
 | `ssh` | another machine, through the local `ssh` binary; key only, strict host-key checking | always |
-| `local` | the RECALL host itself (in Docker: the container, as the app user, in `/app`), with a scrubbed environment | only if `terminal.allow_local: true` in `settings.yaml` or `RECALL_TERMINAL_ALLOW_LOCAL=true` in the server environment |
+| `local` | the RECALL host itself (in Docker: the container, as the app user, in `/app`), with an allowlisted environment | only if `terminal.allow_local: true` in `settings.yaml` or `RECALL_TERMINAL_ALLOW_LOCAL=true` in the server environment |
 
 Backends are declared by the user in `terminal_backends` of the user yaml; each agent lists the ones it may use in its own `terminal.backends`, with a `workdir` and an `approvals` mode each. Your system prompt lists your allowed backends with working directory, approval mode and description; trust that list. A backend is a disposable sandbox only if its description says so; otherwise treat it as one of the user's real machines. Pass `backend` to choose one; without it the call goes to `terminal.default_backend`. A backend that fails to resolve is dropped with a log warning; with none left, the tools are not built.
 
@@ -19,7 +19,7 @@ Limits: foreground only; killed at the timeout (agent-wide `terminal.timeout_sec
 | --- | --- |
 | `manual` (default) | every command and every file operation, reads included |
 | `smart` | only dangerous actions |
-| `off` | nothing; the hardline still applies |
+| `off` | nothing while a person is attached; the hardline and protected paths still apply. Unattended, `off` acts like `smart` and file writes are denied |
 
 The user sees an approval card in the web chat or buttons in Telegram, and only the owner of the chat can answer. The first line of a `terminal` result says how it was authorized: `[approved by the user]`, `[ran without approval: smart mode, normal command]` (or `... nobody attached to approve]` when unattended) or `[approvals off]`, so you know whether the user saw it. A pending approval is denied automatically after `terminal.approval_timeout_seconds` (default 300), when the reply is cancelled, or when the service shuts down.
 
@@ -40,7 +40,7 @@ On a `local` backend, `terminal` and the `sandbox_*` tools refuse, in every appr
 
 ## Unattended runs
 
-When nobody can answer (no attached client, and every dream session) the policy never waits: `manual` denies everything, `smart` runs normal actions and denies dangerous ones, `off` runs everything except the hardline. Dreams use the terminal only with `terminal.allow_in_dream: true` and `terminal` in `dream.tools`.
+When nobody can answer (no attached client, and every dream session) the policy never waits: `manual` denies everything, `smart` runs normal actions and denies dangerous ones, `off` acts like `smart` (dangerous denied) and also denies file writes. Dreams never get the terminal.
 
 ## Workers launched with `task_start`
 

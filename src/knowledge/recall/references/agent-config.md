@@ -63,7 +63,7 @@ MCP entry fields: `tools` (list; omitted means all of the server's tools), `read
 | `dream.max_steps` | model calls per session (60) |
 | `dream.max_tokens` | input + output per session (500000) |
 | `dream.max_minutes` | wall-clock limit, 1-120 (5) |
-| `dream.tools` | extra groups for dreams: `web`, `folders`, `terminal` (default web, folders) |
+| `dream.tools` | extra read groups for dreams: `folders` (default; needs a folder read group), `web` (opt-in) |
 | `dream.prompt` | empty uses the built-in prompt |
 | `dream.notify_telegram` | notify when done (false) |
 
@@ -72,8 +72,8 @@ MCP entry fields: `tools` (list; omitted means all of the server's tools), `read
 | Field | Meaning (default) |
 | --- | --- |
 | `name` | `^[a-z0-9_-]{1,32}$`, unique; not `mind_palace`, `conversations`, `agent`, `dream` |
-| `path` | must exist when saving |
-| `indexed` | feeds associative memory and `query_memory` (true) |
+| `path` | must exist when saving; system, config, data, logs, program, SSH folders are refused; secrets inside stay hidden |
+| `indexed` | feeds associative memory and `query_memory` (true); removing or un-indexing a folder purges its chunks |
 | `read_only` | never writable (false) |
 
 ### `terminal` (Tools tab)
@@ -86,7 +86,6 @@ MCP entry fields: `tools` (list; omitted means all of the server's tools), `read
 | `timeout_seconds` | agent-wide command timeout 1-600 (60); a backend may override it |
 | `terminal.default_backend` | required with more than one backend |
 | `terminal.max_output_chars` | 500-200000 (20000) |
-| `terminal.allow_in_dream` | dreams may use the terminal (false); also needs `terminal` in `dream.tools` |
 
 ### `delegation` (group `delegate`; see `references/delegation.md`)
 
@@ -114,7 +113,7 @@ MCP entry fields: `tools` (list; omitted means all of the server's tools), `read
 | `openrouter`, `ollama`, `claude_subscription` | provider options |
 | `terminal_backends` | named machines agents may use |
 
-Provider options: `ollama.host`; `claude_subscription` takes `claude_config_dir`, `command`, `claude_code_telemetry`, `timeout_seconds`; `openrouter.api_key` is an env var NAME.
+Provider options: `ollama.host`; `claude_subscription` takes `claude_config_dir` (must resolve inside the user's own config folder), `command` (a bare executable name only; absolute paths are admin-only via `settings.yaml` or `RECALL_CLAUDE_COMMAND`), `claude_code_telemetry`, `timeout_seconds`; `openrouter.api_key` is an env var NAME.
 
 Backends (`terminal_backends.<name>`): `type` is `ssh` (`host`, `port`, `user`, `key_file`, `known_hosts_file`) or `local` (`workdir`; refused unless `terminal.allow_local` in `settings.yaml`); both take `description`.
 

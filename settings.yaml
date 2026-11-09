@@ -5,6 +5,9 @@ paths:
   data_dir: data        # per-agent data plane (sources + index)
   logs_dir: logs        # per-run log folders
 
+folders:
+  allowed_roots: []         # user folders must live inside one of these paths; empty = any path outside the reserved ones (config, data, logs, program, /proc, /sys, /dev, ~/.ssh, ~/.gnupg)
+
 index:
   dir_name: .index          # index folder inside each agent's data dir
   collection: memory        # chroma collection name
@@ -56,6 +59,7 @@ claude_subscription:
   # list only the person whose login it is. Example: default_login_users: [<user_id>]
   # RECALL_CLAUDE_DEFAULT_LOGIN_USERS (comma-separated ids, process environment) replaces this list, so the id can
   # stay out of this tracked file. See docs/claude-subscription.md.
+  # command: /absolute/path/to/claude   # optional, administrator-only; users may set only a bare executable name
   default_login_users: []
 
 prompt_cache:

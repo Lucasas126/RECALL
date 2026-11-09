@@ -59,7 +59,8 @@ The web **Agents** tab configures these groups for each agent:
 
 In a [disposable chat](../user-guide/memory.md#disposable-chats) the write tools of
 `memory_edit`, `self` (`memory`, `skill_manage`, `soul_edit`) and `folders_edit` are
-removed, whatever the groups, and the whole `terminal` group and the `delegate` tools are not built; the read tools stay. The exception is the hidden chat of a
+removed, whatever the groups, and the whole `terminal` group and the `delegate` tools are not built; the read tools stay. MCP tools are refused as a class
+(none are built and any call is rejected), not by name. The exception is the hidden chat of a
 subagent task that was granted terminal backends: it is excluded from learning (no Dream, no indexing) like any disposable chat but keeps the terminal group it was granted, restricted to those
 backends and to `manual` approvals; its memory, self and folder-edit tools stay removed.
 
@@ -85,7 +86,9 @@ Tools from external MCP servers (for example Google Calendar) are added per
 agent from the **MCP** tab of the agent form, on top of the tool groups (selected in its **Tools** tab). They are
 named `<server_id>__<tool>`, use the server's own descriptions and schemas, are
 refreshed at each turn and require `chat_config.tools: true`. Results are marked
-`untrusted`. See [MCP servers](../user-guide/mcp.md).
+`untrusted`. The agent's `allow`/`deny` lists apply to these names too (with `allow` set, list the `<server_id>__<tool>` names you want).
+Two tools that end up with the same name, or one that reuses a built-in tool name, are an error, not an overwrite. A
+[disposable chat](../user-guide/memory.md#disposable-chats) and a subagent task get no MCP tools. See [MCP servers](../user-guide/mcp.md).
 
 # main agent toolset
 
@@ -99,6 +102,7 @@ recall_mode
 query_memory
 - parameters: query (str), top_k (int), sources (list of str, optional)
 - agent description: performs a vectorial (semantic) search on your memory to find relevant information based on the query. optionally restrict it to specific sources.
+- access: chunks of a user folder are returned only while the agent can read that folder now (a `folders_read`/`folders_edit` chat group; the `folders` dream tool in dreams) and the folder is `indexed`. Chunks of folders that were removed, un-indexed or refused as unsafe are purged from the index on the next reconcile.
 - background behaviour: a vectorial search over the agent's index (mind palace, `agent:skills/`, conversations and indexed user folders) returns the top_k most similar chunks. it never updates the index; changes are indexed in the background (see [memory index](../user-guide/memory.md#memory-index)). implemented without the `sources` filter.
 - return: the top_k most relevant chunks, each as `[address > heading path] (score)` followed by the chunk text, so the result can be read or edited afterwards.
 
@@ -160,9 +164,9 @@ edit
 
 
 move
-- parameters: memory_path (str), new_path (str)
-- agent description: moves or renames a memory from one path to another, must stay within the available sources. use it to reorganize your mind palace.
-- background behaviour: moves the file from memory_path to new_path and updates its entry in the vector index. obsidian backlinks are updated: any [[note]] reference pointing to the old path is rewritten to the new one. obsidian writes respect the safe/auto overlay: in auto mode the file is moved directly; in safe mode only the agent's shadow copy is moved, never the user's original.
+- parameters: memory_path (str), new_path (str), overwrite (bool, optional, default false)
+- agent description: moves or renames a memory from one path to another, must stay within the available sources. use it to reorganize your mind palace. it refuses to replace an existing destination unless overwrite is true.
+- background behaviour: refuses (error, nothing changed) when the destination is the same file as the source, the source is not a file, or the destination exists without overwrite=true. otherwise moves the file from memory_path to new_path and updates its entry in the vector index. obsidian backlinks are updated: any [[note]] reference pointing to the old path is rewritten to the new one. obsidian writes respect the safe/auto overlay: in auto mode the file is moved directly; in safe mode only the agent's shadow copy is moved, never the user's original.
 - return: confirmation, with the old and new resolved paths and how many backlinks were updated.
 
 
@@ -201,11 +205,13 @@ in recall mode the subagent keeps only search/read tools — it can look things 
 ## dream mode toolset
 
 dream sessions get the review-queue tools (`dream_pending`, `dream_read_chat`,
-`dream_mark_reviewed`), the memory read tools, the edit tools (writes succeed
-only in `mind_palace`), the `self` tools, and optionally `folder_list`,
-`folder_read`, `folder_search` (read-only) and the web tools, per `dream.tools`.
-No MCP tools. The terminal tools are added only when the agent sets `terminal.allow_in_dream` and lists `terminal` in `dream.tools`;
-they never prompt in a dream (see [terminal](../user-guide/terminal.md#unattended-runs)). See [dream mode](../user-guide/dream.md#dream-toolset).
+`dream_mark_reviewed`) and the memory read tools (disposable and task chats are
+not listed, searched or read). The edit tools (writes succeed only in `mind_palace`)
+exist only if the agent's `tool_groups` include `memory_edit`, and the `self` tools
+only if they include `self`. `folder_list`, `folder_read`, `folder_search`
+(read-only) need `folders` in `dream.tools` and a `folders_read` or `folders_edit`
+group; the web tools need `web` in `dream.tools`. No MCP tools and never a terminal.
+See [dream mode](../user-guide/dream.md#dream-toolset).
 
 ## web tools (Tavily)
 

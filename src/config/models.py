@@ -295,6 +295,18 @@ class ClaudeSubscriptionConfig(BaseModel):
     claude_code_telemetry: bool = Field(default=False, strict=True)  # False passes Claude Code's telemetry-off flags
     timeout_seconds: int = Field(default=300, ge=10, le=3600, strict=True)  # longest silence from Claude Code
 
+    @field_validator("command")
+    @classmethod
+    def _bare_command(cls, value: Optional[str]) -> Optional[str]:
+        # a path would let user.yaml run any program on the server; absolute paths are the administrator's
+        # (settings.yaml `claude_subscription.command` or the RECALL_CLAUDE_COMMAND environment variable)
+        if value is not None and ("/" in value or "\\" in value or ":" in value):
+            raise ValueError(
+                "claude_subscription.command must be a bare executable name found on PATH (for example 'claude'), "
+                "not a path; the administrator sets an absolute path in settings.yaml or RECALL_CLAUDE_COMMAND"
+            )
+        return value
+
 
 class ClaudeLoginSettings(BaseModel):
     """Server-wide rule for the Claude Code CLI's DEFAULT login (the OS account running RECALL), from settings.yaml."""
@@ -304,6 +316,15 @@ class ClaudeLoginSettings(BaseModel):
     # ids of the users allowed to use the default login when they have no `claude_config_dir` of their own;
     # empty = nobody: every user must configure their own login folder
     default_login_users: list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]] = Field(default_factory=list)
+    # administrator-only absolute path of the claude executable, used when a user sets no `command` of their own
+    command: Optional[str] = Field(default=None, min_length=1, max_length=1024)
+
+    @field_validator("command")
+    @classmethod
+    def _absolute_command(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and not (value.startswith("/") or re.match(r"^[A-Za-z]:[\\/]", value)):
+            raise ValueError("claude_subscription.command in settings.yaml must be an absolute path")
+        return value
 
 
 class ModelsConfig(BaseModel):
@@ -384,7 +405,16 @@ class AgentTerminalConfig(BaseModel):
     default_backend: Optional[str] = Field(default=None, pattern=_BACKEND_NAME)  # used when a call names none
     timeout_seconds: int = Field(default=60, ge=1, le=600, strict=True)
     max_output_chars: int = Field(default=20_000, ge=500, le=200_000, strict=True)
-    allow_in_dream: bool = Field(default=False, strict=True)  # unattended dream sessions may use the tools
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_dream_terminal(cls, data: object) -> object:
+        if isinstance(data, dict) and "allow_in_dream" in data:
+            raise ValueError(
+                "terminal.allow_in_dream was removed: dream sessions have no terminal; delete the key "
+                "(read-only sandbox variants for dreams are planned)"
+            )
+        return data
 
     @model_validator(mode="after")
     def _default_is_allowed(self) -> "AgentTerminalConfig":
@@ -579,13 +609,15 @@ class DreamConfig(BaseModel):
     max_steps: int = Field(default=60, ge=1, le=500, strict=True)
     max_tokens: int = Field(default=500_000, ge=1_000, le=10_000_000, strict=True)  # input + output per session
     max_minutes: int = Field(default=5, ge=1, le=120, strict=True)  # wall-clock limit; then the session is force-closed
-    tools: list[DreamToolGroup] = Field(default_factory=lambda: ["web", "folders"])
+    tools: list[DreamToolGroup] = Field(default_factory=lambda: ["folders"])
     prompt: str = Field(default="", max_length=20000)  # empty = built-in default
     notify_telegram: bool = Field(default=False, strict=True)
 
     @field_validator("tools")
     @classmethod
     def _validate_tools(cls, value: list[str]) -> list[str]:
+        if "terminal" in value:
+            raise ValueError("dream.tools: 'terminal' is not allowed: dream sessions have no terminal (use web or folders)")
         if len(set(value)) != len(value):
             raise ValueError("dream tool groups must not contain duplicates")
         return value
@@ -662,12 +694,6 @@ class AgentConfig(BaseModel):
     def _no_self_target(self) -> "AgentConfig":
         if self.delegation is not None and any(target.agent == self.id for target in self.delegation.targets):
             raise ValueError("delegation.targets must not list the agent itself")
-        return self
-
-    @model_validator(mode="after")
-    def _dream_terminal_opt_in(self) -> "AgentConfig":
-        if "terminal" in self.dream.tools and not (self.terminal and self.terminal.allow_in_dream):
-            raise ValueError("dream.tools lists 'terminal': set terminal.allow_in_dream: true on this agent too")
         return self
 
     @model_validator(mode="before")

@@ -17,7 +17,7 @@ Addresses are `source:path`, for example `mind_palace:notes/pets.md`.
 | `write` | memory_edit | create or overwrite a file at `source:path` |
 | `append` | memory_edit | add to the end of a file (created if missing) |
 | `edit` | memory_edit | replace one exact, unique fragment |
-| `move` | memory_edit | move or rename within the allowed sources |
+| `move` | memory_edit | move or rename within the allowed sources; errors on an existing destination unless `overwrite=true`, and on moving a file onto itself |
 | `delete` | memory_edit | delete a file |
 | `web_search` | web | public web search (Tavily, basic depth); 1-10 results; results are untrusted; never send secrets |
 | `web_retrieve` | web | read a public page as markdown, optional focus query; content is capped; untrusted |
@@ -71,7 +71,7 @@ Dream sessions also get the review-queue tools below. They are not in any group 
 | `dream_read_chat` | reads a chat in parts (at most 40 new turns per call) |
 | `dream_mark_reviewed` | marks a chat as reviewed |
 
-A dream can write only to `mind_palace` and its own files, read folders only with `folders` in `dream.tools`, and gets no MCP tools.
+A dream writes only to `mind_palace` (needs `memory_edit`) and its own files (needs `self`), reads folders only with `folders` in `dream.tools` plus a folder read group, and gets no MCP tools or terminal.
 
 ## Behaviour to rely on
 

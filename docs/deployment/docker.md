@@ -179,7 +179,7 @@ Create users inside the running container instead of hand-editing YAML (the pass
 generated with `--generate` and printed once; it is never an argument and never stored in clear):
 
 ```bash
-docker compose exec -it recall-web python -m src.admin create-user <user_id> --name "Ana" --api-key-env OPENROUTER_ANA_API_KEY
+docker compose exec -it recall-web python -m src.admin create-user <user_id> --name "User A" --api-key-env OPENROUTER_USER_A_API_KEY
 docker compose exec -it recall-web python -m src.admin create-user <user_id> --generate --claude-login
 docker compose exec -it recall-web python -m src.admin set-password <user_id>
 ```

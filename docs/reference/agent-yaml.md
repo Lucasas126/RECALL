@@ -41,13 +41,13 @@ dream:                               # background self-review sessions (see drea
   max_steps: 60                      # model calls per session
   max_tokens: 500000                 # input + output tokens per session
   max_minutes: 5                     # wall-clock limit (1-120); wrap-up warning 1 minute before
-  tools: [web, folders]              # optional groups for dreams: web, folders, terminal (terminal needs terminal.allow_in_dream)
+  tools: [folders]                   # optional read groups for dreams: folders (default; also needs a folder read group), web (opt-in); `terminal` is rejected
   prompt: ""                         # empty = built-in default
   notify_telegram: false
 folders:                             # user folders, each exposed as the source `<name>:` (see user folders)
   - name: notes                      # ^[a-z0-9_-]{1,32}$, unique, not a built-in source name
     path: /path/to/obsidian-vault    # must exist; never created
-    indexed: true                    # feeds associative memory and query_memory (default true)
+    indexed: true                    # feeds associative memory and query_memory (default true); un-indexing or removing the folder purges its chunks. A path that overlaps config, data, logs, the program folder, /proc, /sys, /dev, ~/.ssh or ~/.gnupg is rejected (see settings.yaml folders.allowed_roots)
     read_only: false                 # never writable, whatever the tool groups (default false)
 terminal:                            # required by the `terminal` tool group (see the terminal guide)
   backends:                          # 1+ names from the user's `terminal_backends` in user.yaml, each with its own policy
@@ -61,14 +61,13 @@ terminal:                            # required by the `terminal` tool group (se
   default_backend: sandbox           # one of the keys above; required when more than one, used when a call names no backend
   timeout_seconds: 60                # default command timeout, 1-600 (capped by settings.yaml terminal.max_timeout_seconds)
   max_output_chars: 20000            # output returned to the model, 500-200000 (capped by settings.yaml)
-  allow_in_dream: false              # dream sessions may use the tools (also needs `terminal` in dream.tools)
 delegation:                          # the `delegate` tool group (see the delegation guide); optional, defaults apply when the group is selected
   enabled: true                      # false removes `task_start` without removing the group
   allowed_groups: [web]              # groups a task may be granted; only `web` is grantable (never memory, folders, terminal, mcp, delegate)
   max_parallel: null                 # running tasks per chat, 1-10; can only lower settings.yaml subagents.max_parallel_per_parent (3)
   timeout_seconds: null              # wall clock per task, 10-3600; can only lower subagents.timeout_seconds (600)
   max_tokens: null                   # input + output tokens per task, 1000-5000000; can only lower subagents.max_tokens (200000)
-  targets: []                        # other agents of this user a task may be handed to: [{agent: orion, remember: false}]; empty = fresh workers only
+  targets: []                        # other agents of this user a task may be handed to: [{agent: scout, remember: false}]; empty = fresh workers only
 ```
 
 `recall_knowledge` (default `true`, Basic > Advanced in the Agents tab) adds one line to the skills index and lets `skill_view` read the
@@ -78,7 +77,7 @@ The `terminal` block is only used when `terminal` is in `tool_groups`. The model
 take an optional `backend` argument limited to these names); approvals, working directory and timeout follow the backend it
 picks. A backend that does not resolve (unknown name, `local` while `terminal.allow_local` is off) is disabled with a warning
 in the log and the agent keeps the others; when none resolves, or the block is missing, the agent still loads with the
-terminal tools not built. `terminal.backend`, `workdir` and `approvals` at the top level of the block no longer exist. `dream.tools: [terminal]` without `terminal.allow_in_dream: true` is rejected. See the
+terminal tools not built. `terminal.backend`, `workdir` and `approvals` at the top level of the block no longer exist. Dreams have no terminal: `dream.tools: [terminal]` and `terminal.allow_in_dream` are rejected with a validation error. See the
 [terminal guide](../user-guide/terminal.md).
 
 <a id="delegation"></a>The `delegation` block belongs to the `delegate` tool group, which exposes `task_start` (phase 1: a synchronous worker in a hidden

@@ -41,6 +41,7 @@ from src.config.settings import (
     TERMINAL, VIDEO_DECOMPOSITION, WEB_PUBLIC_URL, memory_limits,
 )
 from src.core.index import VectorIndex
+from src.core.sources.folders import folder_path_problem
 from src.providers.decisions import DecisionError, decide_choice
 from src.core.sources.agent_files import AgentFilesSource, MemoryTarget
 from src.core.sources.conversations import DEFAULT_DISPOSABLE_RETENTION_DAYS, ConversationsSource
@@ -555,6 +556,7 @@ class ChatService:
         user = self._owned_agent(user_id, agent_id)
         self._check_mcp(config)
         self._check_folders(config.folders)
+        previously_indexed = {f.name for f in self._agent_config(user_id, agent_id).folders if f.indexed}
         self._check_delegation_targets(user, config)
         config = self._check_agent_model(user, config, self._agent_config(user_id, agent_id).chat_config.model)
         slot = self._slot(user_id, agent_id)
@@ -568,7 +570,16 @@ class ChatService:
             self._forget_slot(user_id, agent_id)
             self._replace_preferred_agent(user_id, agent_id, updated.id)
             self._retarget_delegation(user_id, agent_id, updated.id)
+        elif previously_indexed - {f.name for f in updated.folders if f.indexed}:
+            self._purge_folder_chunks(user_id, agent_id)
         return self._agent_view(user_id, updated)
+
+    def _purge_folder_chunks(self, user_id: str, agent_id: str) -> None:
+        """After folders were removed or un-indexed: queue a reconcile that drops their chunks (best effort)."""
+        try:
+            self._agent_index(user_id, agent_id).reconcile(folders=False)
+        except Exception as exc:  # the next chat start reconciles anyway; saving the agent must not fail
+            logger.warning("could not queue the index cleanup of %s/%s: %s", user_id, agent_id, exc)
 
     def delete_agent(self, user_id: str, agent_id: str) -> None:
         """Remove an idle agent's configuration; its data folder is kept on disk."""
@@ -1782,7 +1793,7 @@ class ChatService:
             context = RunContext(
                 user_id, agent_id, chat_id, self._approvals,
                 lambda kind, data, run=run: run.events.put(ChatEvent(kind, data=data, generation_id=run.generation_id)),
-                run.cancellation, tasks=self._tasks,
+                run.cancellation, tasks=self._tasks, interactive=True,
             )
             if (mark := self._conversations(user_id, agent_id).task_mark(chat_id)) is not None:
                 self._tasks.bind_worker(context, mark)  # a worker's approvals are asked in its parent's chat
@@ -2176,6 +2187,11 @@ class ChatService:
                 raise InputError(
                     "folder '{name}' not found: {path}; fix `folders` in the agent configuration",
                     name=folder.name, path=folder.path,
+                )
+            if problem := folder_path_problem(folder.path):
+                raise InputError(
+                    "folder '{name}' is not allowed: {problem}; choose another path",
+                    name=folder.name, problem=problem,
                 )
 
     def _agent_files(self, user_id: str, agent_id: str) -> AgentFilesSource:

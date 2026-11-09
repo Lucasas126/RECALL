@@ -15,7 +15,7 @@ Each process run writes a new folder `logs/<YYYYmmdd_HHMMSS+zzzz>_<run>/` where 
 | `missing_api_key` | the provider key variable is not set on the server | set the variable named in `provider.api_key` (user yaml): either `python -m src.admin set-secret NAME` in his own terminal (no restart) or the server environment/`.env` (restart) |
 | `provider_unreachable` | the Ollama/provider server did not answer | check the server is running and `ollama.host` / `OLLAMA_HOST` |
 | `claude_not_installed` | Claude Code is missing on the RECALL host | install it, or choose another model |
-| `claude_no_own_login` | no `claude_subscription.claude_config_dir` and not in `claude_subscription.default_login_users` (`settings.yaml`) | ask the administrator for a login folder |
+| `claude_no_own_login` | no `claude_subscription.claude_config_dir` inside the user's own config folder, and not in `claude_subscription.default_login_users` (`settings.yaml`) | ask the administrator for a login folder |
 | `claude_not_logged_in` | Claude Code is logged out | run `claude auth login` on the RECALL host |
 | `provider_unavailable` | Claude Code did not report its login state | run `claude auth status` on the host |
 | `model_unavailable` | the model is not in the provider's catalog | choose another model |
@@ -38,7 +38,7 @@ Values are parsed as YAML: wrap text containing `": "` in quotes. String fields 
 ## Agent will not load or save
 
 - Unknown keys are rejected in the agent yaml. A leftover `vault` key must become `folders: [{name: vault, path: ...}]`.
-- `dream.tools` listing `terminal` needs `terminal.allow_in_dream: true` on the same agent.
+- `dream.tools: [terminal]` and `terminal.allow_in_dream` are rejected: dreams have no terminal.
 - `terminal.default_backend` is required with several backends and must be one of them; every backend key must exist in the user's `terminal_backends`.
 - Enabled MCP servers must exist in the `mcp.servers` catalog of `settings.yaml`.
 - A folder path must exist when saving; if it disappears later (unmounted drive), the agent loads without it and the log says `folder ... not found ... skipped`.

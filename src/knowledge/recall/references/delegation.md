@@ -56,7 +56,7 @@ Delegate work that is big, independent and worth its own model run: reading and 
 
 ## Where things are stored
 
-Task records live in `data/<user_id>/.tasks/<task_id>.json` (goal, status, usage, capped result; no secrets). The worker's conversation is a normal chat file in your own `conversations/` folder marked by `<chat_id>.task.json`: it is hidden from chat lists and the latest chat, never pruned while empty, not reviewed by Dream and not indexed, and it is removed with the user's disposable-chat retention. A disposable chat cannot launch tasks. If the process dies while a task runs, the task is later marked `failed` with reason `owner_lost`; nothing is resumed.
+Task records live in `data/<user_id>/.tasks/<task_id>.json` (goal, status, usage, capped result; no secrets). The worker's conversation is a normal chat file in your own `conversations/` folder marked by `<chat_id>.task.json`: it is hidden from chat lists and the latest chat, never pruned while empty, not reviewed by Dream and not indexed, and it is removed with the user's disposable-chat retention. A disposable chat cannot launch tasks or use MCP. A `remember` target gets only the memory groups you hold yourself (`task_send` re-checks). If the process dies mid-task, it is later marked `failed` (`owner_lost`); nothing is resumed.
 
 Agent targets: `references/delegation-targets.md`. Code: `src/service/tasks.py`, `src/agent/toolsets/delegate.py`.
 

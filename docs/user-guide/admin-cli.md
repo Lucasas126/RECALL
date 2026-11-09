@@ -35,10 +35,10 @@ errors are printed as `path: reason` and the files are left untouched. A model r
 like in the web UI. Rewriting a file drops its YAML comments.
 
 ```bash
-python -m src.admin agent create --user ana --id guide --from-template guide
-python -m src.admin agent set --user ana --agent notes --set chat_config.model=openrouter:vendor/model
-python -m src.admin agent set --user ana --agent notes --set chat_config.tool_groups=[memory_read,web]
-python -m src.admin agent rename --user ana --agent guide --new-id main --name "Ana's assistant"
+python -m src.admin agent create --user user-a --id guide --from-template guide
+python -m src.admin agent set --user user-a --agent notes --set chat_config.model=openrouter:vendor/model
+python -m src.admin agent set --user user-a --agent notes --set chat_config.tool_groups=[memory_read,web]
+python -m src.admin agent rename --user user-a --agent guide --new-id main --name "User A's assistant"
 python -m src.admin agent check
 ```
 

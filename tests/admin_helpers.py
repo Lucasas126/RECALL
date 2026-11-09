@@ -23,7 +23,7 @@ DATA_TARGETS = (
     "src.admin.agents.DATA_DIR", "src.config.loader.DATA_DIR", "src.service.chat.DATA_DIR",
     "src.core.sources.registry.DATA_DIR",
 )
-USER_YAML = "id: ana\nname: Ana\nprovider: {{name: ollama, api_key: ANA_KEY_NAME}}\nagents: [bot]\npassword_hash: '{hash}'\n"
+USER_YAML = "id: user-a\nname: User A\nprovider: {{name: ollama, api_key: USER_A_KEY_NAME}}\nagents: [bot]\npassword_hash: '{hash}'\n"
 
 
 class FakeAgent:
@@ -53,7 +53,7 @@ class AdminFixture(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
         self.config_dir, self.data_dir = self.root / ".config", self.root / "data"
-        (self.config_dir / "ana" / "agents").mkdir(parents=True)
+        (self.config_dir / "user-a" / "agents").mkdir(parents=True)
         self.data_dir.mkdir()
         self.write_user()
         self.write_agent("bot", "id: bot\nname: Bot\n")
@@ -70,12 +70,12 @@ class AdminFixture(unittest.TestCase):
         self.addCleanup(service_patch.stop)
 
     def write_user(self, text: str | None = None) -> None:
-        (self.config_dir / "ana" / "user.yaml").write_text(
+        (self.config_dir / "user-a" / "user.yaml").write_text(
             text if text is not None else USER_YAML.format(hash=TEST_PASSWORD_HASH), encoding="utf-8",
         )
 
     def write_agent(self, name: str, text: str) -> None:
-        (self.config_dir / "ana" / "agents" / f"{name}.yaml").write_text(text, encoding="utf-8")
+        (self.config_dir / "user-a" / "agents" / f"{name}.yaml").write_text(text, encoding="utf-8")
 
     def read(self, relative: str) -> str:
         return (self.config_dir / relative).read_text(encoding="utf-8")

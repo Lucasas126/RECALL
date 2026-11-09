@@ -394,9 +394,9 @@ class SwitchConfigTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         root = Path(directory.name)
         config_dir, data_dir = root / "config", root / "data"
-        (config_dir / "ana" / "agents").mkdir(parents=True)
-        (config_dir / "ana" / "user.yaml").write_text(
-            f"id: ana\nname: Ana\nprovider: {{name: ollama}}\nagents: []\npassword_hash: '{TEST_PASSWORD_HASH}'\n", encoding="utf-8",
+        (config_dir / "user-a" / "agents").mkdir(parents=True)
+        (config_dir / "user-a" / "user.yaml").write_text(
+            f"id: user-a\nname: User A\nprovider: {{name: ollama}}\nagents: []\npassword_hash: '{TEST_PASSWORD_HASH}'\n", encoding="utf-8",
         )
         for target in ("src.config.loader.CONFIG_DIR", "src.service.chat.CONFIG_DIR"):
             patcher = patch(target, config_dir)
@@ -410,7 +410,7 @@ class SwitchConfigTests(unittest.TestCase):
         client = TestClient(create_app(service))
         client.__enter__()
         self.addCleanup(client.__exit__, None, None, None)
-        login(client, "ana")
+        login(client, "user-a")
         created = client.post("/api/agents", json={"id": "new", "name": "New"})
         self.assertEqual(created.status_code, 201)
         self.assertTrue(created.json()["chat_config"]["recall_knowledge"])

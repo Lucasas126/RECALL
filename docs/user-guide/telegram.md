@@ -9,7 +9,7 @@ from `TELEGRAM_BOT_TOKEN`.
 `<user_id>` is the RECALL user the Telegram account belongs to. Several people can share one bot, each mapped to their own user:
 
 ```dotenv
-TELEGRAM_ALLOWED_USERS=111111111=alice,222222222=bob
+TELEGRAM_ALLOWED_USERS=1000001=user-a,1000002=user-b
 ```
 
 Entries that do not parse are reported at start-up. To find a Telegram id, message a bot such as `@userinfobot`, or ask the

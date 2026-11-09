@@ -20,6 +20,15 @@ web UI and the Telegram bot after editing it. In Docker you can mount your own c
 | `chat_naming` | `model`, `api_key`, `zdr`, `min_messages` | [chat naming](#chat-naming) |
 | `mcp` | `connect_timeout_seconds`, `call_timeout_seconds`, `servers` | [MCP servers](../user-guide/mcp.md) |
 
+## folders
+
+```yaml
+folders:
+  allowed_roots: []   # default: no restriction beyond the reserved places
+```
+
+`allowed_roots` is a list of paths. When not empty, every user folder of every agent must be equal to or inside one of them. Whatever is listed, a folder can never equal, contain or sit inside the config, data or logs folder, the RECALL program folder, `/proc`, `/sys`, `/dev`, `~/.ssh` or `~/.gnupg` (symlinks are resolved). Saving such an agent fails with a message naming the problem; an already saved agent loads without that folder and a warning in the log. Files protected by the terminal rules ([terminal](#terminal) `protected_paths`) are never exposed by a folder. Restart after changing it.
+
 ## memory limits
 
 ```yaml
@@ -41,8 +50,8 @@ Web users are preconfigured; there is no registration flow. Add an Argon2 passwo
 hash to each user's `user.yaml`:
 
 ```yaml
-id: johndoe
-name: John Doe
+id: user-a
+name: User A
 password_hash: "$argon2id$..."
 ```
 
