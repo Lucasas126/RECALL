@@ -1,4 +1,4 @@
-"""Permission levels, step 1: admin CLI (create-user, user set, agent create/set/check, migrate-levels)."""
+"""Permission levels: admin CLI (create-user, user set, agent create/set/check). No migration command exists."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from unittest.mock import patch
 import yaml
 from admin_helpers import AdminFixture
 
-from src.config.levels import Level, forget_warnings
+from src.config.levels import Level
 from src.config.loader import load_agent_config, load_user
 
 GOOD = "correct-horse-battery"
@@ -28,24 +28,16 @@ TERMINAL_AGENT = (
 class LevelAdminBase(AdminFixture):
     def setUp(self) -> None:
         super().setUp()
-        forget_warnings()
-        self.addCleanup(forget_warnings)
-        import src.admin.levels  # noqa: F401  (imported lazily by the CLI; its directories are patched like the others)
 
-        for target, value in (("src.admin.levels.CONFIG_DIR", self.config_dir), ("src.admin.levels.DATA_DIR", self.data_dir)):
-            patcher = patch(target, value)
-            patcher.start()
-            self.addCleanup(patcher.stop)
-
-    def set_max(self, level: str | None) -> None:
+    def set_max(self, level: str) -> None:
         text = self.read("user-a/user.yaml").replace("max_level: admin\n", "")
-        self.write_user(text if level is None else text + f"max_level: {level}\n")
+        self.write_user(text + f"max_level: {level}\n")
 
     def add_user(self, user_id: str = "user-b") -> None:
         folder = self.config_dir / user_id
         folder.mkdir()
         (folder / "user.yaml").write_text(
-            f"id: {user_id}\nname: B\nprovider: {{name: ollama}}\nagents: []\n", encoding="utf-8",
+            f"id: {user_id}\nname: B\nmax_level: collaborator\nprovider: {{name: ollama}}\nagents: []\n", encoding="utf-8",
         )
 
     def yaml_of(self, relative: str) -> dict:
@@ -56,7 +48,7 @@ class CreateUserTests(LevelAdminBase):
     def create(self, *extra: str, user_id: str = "user-c"):
         return self.run_cli(["create-user", user_id, "--api-key-env", "K", *extra], passwords=[GOOD, GOOD])
 
-    def test_first_user_of_an_installation_is_admin(self) -> None:
+    def test_the_first_user_is_not_special(self) -> None:
         for path in (self.config_dir / "user-a").glob("**/*"):
             if path.is_file():
                 path.unlink()
@@ -64,9 +56,9 @@ class CreateUserTests(LevelAdminBase):
         (self.config_dir / "user-a").rmdir()
         code, out, err = self.create(user_id="first")
         self.assertEqual((code, err), (0, ""), out)
-        self.assertEqual(self.yaml_of("first/user.yaml")["max_level"], "admin")
+        self.assertEqual(self.yaml_of("first/user.yaml")["max_level"], "collaborator")
 
-    def test_later_users_are_collaborators_unless_told_otherwise(self) -> None:
+    def test_users_are_collaborators_unless_told_otherwise(self) -> None:
         code, out, err = self.create()
         self.assertEqual((code, err), (0, ""), out)
         self.assertEqual(self.yaml_of("user-c/user.yaml")["max_level"], "collaborator")
@@ -108,7 +100,7 @@ class UserSetTests(LevelAdminBase):
 
 class AgentCommandTests(LevelAdminBase):
     def test_create_with_level_and_above_max(self) -> None:
-        code, out, err = self.run_cli(["agent", "create", "--user", "user-a", "--id", "mid", "--level", "reader"])
+        code, out, err = self.run_cli(["agent", "create", "--user", "user-a", "--id", "mid", "--level", "reader", "--set", "chat_config.tool_groups=[memory_read]"])
         self.assertEqual((code, err), (0, ""), out)
         self.assertIs(load_agent_config("user-a", "mid").level, Level.READER)
         self.set_max("assistant")
@@ -139,7 +131,7 @@ class AgentCommandTests(LevelAdminBase):
         self.assertIsNone(load_agent_config("user-a", "plain").level)  # effective levels are never written back
 
     def test_rename_keeps_the_level(self) -> None:
-        self.write_agent("bot", "id: bot\nname: Bot\nlevel: reader\n")
+        self.write_agent("bot", "id: bot\nname: Bot\nlevel: reader\nchat_config:\n  tool_groups: [memory_read]\n")
         code, out, err = self.run_cli(["agent", "rename", "--user", "user-a", "--agent", "bot", "--new-id", "bot2"])
         self.assertEqual((code, err), (0, ""), out)
         self.assertIs(load_agent_config("user-a", "bot2").level, Level.READER)
@@ -152,102 +144,67 @@ class AgentCommandTests(LevelAdminBase):
 
 class AgentCheckTests(LevelAdminBase):
     def test_prints_each_effective_level(self) -> None:
-        self.write_agent("bot", "id: bot\nname: Bot\nlevel: reader\n")
+        self.write_agent("bot", "id: bot\nname: Bot\nlevel: reader\nchat_config:\n  tool_groups: [memory_read]\n")
         code, out, _ = self.run_cli(["agent", "check", "--user", "user-a"])
         self.assertEqual(code, 0, out)
         self.assertIn("level: user-a/bot = reader (declared)", out)
         self.write_agent("bot", "id: bot\nname: Bot\n")
         code, out, _ = self.run_cli(["agent", "check"])
-        self.assertIn("level: user-a/bot = assistant (computed, needs assistant)", out)
+        self.assertIn("level: user-a/bot = assistant (computed, needs assistant for tool group 'memory_edit')", out)
 
-    def test_warns_when_an_undeclared_agent_needs_more_than_the_maximum(self) -> None:
+    def test_an_undeclared_agent_that_needs_more_than_the_maximum_is_an_error(self) -> None:
         self.write_user(self.read("user-a/user.yaml").replace("max_level: admin", "max_level: operator") + SSH_BACKENDS)
         self.write_agent("bot", TERMINAL_AGENT.format(id="bot"))
         code, out, _ = self.run_cli(["agent", "check", "--user", "user-a"])
-        self.assertEqual(code, 0, out)
-        self.assertIn("= admin (computed, needs admin)", out)
-        self.assertIn("warning: user-a/bot: no level, and its configuration needs admin", out)
+        self.assertEqual(code, 1, out)
+        self.assertIn("= admin (computed, needs admin for terminal backend 'orion' (ssh user root))", out)
+        self.assertIn("error: user-a/bot: Agent 'bot' uses terminal backend 'orion' (ssh user root), which needs the level 'admin'", out)
+
+    def test_a_declared_level_below_what_the_agent_needs_is_an_error(self) -> None:
+        self.write_user(self.read("user-a/user.yaml") + SSH_BACKENDS)
+        self.write_agent("bot", TERMINAL_AGENT.format(id="bot") + "level: operator\n")
+        code, out, _ = self.run_cli(["agent", "check", "--user", "user-a"])
+        self.assertEqual(code, 1, out)
+        self.assertIn("has the level 'operator', but terminal backend 'orion' (ssh user root) needs the level 'admin'", out)
 
     def test_a_declared_level_above_the_maximum_is_an_error(self) -> None:
         self.write_agent("bot", "id: bot\nname: Bot\nlevel: admin\n")
         self.set_max("reader")
         code, out, _ = self.run_cli(["agent", "check", "--user", "user-a"])
         self.assertEqual(code, 1)
-        self.assertIn("error: user-a/bot: level admin is above the user's max_level reader", out)
+        self.assertIn("error: user-a/bot: The level 'admin' of agent 'bot' is above your maximum level 'reader'", out)
 
-    def test_warns_about_a_user_without_max_level(self) -> None:
-        self.set_max(None)
+    def test_a_user_without_max_level_is_an_error_naming_the_command(self) -> None:
+        self.write_user(self.read("user-a/user.yaml").replace("max_level: admin\n", ""))
         code, out, _ = self.run_cli(["agent", "check", "--user", "user-a"])
-        self.assertEqual(code, 0, out)
-        self.assertIn("warning: user-a/user.yaml: no max_level; using admin", out)
+        self.assertEqual(code, 1, out)
+        self.assertIn("user set --user user-a --set max_level=<level>", out)
 
 
-class MigrateLevelsTests(LevelAdminBase):
-    def setUp(self) -> None:
-        super().setUp()
-        self.set_max(None)
-        self.write_user(self.read("user-a/user.yaml") + "# keep this comment\n" + SSH_BACKENDS)
-        self.write_user(self.read("user-a/user.yaml").replace("agents: [bot]", "agents: [bot, term]"))
-        self.write_agent("bot", "# agent comment\nid: bot\nname: Bot\n")
-        self.write_agent("term", TERMINAL_AGENT.format(id="term"))
+class RemovedMigrationTests(LevelAdminBase):
+    def test_migrate_levels_is_gone(self) -> None:
+        with self.assertRaises(SystemExit):
+            self.run_cli(["migrate-levels"])
+        self.assertFalse((Path(__file__).resolve().parents[1] / "src" / "admin" / "levels.py").exists())
 
-    def snapshot(self) -> dict[str, str]:
-        return {str(p.relative_to(self.config_dir)): p.read_text(encoding="utf-8")
-                for p in sorted(self.config_dir.rglob("*.yaml"))}
 
-    def test_dry_run_writes_nothing(self) -> None:
-        before = self.snapshot()
-        code, out, err = self.run_cli(["migrate-levels", "--dry-run"])
+class GuideTemplateTests(LevelAdminBase):
+    def test_guide_needs_admin_because_of_the_local_backend(self) -> None:
+        self.set_max("operator")
+        before = self.read("user-a/user.yaml")
+        code, out, err = self.run_cli(["agent", "create", "--user", "user-a", "--id", "guide", "--from-template", "guide"])
+        self.assertEqual(code, 1, out)
+        self.assertIn("local terminal backend", err)
+        self.assertIn("'admin'", err)
+        self.assertIn("'operator'", err)
+        self.assertEqual(self.read("user-a/user.yaml"), before)
+        self.assertFalse((self.config_dir / "user-a" / "agents" / "guide.yaml").exists())
+
+    def test_guide_works_for_an_admin(self) -> None:
+        code, out, err = self.run_cli(["agent", "create", "--user", "user-a", "--id", "guide", "--from-template", "guide"])
         self.assertEqual((code, err), (0, ""), out)
-        self.assertEqual(self.snapshot(), before)
-        self.assertIn("would set", out)
-        self.assertIn("dry run", out)
-
-    def test_single_user_gets_admin_and_agents_their_required_level(self) -> None:
-        code, out, err = self.run_cli(["migrate-levels"])
-        self.assertEqual((code, err), (0, ""), out)
-        self.assertEqual(self.yaml_of("user-a/user.yaml")["max_level"], "admin")
-        self.assertEqual(self.yaml_of("user-a/agents/bot.yaml")["level"], "assistant")
-        self.assertEqual(self.yaml_of("user-a/agents/term.yaml")["level"], "admin")
-        self.assertIn("# keep this comment", self.read("user-a/user.yaml"))
-        self.assertIn("# agent comment", self.read("user-a/agents/bot.yaml"))
-        self.assertIs(load_agent_config("user-a", "term").level, Level.ADMIN)
-
-    def test_is_idempotent(self) -> None:
-        self.run_cli(["migrate-levels"])
-        after_first = self.snapshot()
-        code, out, err = self.run_cli(["migrate-levels"])
-        self.assertEqual((code, err), (0, ""), out)
-        self.assertEqual(self.snapshot(), after_first)
-        self.assertIn("changed 0 file(s)", out)
-
-    def test_several_users_get_collaborator_and_a_conflict_is_reported_not_fatal(self) -> None:
-        self.add_user()
-        code, out, err = self.run_cli(["migrate-levels"])
-        self.assertEqual((code, err), (0, ""), out)
-        self.assertEqual(self.yaml_of("user-a/user.yaml")["max_level"], "collaborator")
-        self.assertEqual(self.yaml_of("user-b/user.yaml")["max_level"], "collaborator")
-        self.assertEqual(self.yaml_of("user-a/agents/bot.yaml")["level"], "assistant")
-        self.assertNotIn("level", self.yaml_of("user-a/agents/term.yaml"))  # left untouched
-        self.assertIn("conflict: user=user-a agent=term required=admin max_level=collaborator", out)
-        self.assertIn("1 conflict(s)", out)
-        before = self.snapshot()
-        self.run_cli(["migrate-levels"])
-        self.assertEqual(self.snapshot(), before)
-
-    def test_a_declared_max_level_is_kept(self) -> None:
-        self.write_user(self.read("user-a/user.yaml") + "max_level: operator\n")
-        code, out, _ = self.run_cli(["migrate-levels"])
-        self.assertEqual(code, 0, out)
-        self.assertEqual(self.yaml_of("user-a/user.yaml")["max_level"], "operator")
-        self.assertIn("conflict: user=user-a agent=term required=admin max_level=operator", out)
-
-    def test_an_invalid_agent_file_is_an_error_and_the_others_still_migrate(self) -> None:
-        self.write_agent("broken", "id: broken\nname: B\nunknown_key: 1\n")
-        code, out, err = self.run_cli(["migrate-levels"])
-        self.assertEqual(code, 1)
-        self.assertIn("broken.yaml", err)
-        self.assertEqual(self.yaml_of("user-a/agents/bot.yaml")["level"], "assistant")
+        self.assertIs(load_agent_config("user-a", "guide").level, None)
+        self.assertIn("local", self.yaml_of("user-a/user.yaml")["terminal_backends"])
 
 
 class ExampleConfigTests(unittest.TestCase):

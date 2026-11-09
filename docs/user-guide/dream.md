@@ -176,6 +176,10 @@ read (scoped to the agent, existing guards apply):
   `terminal.allow_in_dream` are configuration errors (read-only sandbox variants
   are planned)
 
+the agent's [permission level](../architecture/permissions.md#dream-mode) is a ceiling over all of this: memory reads
+and folder reads need `reader`, memory and own-file writes and web need `assistant`; below `reader` the session does not
+run (it fails with a message), and a call to a tool the level does not cover is refused even if the tool exists.
+
 the write tools below are capped by the agent's own `tool_groups`: a dream gets
 the mind palace edit tools only if the agent holds `memory_edit`, and `memory`,
 `skill_manage` and `soul_edit` only if it holds `self`.

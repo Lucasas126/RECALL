@@ -116,7 +116,7 @@ class InvalidEditResilienceTests(PickupFixture):
         self.assertEqual(reply, "reply from Bot")
         self.assertIn("line", notices[0])
         self.write_agent("bot", "id: bot\nname: Bot\n")
-        self.write_user("id: user-a\nname: User A\nprovider: {name: nope}\nagents: [bot]\n")
+        self.write_user("id: user-a\nname: User A\nmax_level: admin\nprovider: {name: nope}\nagents: [bot]\n")
         self.assertEqual(self.service.list_agents("user-a"), [{"id": "bot", "name": "Bot"}])
         self.assertEqual(self.service.login("user-a")["name"], "User A")
         reply, notices = self.say()

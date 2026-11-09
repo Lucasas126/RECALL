@@ -335,6 +335,7 @@ _SPANISH = {
     "Could not move the agent data; close other programs using this agent's files and try again.": "No se han podido mover los datos del agente; cierra otros programas que usen sus archivos e inténtalo de nuevo.",
     "Could not read the configuration file '{file}'.": "No se ha podido leer el archivo de configuración '{file}'.",
     "Invalid user ID or password": "Usuario o contraseña no válidos",
+    "Invalid user configuration '{file}': {details}": "Configuración de usuario no válida en '{file}': {details}",
     "Invalid user configuration '{file}'.": "Configuración de usuario no válida en '{file}'.",
     "Invalid agent configuration '{file}': {details}": "Configuración de agente no válida en '{file}': {details}",
     "The user configuration '{file}' has no agents list.": "La configuración de usuario '{file}' no tiene lista de agentes.",
@@ -791,6 +792,8 @@ _SPANISH = {
     "the application's limit": "el límite de la aplicación",
     "none": "ninguno",
     "The level '{level}' of agent '{agent_id}' is above your maximum level '{max_level}'. Choose '{max_level}' or lower, or ask an administrator to raise your maximum.": "El nivel '{level}' del agente '{agent_id}' supera tu nivel máximo '{max_level}'. Elige '{max_level}' o uno inferior, o pide a un administrador que suba tu máximo.",
+    "Agent '{agent_id}' has the level '{level}', but {service} needs the level '{needed}'. Raise the level of the agent to '{needed}' (at most your maximum) or remove {service}.": "El agente '{agent_id}' tiene el nivel '{level}', pero {service} necesita el nivel '{needed}'. Sube el nivel del agente a '{needed}' (como máximo tu máximo) o quita {service}.",
+    "Agent '{agent_id}' uses {service}, which needs the level '{needed}', above your maximum level '{max_level}'. Remove {service} or ask an administrator to raise your maximum.": "El agente '{agent_id}' usa {service}, que necesita el nivel '{needed}', por encima de tu nivel máximo '{max_level}'. Quita {service} o pide a un administrador que suba tu máximo.",
     "delegation.targets lists agents that are not yours: {agents}. Targets must be other agents of this user.": "delegation.targets incluye agentes que no son tuyos: {agents}. Los destinos deben ser otros agentes de este usuario.",
     # subagents (cross-process)
     "status: queued": "estado: en cola",

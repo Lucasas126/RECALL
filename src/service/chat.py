@@ -409,7 +409,7 @@ class ChatService:
             "language": user.language,
             "provider": user.provider.name,
             "require_zdr": user.require_zdr,
-            "max_level": self._agents.max_level(user).label,  # read-only: only an administrator changes it
+            "max_level": user.max_level.label,  # read-only: only an administrator changes it
             "agents": self.list_agents(user_id),
             # names, types and descriptions only, to choose backends in the agent form; never hosts, users or key paths
             "terminal_backends": [
@@ -629,7 +629,7 @@ class ChatService:
         """None when the user and agent files on disk load fine now, else a readable, secret-free reason."""
         try:
             user = load_user(user_id)
-            check_agent_level(load_agent_config(user_id, agent_id), user, self._agents.max_level(user))
+            check_agent_level(load_agent_config(user_id, agent_id), user, user.max_level)
         except FileNotFoundError:
             return None  # deleted: the rebuild reports it
         except Exception as exc:

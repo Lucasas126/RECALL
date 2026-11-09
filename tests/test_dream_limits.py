@@ -189,9 +189,9 @@ class DreamTimeLimitTests(DreamFixture):
         original = DreamRunner._call
         finished = []
 
-        def slow_tool(handlers, name, args):
+        def slow_tool(handlers, name, args, level):
             clock.advance(400)  # the deadline passes while the tool runs
-            result = original(handlers, name, args)
+            result = original(handlers, name, args, level)
             finished.append(name)
             return result
 
@@ -212,9 +212,9 @@ class DreamTimeLimitTests(DreamFixture):
         clock = FakeClock()
         original = DreamRunner._call
 
-        def slow_tool(handlers, name, args):
+        def slow_tool(handlers, name, args, level):
             clock.advance(301)
-            return original(handlers, name, args)
+            return original(handlers, name, args, level)
 
         with patch.object(DreamRunner, "_call", staticmethod(slow_tool)):
             summary = self.runner(ScriptedProvider([{"tool_calls": [_call("c1", "dream_pending")]}]), clock).run()

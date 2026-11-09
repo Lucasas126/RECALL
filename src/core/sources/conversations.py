@@ -5,10 +5,11 @@ import re
 import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Collection, Literal
+from typing import Collection, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from src.config.levels import LevelField
 from src.config.model_refs import CLAUDE_SUBSCRIPTION, prefix_of, provider_of
 from src.config.models import ReasoningEffort
 from src.core.sources.base import Source
@@ -109,6 +110,8 @@ class ChatTask(BaseModel):
     unattended: bool = False  # nobody watches: manual and dangerous actions are denied (phase 7 launches these)
     kind: str = Field(default="ephemeral", pattern=r"^(ephemeral|agent)$")  # `agent`: an existing agent of the user runs it, with its own SOUL
     remember: bool = False  # agent kind only: an ordinary hidden chat (reviewable) whose agent may write its own memory
+    # the level cap of the worker: the lower of the launching agent's level and the target's own; None = its own level
+    level: Optional[LevelField] = None
     created_at: str = ""
 
 

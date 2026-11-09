@@ -18,7 +18,7 @@ from src.agent.tools import build_tools
 from src.agent.toolsets.delegate import TaskError, TaskLimits, build_delegate_tools, task_limits
 from src.config.field_defaults import agent_defaults
 from src.config.models import (
-    AgentConfig, AgentDelegationConfig, ModelsConfig, ResolvedAgent, SubagentSettings,
+    AgentConfig, AgentDelegationConfig, ChatConfig, ModelsConfig, ResolvedAgent, SubagentSettings,
 )
 from src.config.settings import SUBAGENTS
 from src.core.sources.conversations import ChatTask, ConversationsSource
@@ -221,6 +221,12 @@ class SubagentFixture(steering.SteeringFixture):
         self.addCleanup(lambda: [g.set() for g in (self.parent_gate, self.wake_gate) if g is not None])
         self.addCleanup(self.release_child.set)
         self.addCleanup(self._wait_tasks)
+        stored = patch("src.service.chat.load_agent_config", side_effect=lambda user, agent: AgentConfig(
+            id=agent, name=agent, chat_config=ChatConfig(tools=True, tool_groups=list(self.groups)),
+            delegation=self.delegation or AgentDelegationConfig(),
+        ))  # the stored configuration the task manager reads the launcher's level from
+        stored.start()
+        self.addCleanup(stored.stop)
         self.manager = self.service._tasks
         self.manager.poll_seconds = 0.05
         for key, provider in self.providers.items():

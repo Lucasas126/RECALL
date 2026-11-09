@@ -23,11 +23,11 @@ the provider blocks are rejected.
 sets it**, with the [admin CLI](../user-guide/admin-cli.md) (`user set --user U --set max_level=operator`, `create-user --max-level`).
 The web API and the Settings dialog never read or write it, so a user cannot raise their own ceiling.
 
-When the key is missing, the effective value is `admin` if the installation has exactly one user and `collaborator` otherwise, and
-the first load of that user logs one warning that names `python -m src.admin migrate-levels` (writes the value for every user and
-agent) and `user set --set max_level=...`. A declared agent `level` above this value is an error (the agent is not loaded, nor saved
-by the API or the CLI); `user set` refuses a `max_level` below the declared level of one of the user's agents. Step 1 of the
-design only stores and validates the levels; nothing is filtered by them yet.
+`max_level` is **required**: a `user.yaml` without it does not load, and the error names the fix,
+`python -m src.admin user set --user U --set max_level=<level>`. An agent whose level (declared, or what its configuration needs) is
+above this value is invalid (not loaded, nor saved by the API or the CLI); `user set` refuses a `max_level` below the level of one of
+the user's agents. The level is enforced when tools are built and at dispatch, in chats, workers and dreams (see
+[permissions](../architecture/permissions.md)).
 
 ## storage layout
 
@@ -277,8 +277,7 @@ docker compose exec -it recall-web python -m src.admin create-user <user_id> [--
 docker compose exec -it recall-web python -m src.admin set-password <user_id> [--generate]
 ```
 
-`create-user` writes a valid `user.yaml` with the default `models`, `agents: []`, `max_level` (`--max-level`; default `admin` for the first
-user of the installation and `collaborator` for the others), an Argon2 `password_hash` and
+`create-user` writes a valid `user.yaml` with the default `models`, `agents: []`, `max_level` (`--max-level`; default `collaborator`), an Argon2 `password_hash` and
 `provider.api_key` set to the variable NAME (`OPENROUTER_API_KEY` by default; the key is never asked for or
 stored). `--claude-login` sets `claude_subscription.claude_config_dir` to `<config dir>/<user_id>/claude-login`.
 The password is typed twice (hidden) or generated (`--generate`, 24 characters, printed once); passwords shorter

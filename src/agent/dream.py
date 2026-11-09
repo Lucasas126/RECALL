@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from time import monotonic, perf_counter
 from typing import Callable, Literal, Optional, Protocol
 
+from src.agent.permissions_prompt import block_for
 from src.agent.profile import AgentProfile, load_profile, system_prompt
 from src.agent.toolsets.dream import build_review_tools
 from src.agent.toolsets.editing import build_edit_tools
@@ -17,6 +18,8 @@ from src.agent.toolsets.self_files import build_self_tools
 from src.agent.toolsets.tags import build_tag_tools
 from src.agent.toolsets.folders import build_folder_tools
 from src.agent.toolsets.web import build_web_tools
+from src.config.ceiling import dream_allowed_tools, dream_capabilities, dream_refusal
+from src.config.levels import Level
 from src.config.models import ResolvedAgent
 from src.core.review import ReviewQueue
 from src.core.sources.registry import SourceRegistry
@@ -113,7 +116,10 @@ def dream_folder_options(config: ResolvedAgent) -> dict:
 
 def _folders_allowed(config: ResolvedAgent) -> bool:
     groups = set(config.tool_groups or ())
-    return "folders" in config.dream.tools and bool(groups & {"folders_read", "folders_edit"})
+    return (
+        "folders" in config.dream.tools and bool(groups & {"folders_read", "folders_edit"})
+        and dream_capabilities(config.level).folders_read
+    )
 
 
 def build_dream_tools(
@@ -123,16 +129,21 @@ def build_dream_tools(
     """The dream toolset: review queue and memory reads; palace edits only with the `memory_edit` group, own-file
     edits only with `self`; optional web/folder reads; never a terminal."""
     groups = set(host.config.tool_groups or ())  # the agent's chat tool groups cap what a dream may write
-    funcs = [*build_review_tools(queue, read_until, reviewed), *build_memory_tools(host), *build_tag_tools(host)]
-    if "memory_edit" in groups:
+    caps = dream_capabilities(host.config.level)  # ... and so does its level: the dream table of the design
+    funcs = list(build_review_tools(queue, read_until, reviewed))
+    if caps.memory_read:
+        funcs.extend((*build_memory_tools(host), *build_tag_tools(host)))
+    if "memory_edit" in groups and caps.memory_edit:
         funcs.extend(build_edit_tools(host))  # only mind_palace is writable in a dream registry
-    if "self" in groups:
+    if "self" in groups and caps.self_files:
         funcs.extend(build_self_tools(host))
     if _folders_allowed(host.config) and any(folder.readable for folder in host.sources.folders()):
         funcs.extend(build_folder_tools(host, writable=False))
-    if "web" in host.config.dream.tools and web_client is not None:
+    if "web" in host.config.dream.tools and caps.web and web_client is not None:
         funcs.extend(build_web_tools(web_client))
-    # never the terminal: a dream has no terminal tools, whatever the agent's config says
+    # never the terminal, tasks or permissions: a dream has none, whatever the agent's config says
+    allowed = dream_allowed_tools(host.config.level)
+    funcs = [func for func in funcs if func.tool_spec["function"]["name"] in allowed]
     return [func.tool_spec for func in funcs], {func.tool_spec["function"]["name"]: func for func in funcs}
 
 
@@ -317,7 +328,8 @@ class DreamRunner:
 
     def _system_prompt(self, profile: AgentProfile) -> str:
         dream_prompt = self.config.dream.prompt.strip() or DEFAULT_DREAM_PROMPT
-        return system_prompt(profile, [dream_prompt, DATA_RULE])
+        blocks = [block_for(self.config, dream=True), dream_prompt, DATA_RULE]
+        return system_prompt(profile, [block for block in blocks if block])
 
     def _file_notes(self, journal: str) -> list[str]:
         """Which of the files the prompt mentions exist, so the model does not read missing ones."""
@@ -448,6 +460,11 @@ class DreamRunner:
         pending_before = 0
         warning_at: str | None = None
         try:
+            if not dream_capabilities(self.config.level).enabled:
+                raise PermissionError(
+                    f"dreams need the level reader or higher and agent '{self.config.id}' runs at "
+                    f"'{self.config.level.label}'; raise its level to let it dream"
+                )
             pending = self._queue.pending()
             pending_before = len(pending)
             self._event(
@@ -556,7 +573,7 @@ class DreamRunner:
                         except json.JSONDecodeError:
                             args = {"_invalid_json": args}
                     self._event("tool_call", steps, id=call["id"], name=name, arguments=args)
-                    output, failed = self._call(handlers, name, args)  # never interrupted by a stop
+                    output, failed = self._call(handlers, name, args, self.config.level)  # never interrupted by a stop
                     errors += failed
                     self._event(
                         "tool_result", steps, id=call["id"], name=name, error=failed,
@@ -623,8 +640,10 @@ class DreamRunner:
         return summary
 
     @staticmethod
-    def _call(handlers: dict[str, Callable[..., str]], name: str, args: dict) -> tuple[str, bool]:
+    def _call(handlers: dict[str, Callable[..., str]], name: str, args: dict, level: Level) -> tuple[str, bool]:
         handler = handlers.get(name)
+        if handler is not None and name not in dream_allowed_tools(level):  # the dream table is a ceiling, even if a handler exists
+            return dream_refusal(level, name), True
         if handler is None:
             return f"error: unknown tool '{name}'", True
         if "_invalid_json" in args:

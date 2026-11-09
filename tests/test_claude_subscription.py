@@ -294,7 +294,7 @@ class ClaudeSubscriptionConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "name of an environment variable"):
             ProviderConfig(name="openrouter", api_key="sk-or-v1-abc def")
         with self.assertRaisesRegex(ValidationError, "cannot be the main provider"):
-            UserConfig(id="u", name="U", provider={"name": "openrouter"}, embeddings_provider={"name": "claude_subscription"}, agents=[])
+            UserConfig(max_level="admin", id="u", name="U", provider={"name": "openrouter"}, embeddings_provider={"name": "claude_subscription"}, agents=[])
 
     def test_framework_models_need_no_zdr_setting_unless_zdr_is_forced_on(self) -> None:
         self.assertEqual(ChatNamingConfig(model="claude_subscription:haiku").model, "claude_subscription:haiku")
@@ -321,7 +321,7 @@ class ClaudeSubscriptionConfigTests(unittest.TestCase):
 
     def test_loading_a_zdr_user_refuses_a_claude_helper_model_that_inherits_the_policy(self) -> None:
         import src.config.loader as loader
-        data = {"id": "u", "name": "U", "provider": {"name": "openrouter"}, "agents": ["a"]}
+        data = {"id": "u", "name": "U", "max_level": "admin", "provider": {"name": "openrouter"}, "agents": ["a"]}
         naming = ChatNamingConfig(model="claude_subscription:haiku")
         for require_zdr, naming_config, fails in ((True, naming, True), (False, naming, False),
                                                   (True, ChatNamingConfig(model="claude_subscription:haiku", zdr=False), False),
@@ -334,10 +334,10 @@ class ClaudeSubscriptionConfigTests(unittest.TestCase):
                     self.assertEqual(loader.load_user("u").require_zdr, require_zdr)
 
     def test_user_policy_defaults_to_off(self) -> None:
-        self.assertFalse(UserConfig(id="u", name="U", provider={"name": "openrouter"}, agents=[]).require_zdr)
-        self.assertTrue(UserConfig(id="u", name="U", provider={"name": "openrouter"}, agents=[], require_zdr=True).require_zdr)
+        self.assertFalse(UserConfig(max_level="admin", id="u", name="U", provider={"name": "openrouter"}, agents=[]).require_zdr)
+        self.assertTrue(UserConfig(max_level="admin", id="u", name="U", provider={"name": "openrouter"}, agents=[], require_zdr=True).require_zdr)
         with self.assertRaises(ValidationError):
-            UserConfig(id="u", name="U", provider={"name": "openrouter"}, agents=[], require_zdr="yes")
+            UserConfig(max_level="admin", id="u", name="U", provider={"name": "openrouter"}, agents=[], require_zdr="yes")
 
     def test_dream_model_and_chat_selection(self) -> None:
         self.assertEqual(DreamConfig(model="claude_subscription:opus").model, "claude_subscription:opus")
@@ -403,7 +403,7 @@ class ClaudeSubscriptionWiringTests(unittest.TestCase):
         conversations.generated_title.return_value = None
         provider = Mock()
         provider.invoke.return_value = {"response": "A title"}
-        user = UserConfig(id="u", name="U", provider={"name": "openrouter"}, agents=["a"],
+        user = UserConfig(max_level="admin", id="u", name="U", provider={"name": "openrouter"}, agents=["a"],
                           claude_subscription={"claude_config_dir": "/login"})
         naming = ChatNamingConfig(model="claude_subscription:haiku", min_messages=1)
         with patch.object(service, "_conversations", return_value=conversations), \
@@ -420,7 +420,7 @@ class ClaudeSubscriptionWiringTests(unittest.TestCase):
         service = ChatService(agent_factory=Mock(), dream=Mock())
         conversations = Mock()
         conversations.generated_title.return_value = None
-        user = UserConfig(id="u", name="U", provider={"name": "openrouter"}, agents=["a"], require_zdr=True)
+        user = UserConfig(max_level="admin", id="u", name="U", provider={"name": "openrouter"}, agents=["a"], require_zdr=True)
         naming = ChatNamingConfig(model="claude_subscription:haiku", min_messages=1)
         with patch.object(service, "_conversations", return_value=conversations), \
                 patch.object(service, "_load", return_value=[{"role": "user", "content": "hi"}]), \
@@ -435,7 +435,7 @@ class ClaudeSubscriptionWiringTests(unittest.TestCase):
 
 class ClaudeSubscriptionCatalogWebTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.user = UserConfig(
+        self.user = UserConfig(max_level="admin", 
             id="test-user", name="Test", provider=ProviderConfig(name="openrouter"),
             password_hash=TEST_PASSWORD_HASH, agents=[],
         )

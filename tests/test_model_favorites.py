@@ -101,7 +101,7 @@ class ModelFavoritesWebTests(unittest.TestCase):
         self.users = {}
         for user in ("user-one", "user-two"):
             (self.root / user).mkdir()
-            self.users[user] = UserConfig(
+            self.users[user] = UserConfig(max_level="admin", 
                 id=user, name=user, provider=ProviderConfig(name="openrouter"),
                 password_hash=TEST_PASSWORD_HASH, agents=[],
             )

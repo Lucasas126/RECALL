@@ -104,7 +104,7 @@ def profile_blocks(profile: AgentProfile) -> list[str]:
     return blocks
 
 
-def system_prompt(profile: AgentProfile, extra_blocks: list[str] | None = None) -> str:
-    """SOUL first, then the profile blocks, then channel-specific blocks such as MCP notes."""
-    parts = [profile.soul.strip(), *profile_blocks(profile), *(extra_blocks or [])]
+def system_prompt(profile: AgentProfile, extra_blocks: list[str] | None = None, permissions: str = "") -> str:
+    """SOUL first, then the `permissions` block (empty = none), the profile blocks and channel-specific blocks."""
+    parts = [profile.soul.strip(), permissions.strip(), *profile_blocks(profile), *(extra_blocks or [])]
     return "\n\n".join(part for part in parts if part)

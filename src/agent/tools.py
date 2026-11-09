@@ -11,6 +11,7 @@ from src.agent.toolsets.folders import build_folder_tools
 from src.agent.toolsets.terminal import build_terminal_tools
 from src.agent.toolsets.web import build_web_tools
 from src.agent.tool_groups import DISPOSABLE_BLOCKED_TOOLS, TOOL_GROUP_TOOLS, validate_tool_groups
+from src.config.ceiling import group_allowed, restrict_config, tool_allowed
 from src.config.models import ResolvedAgent
 from src.providers.tavily import TavilyClient
 
@@ -56,8 +57,12 @@ def build_tools(
     `disposable` drops every tool that writes the agent's own persistent state (read tools stay).
     `worker_terminal` (a subagent task's chat) keeps the terminal group it was granted although the chat is disposable:
     being excluded from learning does not block the terminal (its approvals are manual, see `Agent._become_worker`).
+
+    The agent's level is a ceiling (`src/config/ceiling.py`): groups, backends and tools it does not cover are dropped,
+    whatever the configuration or the grant says.
     """
-    selected = validate_tool_groups(tool_groups or [])
+    level = agent.config.level
+    selected = [group for group in validate_tool_groups(tool_groups or []) if group_allowed(level, group)]
     base_tools = []
     if "memory_read" in selected:
         base_tools.extend((*build_memory_tools(agent), *build_tag_tools(agent)))
@@ -73,9 +78,9 @@ def build_tools(
     if web_client is not None and "web" in selected:
         base_tools.extend(build_web_tools(web_client))
     if "terminal" in selected and (not disposable or worker_terminal):
-        base_tools.extend(build_terminal_tools(agent.config))
+        base_tools.extend(build_terminal_tools(restrict_config(agent.config)))
     if "delegate" in selected:  # a disposable chat (and so a task's own chat) never launches tasks: DISPOSABLE_BLOCKED_TOOLS
-        base_tools.extend(build_delegate_tools(agent.config))
+        base_tools.extend(build_delegate_tools(restrict_config(agent.config)))
     tools_by_name = {
         func.tool_spec["function"]["name"]: func
         for func in base_tools
@@ -86,6 +91,7 @@ def build_tools(
     funcs = [
         tools_by_name[name] for name in _ORDER
         if name in tools_by_name
+        and tool_allowed(level, name)
         and name not in denied
         and (allowed is None or name in allowed)
     ]

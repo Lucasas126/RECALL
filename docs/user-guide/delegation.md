@@ -84,6 +84,13 @@ with `task_start(agent="<id>")`. It is opt-in and explicit:
 - **No loops.** Depth stays 1: a task never launches tasks. An agent cannot delegate to itself, and `A -> B` is refused while `B` is
   waiting on a task that `A` is running. Per-user and per-chat limits still apply, and the target may be busy in another chat (each chat has its own worker).
 
+## Permission levels
+
+Delegation follows the [permission levels](../architecture/permissions.md#what-is-enforced-step-2): the `delegate` tools exist from
+`collaborator`, handing a task to another agent (`agent`) needs the launcher at `operator`, and a worker never outranks its
+launcher: its level is the lower of its own (the target agent's, for an existing agent) and the launcher's, so the groups, terminal
+backends and delegation targets above that level are dropped.
+
 ## Terminal and approvals
 
 `task_start` takes `backends`: the [terminal backends](terminal.md#backends) to hand to the worker. Naming a backend grants the worker the

@@ -30,6 +30,7 @@ SECRET = "sk-or-v1-never-shown-0123456789"
 USER_YAML = f"""# user file kept by hand
 id: user-one
 name: User One
+max_level: admin
 password_hash: '{TEST_PASSWORD_HASH}'
 provider:
   name: openrouter
@@ -227,7 +228,7 @@ class ProvidersApiTests(unittest.TestCase):
     def test_slow_checks_are_cached_for_a_minute_but_the_key_check_is_live(self) -> None:
         now = [0.0]
         availability = ProviderAvailability(ttl=60.0, clock=lambda: now[0])
-        user = UserConfig(id="u", name="U", provider={"name": "openrouter", "api_key": "OPENROUTER_TEST_KEY"}, agents=[])
+        user = UserConfig(max_level="admin", id="u", name="U", provider={"name": "openrouter", "api_key": "OPENROUTER_TEST_KEY"}, agents=[])
         availability.rows(user)
         availability.rows(user)
         self.assertEqual((self.mocks["claude"].call_count, self.mocks["ollama"].call_count), (1, 1))
@@ -368,7 +369,7 @@ class ProvidersApiTests(unittest.TestCase):
 
 class UserConfigTests(unittest.TestCase):
     def test_there_is_no_enabled_key_and_claude_options_stay_optional(self) -> None:
-        base = {"id": "u", "name": "U", "provider": {"name": "openrouter"}, "agents": []}
+        base = {"id": "u", "name": "U", "max_level": "admin", "provider": {"name": "openrouter"}, "agents": []}
         for block in ("openrouter", "ollama", "claude_subscription"):
             with self.assertRaises(ValueError):
                 UserConfig.model_validate(base | {block: {"enabled": True}})
@@ -379,7 +380,7 @@ class UserConfigTests(unittest.TestCase):
 
 class CatalogFunctionTests(unittest.TestCase):
     def test_main_ollama_rows_are_bare_and_openrouter_rows_prefixed(self) -> None:
-        user = UserConfig(id="u", name="U", provider={"name": "ollama"}, agents=[])
+        user = UserConfig(max_level="admin", id="u", name="U", provider={"name": "ollama"}, agents=[])
         with patch("src.service.providers.list_ollama_models", return_value=["qwen3"]), \
                 patch("src.service.providers.list_openrouter_models", return_value=[
                     OpenRouterModel(id="vendor/alpha", name="Alpha", description="", zdr_providers=["P"])]):

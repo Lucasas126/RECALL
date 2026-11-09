@@ -31,7 +31,7 @@ class IndexApiTests(unittest.TestCase):
         agents = self.config_dir / "user-a" / "agents"
         agents.mkdir(parents=True)
         (self.config_dir / "user-a" / "user.yaml").write_text(
-            f"id: user-a\nname: User A\nprovider: {{name: ollama}}\nagents: [aria]\npassword_hash: '{TEST_PASSWORD_HASH}'\n",
+            f"id: user-a\nname: User A\nmax_level: admin\nprovider: {{name: ollama}}\nagents: [aria]\npassword_hash: '{TEST_PASSWORD_HASH}'\n",
             encoding="utf-8",
         )
         self.notes = self.root / "notes"

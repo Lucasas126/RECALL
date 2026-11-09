@@ -1,4 +1,4 @@
-"""Permission levels, step 1: the web API exposes levels read-only for users and read-write for agents."""
+"""Permission levels: the web API exposes levels read-only for users and read-write for agents, with the level rule."""
 
 from __future__ import annotations
 
@@ -9,7 +9,10 @@ from admin_helpers import AdminFixture
 from auth_helpers import login
 from fastapi.testclient import TestClient
 
-from src.config.levels import LEVEL_EXCEEDS_MAX, LevelExceedsMax, forget_warnings
+from src.config.levels import (
+    LEVEL_BELOW_REQUIRED, LEVEL_EXCEEDS_MAX, LEVEL_REQUIRED_ABOVE_MAX, LevelBelowRequired, LevelExceedsMax,
+    LevelRequiredAboveMax,
+)
 from src.utils.i18n import error_message
 from src.web.app import create_app
 
@@ -17,8 +20,6 @@ from src.web.app import create_app
 class LevelApiTests(AdminFixture):
     def setUp(self) -> None:
         super().setUp()
-        forget_warnings()
-        self.addCleanup(forget_warnings)
         self.write_user(self.read("user-a/user.yaml").replace("max_level: admin", "max_level: operator"))
         self.client = TestClient(create_app(self.service))
         self.client.__enter__()
@@ -32,14 +33,6 @@ class LevelApiTests(AdminFixture):
         self.assertEqual(self.client.get("/api/me").json()["max_level"], "operator")
         response = self.client.post("/api/login", json={"user_id": "user-a", "password": "test-password-123"})
         self.assertEqual(response.json()["max_level"], "operator")
-
-    def test_max_level_falls_back_when_not_declared(self) -> None:
-        self.write_user(self.read("user-a/user.yaml").replace("max_level: operator\n", ""))
-        self.assertEqual(self.client.get("/api/me").json()["max_level"], "admin")  # the only user
-        other = self.config_dir / "user-b"
-        other.mkdir()
-        (other / "user.yaml").write_text("id: user-b\nname: B\nprovider: {name: ollama}\nagents: []\n", encoding="utf-8")
-        self.assertEqual(self.client.get("/api/me").json()["max_level"], "collaborator")
 
     def test_agent_payloads_show_the_effective_level(self) -> None:
         self.assertEqual(self.client.get("/api/agents/bot").json()["level"], "assistant")  # computed from the defaults
@@ -75,6 +68,28 @@ class LevelApiTests(AdminFixture):
         self.assertIn("supera tu nivel máximo", error_message("es", error))
         self.assertIn("above your maximum level", error_message("en", error))
 
+    def test_the_level_rule_codes_over_the_api(self) -> None:
+        body = {"id": "new", "name": "New", "level": "minimal", "chat_config": {"tool_groups": ["web"]}}
+        response = self.client.post("/api/agents", json=body)
+        self.assertEqual((response.status_code, response.json()["code"]), (400, "level_below_required"))
+        self.assertIn("tool group 'web'", response.json()["detail"])
+        self.assertIn("'assistant'", response.json()["detail"])
+        self.write_user(self.read("user-a/user.yaml").replace("max_level: operator", "max_level: assistant"))
+        body = {"id": "new", "name": "New", "chat_config": {"tool_groups": ["folders_edit"]}}
+        response = self.client.post("/api/agents", json=body)
+        self.assertEqual((response.status_code, response.json()["code"]), (400, "level_required_above_max"))
+        self.assertIn("tool group 'folders_edit'", response.json()["detail"])
+        self.assertFalse((self.config_dir / "user-a" / "agents" / "new.yaml").exists())
+
+    def test_the_new_messages_have_spanish_translations(self) -> None:
+        below = LevelBelowRequired(LEVEL_BELOW_REQUIRED, agent_id="bot", level="reader", service="tool group 'web'", needed="assistant")
+        above = LevelRequiredAboveMax(
+            LEVEL_REQUIRED_ABOVE_MAX, agent_id="bot", service="chat_config.mcp", needed="collaborator", max_level="assistant",
+        )
+        self.assertIn("necesita el nivel 'assistant'", error_message("es", below))
+        self.assertIn("por encima de tu nivel máximo", error_message("es", above))
+        self.assertIn("tool group 'web'", error_message("es", below))  # the service label is an opaque value
+
     def test_an_unknown_level_is_a_validation_error(self) -> None:
         response = self.client.post("/api/agents", json={"id": "new", "name": "New", "level": "root"})
         self.assertEqual(response.status_code, 422)
@@ -97,8 +112,8 @@ class LevelApiTests(AdminFixture):
         self.assertNotIn("level", self.stored())
 
     def test_rename_through_put_keeps_the_level(self) -> None:
-        self.write_agent("bot", "id: bot\nname: Bot\nlevel: reader\n")
-        body = {"id": "bot2", "name": "Bot"}
+        self.write_agent("bot", "id: bot\nname: Bot\nlevel: reader\nchat_config:\n  tool_groups: [memory_read]\n")
+        body = {"id": "bot2", "name": "Bot", "chat_config": {"tool_groups": ["memory_read"]}}
         self.assertEqual(self.client.put("/api/agents/bot", json=body).status_code, 200)
         self.assertEqual(self.stored("bot2")["level"], "reader")
 

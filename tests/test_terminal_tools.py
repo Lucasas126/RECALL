@@ -284,7 +284,7 @@ class SshBackendTests(unittest.TestCase):
 
 class ResolveAndConfigTests(unittest.TestCase):
     def user(self, **backends):
-        return UserConfig(id="u", name="U", provider=ProviderConfig(name="ollama"), agents=[], terminal_backends=backends)
+        return UserConfig(max_level="admin", id="u", name="U", provider=ProviderConfig(name="ollama"), agents=[], terminal_backends=backends)
 
     def test_local_backend_is_refused_unless_allowed(self) -> None:
         user = self.user(here={"type": "local", "workdir": "/srv/w"}, box=ssh_config().model_dump())
@@ -421,7 +421,7 @@ class AuditTests(ToolFixture):
 
 class AdminTerminalTestTests(unittest.TestCase):
     def run_cli(self, argv, backends=None, user="user-a", allow_local=False):
-        loaded = UserConfig(id=user, name="A", provider=ProviderConfig(name="ollama"), agents=[],
+        loaded = UserConfig(max_level="admin", id=user, name="A", provider=ProviderConfig(name="ollama"), agents=[],
                             terminal_backends=backends or {})
         out, err = io.StringIO(), io.StringIO()
         with patch.object(admin, "load_user", return_value=loaded), \

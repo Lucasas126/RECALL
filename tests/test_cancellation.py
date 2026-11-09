@@ -35,7 +35,7 @@ class AgentCancellationTests(unittest.TestCase):
             user_id="test-user", id="test-agent", name="Test",
             models=ModelsConfig(), provider_name="ollama", api_key="",
             embeddings_provider_name="ollama", embeddings_api_key="",
-            tools=False, associative_memory="off",
+            tools=False, associative_memory="off", level="admin",
         )
         with (
             patch("src.agent.agent.SourceRegistry.for_agent", return_value=registry),

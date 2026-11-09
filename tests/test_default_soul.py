@@ -24,7 +24,7 @@ class DefaultSoulTests(unittest.TestCase):
         agents = self.config_dir / "user-a" / "agents"
         agents.mkdir(parents=True)
         (self.config_dir / "user-a" / "user.yaml").write_text(
-            f"id: user-a\nname: User A\nprovider: {{name: ollama}}\nagents: [old]\npassword_hash: '{TEST_PASSWORD_HASH}'\n",
+            f"id: user-a\nname: User A\nmax_level: admin\nprovider: {{name: ollama}}\nagents: [old]\npassword_hash: '{TEST_PASSWORD_HASH}'\n",
             encoding="utf-8",
         )
         (agents / "old.yaml").write_text(yaml.safe_dump({"id": "old", "name": "Old"}), encoding="utf-8")

@@ -36,6 +36,8 @@ from src.agent.toolsets.delegate import (
     MAX_CONTEXT_CHARS, MAX_GOAL_CHARS, MAX_INSTRUCTIONS_CHARS, TaskError, TaskLimits, task_limits,
 )
 from src.agent.tool_groups import DEFAULT_TOOL_GROUPS, DELEGATE_GRANTABLE_GROUPS
+from src.config.ceiling import delegation_targets_allowed, group_allowed, worker_level, workers_allowed
+from src.config.levels import Level, effective_agent_level
 from src.config.settings import SUBAGENTS
 from src.core.sources.conversations import ChatTask
 from src.providers.cancellation import GenerationCancelled
@@ -588,7 +590,7 @@ class TaskManager:
         self, parent: RunContext, *, config: Any, limits: TaskLimits, grantable: list[str], goal: str, context: str,
         instructions: str, groups: list[str], model: str, timeout_s: int,
         backends: list[str] | None = None, grantable_backends: list[str] | None = None,
-        agent: str = "", targets: list[dict] | None = None, parent_name: str = "",
+        agent: str = "", targets: list[dict] | None = None, parent_name: str = "", launcher_level: Level | None = None,
     ) -> dict:
         """Launch a task and block until it ends (phase 1's `task_start(wait=true)`); returns the result summary.
 
@@ -598,6 +600,7 @@ class TaskManager:
             parent, limits=limits, grantable=grantable, goal=goal, context=context, instructions=instructions,
             groups=groups, model=model, timeout_s=timeout_s, wake=False,
             backends=backends, grantable_backends=grantable_backends, agent=agent, targets=targets, parent_name=parent_name,
+            launcher_level=launcher_level,
         )
         try:
             while not live.done.wait(0.2):
@@ -616,12 +619,13 @@ class TaskManager:
         self, parent: RunContext, *, limits: TaskLimits, grantable: list[str], goal: str, context: str,
         instructions: str, groups: list[str], model: str, timeout_s: int, wake: bool = True,
         backends: list[str] | None = None, grantable_backends: list[str] | None = None,
-        agent: str = "", targets: list[dict] | None = None, parent_name: str = "",
+        agent: str = "", targets: list[dict] | None = None, parent_name: str = "", launcher_level: Level | None = None,
     ) -> _LiveTask:
         """Check every limit and the grant, create the record and the hidden chat, and start the worker.
 
         `wake` says whether the parent is told when the task ends (a wake turn in its chat); `run` passes False
-        because it returns the result itself.
+        because it returns the result itself. `launcher_level` is the level of the launching agent as it runs (its stored
+        configuration when omitted): it caps the worker.
         """
         service, user_id = self._service, parent.user_id
         goal, context, instructions = (goal or "").strip(), (context or "").strip(), (instructions or "").strip()
@@ -632,6 +636,14 @@ class TaskManager:
             if len(text) > cap:
                 raise TaskError(f"{name} is too long ({len(text)} characters, at most {cap}); shorten it")
         groups = list(dict.fromkeys(groups))
+        launcher = launcher_level if launcher_level is not None else self._agent_level(user_id, parent.agent_id)
+        if not workers_allowed(launcher):
+            raise TaskError(
+                f"level: launching tasks needs the level collaborator or higher and you run at {launcher.label}; "
+                "do the work yourself or tell the user which level would be required"
+            )
+        if bad := [group for group in groups if not group_allowed(launcher, group)]:
+            raise TaskError(f"level: cannot grant {', '.join(bad)}: not covered by your level {launcher.label}")
         if bad := [group for group in groups if group not in grantable]:
             raise TaskError(
                 f"cannot grant {', '.join(bad)} to a task; grantable groups for this agent: "
@@ -639,7 +651,15 @@ class TaskManager:
             )
         backends = list(dict.fromkeys(backends or []))
         target = self._resolve_target(parent, (agent or "").strip(), targets) if (agent or "").strip() else None
+        cap = launcher
+        if target is not None and not delegation_targets_allowed(launcher):
+            raise TaskError(
+                f"level: handing a task to another agent needs the level operator and you run at {launcher.label}; "
+                "use a fresh worker or tell the user which level would be required"
+            )
         if target is not None:  # an existing agent: its own SOUL (`instructions` is ignored) and its groups ∩ the grant
+            cap = worker_level(target["level"], launcher)  # the worker never outranks its launcher
+            groups = [group for group in groups if group_allowed(cap, group)]
             instructions = ""
             groups = [group for group in groups if group in target["groups"]]
             if backends:
@@ -653,7 +673,12 @@ class TaskManager:
                 self._check_backend_match(parent, target, backends)
             if target["remember"]:  # it keeps its own memory tools, but only those the LAUNCHING agent holds itself
                 held = self._agent_groups(user_id, parent.agent_id)
-                groups = [*groups, *(group for group in MEMORY_GROUPS if group in target["groups"] and group in held)]
+                groups = [
+                    *groups,
+                    *(group for group in MEMORY_GROUPS if group in target["groups"] and group in held and group_allowed(cap, group)),
+                ]
+        if backends and not group_allowed(cap, "terminal"):
+            raise TaskError(f"level: the terminal needs the level operator and the worker would run at {cap.label}")
         if backends:  # a terminal grant: only backends the parent has, and only with the parent's own terminal group
             if bad := [name for name in backends if name not in (grantable_backends or [])]:
                 raise TaskError(
@@ -719,6 +744,7 @@ class TaskManager:
         try:
             chat_id = self._create_child_chat(
                 parent, task_id, groups, instructions, model, backends, record["title"], target=target, parent_name=parent_name,
+                level=cap,
             )
         except Exception as exc:
             self._finish(live, "failed", reason="launch_error", error=str(exc)[:300])
@@ -791,13 +817,15 @@ class TaskManager:
                 raise TaskError(f"notify chat {notify_agent}/{notify_id} does not exist for this user") from None
             parent = {"agent_id": notify_agent, "chat_id": notify_id}
 
+        own = effective_agent_level(config, service._user(user_id))
         if instructions:
-            target, grant, backends = None, [g for g in dict.fromkeys(groups or []) if g in DELEGATE_GRANTABLE_GROUPS], []
+            target, backends = None, []
+            grant = [g for g in dict.fromkeys(groups or []) if g in DELEGATE_GRANTABLE_GROUPS and group_allowed(own, g)]
         else:
             standin = SimpleNamespace(user_id=user_id, agent_id="")  # `_resolve_target` only reads these two
             target = self._resolve_target(standin, agent_id, [{"agent": agent_id, "remember": False}])  # type: ignore[arg-type]
-            grant = [g for g in target["groups"] if g in DELEGATE_GRANTABLE_GROUPS]
-            backends = list(target["backends"]) if "terminal" in target["groups"] else []
+            grant = [g for g in target["groups"] if g in DELEGATE_GRANTABLE_GROUPS and group_allowed(own, g)]
+            backends = list(target["backends"]) if "terminal" in target["groups"] and group_allowed(own, "terminal") else []
             if backends:
                 grant.append("terminal")
         if (until := self.store.blocked_until(user_id)) is not None:
@@ -835,7 +863,7 @@ class TaskManager:
             mark = ChatTask(
                 task_id=task_id, parent_agent_id=parent["agent_id"], parent_chat_id=parent["chat_id"], depth=1,
                 groups=grant, instructions=instructions, created_at=_now(), backends=backends, title=record["title"],
-                unattended=True, kind="agent" if target is not None else "ephemeral", remember=False,
+                unattended=True, kind="agent" if target is not None else "ephemeral", remember=False, level=own,
             )
             chat_id = conversations.create(origin=_CHILD_ORIGIN, task=mark)
             if target is None and model.strip():
@@ -892,8 +920,16 @@ class TaskManager:
         defined = {name: config.terminal.backends[name] for name in backends} if backends else {}
         return {
             "id": config.id, "name": config.name, "groups": groups, "backends": backends, "remember": allowed[agent_id],
-            "backend_configs": defined,
+            "backend_configs": defined, "level": effective_agent_level(config, service._user(parent.user_id)),
         }
+
+    def _agent_level(self, user_id: str, agent_id: str) -> Level:
+        """The effective level of one of the user's agents, from its stored configuration."""
+        service = self._service
+        try:
+            return effective_agent_level(service._agent_config(user_id, agent_id), service._user(user_id))
+        except Exception:
+            raise TaskError("could not read your level; the task was not started") from None
 
     def _agent_groups(self, user_id: str, agent_id: str) -> list[str]:
         """The tool groups an agent holds by its own configuration (empty when it has no tools or cannot be read)."""
@@ -975,6 +1011,7 @@ class TaskManager:
     def _create_child_chat(
         self, parent: RunContext, task_id: str, groups: list[str], instructions: str, model: str,
         backends: list[str] | None = None, title: str = "", *, target: dict | None = None, parent_name: str = "",
+        level: Level | None = None,
     ) -> str:
         service = self._service
         # the worker chat lives under the agent that runs it: the parent's for an ephemeral worker, else the target's
@@ -984,6 +1021,7 @@ class TaskManager:
             task_id=task_id, parent_agent_id=parent.agent_id, parent_chat_id=parent.chat_id, depth=1,
             groups=groups, instructions=instructions, created_at=_now(), backends=list(backends or []), title=title,
             kind="agent" if target is not None else "ephemeral", remember=bool(target and target["remember"]),
+            level=level,
         )
         chat_id = conversations.create(origin=_CHILD_ORIGIN, task=mark)
         if target is not None:  # an existing agent keeps its own model, provider and reasoning settings

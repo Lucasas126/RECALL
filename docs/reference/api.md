@@ -59,6 +59,8 @@ message. Errors render as a dismissable card (`role="alert"`) in the transcript,
 | `agent_busy` | the agent or chat still has active/queued replies (also when converting a chat to or from disposable) | none (wait) |
 | `mcp_not_connected` | an MCP tool needs an account the user has not connected | Open Settings |
 | `level_exceeds_max` | an agent's `level` is above the user's `max_level` (HTTP 400, on `POST`/`PUT /api/agents`) | none (choose a lower level) |
+| `level_below_required` | an agent's `level` is below what one of its services needs; the message names the service and the level (HTTP 400, same routes) | none (raise the level or remove the service) |
+| `level_required_above_max` | an agent uses a service that needs more than the user's `max_level` (HTTP 400, same routes; also for an agent without a `level`) | none (remove the service or ask an administrator) |
 
 New codes are set with `UserMessageError(..., code="...")` or a class-level `code`.
 
@@ -85,7 +87,8 @@ The rules these routes follow (ids, renames, deletion, locks, `409` while replie
 
 **Permission levels.** `POST`/`PUT /api/agents` accept an optional top-level `level` (`minimal`, `reader`, `assistant`, `collaborator`,
 `operator`, `admin`; any case, always returned lowercase). One above the user's `max_level` is refused with HTTP 400 and code
-`level_exceeds_max`; an unknown name is a `422`. A `PUT` without `level` keeps the stored one. Reads always return the effective
+`level_exceeds_max`; one below what the configuration needs, or a configuration that needs more than `max_level`, with
+`level_below_required` / `level_required_above_max` (the rule applies to agents without a `level` too); an unknown name is a `422`. A `PUT` without `level` keeps the stored one. Reads always return the effective
 `level`. The user's `max_level` is only exposed by `POST /api/login` and `GET /api/me`; no route accepts or changes it (it is not an
 agent field and `PATCH /api/preferences` rejects it with `422`): only an administrator sets it, with the admin CLI.
 

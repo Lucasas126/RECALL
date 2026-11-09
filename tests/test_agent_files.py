@@ -21,7 +21,7 @@ SKILL = "---\nname: weekly-plan\ndescription: Plan the user's week from the cale
 def _config(**changes) -> ResolvedAgent:
     fields = dict(
         user_id="u", id="a", name="A", models=ModelsConfig(),
-        provider_name="ollama", api_key="", embeddings_provider_name="ollama", embeddings_api_key="",
+        provider_name="ollama", api_key="", embeddings_provider_name="ollama", embeddings_api_key="", level="admin",
     )
     return ResolvedAgent(**{**fields, **changes})
 

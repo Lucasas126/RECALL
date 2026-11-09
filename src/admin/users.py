@@ -2,7 +2,6 @@
 
     python -m src.admin create-user <user_id> [--name N] [--language en] [--api-key-env VAR]
                                     [--claude-login] [--generate] [--max-level LEVEL]
-    python -m src.admin migrate-levels [--dry-run]                             (src/admin/levels.py)
     python -m src.admin set-password <user_id> [--generate]
     python -m src.admin route-test "message text" --user <user_id> [--force]
     python -m src.admin terminal-test --user <user_id> --backend <name>
@@ -27,7 +26,7 @@ from pathlib import Path
 
 import yaml
 
-from src.config.levels import LEVEL_NAMES, Level, installation_user_count, parse_level
+from src.config.levels import LEVEL_NAMES, Level, parse_level
 from src.config.loader import load_user
 from src.config.models import ModelsConfig
 from src.config.settings import CONFIG_DIR, TERMINAL
@@ -111,11 +110,9 @@ def create_user(
     if not _ENV_NAME_RE.match(api_key_env):
         raise AdminError("--api-key-env takes the NAME of an environment variable, never the key itself.")
     try:
-        level = parse_level(max_level) if max_level is not None else None
+        level = parse_level(max_level) if max_level is not None else Level.COLLABORATOR
     except ValueError as exc:
         raise AdminError(f"Invalid --max-level: {exc}") from exc
-    if level is None:  # the first user of an installation is its administrator; later ones start as collaborators
-        level = Level.ADMIN if installation_user_count(CONFIG_DIR) == 0 else Level.COLLABORATOR
     hashed, generated = _hash_new_password(generate)
     login_dir = (CONFIG_DIR / user_id / "claude-login").resolve()
     models = ModelsConfig()
@@ -200,9 +197,6 @@ def _build_parser() -> argparse.ArgumentParser:
     from src.admin import tasks as task_commands  # lazy too: it imports this module
 
     task_commands.add_parsers(sub)
-    from src.admin import levels as level_commands  # lazy too
-
-    level_commands.add_parsers(sub)
     secret_set = sub.add_parser(
         "set-secret", help="store a credential in .config/secrets.env (hidden prompt or --stdin; never an argument)",
     )
@@ -308,10 +302,6 @@ def main(argv: list[str] | None = None) -> int:
         from src.admin import tasks as task_commands
 
         return task_commands.run(args)
-    if args.command == "migrate-levels":
-        from src.admin import levels as level_commands
-
-        return level_commands.run(args)
     if args.command in ("set-secret", "secret"):
         from src.admin import credentials
 

@@ -78,7 +78,7 @@ class SteeringFixture(unittest.TestCase):
     def _user(self, user_id: str) -> UserConfig:
         if user_id not in ("user-one", "user-two"):
             raise FileNotFoundError(user_id)
-        return UserConfig(
+        return UserConfig(max_level="admin", 
             id=user_id, name="Test", provider=ProviderConfig(name="ollama"),
             password_hash=TEST_PASSWORD_HASH, agents=["agent-one", "agent-two"],
         )
@@ -93,7 +93,7 @@ class SteeringFixture(unittest.TestCase):
             user_id=user, id=agent, name="Test",
             models=ModelsConfig(), provider_name="ollama", api_key="",
             embeddings_provider_name="ollama", embeddings_api_key="",
-            tools=False, associative_memory=self.associative_memory, has_memory=self.memory,
+            tools=False, associative_memory=self.associative_memory, has_memory=self.memory, level="admin",
             conversation_messages_retained=self.retained,
         )
         instance = Agent(config, self.providers[(user, agent)], chat_id)

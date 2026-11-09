@@ -185,7 +185,7 @@ class UserPreferencesWebTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
         self.users = {
-            user: UserConfig(
+            user: UserConfig(max_level="admin", 
                 id=user, name=user, language=language, provider=ProviderConfig(name="openrouter"),
                 password_hash=TEST_PASSWORD_HASH, agents=agents,
             )

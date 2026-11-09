@@ -5,6 +5,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Callable
 
+from src.config.ceiling import mcp_allowed
+from src.config.levels import Level
 from src.config.models import AgentMcpConfig
 from src.providers.mcp import McpError, McpManager, McpTool
 from src.utils.logger import get_logger
@@ -44,7 +46,7 @@ class McpToolNameError(ValueError):
 def build_mcp_tools(
     manager: McpManager, user_id: str, selections: dict[str, AgentMcpConfig], *,
     allow: list[str] | None = None, deny: list[str] | None = None,
-    disposable: bool = False, reserved: frozenset[str] | set[str] = frozenset(),
+    disposable: bool = False, reserved: frozenset[str] | set[str] = frozenset(), level: Level,
 ) -> McpToolset:
     """Build the tools of every MCP server an agent enables; unavailable servers become notes.
 
@@ -53,9 +55,10 @@ def build_mcp_tools(
     model-facing names (`<server>__<tool>`) exactly as they do to built-in tools. `reserved` are the names of
     the built-in tools. A name used twice (two tools of one server that sanitize to the same name, or a tool
     that shadows a built-in one) raises `McpToolNameError` instead of one silently replacing the other.
+    MCP needs the level `collaborator`: below it the agent gets no MCP tool and no note (`level` is the agent's).
     """
     toolset = McpToolset()
-    if disposable:
+    if disposable or not mcp_allowed(level):
         return toolset
     denied = set(deny or ())
     allowed = set(allow) if allow is not None else None
