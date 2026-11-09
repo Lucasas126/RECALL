@@ -7,6 +7,7 @@ from typing import Optional
 import yaml
 
 from src.config.agents import AgentModelError, AgentStore
+from src.config.levels import Level, check_agent_level, effective_agent_level, effective_user_level, installation_user_count
 from src.config.models import AgentConfig, ModelsConfig, ResolvedAgent, UserConfig
 from src.config.preferences import UserPreferencesStore
 from src.config.secrets import get_secret
@@ -33,7 +34,13 @@ def load_user(user_id: str) -> UserConfig:
     if user.require_zdr:  # the framework-wide helper models inherit the policy; Claude subscription has no ZDR
         ensure_zdr_compatible(CHAT_NAMING.model, zdr_required(True, CHAT_NAMING.zdr), "chat_naming")
         ensure_zdr_compatible(ASSOC.query_model, zdr_required(True, ASSOC.zdr), "associative_memory")
+    effective_max_level(user)  # logs the one-time warning of a user without max_level
     return user
+
+
+def effective_max_level(user: UserConfig) -> Level:
+    """The user's `max_level`: declared, else admin on a single-user installation, else collaborator."""
+    return effective_user_level(user, installation_user_count(CONFIG_DIR))
 
 
 def load_agent_config(user_id: str, agent_id: str) -> AgentConfig:
@@ -95,6 +102,9 @@ def load_agent(user_id: str, agent_id: Optional[str] = None, *, check_agent_mode
         raise ValueError(f"agent '{agent_id}' is not owned by user '{user_id}'")
 
     agent = load_agent_config(user_id, agent_id)
+    max_level = effective_max_level(user)
+    check_agent_level(agent, user, max_level)  # a declared level above the owner's max_level is an invalid agent
+    level = effective_agent_level(agent, user)
 
     # local providers (e.g. ollama) need no key; only resolve one if configured
     api_key = ""
@@ -157,4 +167,6 @@ def load_agent(user_id: str, agent_id: Optional[str] = None, *, check_agent_mode
         claude_subscription=user.claude_subscription,
         openrouter=user.openrouter_settings(),
         ollama=user.ollama,
+        level=level,
+        max_level=max_level,
     )
