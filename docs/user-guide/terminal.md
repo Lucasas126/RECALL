@@ -18,7 +18,7 @@ Status: phase 1. Commands run in the foreground and are killed at the timeout; t
 | type | where commands run | availability |
 | --- | --- | --- |
 | `ssh` | on another machine, through the local `ssh` binary (key only, strict host-key checking, no agent/X11 forwarding, no password prompts, a minimal local environment) | always |
-| `local` | on the RECALL host itself, in a working directory, with a scrubbed environment (no `*_KEY`, `*_TOKEN`, `RECALL_*`, provider variables...) | only when `settings.yaml` has `terminal.allow_local: true` or the server environment sets `RECALL_TERMINAL_ALLOW_LOCAL=true`; trusted installs only |
+| `local` | on the RECALL host itself, in a working directory, with an environment ALLOWLIST (`PATH`, `HOME`, `LANG`, `LC_*`, `TERM`, `TMPDIR`, `USER`, `LOGNAME`, `SHELL`, `TZ`); nothing else is inherited (no `SSH_AUTH_SOCK`, `DOCKER_HOST`, `KUBECONFIG`, `DBUS_SESSION_BUS_ADDRESS`, `DATABASE_URL`, proxies, keys, tokens or `RECALL_*`) | only when `settings.yaml` has `terminal.allow_local: true` or the server environment sets `RECALL_TERMINAL_ALLOW_LOCAL=true`; trusted installs only |
 
 Pointing an agent at the RECALL container itself (a `local` backend) gives it every user's `.config` and `data`. The only intended
 use is the setup guide of the [Admin CLI](admin-cli.md#templates), with `approvals: manual`. See
@@ -111,7 +111,6 @@ terminal:
   default_backend: sandbox                 # required when more than one; used when a call names no backend
   timeout_seconds: 60                      # default command timeout, 1-600
   max_output_chars: 20000                  # output returned to the model, 500-200000
-  allow_in_dream: false                    # see "dream mode" below
 ```
 
 Framework level, in `settings.yaml` (`terminal:` block, see [settings.yaml](../reference/settings-yaml.md#terminal)):
@@ -139,7 +138,7 @@ The tools are never built in [disposable chats](memory.md#disposable-chats).
 | --- | --- |
 | `manual` (default) | every command and every file operation, reads included |
 | `smart` | only the *dangerous* actions listed below |
-| `off` | nothing asks; the hardline (and, on a local backend, the [protected paths](#protected-paths-local-backend)) still applies |
+| `off` | nothing asks while a person is attached to the chat; the hardline (and, on a local backend, the [protected paths](#protected-paths-local-backend)) still applies. When nobody is attached it is **not** a free pass: see [unattended runs](#unattended-runs) |
 
 An approval is shown to the chat's owner while the reply waits:
 
@@ -164,7 +163,7 @@ the model not to retry or work around it. A `sandbox_patch` asks once for both i
 - **Agent form**: the **Terminal** block appears in the Tools tab once the terminal group is enabled. It lists your
   backends (name, type and description only, never host or key) each with an **Allow** checkbox that reveals its working
   directory and approvals mode (`off` is shown as a warning), a **Default backend** select limited to the allowed ones, the
-  command timeout and whether dreams may use it. With no backends defined it explains how to add one.
+  command timeout. With no backends defined it explains how to add one.
 
 ### hardline: always refused, in every mode
 
@@ -196,11 +195,18 @@ approval mode, `off` included, without asking anyone, also in unattended runs an
 | any file inside a directory named `keys` under the config folder | listing the folder (`ls .config/keys`) is allowed |
 | `id_rsa`, `id_ed25519`, `id_ecdsa`, `id_dsa` (no `.pub`) anywhere | |
 | `*/claude-login/.credentials.json`, any `.credentials.json` | |
+| `.config/<user>/mcp/**` (MCP credential folders) | read **and** write protected |
 | `/proc/<pid>/environ`, `/proc/self/environ` | `/proc/*/cmdline` is fine |
 | patterns in `settings.yaml` `terminal.protected_paths` | globs, repo-relative or absolute; a folder protects its contents |
 
-`user.yaml` is **not** protected (agents need it for admin work; the admin CLI never prints password hashes). Cross-user access
-to config and data is still allowed by the rules of the setup guide.
+A `user.yaml` that cannot be parsed does not drop its user from the set: the `key_file:` values its text names are still
+protected and the failure is logged (fail closed).
+
+**Write-only protection** (reading stays allowed because agents need `user.yaml` for admin work and the admin CLI never prints
+password hashes): `terminal_audit.jsonl`, every `user.yaml`, agent yaml (`.config/<user>/agents/*.yaml`), `settings.yaml` and
+`known_hosts` files cannot be written by `sandbox_write`, `sandbox_patch` or a shell command that redirects into them, or uses
+`tee`, `cp`, `mv`, `install`, `ln`, `rsync`, `scp`, `dd of=`, `sed -i`, `perl -i`, `rm`, `truncate`, `touch`, `chmod`, `chown`.
+Cross-user access to config and data is otherwise still allowed by the rules of the setup guide.
 
 What is checked:
 
@@ -214,12 +220,12 @@ What is checked:
   `grep -r`, `rg` and `find -exec` may not start at a folder that contains protected files (name narrower paths); a script run
   by an interpreter and an `ssh -F` config that mention a protected path or an `IdentityFile` are refused. `ssh`/`scp`/`sftp`/
   `ssh-add`/`ssh-keygen` with `-i`, `-F` or `-o IdentityFile` pointing at a protected path are refused like any other mention.
-  `env`, `printenv` and `set` are fine (the local backend already removes secret-looking variables).
+  `env`, `printenv` and `set` are fine (the local backend passes only an allowlist of variables).
 
 The refusal reads `Denied: protected path: <what>...`, tells the model not to retry or work around it, and the audit decision
 is `denied:protected`. No approval card is shown: nobody can approve it from the chat.
 
-**Limits, honestly.** The command scan is a heuristic. A determined obfuscated command (a path assembled from pieces,
+**Limits, honestly.** The command parser is a best-effort heuristic, not a security boundary, and that risk is accepted. The `local` backend is a real host shell: anything the RECALL user can do, an approved (or `off`-mode) command can do. The command scan is a heuristic. A determined obfuscated command (a path assembled from pieces,
 `printf` + `eval` tricks, a hard link, a program written and run in two steps by an interpreter the scan cannot read) can bypass
 it; the file tools cannot be bypassed this way. The approval card (`manual`) stays the second barrier, and the real boundary is
 separation: see the ideas in the [backlog](../project/backlog.md) (a separate OS user or container for local backends).
@@ -252,7 +258,7 @@ safety net, not a security boundary: the boundary is the sandbox itself.
 ## unattended runs
 
 Nobody can answer when there is no attached client, so the policy never waits: with `approvals: manual` everything is denied;
-with `smart` normal actions run and dangerous ones are denied; with `off` everything except the hardline runs. The mode is
+with `smart` normal actions run and dangerous ones are denied; with `off` the behaviour is that of `smart` (dangerous actions are denied) and `sandbox_write`/`sandbox_patch` are denied too, so `off` never widens what runs unattended. The hardline and protected paths apply as always. A run counts as attended only when the chat path says so explicitly (`RunContext.interactive` defaults to `False`). The mode is
 that of the backend the call targets. The denial text tells the model so. This applies to runs without an interactive client and to dream sessions.
 
 ## subagent workers
@@ -266,9 +272,8 @@ resumes the worker; the task's timeout is paused while it waits. A worker run no
 
 ## dream mode
 
-[Dream](dream.md) sessions get the terminal only when **both** the agent's `terminal.allow_in_dream` is `true` **and**
-`dream.tools` lists `terminal`; listing `terminal` without `allow_in_dream` is a configuration error. Dream runs are always
-unattended (previous section), so they are best used with `approvals: smart` or `off` on a disposable sandbox.
+[Dream](dream.md) sessions never get the terminal. `terminal.allow_in_dream` and `terminal` in `dream.tools` are
+configuration errors. Read-only sandbox variants for dreams are planned.
 
 ## Using your own PC as a backend
 
@@ -304,8 +309,7 @@ files**: start with `approvals: manual`, so every command waits for your tap. Ex
 5. **Git for Windows tools** (`head`, `wc`, `find`, `diff`, `awk`, `mktemp`, `file`): the file tools only use standard POSIX utilities, which Git Bash ships; no Python is needed on the PC.
 6. **Pin the host key and test**, as for the sandbox: `ssh-keyscan 192.0.2.20 > ./config/keys/pc_known_hosts`, declare the backend
    in `terminal_backends` (example above) and run `terminal-test --backend pc`.
-7. **The PC must be on and awake** when the agent uses it; otherwise calls fail with exit code 255 (ssh failed). Dreams are
-   unattended, so with `manual` on the PC they cannot use it at all; leave `allow_in_dream` off unless that is what you want.
+7. **The PC must be on and awake** when the agent uses it; otherwise calls fail with exit code 255 (ssh failed). Dreams never use it.
 
 See the [security notes](../deployment/security.md#terminal-sandbox) before enabling it.
 
@@ -314,15 +318,15 @@ See the [security notes](../deployment/security.md#terminal-sandbox) before enab
 Every executed or refused action appends one JSON line (`backend` is the configured backend name) to `data/<user_id>/<agent_id>/terminal_audit.jsonl`:
 
 ```json
-{"ts": 1767225600.123, "user": "ana", "agent": "aria", "backend": "sandbox", "tool": "terminal", "command": "ls -la", "cwd": "~/workspace", "decision": "approved", "exit_code": 0, "duration_ms": 412, "timed_out": false}
+{"ts": 1767225600.123, "user": "user-a", "agent": "aria", "backend": "sandbox", "tool": "terminal", "command": "ls -la", "cwd": "~/workspace", "decision": "approved", "exit_code": 0, "duration_ms": 412, "timed_out": false}
 ```
 
 The `terminal` result starts with one line telling the agent how the command was authorized (`[approved by the user]`, `[ran without approval: smart mode, normal command]` or `[approvals off]`).
 
-`decision` is one of `approved`, `approved:same-operation`, `auto:smart`, `auto:off`, `hardline`, `denied:protected`, `denied:unattended`,
+`decision` is one of `approved`, `approved:same-operation`, `auto:smart`, `auto:off`, `hardline`, `denied:protected`, `denied:unattended`, `denied:invalid` (NUL byte, too long, bad path),
 `denied:<reason>` (`denied by user`, `timed out`, `cancelled`, `service shutdown`) or `cancelled`. The command is redacted
 for known secret formats and cut at 2000 characters; the output is not recorded. The agent's own tools cannot read or edit
-this file: the memory/palace/folder tools only reach their sources, and the sandbox tools only reach the sandbox. Each
+this file: the memory/palace/folder tools only reach their sources, and the sandbox tools only reach the sandbox. Records carry the `verdict` (`normal`, `dangerous`, `hardline`, `protected`) of refused and executed actions. **The audit trail fails closed:** when it cannot be written (full disk, bad permissions) the action is refused with an error instead of running unrecorded. The approval card of `sandbox_write`/`sandbox_patch` shows a truncated preview (400 characters) of the content, or of the old and new text; the preview is not written to the audit trail. Each
 decision is also kept in an in-memory log of the last 50 per user.
 
 ## limits and privacy

@@ -15,8 +15,17 @@ users) and the checks below apply to `type: local` backends ONLY (SSH backends a
   mentions a protected path. A determined obfuscated command (a path built from pieces, a program written first) can
   bypass this scan; approval cards remain the second barrier (see docs/deployment/security.md).
 
-Not protected on purpose: `user.yaml` (agents need it for admin work; the admin CLI never prints password hashes),
-public keys (`*.pub`), `known_hosts` files, `.env.example`-style templates and the *names* in a keys directory.
+Read-protected too: the per-user `mcp/` credential folders (`<config_dir>/<user>/mcp/**`).
+
+WRITE-protected only (reading stays allowed: agents need `user.yaml` for admin work and the admin CLI never prints
+password hashes): the audit trail (`terminal_audit.jsonl`), every `user.yaml`, agent yaml (`<config_dir>/<user>/agents/*.yaml`)
+and `settings.yaml`, and `known_hosts` files. For shell commands a write is a redirect target, `tee`, `cp`/`mv`/`install`/`ln`/
+`rsync`/`scp` destinations, `dd of=`, `sed -i`/`perl -i`, `rm`, `truncate`, `touch`, `chmod`, `chown`, `shred`.
+
+Not protected on purpose: public keys (`*.pub`), `.env.example`-style templates and the *names* in a keys directory.
+
+A `user.yaml` that cannot be parsed fails CLOSED: the key files it names are still found by a text scan, and the
+failure is logged (never silently skipped).
 """
 
 from __future__ import annotations
@@ -31,7 +40,9 @@ from pathlib import Path
 
 import yaml
 
-from src.terminal.policy import _KEYWORDS, _SHELLS, _WRAPPERS_NOARG, _flags, _tokens, split_command, _redirect_targets
+from src.terminal.policy import (
+    _KEYWORDS, _SHELLS, _WRAPPERS_NOARG, _flags, _operands, _redirect_targets, _tokens, split_command,
+)
 from src.utils.logger import get_logger
 
 logger = get_logger("terminal")
@@ -40,6 +51,11 @@ KEYS_DIR_NAME = "keys"
 PRIVATE_KEY_NAMES = frozenset({"id_rsa", "id_ed25519", "id_ecdsa", "id_dsa"})
 ENV_TEMPLATE_SUFFIXES = frozenset({"example", "sample", "template", "dist", "defaults"})
 PUBLIC_NAMES = frozenset({"known_hosts", "known_hosts.old"})
+AUDIT_NAME = "terminal_audit.jsonl"
+MCP_DIR_NAME = "mcp"
+_WRITE_ALL = frozenset({"tee", "mv", "rm", "truncate", "touch", "chmod", "chown", "chgrp", "shred", "unlink", "sponge"})
+_WRITE_LAST = frozenset({"cp", "install", "ln", "rsync", "scp"})
+_KEY_FILE_TEXT = re.compile(r"key_file\s*['\"]?\s*:\s*['\"]?([^\s'\",}\]]+)")
 _PROC_ENVIRON = re.compile(r"^/proc/(?:self|thread-self|\d+)(?:/task/\d+)?/environ$")
 _SSH_TOOLS = frozenset({"ssh", "scp", "sftp", "rsync", "ssh-add", "ssh-agent", "ssh-keygen", "ssh-copy-id", "sshpass"})
 _ARCHIVERS = frozenset({"tar", "bsdtar", "zip", "7z", "7za", "7zr", "cpio", "pax", "rsync", "scp", "rg", "ag", "ack"})
@@ -106,6 +122,8 @@ class ProtectedPaths:
     secret_files: set[str] = field(default_factory=set)
     extra: list[str] = field(default_factory=list)   # folded absolute glob patterns from settings.yaml
     concrete: list[str] = field(default_factory=list)  # folded paths of the known protected files
+    write_only: list[str] = field(default_factory=list)  # folded paths that may be read but never written
+    repo_roots: list[str] = field(default_factory=list)  # folded roots whose settings.yaml is write-protected
 
     # ------------------------------------------------------------------ single paths
     def _rule(self, p: str) -> str | None:
@@ -132,13 +150,38 @@ class ProtectedPaths:
             parents = p[len(self.config_dir) + 1:].split("/")[:-1]
             if KEYS_DIR_NAME in parents:
                 return "a file in a keys directory"
+            if len(parents) >= 2 and parents[1] == MCP_DIR_NAME:
+                return "an MCP credentials folder"
         return None
 
-    def reason(self, path: str, cwd: str = ".") -> str | None:
-        """Why `path` (as an agent wrote it) is protected, else None. Checked lexically and through symlinks."""
+    def _write_rule(self, p: str) -> str | None:
+        """Why the folded absolute path `p` may be read but not written, else None."""
+        base = p.rsplit("/", 1)[-1]
+        if base == AUDIT_NAME:
+            return "the terminal audit trail"
+        if base == "user.yaml":
+            return "a user configuration file"
+        if base in PUBLIC_NAMES or p in self.public_files:
+            return "a known_hosts file"
+        if p in self.write_only:
+            return "a configuration file"
+        if base == "settings.yaml" and (any(p == root + "/settings.yaml" for root in self.repo_roots)
+                                        or (self.config_dir and p.startswith(self.config_dir + "/"))):
+            return "the settings file"
+        if self.config_dir and p.startswith(self.config_dir + "/"):
+            parts = p[len(self.config_dir) + 1:].split("/")
+            if len(parts) == 3 and parts[1] == "agents" and base.endswith((".yaml", ".yml")):
+                return "an agent configuration file"
+        return None
+
+    def reason(self, path: str, cwd: str = ".", *, write: bool = False) -> str | None:
+        """Why `path` (as an agent wrote it) is protected, else None. Checked lexically and through symlinks.
+
+        `write=True` adds the write-only rules (audit trail, user/agent/settings yaml, known_hosts).
+        """
         try:
             for form in forms(path, cwd):
-                why = self._rule(form)
+                why = self._rule(form) or (self._write_rule(form) if write else None)
                 if why:
                     return why
         except (OSError, ValueError):
@@ -155,7 +198,7 @@ class ProtectedPaths:
                 return True
         return False
 
-    def glob_reason(self, pattern: str, cwd: str = ".") -> str | None:
+    def glob_reason(self, pattern: str, cwd: str = ".", *, write: bool = False) -> str | None:
         """Why a glob word expands to a protected file, else None.
 
         On the local backend the glob is resolved against the real filesystem (like the shell: `*` skips dotfiles) and
@@ -167,7 +210,7 @@ class ProtectedPaths:
         except (OSError, ValueError):
             matches = []
         for match in matches:
-            why = self.reason(match, cwd)
+            why = self.reason(match, cwd, write=write)
             if why:
                 return f"{match} ({why})"
         folded = _fold(os.path.normpath(absolute))
@@ -260,7 +303,7 @@ class ProtectedPaths:
 
     def _words(self, words: list[str], redirects: list[str], cwd: str, depth: int) -> str | None:
         for target in redirects:
-            why = self._candidate(target, cwd)
+            why = self._candidate(target, cwd) or self._candidate(target, cwd, write=True)
             if why:
                 return why
         while words and re.match(r"^[A-Za-z_]\w*=", words[0]):
@@ -291,6 +334,10 @@ class ProtectedPaths:
         why = self._ancestor_use(name, args, cwd)
         if why:
             return why
+        for target in _write_targets(name, args):
+            why = self._candidate(target, cwd, write=True)
+            if why:
+                return why
         why = self._named_files(name, args, cwd)
         if why:
             return why
@@ -315,7 +362,7 @@ class ProtectedPaths:
                 return why
         return None
 
-    def _candidate(self, text: str, cwd: str) -> str | None:
+    def _candidate(self, text: str, cwd: str, *, write: bool = False) -> str | None:
         if not text or text.startswith("-") and "/" not in text or "\x00" in text:
             return None
         home = os.path.expanduser("~")
@@ -324,11 +371,11 @@ class ProtectedPaths:
         if _GLOB_CHARS.search(text):
             if unresolved or (isinstance(cwd, _UnknownCwd) and not _is_abs(text)):
                 return self.name_pattern_reason(text)
-            why = self.glob_reason(text, cwd)
+            why = self.glob_reason(text, cwd, write=write)
             return f"the pattern {text} expands to {why}" if why else None
         if unresolved:
             return None
-        why = self.reason(text, cwd)
+        why = self.reason(text, cwd, write=write)
         return f"{text} is {why}" if why else None
 
     def _ancestor_use(self, name: str, args: list[str], cwd: str) -> str | None:
@@ -375,6 +422,27 @@ class ProtectedPaths:
         return None
 
 
+def _write_targets(name: str, args: list[str]) -> list[str]:
+    """The words of a command that name files it writes, replaces or deletes (best effort)."""
+    short, long = _flags(args)
+    operands = _operands(args)
+    if name in _WRITE_ALL:
+        return operands
+    if name in _WRITE_LAST:
+        targets = operands[-1:]
+        for index, arg in enumerate(args):
+            if arg in ("-t", "--target-directory") and index + 1 < len(args):
+                targets.append(args[index + 1])
+            elif arg.startswith("--target-directory="):
+                targets.append(arg.split("=", 1)[1])
+        return targets
+    if name == "dd":
+        return [a[3:] for a in args if a.startswith("of=")]
+    if name in ("sed", "perl", "ruby") and ("i" in short or any(f.startswith("--in-place") for f in long)):
+        return operands
+    return []
+
+
 class _UnknownCwd(str):
     """A working directory that a `cd` with a variable or substitution made unknowable (relative globs cannot be resolved)."""
 
@@ -403,16 +471,35 @@ def _glob_hits_path(pattern: str, path: str) -> bool:
 
 # ---------------------------------------------------------------------- building the set
 def _ssh_entries(config_dir: Path) -> list[tuple[str, str, str, str]]:
-    """(user dir, backend name, key_file, known_hosts_file) of every SSH backend; broken users are skipped."""
+    """(user dir, backend name, key_file, known_hosts_file) of every SSH backend.
+
+    Fails CLOSED: a `user.yaml` that cannot be parsed still protects every `key_file:` its text names (and is logged);
+    one that cannot be read at all is logged as an error. A user is never silently dropped from the set.
+    """
     entries = []
     try:
         users = sorted(p for p in config_dir.iterdir() if p.is_dir())
     except OSError:
         return entries
     for user_dir in users:
+        yaml_file = user_dir / "user.yaml"
+        if not yaml_file.exists():
+            continue
+        broken = ""
         try:
-            data = yaml.safe_load((user_dir / "user.yaml").read_text(encoding="utf-8"))
-        except (OSError, yaml.YAMLError, UnicodeDecodeError, ValueError):
+            text = yaml_file.read_text(encoding="utf-8")
+            data = yaml.safe_load(text)
+        except (OSError, UnicodeDecodeError, yaml.YAMLError, ValueError) as exc:
+            broken = type(exc).__name__
+            try:
+                text = yaml_file.read_bytes().decode("utf-8", errors="replace")
+            except OSError:
+                logger.error("protected paths: %s cannot be read; the SSH keys it names cannot be protected", yaml_file)
+                continue
+        if broken:
+            logger.error("protected paths: %s cannot be parsed (%s); protecting every key_file it names", yaml_file, broken)
+            for index, match in enumerate(_KEY_FILE_TEXT.finditer(text)):
+                entries.append((user_dir.name, f"unparsed-{index + 1}", match.group(1).strip(), ""))
             continue
         backends = data.get("terminal_backends") if isinstance(data, dict) else None
         if not isinstance(backends, dict):
@@ -471,6 +558,15 @@ def build_protected(extra: list[str] | None = None, *, config_dir: str | Path | 
                 concrete.add(_fold(os.path.normpath(str(file))))
     for creds in config.glob("*/claude-login/.credentials.json"):
         concrete.add(_fold(os.path.normpath(str(creds))))
+    for mcp_dir in config.glob(f"*/{MCP_DIR_NAME}"):
+        for file in _walk_files(mcp_dir):
+            concrete.add(_fold(os.path.normpath(str(file))))
+    result.repo_roots = sorted({_fold(os.path.normpath(str(root))) for root in (repo, Path(app_root)) if root} if app_root else
+                               {_fold(os.path.normpath(str(repo)))})
+    writes = {_fold(os.path.normpath(str(config / "settings.yaml")))}
+    writes.update(_fold(os.path.normpath(str(p))) for p in config.glob("*/user.yaml"))
+    writes.update(_fold(os.path.normpath(str(p))) for pat in ("*.yaml", "*.yml") for p in config.glob(f"*/agents/{pat}"))
+    result.write_only = sorted(writes)
     for pattern in extra or []:
         text = os.path.expanduser(pattern.strip())
         if not text:

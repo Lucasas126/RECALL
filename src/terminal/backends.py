@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import posixpath
-import re
 import shlex
 import shutil
 import signal
@@ -19,13 +18,12 @@ from src.utils.logger import get_logger
 logger = get_logger("terminal")
 
 _CONNECT_TIMEOUT = 10
-# environment variables that never reach a child process (secrets of the RECALL deployment)
-_SECRET_NAME = re.compile(
-    r"(^|_)(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?|COOKIE)($|_)"
-    r"|^(RECALL|OPENROUTER|TAVILY|TELEGRAM|ANTHROPIC|OPENAI|GITHUB|GH)(_|$)"
-    r"|SECRET|TOKEN|_KEY$|API_?KEY",
-    re.I,
-)
+# the ONLY environment variables a local process inherits (an allowlist: SSH_AUTH_SOCK, DOCKER_HOST, KUBECONFIG,
+# DBUS_SESSION_BUS_ADDRESS, DATABASE_URL, proxies, tokens and every RECALL setting are never passed)
+_ALLOWED_ENV = ("PATH", "HOME", "LANG", "TERM", "TMPDIR", "USER", "LOGNAME", "SHELL", "TZ")
+_ALLOWED_ENV_PREFIXES = ("LC_",)
+_WINDOWS_ENV = ("USERPROFILE", "SystemRoot", "SYSTEMROOT", "TEMP", "TMP", "COMSPEC")
+# what the local `ssh` process needs and nothing else
 _SAFE_ENV = ("PATH", "HOME", "USERPROFILE", "SystemRoot", "SYSTEMROOT", "TEMP", "TMP", "LANG", "LC_ALL", "COMSPEC")
 
 
@@ -48,9 +46,10 @@ class Backend(Protocol):
 
 
 def scrubbed_env(environ: dict[str, str] | None = None) -> dict[str, str]:
-    """The parent environment without anything that looks like a secret or a RECALL setting."""
+    """The environment of a local process: an allowlist of the parent's variables, nothing else."""
     source = environ if environ is not None else os.environ
-    return {k: v for k, v in source.items() if not _SECRET_NAME.search(k)}
+    allowed = _ALLOWED_ENV + (_WINDOWS_ENV if os.name == "nt" else ())
+    return {k: v for k, v in source.items() if k in allowed or k.startswith(_ALLOWED_ENV_PREFIXES)}
 
 
 def minimal_env(environ: dict[str, str] | None = None) -> dict[str, str]:
@@ -130,6 +129,7 @@ class SshBackend:
         cfg = self.config
         return [
             self.ssh_binary,
+            "-F", os.devnull,  # never read the RECALL user's ~/.ssh/config (ProxyCommand, Include, Match exec...)
             "-i", str(Path(cfg.key_file).expanduser()),
             "-o", "BatchMode=yes",
             "-o", "IdentitiesOnly=yes",

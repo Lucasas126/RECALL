@@ -139,7 +139,7 @@ class UnattendedTests(unittest.TestCase):
         cases = [  # (mode, command, runs?)
             ("manual", "ls", False), ("manual", RM, False),
             ("smart", "ls", True), ("smart", RM, False),
-            ("off", "ls", True), ("off", RM, True),
+            ("off", "ls", True), ("off", RM, False),  # `off` never widens what runs unattended
             ("manual", HARDLINE, False), ("smart", HARDLINE, False), ("off", HARDLINE, False),
         ]
         for how in ("flag", "no-context", "non-interactive"):

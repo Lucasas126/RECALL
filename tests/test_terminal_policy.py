@@ -30,7 +30,7 @@ DANGEROUS = [
     "kill -9 123", "kill -KILL 123", "pkill python", "killall node", "systemctl stop nginx", "systemctl disable x",
     "systemctl restart x", "mount /dev/sdb1 /mnt", "umount /mnt", "iptables -F", "nft flush ruleset", "ufw disable",
     "crontab -r", "dd if=a of=b", "mv x /etc/x", "cp x /usr/bin/x", "mv /bin/ls /tmp/", "cat x > /etc/hosts",
-    "echo x >> /etc/passwd", "echo x | tee /etc/sudoers", "echo hi > /home/other/file", "echo hi > ~/file",
+    "echo x >> /etc/passwd", "echo x | tee /etc/sudoers", "echo hi > /home/user-b/file", "echo hi > ~/file",
     "pip install --break-system-packages x", "npm install -g typescript", "npm i --global x", "yarn global add x",
     "pnpm add -g x", "docker rm c", "docker rmi image", "docker system prune -af", "docker volume rm v",
     "docker container prune", "ssh host ls", "scp a host:b", "sftp host", "find . -name '*.pyc' -delete",
@@ -93,7 +93,7 @@ class ClassifyTests(unittest.TestCase):
     def test_file_write_assessment(self) -> None:
         self.assertEqual(assess_write("/dev/sda").level, "hardline")
         self.assertEqual(assess_write("/etc/passwd").level, "dangerous")
-        self.assertEqual(assess_write("/home/agent/workspace/a.py").level, "normal")
+        self.assertEqual(assess_write("/home/user-a/workspace/a.py").level, "normal")
         self.assertEqual(assess_write("/etc/../tmp/x").level, "normal")
 
 

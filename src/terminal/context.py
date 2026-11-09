@@ -22,7 +22,8 @@ class RunContext:
     broker: Any  # ApprovalBroker
     emit: Callable[[str, dict], None]  # puts a ChatEvent of that kind (approval, approval_resolved) in the run's stream
     cancellation: CancellationToken | None = None
-    interactive: bool = True  # a person is attached and can answer an approval request
+    # a person is attached and can answer an approval request; False unless the chat path says so explicitly
+    interactive: bool = False
     tasks: Any = None  # TaskManager: what the `delegate` tools launch tasks through
     task_launches: int = 0  # tasks launched by this run (one parent turn), against max_launches_per_turn
     # a subagent task's run asks its PARENT chat (agent id, chat id) for approvals, so the cards appear where the user is

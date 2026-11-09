@@ -72,13 +72,34 @@ def _problem(code: int | None, path: str, stderr: str) -> str:
     }.get(code, f"error: could not access {path}" + (f": {stderr.strip()}" if stderr.strip() else ""))
 
 
-def protected_verdict(session: TerminalSession, path: str) -> Assessment | None:
-    """The `protected` verdict for a path on a local backend (key, secret, .env...), else None. Exact, not a scan."""
+def protected_verdict(session: TerminalSession, path: str, *, write: bool = False) -> Assessment | None:
+    """The `protected` verdict for a path on a local backend (key, secret, .env...), else None. Exact, not a scan.
+
+    `write=True` (sandbox_write, sandbox_patch) also refuses the write-only paths: audit trail, user/agent/settings yaml, known_hosts.
+    """
     protected = session.protected()
     if protected is None:
         return None
-    why = protected.reason(path, session.local_cwd())
+    why = protected.reason(path, session.local_cwd(), write=write)
     return Assessment("protected", f"{path} is {why}") if why else None
+
+
+def _checked(session: TerminalSession, tool: str, path: str) -> str:
+    """`check_path`, recording a refused path in the audit trail (early refusals are audited too)."""
+    try:
+        return check_path(path)
+    except ValueError as exc:
+        session.audit_refusal(tool, f"{tool} {str(path)[:200]!r}".replace("\x00", "\\0"), str(exc))
+        raise
+
+
+PREVIEW_CHARS = 400
+
+
+def preview(text: str, limit: int = PREVIEW_CHARS) -> str:
+    """A truncated one-block preview of text for an approval card (control characters made visible)."""
+    shown = text[:limit].replace("\x00", "\\0")
+    return shown + (f"\n... [{len(text) - limit} more characters]" if len(text) > limit else "")
 
 
 def _fetch(session: TerminalSession, tool: str, display: str, path: str, body: str):
@@ -88,7 +109,7 @@ def _fetch(session: TerminalSession, tool: str, display: str, path: str, body: s
 
 # ---------------------------------------------------------------------- read
 def sandbox_read(session: TerminalSession, path: str, offset: int = 1, limit: int = 200) -> str:
-    path = check_path(path)
+    path = _checked(session, "sandbox_read", path)
     offset, limit = max(1, int(offset)), max(1, min(int(limit), MAX_READ_LINES))
     script = "\n".join([
         "f=" + shell_path(path),
@@ -131,11 +152,12 @@ def _write_script(path: str) -> str:
 
 
 def _write(session: TerminalSession, tool: str, display: str, path: str, content: str, assessment: Assessment,
-           preapproved: bool = False):
+           preapproved: bool = False, detail: str = ""):
     data = content.encode("utf-8")
     if len(data) > MAX_FILE_BYTES:
         return None, f"error: content is {len(data)} bytes; the limit is {MAX_FILE_BYTES}"
-    result, denial = session.run(tool, display, _write_script(path), stdin=data, assessment=assessment, preapproved=preapproved)
+    result, denial = session.run(tool, display, _write_script(path), stdin=data, assessment=assessment, preapproved=preapproved,
+                                  detail=detail)
     if denial:
         return None, denial
     if result.timed_out:
@@ -146,10 +168,11 @@ def _write(session: TerminalSession, tool: str, display: str, path: str, content
 
 
 def sandbox_write(session: TerminalSession, path: str, content: str) -> str:
-    path = check_path(path)
+    path = _checked(session, "sandbox_write", path)
     size, problem = _write(
         session, "sandbox_write", f"write {path} ({len(content.encode('utf-8'))} bytes)", path, content,
-        protected_verdict(session, path) or assess_write(posixpath.normpath(_where(session, path))),
+        protected_verdict(session, path, write=True) or assess_write(posixpath.normpath(_where(session, path))),
+        detail="content:\n" + preview(content),
     )
     return problem or f"wrote {size} bytes to {path}"
 
@@ -205,7 +228,7 @@ def patch_text(text: str, old: str, new: str, replace_all: bool = False) -> tupl
 
 
 def sandbox_patch(session: TerminalSession, path: str, old: str, new: str, replace_all: bool = False) -> str:
-    path = check_path(path)
+    path = _checked(session, "sandbox_patch", path)
     fetch = "\n".join([
         "f=" + shell_path(path),
         f'[ -e "$f" ] || exit {_MISSING}',
@@ -214,8 +237,9 @@ def sandbox_patch(session: TerminalSession, path: str, old: str, new: str, repla
         _BINARY_CHECK,
         'cat -- "$f"',
     ])
-    assessment = protected_verdict(session, path) or assess_write(posixpath.normpath(_where(session, path)))
-    result, denial = session.run("sandbox_patch", f"patch {path}", fetch, assessment=assessment)
+    assessment = protected_verdict(session, path, write=True) or assess_write(posixpath.normpath(_where(session, path)))
+    detail = f"replace{' all' if replace_all else ''}:\n{preview(old)}\nwith:\n{preview(new)}"
+    result, denial = session.run("sandbox_patch", f"patch {path}", fetch, assessment=assessment, detail=detail)
     if denial:
         return denial
     if result.timed_out or result.exit_code != 0:
@@ -243,10 +267,12 @@ def _write_after_patch(session: TerminalSession, path: str, content: str, assess
 # ---------------------------------------------------------------------- search
 def sandbox_search(session: TerminalSession, pattern: str, path: str = ".", glob: str | None = None,
                    files: bool = False) -> str:
-    path = check_path(path or ".")
+    path = _checked(session, "sandbox_search", path or ".")
     if not isinstance(pattern, str) or not pattern or "\x00" in pattern:
+        session.audit_refusal("sandbox_search", "sandbox_search (invalid pattern)", "invalid pattern")
         raise ValueError("pattern must be a non-empty string without NUL bytes")
     if glob is not None and "\x00" in glob:
+        session.audit_refusal("sandbox_search", "sandbox_search (invalid glob)", "invalid glob")
         raise ValueError("glob must not contain a NUL byte")
     p = shell_path(path)
     cap = MAX_SEARCH_RESULTS + 1

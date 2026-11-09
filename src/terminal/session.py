@@ -7,7 +7,7 @@ from pathlib import Path
 
 from src.config.models import AgentTerminalConfig, TerminalSettings
 from src.providers.cancellation import GenerationCancelled
-from src.terminal.audit import write_audit
+from src.terminal.audit import audit_writable, write_audit
 from src.terminal.backends import Backend, LocalBackend, Result
 from src.terminal.context import current_run
 from src.terminal.policy import Assessment, assess
@@ -17,10 +17,15 @@ from src.utils.logger import get_logger
 logger = get_logger("terminal")
 MAX_COMMAND_CHARS = 20_000
 
+# file tools that change files: never run unattended, whatever the approval mode
+WRITE_TOOLS = frozenset({"sandbox_write", "sandbox_patch"})
+AUDIT_FAILED = "error: the action was not run because the terminal audit trail could not be written. Tell the user."
+
 DENIED_HINT = "Do not retry this action; tell the user what you wanted to do and why, and let them decide."
 PROTECTED_NOTICE = (
-    "Denied: protected path: {why}. SSH keys, secrets files, .env files, login credentials and process environments are "
-    "off limits to agents on the local backend in every approval mode, and no one can approve access to them from here. "
+    "Denied: protected path: {why}. SSH keys, secrets files, .env files, login credentials, MCP credentials and process "
+    "environments are off limits to agents on the local backend in every approval mode, and so is writing audit trails, "
+    "user/agent/settings configuration files and known_hosts files. No one can approve access to them from here. "
     "Do not try another way to reach them (other tools, paths, globs, scripts). "
 )
 
@@ -80,7 +85,7 @@ class TerminalSession:
         return float(max(1.0, min(value, self.settings.max_timeout_seconds)))
 
     # ------------------------------------------------------------------ policy
-    def decide(self, tool: str, display: str, assessment: Assessment, cwd: str) -> tuple[bool, str, str]:
+    def decide(self, tool: str, display: str, assessment: Assessment, cwd: str, detail: str = "") -> tuple[bool, str, str]:
         """(allowed, text for the model when denied, decision label for the audit trail)."""
         mode = self.policy.approvals
         if assessment.level == "protected":  # before every mode and before the unattended handling
@@ -91,11 +96,17 @@ class TerminalSession:
                 f"Blocked: this action ({why}) is on the hardline blocklist and can never run on this backend, "
                 f"whatever the approval mode. {DENIED_HINT}"
             ), "hardline"
-        if mode == "off":
-            return True, "", "auto:off"
         run = current_run()
         dangerous = assessment.level == "dangerous"
         attended = not self.unattended and run is not None and run.interactive
+        if mode == "off":
+            if attended:
+                return True, "", "auto:off"
+            # nobody can answer (dreams, cron, tasks without a client): `off` must not widen what runs unattended
+            if dangerous or tool in WRITE_TOOLS:
+                what = f"dangerous ({assessment.reason})" if dangerous else "a file write"
+                return False, f"Denied: this action is {what} and nobody is attached to approve it, whatever the approval mode. {DENIED_HINT}", "denied:unattended"
+            return True, "", "auto:off"
         if not attended:
             if mode == "manual":
                 return False, f"Denied: approvals are manual and nobody is attached to approve actions here. {DENIED_HINT}", "denied:unattended"
@@ -108,7 +119,7 @@ class TerminalSession:
         # a subagent task's run is answered in its parent's chat, attributed to the task
         target_agent, target_chat = run.approval_target or (self.agent_id, run.chat_id)
         outcome = run.broker.request(
-            self.user_id, target_agent, target_chat, run, tool, display, cwd,
+            self.user_id, target_agent, target_chat, run, tool, display + (f"\n{detail}" if detail else ""), cwd,
             assessment.reason or ("approvals are set to manual" if mode == "manual" else ""), risk, backend=self.name,
             task=run.task,
         )
@@ -135,12 +146,18 @@ class TerminalSession:
     def run(
         self, tool: str, display: str, command: str, *, cwd: str | None = None, timeout: int | float | None = None,
         stdin: bytes | str | None = None, assessment: Assessment | None = None, preapproved: bool = False,
+        detail: str = "",
     ) -> tuple[Result | None, str | None]:
-        """Authorize and execute; returns (result, None) or (None, denial text for the model)."""
+        """Authorize and execute; returns (result, None) or (None, denial text for the model).
+
+        `detail` is extra text for the approval card only (a preview of what a file tool will write); it is not audited.
+        """
         cwd = cwd or self.workdir
         if "\x00" in command or "\x00" in display:
+            self._audit(tool, display.replace("\x00", "\\0"), cwd, "denied:invalid", None, 0.0)
             return None, "error: the action contains a NUL byte"
         if len(command) > MAX_COMMAND_CHARS:
+            self._audit(tool, display, cwd, "denied:invalid", None, 0.0)
             return None, f"error: command is longer than {MAX_COMMAND_CHARS} characters; use sandbox_write for large content"
         verdict = assessment or assess(
             command, None, self.protected(), self.local_cwd(cwd) if self.local else None,
@@ -149,19 +166,22 @@ class TerminalSession:
             if preapproved and verdict.level != "protected":  # the second step of an operation whose first step was already authorized
                 allowed, text, decision = True, "", "approved:same-operation"
             else:
-                allowed, text, decision = self.decide(tool, display, verdict, cwd)
+                allowed, text, decision = self.decide(tool, display, verdict, cwd, detail)
         except GenerationCancelled:
-            self._audit(tool, display, cwd, "cancelled", None, 0.0)
+            self._audit(tool, display, cwd, "cancelled", None, 0.0, verdict=verdict.level)
             raise
         if not allowed:
-            self._audit(tool, display, cwd, decision, None, 0.0)
+            self._audit(tool, display, cwd, decision, None, 0.0, verdict=verdict.level)
             logger.info("terminal %s/%s not run (%s): %s", self.agent_id, self.name, decision, display[:200])
             return None, text
+        if not audit_writable(self.audit_file):  # fail closed: nothing runs that cannot be recorded
+            logger.error("terminal %s/%s not run: the audit file is not writable", self.agent_id, self.name)
+            return None, AUDIT_FAILED
         started = time.monotonic()
         result = self.backend.run(command, cwd, self.timeout_for(timeout), stdin)
         elapsed = time.monotonic() - started
         result.approval = self.approval_note(decision)
-        self._audit(tool, display, cwd, decision, result.exit_code, elapsed, timed_out=result.timed_out)
+        self._audit(tool, display, cwd, decision, result.exit_code, elapsed, timed_out=result.timed_out, verdict=verdict.level)
         logger.info(
             "terminal %s/%s [%s] %s exit=%s decision=%s %.1fs: %s",
             self.user_id, self.agent_id, self.name, tool, result.exit_code, decision, elapsed, display[:200],
@@ -169,9 +189,15 @@ class TerminalSession:
         return result, None
 
     def _audit(self, tool: str, command: str, cwd: str, decision: str, exit_code: int | None, elapsed: float,
-               *, timed_out: bool = False) -> None:
-        write_audit(
+               *, timed_out: bool = False, verdict: str | None = None) -> bool:
+        extra = {"verdict": verdict} if verdict else {}
+        return write_audit(
             self.audit_file, user=self.user_id, agent=self.agent_id, backend=self.name,
             tool=tool, command=command, cwd=cwd, decision=decision, exit_code=exit_code,
-            duration_ms=int(elapsed * 1000), timed_out=timed_out,
+            duration_ms=int(elapsed * 1000), timed_out=timed_out, **extra,
         )
+
+    def audit_refusal(self, tool: str, display: str, reason: str) -> None:
+        """Record an action refused before it reached `run` (an invalid path, for instance)."""
+        self._audit(tool, display, self.workdir, "denied:invalid", None, 0.0)
+        logger.info("terminal %s/%s refused (%s): %s", self.agent_id, self.name, reason, display[:200])

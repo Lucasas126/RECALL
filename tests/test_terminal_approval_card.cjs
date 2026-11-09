@@ -139,7 +139,7 @@ test("the approvals hint follows the mode", () => {
 test("buildTerminalConfig round-trips the form and leaves a disabled group alone", () => {
   const saved = {
     backends: { sandbox: { workdir: "~/w", approvals: "manual", timeout_seconds: 30 } },
-    default_backend: "sandbox", timeout_seconds: 60, allow_in_dream: false, extra: 1,
+    default_backend: "sandbox", timeout_seconds: 60, extra: 1,
   };
   const fields = {
     backends: [
@@ -147,14 +147,14 @@ test("buildTerminalConfig round-trips the form and leaves a disabled group alone
       { name: "pc", allowed: true, workdir: " ", approvals: "manual" },
       { name: "nas", allowed: false, workdir: "~", approvals: "off" },
     ],
-    defaultBackend: "pc", timeout: "90", allowInDream: true,
+    defaultBackend: "pc", timeout: "90",
   };
   assert.deepEqual(plain(f.buildTerminalConfig(saved, true, fields)), {
     backends: {
       sandbox: { workdir: "~/other", approvals: "smart", timeout_seconds: 30 },
       pc: { workdir: "~", approvals: "manual" },
     },
-    default_backend: "pc", timeout_seconds: 90, allow_in_dream: true, extra: 1,
+    default_backend: "pc", timeout_seconds: 90, extra: 1,
   });
   assert.deepEqual(plain(f.buildTerminalConfig(saved, false, fields)), saved);
   assert.equal(f.buildTerminalConfig(undefined, false, fields), null);

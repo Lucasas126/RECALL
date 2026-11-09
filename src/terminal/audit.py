@@ -24,10 +24,28 @@ def audit_path(data_dir: Path, user_id: str, agent_id: str) -> Path:
     return Path(data_dir) / user_id / agent_id / AUDIT_FILE
 
 
-def write_audit(path: Path | None, **fields) -> None:
-    """Append one record; failures are logged, never raised into the tool."""
+def audit_writable(path: Path | None) -> bool:
+    """True when the audit file can be appended to (created if missing); no audit file configured counts as writable."""
     if path is None:
-        return
+        return True
+    try:
+        with _LOCK:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8"):
+                pass
+    except OSError:
+        logger.exception("the terminal audit file %s is not writable", path)
+        return False
+    return True
+
+
+def write_audit(path: Path | None, **fields) -> bool:
+    """Append one record; returns False when it could not be written (logged, never raised into the tool).
+
+    The terminal session treats an unwritable audit file as a reason to refuse the action (fail closed).
+    """
+    if path is None:
+        return True
     record = {"ts": round(time.time(), 3), **fields}
     if isinstance(record.get("command"), str):
         record["command"] = redact(record["command"])[:_MAX_COMMAND]
@@ -38,3 +56,5 @@ def write_audit(path: Path | None, **fields) -> None:
                 handle.write(json.dumps(record, ensure_ascii=False) + "\n")
     except OSError:
         logger.exception("could not write the terminal audit file %s", path)
+        return False
+    return True

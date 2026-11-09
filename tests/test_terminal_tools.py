@@ -26,7 +26,7 @@ from src.terminal import backends as backends_module
 from src.terminal.approvals import ApprovalBroker
 from src.terminal.audit import audit_path
 from src.terminal.backends import LocalBackend, Result, SshBackend, build_backend, minimal_env, scrubbed_env
-from src.terminal.context import run_context
+from src.terminal.context import RunContext, run_context
 from src.terminal.output import REDACTED, clean, redact, strip_ansi, truncate
 from src.terminal.resolve import check_agent_terminal, resolve_backend, resolve_backends
 from src.utils.i18n import InputError
@@ -102,9 +102,12 @@ class TerminalToolTests(ToolFixture):
 
 
 class FileToolTests(ToolFixture):
-    def sandbox(self, files=None, **kw):
+    def sandbox(self, files=None, attended=False, **kw):
         self.box = FakeSandbox(files)
-        return self.build(self.box, **kw)
+        tools = self.build(self.box, **kw)
+        if attended:  # a person is attached (the chat path sets interactive=True); `off` writes files only then
+            self.enterContext(run_context(RunContext("u", "a", "c", None, lambda *a: None, interactive=True)))
+        return tools
 
     def test_read_paginates(self) -> None:
         tools = self.sandbox({"/w/big.txt": "\n".join(f"line {i}" for i in range(1, 451))})
@@ -120,7 +123,7 @@ class FileToolTests(ToolFixture):
         self.assertIn("no such file", tools["sandbox_read"]("/w/missing"))
 
     def test_write_sends_content_on_stdin_only(self) -> None:
-        tools = self.sandbox()
+        tools = self.sandbox(attended=True)
         content = "secret body; rm -rf x\n$(touch y)\n"
         self.assertEqual(tools["sandbox_write"]("notes/a.txt", content), f"wrote {len(content)} bytes to notes/a.txt")
         call = self.box.calls[0]
@@ -139,7 +142,7 @@ class FileToolTests(ToolFixture):
         self.assertIn("wrote", tools["sandbox_write"]("/srv/w/ok.txt", "x"))
 
     def test_patch_unique_with_diff(self) -> None:
-        tools = self.sandbox({"a.py": "x = 1\ny = 2\nz = 3\n"})
+        tools = self.sandbox({"a.py": "x = 1\ny = 2\nz = 3\n"}, attended=True)
         result = tools["sandbox_patch"]("a.py", "y = 2", "y = 20")
         self.assertIn("patched a.py (exact)", result)
         self.assertIn("-y = 2", result)
@@ -149,7 +152,7 @@ class FileToolTests(ToolFixture):
         self.assertIn(b"y = 20", self.box.calls[-1].stdin)
 
     def test_patch_duplicate_missing_and_replace_all(self) -> None:
-        tools = self.sandbox({"a.txt": "foo\nbar\nfoo\n"})
+        tools = self.sandbox({"a.txt": "foo\nbar\nfoo\n"}, attended=True)
         self.assertIn("matches 2 places", tools["sandbox_patch"]("a.txt", "foo", "baz"))
         self.assertEqual(self.box.files["a.txt"], "foo\nbar\nfoo\n")
         self.assertIn("was not found", tools["sandbox_patch"]("a.txt", "nothing", "x"))
@@ -159,7 +162,7 @@ class FileToolTests(ToolFixture):
         self.assertIn("identical", tools["sandbox_patch"]("a.txt", "bar", "bar"))
 
     def test_patch_tolerates_indentation_differences(self) -> None:
-        tools = self.sandbox({"a.py": "def f():\n    return 1\n"})
+        tools = self.sandbox({"a.py": "def f():\n    return 1\n"}, attended=True)
         self.assertIn("whitespace-tolerant", tools["sandbox_patch"]("a.py", "def f():\nreturn 1", "def f():\n    return 2"))
         self.assertIn("return 2", self.box.files["a.py"])
 
@@ -183,7 +186,7 @@ class FileToolTests(ToolFixture):
         self.assertEqual(set(tools["sandbox_search"]("*.py", "/w", files=True).splitlines()), {"/w/a.py", "/w/c.py"})
 
     def test_content_and_patterns_never_land_in_argv_unquoted(self) -> None:
-        tools = self.sandbox({"a.txt": "x\n"})
+        tools = self.sandbox({"a.txt": "x\n"}, attended=True)
         tools["sandbox_search"](HOSTILE, "a.txt")
         script = self.box.calls[-1].command
         self.assertIn(shlex.quote(HOSTILE), script)  # one quoted word, not shell syntax
@@ -253,7 +256,7 @@ class SshBackendTests(unittest.TestCase):
 
     def test_run_never_uses_a_local_shell_and_passes_a_minimal_env(self) -> None:
         captured, popen = self.fake_popen()
-        env = {"PATH": "/usr/bin", "HOME": "/home/x", "OPENROUTER_API_KEY": "s3cret", "SSH_AUTH_SOCK": "/agent",
+        env = {"PATH": "/usr/bin", "HOME": "/home/user-a", "OPENROUTER_API_KEY": "s3cret", "SSH_AUTH_SOCK": "/agent",
                "RECALL_SESSION_SECRET": "s", "HTTPS_PROXY": "http://p"}
         with popen, patch.dict(os.environ, env, clear=True):
             result = SshBackend("box", ssh_config(), ssh_binary="ssh").run("ls", "~", 5, stdin="data")
@@ -271,7 +274,7 @@ class SshBackendTests(unittest.TestCase):
 
     def test_env_helpers(self) -> None:
         env = {"PATH": "p", "MY_API_KEY": "k", "GITHUB_TOKEN": "t", "LANG": "C", "RECALL_X": "1", "EDITOR": "vi"}
-        self.assertEqual(set(scrubbed_env(env)), {"PATH", "LANG", "EDITOR"})
+        self.assertEqual(set(scrubbed_env(env)), {"PATH", "LANG"})  # an allowlist: EDITOR does not pass
         self.assertEqual(set(minimal_env(env)), {"PATH", "LANG"})
 
     def test_build_backend_picks_the_class(self) -> None:
@@ -324,7 +327,7 @@ class ResolveAndConfigTests(unittest.TestCase):
         term = AgentTerminalConfig(backends={"box": {}})
         entry = term.backends["box"]
         self.assertEqual((entry.approvals, entry.workdir, entry.timeout_seconds), ("manual", "~", None))
-        self.assertEqual((term.default_backend, term.timeout_seconds, term.allow_in_dream), ("box", 60, False))
+        self.assertEqual((term.default_backend, term.timeout_seconds), ("box", 60))
         two = {"sandbox": {"approvals": "smart", "timeout_seconds": 5}, "pc": {}}
         self.assertEqual(AgentTerminalConfig(backends=two, default_backend="pc").timeout_for_backend("sandbox"), 5)
         self.assertEqual(AgentTerminalConfig(backends=two, default_backend="pc").timeout_for_backend("pc"), 60)
@@ -357,37 +360,17 @@ class ResolveAndConfigTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             TerminalSettings(approval_timeout_seconds=1)
 
-    def test_dream_terminal_needs_the_agent_opt_in(self) -> None:
+    def test_dreams_have_no_terminal_config(self) -> None:
         with self.assertRaises(ValidationError):
             AgentConfig(id="a", name="A", dream=DreamConfig(tools=["terminal"]), terminal={"backends": {"box": {}}})
-        agent = AgentConfig(id="a", name="A", dream=DreamConfig(tools=["terminal"]),
-                            terminal={"backends": {"box": {}}, "allow_in_dream": True})
-        self.assertTrue(agent.terminal.allow_in_dream)
+        with self.assertRaises(ValidationError):
+            AgentConfig(id="a", name="A", terminal={"backends": {"box": {}}, "allow_in_dream": True})
 
 
-class DreamGatingTests(unittest.TestCase):
-    def tools(self, *, dream_tools, allow_in_dream, backend=True):
-        config = resolved_agent(allow_in_dream=allow_in_dream).model_copy(update={"dream": DreamConfig(tools=dream_tools)})
-        if not backend:
-            config = config.model_copy(update={"terminal_backends": {}})
-        host = SimpleNamespace(config=config, sources=SimpleNamespace(folders=lambda: []))
-        with contextlib.ExitStack() as stack:
-            for name in ("build_review_tools", "build_memory_tools", "build_tag_tools", "build_edit_tools",
-                         "build_self_tools"):
-                stack.enter_context(patch.object(dream, name, return_value=[]))
-            specs, handlers = dream.build_dream_tools(host, None, {}, [], None)
-        return set(handlers)
-
-    def test_needs_both_allow_in_dream_and_the_dream_tools_entry(self) -> None:
-        names = {"terminal", "sandbox_read", "sandbox_write", "sandbox_patch", "sandbox_search"}
-        self.assertEqual(self.tools(dream_tools=["terminal"], allow_in_dream=True), names)
-        self.assertEqual(self.tools(dream_tools=["web"], allow_in_dream=True), set())
-        self.assertEqual(self.tools(dream_tools=["terminal"], allow_in_dream=False), set())  # defence in depth
-        self.assertEqual(self.tools(dream_tools=["terminal"], allow_in_dream=True, backend=False), set())
-
+class DreamUnattendedTests(unittest.TestCase):
     def test_dream_tools_never_prompt(self) -> None:
         backend = FakeBackend()
-        config = resolved_agent("manual", allow_in_dream=True)
+        config = resolved_agent("manual")
         with patch("src.agent.toolsets.terminal.DATA_DIR", Path("unused")), \
                 patch("src.terminal.audit.write_audit"), patch("src.terminal.session.write_audit"):
             tools = {t.__name__: t for t in build_terminal_tools(config, unattended=True, backends={"box": backend})}
@@ -437,7 +420,7 @@ class AuditTests(ToolFixture):
 
 
 class AdminTerminalTestTests(unittest.TestCase):
-    def run_cli(self, argv, backends=None, user="ana", allow_local=False):
+    def run_cli(self, argv, backends=None, user="user-a", allow_local=False):
         loaded = UserConfig(id=user, name="A", provider=ProviderConfig(name="ollama"), agents=[],
                             terminal_backends=backends or {})
         out, err = io.StringIO(), io.StringIO()
@@ -451,7 +434,7 @@ class AdminTerminalTestTests(unittest.TestCase):
         secret = "sk-or-" + "z" * 24
         backend = FakeBackend(lambda *a: Result(0, f"ok\nLinux 6.1\n{secret}\n"))
         with patch.object(admin, "build_backend", return_value=backend) as build:
-            code, out, err = self.run_cli(["terminal-test", "--user", "ana", "--backend", "box"],
+            code, out, err = self.run_cli(["terminal-test", "--user", "user-a", "--backend", "box"],
                                           {"box": ssh_config().model_dump()})
         self.assertEqual(code, 0)
         self.assertEqual(build.call_args.args[0], "box")
@@ -465,18 +448,18 @@ class AdminTerminalTestTests(unittest.TestCase):
     def test_failure_exit_code_and_stderr(self) -> None:
         backend = FakeBackend(lambda *a: Result(255, "", "Host key verification failed."))
         with patch.object(admin, "build_backend", return_value=backend):
-            code, out, _ = self.run_cli(["terminal-test", "--user", "ana", "--backend", "box"], {"box": ssh_config().model_dump()})
+            code, out, _ = self.run_cli(["terminal-test", "--user", "user-a", "--backend", "box"], {"box": ssh_config().model_dump()})
         self.assertEqual(code, 1)
         self.assertIn("exit code: 255", out)
         self.assertIn("Host key verification failed.", out)
 
     def test_unknown_backend_and_disabled_local(self) -> None:
-        code, _, err = self.run_cli(["terminal-test", "--user", "ana", "--backend", "nope"], {"box": ssh_config().model_dump()})
+        code, _, err = self.run_cli(["terminal-test", "--user", "user-a", "--backend", "nope"], {"box": ssh_config().model_dump()})
         self.assertEqual(code, 1)
         self.assertIn("box", err)
         backend = FakeBackend()
         with patch.object(admin, "build_backend", return_value=backend):
-            code, _, err = self.run_cli(["terminal-test", "--user", "ana", "--backend", "here"],
+            code, _, err = self.run_cli(["terminal-test", "--user", "user-a", "--backend", "here"],
                                         {"here": {"type": "local", "workdir": "/srv/w"}})
         self.assertEqual((code, backend.calls), (1, []))
         self.assertIn("allow_local", err)
