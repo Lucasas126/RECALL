@@ -411,12 +411,10 @@ class AgentTerminalConfig(BaseModel):
     @classmethod
     def _no_dream_terminal(cls, data: object) -> object:
         if isinstance(data, dict) and "allow_in_dream" in data:
-            if data["allow_in_dream"]:
-                raise ValueError(
-                    "terminal.allow_in_dream was removed: dream sessions have no terminal; delete the key "
-                    "(read-only sandbox variants for dreams are planned)"
-                )
-            data = {key: value for key, value in data.items() if key != "allow_in_dream"}  # old files saved `false`
+            raise ValueError(
+                "terminal.allow_in_dream was removed: dream sessions have no terminal; delete the key "
+                "(read-only sandbox variants for dreams are planned)"
+            )
         return data
 
     @model_validator(mode="after")
@@ -542,17 +540,24 @@ class UserConfig(BaseModel):
     models: ModelsConfig = Field(default_factory=ModelsConfig)
     openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
-    # effective permission levels (declared or resolved at load); None only when built by hand
-    level: Optional[LevelField] = None
-    max_level: Optional[LevelField] = None
     claude_subscription: ClaudeSubscriptionConfig = Field(default_factory=ClaudeSubscriptionConfig)
     # sandboxes the user's agents may run commands in, by name (see docs/user-guide/terminal.md)
     terminal_backends: dict[Annotated[str, StringConstraints(pattern=_BACKEND_NAME)], TerminalBackendConfig] = Field(
         default_factory=dict,
     )
-    # highest level the user's agents may have; set only by an administrator (see config/levels.py). None = not
-    # declared yet: `effective_user_level` resolves it at load.
-    max_level: Optional[LevelField] = None
+    # highest level the user's agents may have; required, set only by an administrator (see config/levels.py)
+    max_level: LevelField
+
+    @model_validator(mode="before")
+    @classmethod
+    def _max_level_is_declared(cls, data: object) -> object:
+        if isinstance(data, dict) and data.get("max_level") is None:
+            raise ValueError(
+                f"user '{data.get('id', '?')}' has no max_level (the highest permission level of its agents). "
+                f"Set it with `python -m src.admin user set --user {data.get('id', '<user>')} --set max_level=<level>` "
+                "(minimal, reader, assistant, collaborator, operator or admin)"
+            )
+        return data
 
     def openrouter_settings(self) -> OpenRouterConfig:
         """OpenRouter settings with the key env var actually used (`provider.api_key` when it is main)."""
@@ -763,6 +768,15 @@ class ResolvedAgent(BaseModel):
     claude_subscription: ClaudeSubscriptionConfig = Field(default_factory=ClaudeSubscriptionConfig)
     openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)  # key env var already resolved for a main OpenRouter
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
-    # effective permission levels (declared or resolved at load); None only when built by hand
+    # effective permission levels, resolved at load. A hand-built config without `level` gets the lowest level that
+    # covers what it is configured with; `max_level` stays None then.
     level: Optional[LevelField] = None
     max_level: Optional[LevelField] = None
+
+    @model_validator(mode="after")
+    def _effective_level(self) -> "ResolvedAgent":
+        if self.level is None:
+            from src.config.levels import required_level
+
+            self.level = required_level(self)
+        return self

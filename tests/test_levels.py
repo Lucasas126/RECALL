@@ -1,4 +1,4 @@
-"""Permission levels, step 1: ordering, parsing, required levels, fallbacks and load-time validation."""
+"""Permission levels: ordering, parsing, required levels, the required max_level and load-time validation."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from src.config.agents import AgentStore
 from src.config.levels import (
-    Level, LevelExceedsMax, effective_agent_level, effective_user_level, forget_warnings, parse_level, required_level,
+    Level, LevelBelowRequired, LevelExceedsMax, LevelRequiredAboveMax, effective_agent_level, parse_level, required_level,
 )
 from src.config.loader import load_agent
 from src.config.models import AgentConfig, UserConfig
@@ -41,7 +41,7 @@ def user_config(**extra) -> UserConfig:
         "local": {"type": "local", "workdir": "/app"},
     }
     return UserConfig.model_validate({
-        "id": "user-a", "name": "User A", "provider": {"name": "ollama"}, "agents": [],
+        "id": "user-a", "name": "User A", "max_level": "admin", "provider": {"name": "ollama"}, "agents": [],
         "terminal_backends": backends, **extra,
     })
 
@@ -122,39 +122,33 @@ class RequiredLevelTests(unittest.TestCase):
 
 
 class EffectiveLevelTests(unittest.TestCase):
-    def setUp(self) -> None:
-        forget_warnings()
-        self.addCleanup(forget_warnings)
-
-    def test_declared_user_level_wins(self) -> None:
-        self.assertIs(effective_user_level(user_config(max_level=Level.READER), 1), Level.READER)
-
-    def test_single_user_installation_is_admin_several_are_collaborator(self) -> None:
-        self.assertIs(effective_user_level(user_config(), 1), Level.ADMIN)
-        self.assertIs(effective_user_level(user_config(), 2), Level.COLLABORATOR)
-
-    def test_the_fallback_warns_once_per_user_and_names_the_commands(self) -> None:
-        with self.assertLogs("recall.config", "WARNING") as logs:
-            effective_user_level(user_config(), 2)
-            effective_user_level(user_config(), 2)
-        self.assertEqual(len(logs.records), 1)
-        self.assertIn("migrate-levels", logs.output[0])
-        self.assertIn("max_level=", logs.output[0])
-
-    def test_declared_user_level_does_not_warn(self) -> None:
-        with self.assertNoLogs("recall.config", "WARNING"):
-            effective_user_level(user_config(max_level=Level.OPERATOR), 3)
-
     def test_declared_agent_level_wins_over_required(self) -> None:
         config = agent(["terminal"], terminal=["orion"], level=Level.READER)
         self.assertIs(effective_agent_level(config, user_config()), Level.READER)
+
+    def test_an_undeclared_level_is_what_the_configuration_needs(self) -> None:
+        self.assertIs(effective_agent_level(agent(["memory_read", "web"]), user_config()), Level.ASSISTANT)
+
+    def test_max_level_is_required_and_the_error_names_the_fix(self) -> None:
+        data = {"id": "user-z", "name": "Z", "provider": {"name": "ollama"}, "agents": []}
+        with self.assertRaises(ValidationError) as raised:
+            UserConfig.model_validate(data)
+        text = str(raised.exception)
+        self.assertIn("python -m src.admin user set --user user-z --set max_level=<level>", text)
+        with self.assertRaises(ValidationError):
+            UserConfig.model_validate({**data, "max_level": None})
+        self.assertIs(UserConfig.model_validate({**data, "max_level": "Reader"}).max_level, Level.READER)
+
+    def test_migration_helpers_are_gone(self) -> None:
+        import src.config.levels as levels
+
+        for name in ("installation_user_count", "effective_user_level", "forget_warnings"):
+            self.assertFalse(hasattr(levels, name), name)
 
 
 class LoaderTests(AdminFixture):
     def setUp(self) -> None:
         super().setUp()
-        forget_warnings()
-        self.addCleanup(forget_warnings)
         environment = patch.dict(os.environ, {"USER_A_KEY_NAME": "secret"})
         environment.start()
         self.addCleanup(environment.stop)
@@ -165,14 +159,15 @@ class LoaderTests(AdminFixture):
         resolved = load_agent("user-a", "bot")
         self.assertEqual((resolved.level, resolved.max_level), (Level.COLLABORATOR, Level.OPERATOR))
 
-    def test_missing_levels_are_resolved_at_load(self) -> None:
+    def test_a_missing_max_level_is_a_clear_load_error(self) -> None:
         self.write_user(self.read("user-a/user.yaml").replace("max_level: admin\n", ""))
+        with self.assertRaises(ValidationError) as raised:
+            load_agent("user-a", "bot")
+        self.assertIn("user set --user user-a --set max_level=<level>", str(raised.exception))
+
+    def test_an_undeclared_level_is_resolved_at_load(self) -> None:
         resolved = load_agent("user-a", "bot")
-        self.assertEqual((resolved.level, resolved.max_level), (Level.ASSISTANT, Level.ADMIN))  # single user
-        other = self.config_dir / "user-b"
-        other.mkdir()
-        (other / "user.yaml").write_text("id: user-b\nname: B\nprovider: {name: ollama}\nagents: []\n", encoding="utf-8")
-        self.assertEqual(load_agent("user-a", "bot").max_level, Level.COLLABORATOR)
+        self.assertEqual((resolved.level, resolved.max_level), (Level.ASSISTANT, Level.ADMIN))
 
     def test_declared_level_above_max_is_an_invalid_agent(self) -> None:
         self.write_user(self.read("user-a/user.yaml").replace("max_level: admin", "max_level: operator"))
@@ -182,24 +177,51 @@ class LoaderTests(AdminFixture):
         self.assertEqual(raised.exception.code, "level_exceeds_max")
         self.assertIn("operator", str(raised.exception))
 
-    def test_production_shape_for_a_lower_max_is_a_warning_not_a_failure(self) -> None:
+    PRODUCTION_BACKENDS = (
+        "terminal_backends:\n"
+        "  local: {type: local, workdir: /app}\n"
+        "  sandbox: {type: ssh, host: a.example, user: deploy, key_file: /k, known_hosts_file: /h}\n"
+        "  pc: {type: ssh, host: b.example, user: user-a, key_file: /k, known_hosts_file: /h}\n"
+        "  orion: {type: ssh, host: c.example, user: root, key_file: /k, known_hosts_file: /h}\n"
+    )
+
+    def test_production_shape_above_a_lower_max_is_an_invalid_agent(self) -> None:
         self.write_user(
-            self.read("user-a/user.yaml").replace("max_level: admin", "max_level: operator")
-            + "terminal_backends:\n"
-            "  local: {type: local, workdir: /app}\n"
-            "  sandbox: {type: ssh, host: a.example, user: deploy, key_file: /k, known_hosts_file: /h}\n"
-            "  pc: {type: ssh, host: b.example, user: user-a, key_file: /k, known_hosts_file: /h}\n"
-            "  orion: {type: ssh, host: c.example, user: root, key_file: /k, known_hosts_file: /h}\n"
+            self.read("user-a/user.yaml").replace("max_level: admin", "max_level: operator") + self.PRODUCTION_BACKENDS
         )
         self.write_agent(
             "bot",
             "id: bot\nname: Bot\nchat_config:\n  tool_groups: [memory_read, memory_edit, web, self, terminal]\n"
             "terminal:\n  default_backend: sandbox\n  backends: {local: {}, sandbox: {}, pc: {}, orion: {}}\n",
         )
-        with self.assertLogs("recall.config", "WARNING") as logs:
-            resolved = load_agent("user-a", "bot")
-        self.assertEqual((resolved.level, resolved.max_level), (Level.ADMIN, Level.OPERATOR))
-        self.assertTrue(any("needs admin" in line and "operator" in line for line in logs.output))
+        with self.assertRaises(LevelRequiredAboveMax) as raised:
+            load_agent("user-a", "bot")
+        self.assertEqual(raised.exception.code, "level_required_above_max")
+        message = str(raised.exception)
+        self.assertIn("'bot'", message)
+        self.assertIn("terminal backend 'local' (type local)", message)
+        self.assertIn("'admin'", message)
+        self.assertIn("'operator'", message)
+
+    def test_a_declared_level_below_what_the_configuration_needs_is_invalid(self) -> None:
+        self.write_user(self.read("user-a/user.yaml") + self.PRODUCTION_BACKENDS)
+        self.write_agent(
+            "bot",
+            "id: bot\nname: Bot\nlevel: operator\nchat_config:\n  tool_groups: [memory_read, terminal]\n"
+            "terminal:\n  backends: {orion: {}}\n",
+        )
+        with self.assertRaises(LevelBelowRequired) as raised:
+            load_agent("user-a", "bot")
+        self.assertEqual(raised.exception.code, "level_below_required")
+        self.assertIn("terminal backend 'orion' (ssh user root)", str(raised.exception))
+        self.assertIn("'admin'", str(raised.exception))
+
+    def test_an_undeclared_level_that_needs_more_than_max_is_invalid_not_a_warning(self) -> None:
+        self.write_user(self.read("user-a/user.yaml").replace("max_level: admin", "max_level: reader"))
+        self.write_agent("bot", "id: bot\nname: Bot\n")  # the default groups need assistant
+        with self.assertRaises(LevelRequiredAboveMax) as raised:
+            load_agent("user-a", "bot")
+        self.assertIn("tool group 'memory_edit'", str(raised.exception))
 
     def test_store_rejects_a_declared_level_above_max_on_create_and_update(self) -> None:
         self.write_user(self.read("user-a/user.yaml").replace("max_level: admin", "max_level: assistant"))
@@ -213,13 +235,29 @@ class LoaderTests(AdminFixture):
         self.assertEqual(self.read("user-a/agents/bot.yaml"), before)
         store.create("user-a", AgentConfig(id="ok", name="Ok", level=Level.ASSISTANT))
 
+    def test_store_rejects_an_agent_that_needs_more_than_max_or_its_own_level(self) -> None:
+        self.write_user(self.read("user-a/user.yaml").replace("max_level: admin", "max_level: assistant"))
+        store = AgentStore(self.config_dir, self.data_dir)
+        mcp = AgentConfig(id="m", name="M", chat_config={"mcp": {"calendar": {}}})
+        with self.assertRaises(LevelRequiredAboveMax) as raised:
+            store.create("user-a", mcp)
+        self.assertIn("chat_config.mcp", str(raised.exception))
+        self.assertFalse((self.config_dir / "user-a" / "agents" / "m.yaml").exists())
+        low = AgentConfig(id="w", name="W", level=Level.MINIMAL, chat_config={"tool_groups": ["web"]})
+        with self.assertRaises(LevelBelowRequired):
+            store.create("user-a", low)
+        before = self.read("user-a/agents/bot.yaml")
+        with self.assertRaises(LevelRequiredAboveMax):
+            store.update("user-a", "bot", AgentConfig(id="bot", name="Bot", chat_config={"mcp": {"calendar": {}}}))
+        self.assertEqual(self.read("user-a/agents/bot.yaml"), before)
+
     def test_store_update_without_level_keeps_the_stored_one(self) -> None:
         store = AgentStore(self.config_dir, self.data_dir)
         self.write_agent("bot", "id: bot\nname: Bot\nlevel: operator\n")
         store.update("user-a", "bot", AgentConfig(id="bot", name="Renamed"))
         self.assertIn("level: operator", self.read("user-a/agents/bot.yaml"))
-        store.update("user-a", "bot", AgentConfig(id="bot", name="Renamed", level=Level.READER))
-        self.assertIn("level: reader", self.read("user-a/agents/bot.yaml"))
+        store.update("user-a", "bot", AgentConfig(id="bot", name="Renamed", level=Level.COLLABORATOR))
+        self.assertIn("level: collaborator", self.read("user-a/agents/bot.yaml"))
 
     def test_service_rejects_and_preserves(self) -> None:
         self.write_user(self.read("user-a/user.yaml").replace("max_level: admin", "max_level: operator"))
@@ -231,6 +269,13 @@ class LoaderTests(AdminFixture):
         view = self.service.update_agent("user-a", "bot", AgentConfig(id="bot", name="Edited"))
         self.assertEqual(view["level"], "operator")
         self.assertIn("level: operator", self.read("user-a/agents/bot.yaml"))
+        self.write_user(self.read("user-a/user.yaml") + self.PRODUCTION_BACKENDS)
+        with self.assertRaises(LevelRequiredAboveMax) as raised:  # an undeclared level is checked too
+            self.service.create_agent("user-a", AgentConfig(
+                id="sh", name="Sh", chat_config={"tool_groups": ["terminal"]},
+                terminal={"backends": {"local": {}}},
+            ))
+        self.assertEqual(raised.exception.code, "level_required_above_max")
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ class AgentDescriptionTests(unittest.TestCase):
         user_dir = root / "config" / "user-a"
         user_dir.mkdir(parents=True)
         (user_dir / "user.yaml").write_text(
-            "id: user-a\nname: User A\nprovider: {name: openrouter}\nagents: []\n", encoding="utf-8",
+            "id: user-a\nname: User A\nmax_level: admin\nprovider: {name: openrouter}\nagents: []\n", encoding="utf-8",
         )
         self.store = AgentStore(root / "config", root / "data")
 

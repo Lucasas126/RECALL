@@ -50,6 +50,11 @@ class AgentTargetFixture(SubagentFixture):
         return AgentConfig(
             id=agent, name=f"Name of {agent}", chat_config=ChatConfig(tools=True, tool_groups=list(groups)),
             terminal=self.target_terminal if agent == "agent-two" else self.parent_terminal,
+            delegation=(
+                AgentDelegationConfig(targets=[DelegationTarget(agent="agent-one")])
+                if agent == "agent-two" and "delegate" in groups else None
+                if agent == "agent-two" else AgentDelegationConfig(targets=[DelegationTarget(**TARGET)])
+            ),
         )
 
     def _factory(self, user: str, agent: str, chat_id: str | None) -> Agent:
@@ -144,6 +149,8 @@ class AllowlistTests(AgentTargetFixture):
 
 
 class CycleAndDepthTests(AgentTargetFixture):
+    target_groups = ["web", "memory_read", "memory_edit", "self", "delegate"]  # agent-two launches in these tests
+
     def test_an_agent_cannot_delegate_to_itself(self) -> None:
         with self.assertRaises(TaskError) as caught:
             self.to_agent(agent="agent-one", targets=[{"agent": "agent-one", "remember": False}])
@@ -373,7 +380,7 @@ class FormRoundTripTests(unittest.TestCase):
             user_dir = root / "config" / "user-a"
             (user_dir / "agents").mkdir(parents=True)
             (user_dir / "user.yaml").write_text(
-                "id: user-a\nname: User A\nprovider: {name: openrouter}\nagents: [scout, planner]\n", encoding="utf-8",
+                "id: user-a\nname: User A\nmax_level: admin\nprovider: {name: openrouter}\nagents: [scout, planner]\n", encoding="utf-8",
             )
             (user_dir / "agents" / "scout.yaml").write_text("id: scout\nname: Scout\n", encoding="utf-8")
             (user_dir / "agents" / "planner.yaml").write_text(

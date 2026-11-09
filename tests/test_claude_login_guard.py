@@ -21,7 +21,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 
 
 def _user(user_id: str, **claude) -> UserConfig:
-    return UserConfig(id=user_id, name=user_id.title(), provider={"name": "openrouter"}, agents=["a"],
+    return UserConfig(max_level="admin", id=user_id, name=user_id.title(), provider={"name": "openrouter"}, agents=["a"],
                       claude_subscription=claude)
 
 

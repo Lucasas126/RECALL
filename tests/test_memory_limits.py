@@ -78,8 +78,9 @@ class AppLimitsAreUsedTests(unittest.TestCase):
         from types import SimpleNamespace
 
         from src.agent.tools import build_tools
+        from src.config.levels import Level
 
-        host = SimpleNamespace(sources=self.sources, config=SimpleNamespace(), index=None)
+        host = SimpleNamespace(sources=self.sources, config=SimpleNamespace(level=Level.ADMIN), index=None)
         with _limits(memory_chars=100):
             memory = build_tools(host, None, ["self"])[1]["memory"]
             self.assertTrue(memory(target="memory", action="add", content="a" * 90).startswith("saved"))

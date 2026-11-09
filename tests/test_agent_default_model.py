@@ -34,7 +34,7 @@ class AgentDefaultModelConfigTests(unittest.TestCase):
         self.user_dir = root / "config" / "user-a"
         (self.user_dir / "agents").mkdir(parents=True)
         (self.user_dir / "user.yaml").write_text(
-            "id: user-a\nname: User A\nprovider: {name: openrouter}\nagents: [aria]\n", encoding="utf-8",
+            "id: user-a\nname: User A\nmax_level: admin\nprovider: {name: openrouter}\nagents: [aria]\n", encoding="utf-8",
         )
         self.store = AgentStore(root / "config", root / "data")
 
@@ -81,7 +81,7 @@ class DefaultModelResolutionTests(unittest.TestCase):
     @staticmethod
     def _user(require_zdr: bool = False) -> UserConfig:
         return UserConfig.model_validate({
-            "id": "user-a", "name": "User A", "provider": {"name": "openrouter"}, "agents": ["aria"],
+            "id": "user-a", "name": "User A", "max_level": "admin", "provider": {"name": "openrouter"}, "agents": ["aria"],
             "models": {"chat": "vendor/user"}, "require_zdr": require_zdr,
         })
 

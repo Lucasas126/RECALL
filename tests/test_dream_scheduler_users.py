@@ -10,6 +10,7 @@ from src.service.chat import ChatService
 
 _USER_YAML = """id: {name}
 name: {name}
+max_level: admin
 provider:
   name: openrouter
   api_key: {key}

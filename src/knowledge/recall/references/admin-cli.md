@@ -11,7 +11,7 @@ Values after `=` are YAML: `true`, `42`, `[a, b]`, `{k: v}`, `null`, or a quoted
 | `python -m src.admin agent list --user U` | id, name, model and tool groups of each agent |
 | `python -m src.admin agent show --user U --agent A` | the agent yaml as the loader sees it (defaults filled in) |
 | `python -m src.admin agent create --user U --id A --name N [--level L]` | new agent with the default SOUL |
-| `python -m src.admin agent create --user U --id A --from-template guide` | a setup guide: tool groups `memory_read`, `memory_edit`, `web`, `self`, `terminal`, local backend, its own SOUL |
+| `python -m src.admin agent create --user U --id A --from-template guide` | a setup guide: tool groups `memory_read`, `memory_edit`, `web`, `self`, `terminal`, local backend, its own SOUL; the local backend is admin-only, so it fails for a user whose `max_level` is below `admin` |
 | `python -m src.admin agent set --user U --agent A --set path=value` | change settings (repeat `--set`); `--level L` sets the permission level |
 | `python -m src.admin agent rename --user U --agent A --new-id B --name N` | new id (and optional name); moves `data/U/A` to `data/U/B` exactly like the web UI |
 | `python -m src.admin agent delete --user U --agent A --yes` | remove the configuration; the data folder stays on disk |
@@ -40,11 +40,11 @@ python -m src.admin agent create --user user-a --id travel --name Travel --set d
 | `python -m src.admin user show --user U` | `user.yaml` with key variable NAMES; never the password hash |
 | `python -m src.admin user set --user U --set path=value` | non-secret fields: `name`, `language`, `models.*`, `provider.name`, `provider.api_key` (a variable NAME), `terminal_backends.*`, `claude_subscription.claude_config_dir`, ... |
 
-`max_level` (`minimal`, `reader`, `assistant`, `collaborator`, `operator`, `admin`) is the highest `level` the user's agents may have and can only be set here; it is refused while an agent declares more. `python -m src.admin migrate-levels [--dry-run]` writes the missing `max_level` of users and `level` of agents (conflicts, where an agent needs more than the owner's maximum, are printed and left alone; exit 0). `password_hash`, `id` and `agents` are refused (use `set-password` and the `agent` commands). `*.api_key` values must look like a variable name, never a key.
+`max_level` (`minimal`, `reader`, `assistant`, `collaborator`, `operator`, `admin`) is required, is the highest `level` the user's agents may have and can only be set here; it is refused while an agent needs or declares more. `password_hash`, `id` and `agents` are refused (use `set-password` and the `agent` commands). `*.api_key` values must look like a variable name, never a key.
 
 `python -m src.admin task run --user U --agent A --goal "..." [--context C] [--instructions I] [--notify AGENT:CHAT] [--wait]` starts an **unattended** subagent task with no parent chat (testing entry point for future scheduled jobs): prints `task: <id>`, and with `--wait` the status, tokens and result. Manual and dangerous terminal actions are denied, `smart` normal ones run; limits and the daily token budget apply; without `--wait` it stops when the command exits. See `delegation-processes.md`.
 
-Creating users and passwords stays with `python -m src.admin create-user [--max-level L]` (default `admin` for the first user, else `collaborator`) and `python -m src.admin set-password`, which the user runs himself (hidden prompt). `python -m src.admin version` prints the running version (and the image build id when set). Other checks: `python -m src.admin terminal-test --user U --backend B` (ssh backends) and `python -m src.admin route-test "text" --user U`.
+Creating users and passwords stays with `python -m src.admin create-user [--max-level L]` (default `collaborator`) and `python -m src.admin set-password`, which the user runs himself (hidden prompt). `python -m src.admin version` prints the running version (and the image build id when set). Other checks: `python -m src.admin terminal-test --user U --backend B` (ssh backends) and `python -m src.admin route-test "text" --user U`.
 
 ## Secrets
 

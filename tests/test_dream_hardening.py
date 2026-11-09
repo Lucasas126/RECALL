@@ -35,8 +35,8 @@ class NoTerminalTests(unittest.TestCase):
         with self.assertRaises(ValidationError) as caught:
             AgentTerminalConfig(backends={"box": {}}, allow_in_dream=True)
         self.assertIn("allow_in_dream was removed", str(caught.exception))
-        legacy = AgentConfig(id="a", name="A", terminal={"backends": {"box": {}}, "allow_in_dream": False})
-        self.assertNotIn("allow_in_dream", legacy.terminal.model_dump())
+        with self.assertRaises(ValidationError):
+            AgentConfig(id="a", name="A", terminal={"backends": {"box": {}}, "allow_in_dream": False})
 
     def test_default_dream_tools_are_folders_only(self) -> None:
         self.assertEqual(DreamConfig().tools, ["folders"])

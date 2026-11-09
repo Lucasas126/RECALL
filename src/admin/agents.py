@@ -21,6 +21,7 @@ import copy
 import re
 import sys
 import typing
+from types import SimpleNamespace
 from pathlib import Path
 
 import yaml
@@ -30,7 +31,7 @@ from src.admin.users import AdminError, _ENV_NAME_RE, check_user_id
 from src.agent import templates as agent_templates
 from src.config.agents import AgentConfigError, AgentStore
 from src.config.errors import describe_config_error
-from src.config.levels import Level, effective_agent_level, installation_user_count, effective_user_level, required_level
+from src.config.levels import Level, check_agent_level, effective_agent_level, required_level, required_level_reason
 from src.config.loader import agent_default_model, load_agent_config, load_user
 from src.config.models import AgentConfig, UserConfig
 from src.config.secrets import is_set
@@ -271,6 +272,15 @@ def agent_create(service, user_id: str, agent_id: str, *, name: str | None, temp
     previous = (_user_dir(user_id) / "user.yaml").read_text(encoding="utf-8")
     backend_added = False
     if chosen.needs_backend:
+        needed = required_level(config, {agent_templates.GUIDE_BACKEND: SimpleNamespace(**agent_templates.GUIDE_BACKEND_DEFINITION)})
+        max_level = load_user(user_id).max_level
+        if needed > max_level:
+            raise AdminError(
+                f"the '{template}' template needs the local terminal backend (a shell on the RECALL host), which only the "
+                f"level '{needed.label}' may use, and the maximum level of user '{user_id}' is '{max_level.label}'. "
+                f"Ask an administrator to raise it (`python -m src.admin user set --user {user_id} --set "
+                f"max_level={needed.label}`) or use another template. Nothing was written."
+            )
         backend_added = _ensure_guide_backend(user_id, agent_templates.GUIDE_BACKEND, agent_templates.GUIDE_BACKEND_DEFINITION)
     try:
         service.create_agent(user_id, config)
@@ -351,10 +361,7 @@ def check_user(user_id: str, levels: list[str] | None = None) -> tuple[list[str]
     except Exception as exc:
         return [f"{user_id}/user.yaml: {describe_config_error(exc)}"], warnings, 0
     store = _store()
-    max_level = store.max_level(user, warn=False)  # reported below as a check warning
-    if user.max_level is None:
-        warnings.append(f"{user_id}/user.yaml: no max_level; using {max_level.label}. Run `python -m src.admin "
-                        "migrate-levels` or `user set --set max_level=...`")
+    max_level = user.max_level
     agents_dir = CONFIG_DIR / user_id / "agents"
     listed = set(user.agents)
     if len(listed) != len(user.agents):
@@ -384,19 +391,13 @@ def check_user(user_id: str, levels: list[str] | None = None) -> tuple[list[str]
             agent_default_model(user, config)
         except Exception as exc:
             errors.append(f"{user_id}/{agent_id}: {describe_config_error(exc)}")
-        needed = required_level(config, user.terminal_backends)
-        if config.level is not None:
-            if config.level > max_level:
-                errors.append(f"{user_id}/{agent_id}: level {config.level.label} is above the user's max_level "
-                              f"{max_level.label}")
-            elif config.level < needed:
-                warnings.append(f"{user_id}/{agent_id}: level {config.level.label} is below what its configuration "
-                                f"needs ({needed.label}); a later release will restrict it")
-        elif needed > max_level:
-            warnings.append(f"{user_id}/{agent_id}: no level, and its configuration needs {needed.label}, above the "
-                            f"user's max_level {max_level.label}; a later release will enforce this")
+        needed, service = required_level_reason(config, user.terminal_backends)
+        try:
+            check_agent_level(config, user, max_level)
+        except InputError as exc:
+            errors.append(f"{user_id}/{agent_id}: {error_message('en', exc)}")
         if levels is not None:
-            source = "declared" if config.level is not None else f"computed, needs {needed.label}"
+            source = "declared" if config.level is not None else f"computed, needs {needed.label} for {service}"
             levels.append(f"level: {user_id}/{agent_id} = {effective_agent_level(config, user).label} ({source}); "
                           f"max_level of {user_id}: {max_level.label}")
         groups = config.chat_config.tool_groups or []
@@ -465,12 +466,13 @@ def user_show(user_id: str) -> int:
 
 
 def _check_agents_fit_max_level(user_id: str, updated_user: dict) -> None:
-    """Refuse a max_level below the declared level of one of the user's agents (it would stop loading)."""
+    """Refuse a max_level below the level of one of the user's agents (declared, or what its configuration needs):
+    it would stop loading."""
     try:
         model = UserConfig.model_validate(updated_user)
     except ValidationError:
         return  # reported by the validation that follows
-    new_max = effective_user_level(model, installation_user_count(CONFIG_DIR))
+    new_max = model.max_level
     store = _store()
     too_high = []
     for path in store._agent_files(user_id):
@@ -478,12 +480,14 @@ def _check_agents_fit_max_level(user_id: str, updated_user: dict) -> None:
             config = store._read(path)
         except Exception:
             continue
-        if config.level is not None and config.level > new_max:
-            too_high.append(f"{config.id} ({config.level.label})")
+        level = effective_agent_level(config, model)
+        if level > new_max:
+            too_high.append(f"{config.id} ({level.label})")
     if too_high:
         raise _Refused(
-            f"max_level {new_max.label} is below the declared level of: {', '.join(too_high)}. "
-            "Lower those agents first (`agent set --level ...`), then lower the maximum. Nothing was written."
+            f"max_level {new_max.label} is below the level of: {', '.join(too_high)}. "
+            "Lower those agents first (`agent set --level ...`, or remove the services that need the level), "
+            "then lower the maximum. Nothing was written."
         )
 
 

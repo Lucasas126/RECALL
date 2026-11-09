@@ -26,7 +26,7 @@ Unknown keys are rejected in the agent yaml and most blocks (not in `chat_config
 | `folders` | up to 20 user folders |
 | `terminal` | block below; needed by the `terminal` tool group |
 | `delegation` | block below; the `delegate` tool group, which gets the defaults when this is omitted |
-| `level` | `minimal`, `reader`, `assistant`, `collaborator`, `operator` or `admin`; at most the owner's `max_level`. Unset = the lowest level covering its tools; saving without it keeps the stored one. Not enforced yet |
+| `level` | `minimal`, `reader`, `assistant`, `collaborator`, `operator` or `admin`; between what its tools need and the owner's `max_level`, else invalid (the error names the service). Unset = what its tools need; kept when saved without it. Enforced at build and call |
 
 ### `chat_config` (Agents tab: Basic, Basic > Advanced and Tools)
 
@@ -113,7 +113,7 @@ MCP entry fields: `tools` (list; omitted means all of the server's tools), `read
 | `models` | defaults `chat`, `stt`, `embeddings` |
 | `openrouter`, `ollama`, `claude_subscription` | provider options |
 | `terminal_backends` | named machines agents may use |
-| `max_level` | highest agent `level`; only an admin sets it (`user set`). Unset: `admin` for a sole user, else `collaborator` |
+| `max_level` | required; highest agent `level`; only an admin sets it (`user set`) |
 
 Provider options: `ollama.host`; `claude_subscription` takes `claude_config_dir` (inside the user's own config folder), `command` (a bare executable name; absolute paths are admin-only via `settings.yaml` or `RECALL_CLAUDE_COMMAND`), `claude_code_telemetry`, `timeout_seconds`; `openrouter.api_key` is an env var NAME.
 

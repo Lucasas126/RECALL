@@ -118,9 +118,9 @@ class RouteMessageTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         root = Path(directory.name)
         self.users = {
-            "u": UserConfig(id="u", name="u", provider=ProviderConfig(name="openrouter"), password_hash="x" * 20, agents=["agent-a", "agent-b"]),
-            "solo": UserConfig(id="solo", name="solo", provider=ProviderConfig(name="openrouter"), password_hash="x" * 20, agents=["agent-a"]),
-            "zdr": UserConfig(id="zdr", name="zdr", provider=ProviderConfig(name="openrouter"), password_hash="x" * 20, agents=["agent-a", "agent-b"], require_zdr=True),
+            "u": UserConfig(max_level="admin", id="u", name="u", provider=ProviderConfig(name="openrouter"), password_hash="x" * 20, agents=["agent-a", "agent-b"]),
+            "solo": UserConfig(max_level="admin", id="solo", name="solo", provider=ProviderConfig(name="openrouter"), password_hash="x" * 20, agents=["agent-a"]),
+            "zdr": UserConfig(max_level="admin", id="zdr", name="zdr", provider=ProviderConfig(name="openrouter"), password_hash="x" * 20, agents=["agent-a", "agent-b"], require_zdr=True),
         }
         for user in self.users:
             (root / user).mkdir()

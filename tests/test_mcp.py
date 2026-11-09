@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 from pydantic import ValidationError
 
 from src.agent.toolsets.mcp import build_mcp_tools, mcp_tool_name
+from src.config.levels import Level
 from src.config.models import AgentMcpConfig, McpSettings
 from src.providers.mcp import McpError, McpManager, McpTool, UnknownMcpServer
 
@@ -153,7 +154,7 @@ class McpToolsetTests(unittest.TestCase):
         self.manager.call_tool.return_value = "done"
 
     def test_tools_are_prefixed_and_call_the_users_server(self) -> None:
-        toolset = build_mcp_tools(self.manager, "user-one", {"fake": AgentMcpConfig()})
+        toolset = build_mcp_tools(self.manager, "user-one", {"fake": AgentMcpConfig()}, level=Level.ADMIN)
 
         names = [spec["function"]["name"] for spec in toolset.specs]
         self.assertEqual(names, ["fake__whoami", "fake__add_event"])
@@ -164,7 +165,7 @@ class McpToolsetTests(unittest.TestCase):
     def test_tool_selection_read_only_and_instructions(self) -> None:
         selection = AgentMcpConfig(tools=["whoami", "add.event"], read_only=True, instructions="Use work calendar")
 
-        toolset = build_mcp_tools(self.manager, "user-one", {"fake": selection})
+        toolset = build_mcp_tools(self.manager, "user-one", {"fake": selection}, level=Level.ADMIN)
 
         self.assertEqual([spec["function"]["name"] for spec in toolset.specs], ["fake__whoami"])
         self.assertIn("Use work calendar", toolset.notes[0])
@@ -173,7 +174,7 @@ class McpToolsetTests(unittest.TestCase):
     def test_unavailable_server_becomes_a_note(self) -> None:
         self.manager.list_tools.side_effect = McpError("Connect {server} in Settings before using it.", server="Fake")
 
-        toolset = build_mcp_tools(self.manager, "user-one", {"fake": AgentMcpConfig()})
+        toolset = build_mcp_tools(self.manager, "user-one", {"fake": AgentMcpConfig()}, level=Level.ADMIN)
 
         self.assertEqual(toolset.specs, [])
         self.assertIn("Connect Fake in Settings", toolset.notes[0])

@@ -17,6 +17,7 @@ from test_subagents_agents import REMEMBER, AgentTargetFixture
 from src.agent.agent import Agent
 from src.agent.toolsets.delegate import TaskError
 from src.agent.toolsets.mcp import McpToolNameError, build_mcp_tools
+from src.config.levels import Level
 from src.config.models import AgentMcpConfig, ModelsConfig, ResolvedAgent
 from src.core.sources.registry import SourceRegistry
 from src.providers.mcp import McpTool
@@ -68,25 +69,25 @@ def _names(toolset) -> list[str]:
 class McpBuildTests(unittest.TestCase):
     def test_disposable_chat_gets_no_mcp_tools_whatever_they_are_called_or_flagged(self) -> None:
         manager = _manager("whoami", "add_event", read_only=True)
-        toolset = build_mcp_tools(manager, "u", {"fake": AgentMcpConfig()}, disposable=True)
+        toolset = build_mcp_tools(manager, "u", {"fake": AgentMcpConfig()}, disposable=True, level=Level.ADMIN)
         self.assertEqual((toolset.specs, toolset.handlers, toolset.notes), ([], {}, []))
         manager.list_tools.assert_not_called()  # not even a server round trip
 
     def test_agent_allow_and_deny_apply_to_the_model_facing_names(self) -> None:
         manager = _manager("a", "b", "c")
         selection = {"fake": AgentMcpConfig()}
-        self.assertEqual(_names(build_mcp_tools(manager, "u", selection, deny=["fake__b"])), ["fake__a", "fake__c"])
-        self.assertEqual(_names(build_mcp_tools(manager, "u", selection, allow=["fake__c", "query_memory"])), ["fake__c"])
-        self.assertEqual(_names(build_mcp_tools(manager, "u", selection, allow=[])), [])
-        self.assertEqual(_names(build_mcp_tools(manager, "u", selection, allow=None, deny=None)), ["fake__a", "fake__b", "fake__c"])
+        self.assertEqual(_names(build_mcp_tools(manager, "u", selection, deny=["fake__b"], level=Level.ADMIN)), ["fake__a", "fake__c"])
+        self.assertEqual(_names(build_mcp_tools(manager, "u", selection, allow=["fake__c", "query_memory"], level=Level.ADMIN)), ["fake__c"])
+        self.assertEqual(_names(build_mcp_tools(manager, "u", selection, allow=[], level=Level.ADMIN)), [])
+        self.assertEqual(_names(build_mcp_tools(manager, "u", selection, allow=None, deny=None, level=Level.ADMIN)), ["fake__a", "fake__b", "fake__c"])
 
     def test_duplicate_names_are_rejected_not_overwritten(self) -> None:
         with self.assertRaisesRegex(McpToolNameError, "already used"):
-            build_mcp_tools(_manager("add.event", "add_event"), "u", {"fake": AgentMcpConfig()})
+            build_mcp_tools(_manager("add.event", "add_event"), "u", {"fake": AgentMcpConfig()}, level=Level.ADMIN)
 
     def test_a_name_of_a_builtin_tool_is_rejected(self) -> None:
         with self.assertRaisesRegex(McpToolNameError, "built-in"):
-            build_mcp_tools(_manager("x"), "u", {"fake": AgentMcpConfig()}, reserved={"fake__x"})
+            build_mcp_tools(_manager("x"), "u", {"fake": AgentMcpConfig()}, reserved={"fake__x"}, level=Level.ADMIN)
 
 
 class McpAgentTests(unittest.TestCase):

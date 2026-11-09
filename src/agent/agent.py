@@ -13,12 +13,14 @@ from src.config.model_refs import CLAUDE_SUBSCRIPTION, prefix_of, provider_of
 from src.providers.routing import provider_for
 from src.agent import usage
 from src.agent import associative
+from src.agent.permissions_prompt import block_for
 from src.agent.profile import AgentProfile, load_profile, system_prompt
 from src.agent.tool_groups import DISPOSABLE_BLOCKED_TOOLS, TOOL_GROUP_TOOLS
 from src.agent.tools import TOOL_ORDER, build_tools, chat_folder_options
 from src.agent.toolsets.delegate import delegate_notice, worker_prompt
 from src.agent.toolsets.terminal import terminal_notice
 from src.agent.toolsets.mcp import build_mcp_tools
+from src.config.ceiling import refusal as level_refusal, restrict_config, tool_allowed
 from src.config.loader import load_agent
 from src.config.models import ModelsConfig, ResolvedAgent
 from src.config.settings import AGENT_MAX_TOOL_HOPS, PROMPT_CACHE, TAVILY
@@ -219,6 +221,8 @@ class Agent:
                 self.config.terminal = None
         elif cfg is not None:
             self.config.terminal = None
+        # a worker never outranks its launcher: groups, MCP, backends and delegation above the cap are dropped
+        self.config = restrict_config(self.config, task.level)
 
     @staticmethod
     def _worker_approvals(task: ChatTask, backend) -> str:
@@ -373,7 +377,7 @@ class Agent:
             blocks.append(notice)
         if self._mcp_notes:
             blocks.append("## Connected services (MCP)\n\n" + "\n\n".join(self._mcp_notes))
-        return system_prompt(self.profile, blocks)
+        return system_prompt(self.profile, blocks, block_for(self.config))
 
     def _refresh_mcp_tools(self) -> None:
         """Rebuild this turn's MCP tools, so connecting or disconnecting a service applies at once."""
@@ -381,7 +385,7 @@ class Agent:
             return
         toolset = build_mcp_tools(
             self._mcp, self.config.user_id, self.config.mcp, allow=self.config.allow, deny=self.config.deny,
-            disposable=self._disposable, reserved=frozenset(TOOL_ORDER),
+            disposable=self._disposable, reserved=frozenset(TOOL_ORDER), level=self.config.level,
         )
         self._tool_specs = [*self._base_tool_specs, *toolset.specs]
         self._tool_handlers = {**self._base_tool_handlers, **toolset.handlers}
@@ -808,6 +812,8 @@ class Agent:
             failed = False
             if self._disposable and (name in self._blocked_tools() or name in self._mcp_tool_names):  # defence in depth: the specs already omit these
                 result, failed = f"error: '{name}' is not available in a disposable chat", True
+            elif handler is not None and not tool_allowed(self.config.level, name, self._mcp_tool_names):
+                result, failed = level_refusal(self.config.level, name, self._mcp_tool_names), True  # the level is a ceiling, even if a handler exists
             elif handler is None:
                 result, failed = f"error: unknown tool '{name}'", True
             else:

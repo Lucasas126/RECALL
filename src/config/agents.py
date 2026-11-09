@@ -8,7 +8,7 @@ from pathlib import Path
 import yaml
 from pydantic import ValidationError
 
-from src.config.levels import check_agent_level, installation_user_count, effective_user_level
+from src.config.levels import check_agent_level
 from src.config.models import AgentConfig, UserConfig
 from src.utils.files import atomic_write_text, exclusive_file_lock
 from src.utils.i18n import UserMessageError
@@ -201,13 +201,9 @@ class AgentStore:
         agents_dir = self._agents_dir(user_id)
         return sorted(agents_dir.glob("*.yaml")) if agents_dir.is_dir() else []
 
-    def max_level(self, user: UserConfig, *, warn: bool = True):
-        """The owner's effective `max_level` (declared, else resolved from the installation's user count)."""
-        return effective_user_level(user, installation_user_count(self.config_dir), warn=warn)
-
     def _check_level(self, user: UserConfig, config: AgentConfig) -> None:
-        """Raise LevelExceedsMax for a declared level above the owner's max_level; an undeclared one only warns."""
-        check_agent_level(config, user, self.max_level(user))
+        """The config rule: required level <= the agent's effective level <= the owner's max_level, else it is refused."""
+        check_agent_level(config, user, user.max_level)
 
     def _ensure_free(self, user_id: str, agent_id: str, user: UserConfig) -> None:
         if agent_id in user.agents or self._is_defined(user_id, agent_id):
@@ -250,7 +246,10 @@ class AgentStore:
         try:
             return UserConfig.model_validate(self._load_yaml(path))
         except ValidationError as exc:
-            raise AgentConfigError("Invalid user configuration '{file}'.", file=path.name) from exc
+            raise AgentConfigError(
+                "Invalid user configuration '{file}': {details}",
+                file=path.name, details="; ".join(error["msg"] for error in exc.errors()),
+            ) from exc
 
     def _read(self, path: Path) -> AgentConfig:
         try:

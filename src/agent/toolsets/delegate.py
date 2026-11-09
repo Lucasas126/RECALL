@@ -14,6 +14,7 @@ from typing import Annotated, Callable, Optional
 
 from src.agent.tool_groups import DELEGATE_GRANTABLE_GROUPS
 from src.agent.tooling import tool
+from src.config.ceiling import backend_allowed, delegation_targets_allowed, group_allowed, workers_allowed
 from src.config.models import AgentDelegationConfig, ResolvedAgent
 from src.config.settings import SUBAGENTS
 from src.terminal.context import RunContext, current_run
@@ -161,13 +162,23 @@ def _task_start_base(limits: TaskLimits, grantable: list[str], backends: list[st
 def build_delegate_tools(config: ResolvedAgent) -> list[Callable[..., str]]:
     """The delegate tools of an agent; empty when its `delegation` block switches them off."""
     delegation = config.delegation or AgentDelegationConfig()
-    if not delegation.enabled:
+    level = config.level
+    if not delegation.enabled or not workers_allowed(level):  # workers need the level collaborator
         return []
     limits = task_limits(delegation)
     parent_groups = set(config.tool_groups or ())
-    grantable = [g for g in delegation.allowed_groups if g in parent_groups and g in DELEGATE_GRANTABLE_GROUPS]
-    grantable_backends = granted_backends(config)
-    targets = [{"agent": target.agent, "remember": target.remember} for target in delegation.targets]
+    grantable = [
+        g for g in delegation.allowed_groups
+        if g in parent_groups and g in DELEGATE_GRANTABLE_GROUPS and group_allowed(level, g)
+    ]
+    grantable_backends = [
+        name for name in granted_backends(config) if backend_allowed(level, config.terminal_backends[name])
+    ]
+    # handing tasks to the user's other agents needs the level operator
+    targets = [
+        {"agent": target.agent, "remember": target.remember}
+        for target in (delegation.targets if delegation_targets_allowed(level) else [])
+    ]
     target_ids = [target["agent"] for target in targets]
 
     @tool
@@ -191,7 +202,7 @@ def build_delegate_tools(config: ResolvedAgent) -> list[Callable[..., str]]:
             limits=limits, grantable=grantable, goal=goal, context=context, instructions=instructions,
             groups=list(tools or []), model=model, timeout_s=timeout_s,
             backends=list(backends or []), grantable_backends=list(grantable_backends),
-            agent=agent, targets=targets, parent_name=config.name,
+            agent=agent, targets=targets, parent_name=config.name, launcher_level=level,
         )
         try:
             if wait:

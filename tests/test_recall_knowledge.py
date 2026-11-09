@@ -23,6 +23,7 @@ from src.agent.tool_groups import TOOL_GROUP_TOOLS
 from src.agent.tools import build_tools
 from src.agent.toolsets.self_files import build_self_tools
 from src.config import models
+from src.config.levels import Level
 from src.core.sources.agent_files import BUILTIN_SKILL, AgentFilesSource
 from src.core.sources.registry import SourceRegistry
 from src.service.chat import ChatService
@@ -57,7 +58,7 @@ def real_tools() -> set[str]:
 
 def fake_agent(root: Path, *, recall_knowledge: bool = True):
     sources = SourceRegistry.for_agent("u", "a", data_dir=root)
-    return SimpleNamespace(sources=sources, config=SimpleNamespace(recall_knowledge=recall_knowledge))
+    return SimpleNamespace(sources=sources, config=SimpleNamespace(recall_knowledge=recall_knowledge, level=Level.ADMIN))
 
 
 def tools_of(agent) -> dict:
@@ -396,7 +397,7 @@ class SwitchConfigTests(unittest.TestCase):
         config_dir, data_dir = root / "config", root / "data"
         (config_dir / "user-a" / "agents").mkdir(parents=True)
         (config_dir / "user-a" / "user.yaml").write_text(
-            f"id: user-a\nname: User A\nprovider: {{name: ollama}}\nagents: []\npassword_hash: '{TEST_PASSWORD_HASH}'\n", encoding="utf-8",
+            f"id: user-a\nname: User A\nmax_level: admin\nprovider: {{name: ollama}}\nagents: []\npassword_hash: '{TEST_PASSWORD_HASH}'\n", encoding="utf-8",
         )
         for target in ("src.config.loader.CONFIG_DIR", "src.service.chat.CONFIG_DIR"):
             patcher = patch(target, config_dir)

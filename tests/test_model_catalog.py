@@ -201,7 +201,7 @@ class ModelCatalogTests(unittest.TestCase):
 class ModelCatalogWebTests(unittest.TestCase):
     def setUp(self) -> None:
         isolate_providers(self)
-        self.user = UserConfig(
+        self.user = UserConfig(max_level="admin", 
             id="test-user", name="Test", provider=ProviderConfig(name="openrouter"),
             password_hash=TEST_PASSWORD_HASH, agents=[],
         )

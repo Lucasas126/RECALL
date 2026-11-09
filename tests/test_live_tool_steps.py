@@ -78,7 +78,7 @@ class LiveToolStepTests(steering.SteeringFixture):
         def cancelled():
             raise GenerationCancelled()
 
-        self.use_tools([{"id": "c1", "name": "wait", "arguments": {}}], {"wait": cancelled})
+        self.use_tools([{"id": "c1", "name": "search", "arguments": {}}], {"search": cancelled})
         events = list(self._send("Go"))
         kinds = [e.kind for e in events]
         self.assertEqual(kinds[0], "tool_start")
@@ -93,7 +93,7 @@ class LiveToolStepTests(steering.SteeringFixture):
             self.assertTrue(release.wait(3))
             return "done"
 
-        self.use_tools([{"id": "c1", "name": "slow", "arguments": {}}], {"slow": slow})
+        self.use_tools([{"id": "c1", "name": "read", "arguments": {}}], {"read": slow})
         original = self._send("Go")
         consumer = threading.Thread(target=lambda: list(original), daemon=True)
         consumer.start()

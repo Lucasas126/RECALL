@@ -1,7 +1,8 @@
-# Permission levels (design; step 1 implemented)
+# Permission levels (design; steps 1 and 2 implemented)
 
-Status: **step 1 (schema, validation, migration, API read side) is implemented; nothing is enforced yet**. Every other part of this
-page is design. The steps are listed under [implementation plan](#implementation-plan). Research behind it: Claude Code permission rules, the Codex
+Status: **steps 1 (schema, validation, API read side) and 2 (ceiling enforcement) are implemented**, except the limited dream
+delegate and the `permissions` prompt block (see [what is enforced](#what-is-enforced-step-2)). The rule engine, approvals and
+the UI are design. The steps are listed under [implementation plan](#implementation-plan). Research behind it: Claude Code permission rules, the Codex
 approval/sandbox split, Meta's *Agents Rule of Two*, OWASP LLM06 (excessive agency) and an audit of RECALL's own code.
 
 ## Principles
@@ -102,6 +103,8 @@ cannot do in one line each, and an explicit reminder that **even if it finds a w
 more it tells the user which level would be required. The block links to an internal page of the built-in `recall` skill
 (`references/permissions.md`) with every level, the service table, the dream table and the approval rules, read only when needed.
 
+Status: **implemented** (step 2B): `src/agent/permissions_prompt.py`, used by chats, workers and dream sessions.
+
 ## Configuration shape (implemented in step 1)
 
 ```yaml
@@ -112,16 +115,33 @@ max_level: operator          # minimal | reader | assistant | collaborator | ope
 level: collaborator          # must not exceed the owner's max_level
 ```
 
-`max_level` is set only through the admin CLI and the web API never exposes a way to change it; `level` is validated against it when
-an agent is loaded, created or updated. If either is missing it is resolved at load: the user's falls back to `admin` on a
-single-user installation and `collaborator` otherwise (one warning per user), the agent's to the lowest level covering its
-configuration. The minimum level of each service is the table in `src/config/levels.py`, taken from the table above. An agent
-without a declared `level` that needs more than the owner's `max_level` only logs a warning until step 2. Details:
+`max_level` is **required** in `user.yaml` (a missing value is a load error that names `user set --set max_level=<level>`), is set only
+through the admin CLI and the web API never exposes a way to change it. An agent's `level` is optional; its effective value is the
+declared one, else the lowest level covering its configuration (`required_level`). The **config rule** holds when an agent is
+loaded, created or updated (web, service, admin CLI): `required_level(agent) <= effective level <= max_level`, else the agent is
+invalid and the error names the agent, the service that needs the higher level and the level it needs. The minimum level of each
+service is the table in `src/config/levels.py`, taken from the table above. Details:
 [user.yaml](../reference/user-yaml.md#max_level-permission-levels), [agent.yaml](../reference/agent-yaml.md#level),
 [admin CLI](../user-guide/admin-cli.md#permission-levels).
 
 Resources stay where they are today (`terminal_backends`, `folders`, MCP servers); a backend gains a `kind` (`sandbox` or
 `machine`) and a privilege field. Level data must never live under `chat_config`, which accepts unknown keys.
+
+## What is enforced (step 2)
+
+One module, `src/config/ceiling.py`, derives from an effective level what is allowed; nothing else compares levels.
+
+| Where | Effect |
+| --- | --- |
+| Chat tools (`build_tools`) | groups above the level are dropped, terminal backends are limited to their class (ssh without root = operator, `local` or a root ssh user = admin), delegate tools need collaborator and `agent` targets operator, and a final per-tool gate removes anything the level does not cover. `skill_view` is never gated (it is how skills are used). |
+| MCP (`build_mcp_tools`, refresh each turn) | no MCP tool and no note below collaborator. |
+| Dispatch (chats and dreams) | a call to a tool the level does not cover is refused with a tool error even if a handler exists; a name that is neither built in nor an MCP tool is refused as well. |
+| Delegation | a worker's level is `min(target's own level, launcher's level)` (stored in the task mark); launching needs collaborator, handing a task to another agent needs the launcher at operator; groups, backends and delegation targets of a worker above its level are dropped. |
+| Dreams | follow the [dream table](#dream-mode): memory read from reader; `memory_edit` and `self` from assistant (and the chat group); folders read-only from reader (and `dream.tools: [folders]`); web from assistant (and `dream.tools: [web]`); never a terminal, tasks or permissions. A dream of a `minimal` agent does not run (the session fails with a message). |
+| Templates | `guide` needs the `local` backend, so `agent create --from-template guide` fails for a user whose `max_level` is below admin. |
+
+Not built yet: the limited dream delegate, MCP read-only tools and read-only sandbox tools in dreams (the ceiling already reports
+them, the dream toolset does not use them), the individually chosen tools of L0, and the `permissions` prompt block.
 
 ## Known gaps, out of scope for the level work
 
@@ -139,8 +159,8 @@ Resources stay where they are today (`terminal_backends`, `folders`, MCP servers
 | Step | Content |
 | --- | --- |
 | 0 | This specification (done with this page). |
-| 1 (done) | Schema and migration: `max_level` (admin only), agent `level`, validation, a migration that gives existing agents the lowest level covering their current groups. |
-| 2 | Ceiling enforcement in one module: when tools are built (chats, workers, dreams), at dispatch, on config save and on load; `permissions` prompt block and skill page. |
+| 1 (done) | Schema: `max_level` (required, admin only), agent `level`, validation, effective levels. No migration code: the project is in development. |
+| 2 (done, except the dream limited delegate and the prompt block) | Ceiling enforcement in one module (`src/config/ceiling.py`): when tools are built (chats, workers, dreams), at dispatch, on config save and on load. Still to do: the `permissions` prompt block and skill page, and the limited dream delegate. |
 | 3 | Rule engine: layers, deny/ask/allow, matching, the three legacy modes as presets. |
 | 4 | Approvals with memory: once / session / always for this agent, web and Telegram, audit. |
 | 5 | `permissions` tool group and a permission-manager agent template; escalation tests. |

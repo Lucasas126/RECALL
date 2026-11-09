@@ -105,21 +105,26 @@ layout and the prompt assembly. when `tool_groups` is omitted, the default is
 
 ## level
 
-`level` is a top-level field (never under `chat_config`, which accepts unknown keys). It is optional and must not exceed the owner's
-[`max_level`](user-yaml.md#max_level-permission-levels): such an agent is invalid when loaded and is refused by the web API
-(HTTP 400, code `level_exceeds_max`) and by the admin CLI. Without it the agent's effective level is the lowest level that covers
-its configuration (tool groups, terminal backends, MCP servers, delegation targets; see
-[permissions](../architecture/permissions.md#levels-and-services)). An agent with no declared level whose configuration needs more
-than the owner's `max_level` only logs a warning and shows up in `agent check`; it is not blocked yet (a later step enforces it).
+`level` is a top-level field (never under `chat_config`, which accepts unknown keys). It is optional. Without it the agent's
+effective level is the lowest level that covers its configuration (tool groups, terminal backends, MCP servers, delegation
+targets; see [permissions](../architecture/permissions.md#levels-and-services)).
+
+**The rule**, checked when the agent is loaded, created or updated (web API, service and admin CLI):
+`required level of the configuration <= effective level <= the owner's` [`max_level`](user-yaml.md#max_level-permission-levels).
+An agent that breaks it is invalid and is not saved. The error names the agent, the service that needs the higher level and the
+level it needs: HTTP 400 with code `level_exceeds_max` (declared level above `max_level`), `level_below_required` (declared level
+below what the configuration needs) or `level_required_above_max` (the configuration needs more than `max_level`; remove that
+service or ask an administrator to raise it). The level is also enforced at run time: tools of a group above the level are not built
+and a call to one is refused (see [permissions](../architecture/permissions.md)).
 
 Saving an agent without `level` (the current web form) keeps the stored level; changing it needs a new value, and removing it means
-editing the file. `python -m src.admin migrate-levels` writes the computed level into agents that lack one.
+editing the file.
 
 ## loading
 
 `load_agent(user_id, agent_id?)` reads `user.yaml` and the agent file, resolves the provider key from the environment and the effective `level` / `max_level`, and returns a `ResolvedAgent` (used to build the `Agent` and its `SourceRegistry`). if `agent_id` is omitted, the user's first agent is used.
 
-checks today: the agent belongs to the user, the provider key env var (if configured) is set, and a declared `level` does not exceed the owner's `max_level`.
+checks today: the agent belongs to the user, the provider key env var (if configured) is set, and the level rule above holds.
 
 planned: a `defaults.yaml < user.yaml < agent.yaml` merge, resource/folder
 references, and a `ConfigStore` with a channel→user index for routing incoming
