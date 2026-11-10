@@ -47,6 +47,18 @@ One list of ideas and planned work, with what is already done kept separate. Imp
 - Remove unnecessary messages from the settings and configuration selectors to keep the interface clean.
 - A global `defaults.yaml` merged under `user.yaml` and agent files, and a channel to user index in a `ConfigStore` ([agent.yaml](../reference/agent-yaml.md#loading)).
 
+### permission level follow-ups
+
+Not built yet, in the order they matter (see the [known gaps](../architecture/permissions.md#known-gaps-out-of-scope-for-the-level-work)):
+
+- **Outbound network control**: a domain allowlist for `web`/`web_retrieve` and egress rules for the terminal sandbox; the largest remaining exfiltration channel.
+- **Dream extras**: the limited read-only delegate (configurable, off by default), MCP read-only tools and `sandbox_read`/`sandbox_search` on disposable sandboxes.
+- **Folder and MCP actions through the rule engine** (deletes, moves, non-read-only MCP tools), with approval cards that do not assume a command.
+- **Scoped admin tools for the setup guide**, so it no longer needs the `local` backend and can run below admin.
+- **Per-user path isolation**, **session revocation on demotion**, **login throttle** and a **CSRF token**.
+- **Audit of every write** (files, memory, self), not only terminal and permission changes; **budgets** per agent.
+- **Outbound messages to third parties** as their own service, never below operator.
+
 ## From the replica report (2026-11-05)
 
 Capability gaps an agent reported, in the order they block it; each line says what depends on it.

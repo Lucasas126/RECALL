@@ -1,4 +1,4 @@
-# Permission levels (design; steps 1 to 6 implemented)
+# Permission levels (implemented)
 
 Status: **steps 1 (schema, validation, API read side), 2 (ceiling enforcement), 3 (the approval rule engine), 4 (approvals with memory), 5 (the `permissions` tool group and the permission-manager template) and 6 (the web UI and the admin screen) are implemented**,
 except the limited dream delegate (see [what is enforced](#what-is-enforced-step-2) and [approval rules](#approval-rules)). The steps are listed under [implementation plan](#implementation-plan). Research behind it: Claude Code permission rules, the Codex
@@ -301,6 +301,12 @@ them, the dream toolset does not use them) and the individually chosen tools of 
 | Budgets (tokens and spend per agent, allowed models) | Partial for delegated tasks. |
 | Session revocation on demotion, login throttle, CSRF token | Not present. |
 | Audit of every write (files, memory, self) | Only the terminal and agent-made permission changes are audited today. |
+| Command parser | Best effort and heuristic (interpreters, variable expansion, wrappers, hard links can bypass it). The boundaries are the level, the backend kind and the approval, never the parser. Accepted risk. |
+| Dreams: limited read-only delegate, MCP read-only tools and `sandbox_read` | The ceiling reports them; the dream toolset does not build them yet. |
+| Individually chosen tools of the `minimal` level | Not built: a `minimal` agent has no tools. |
+| Folder and MCP actions through the rule engine | Folder deletes and moves and non-read-only MCP tools never ask today; routing them needs approval cards without a command. |
+| Approval cards of file writes | The content preview is appended to the command text; the web may not link the card to its tool step. |
+| The `local` backend | A host shell as the RECALL OS user: admin only, and the setup guide needs it. Replacing it with scoped tools is open. |
 
 ## Implementation plan
 
@@ -313,4 +319,4 @@ them, the dream toolset does not use them) and the individually chosen tools of 
 | 4 (done) | Approvals with memory: once / session / always for this agent, web and Telegram, audit. |
 | 5 (done) | `permissions` tool group and a permission-manager agent template; escalation tests (`tests/test_permissions_tool_*.py`). |
 | 6 (done) | Web UI and admin CLI: level selector capped by `max_level`, rule editor, admin screen; see [implemented](#implemented-step-6-web-ui-and-admin-screen). |
-| 7 | Final documentation, changelog and remaining-gaps list. |
+| 7 (done) | Final documentation and the remaining-gaps list (this page, the [security notes](../deployment/security.md#permission-levels) and the [backlog](../project/backlog.md#permission-level-follow-ups)). |

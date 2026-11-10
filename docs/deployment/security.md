@@ -108,3 +108,24 @@ one that exists.
 **Privacy.** Commands and their outputs are part of the conversation and go to the model provider. Zero-data-retention routing
 applies as for any other message.
 
+## permission levels
+
+Every user has a `max_level` (set by an administrator) and every agent a `level` up to it; the level is a ceiling over the tool
+groups, terminal backend classes, MCP, delegation and dream tools, and approvals follow layered allow/ask/deny rules. Design,
+tables and limits: [permission levels](../architecture/permissions.md). What this changes for an installation:
+
+- **`max_level` is required** in every `user.yaml`; set it with `python -m src.admin user set --user U --set max_level=<level>` or
+  `create-user --max-level` (default `collaborator`). There is no migration: add it to existing users before updating.
+- **Remove `terminal.allow_in_dream`** from agent files (the key is rejected whenever present); dreams have no terminal.
+- **The `local` backend and root ssh users need admin.** An agent that holds them needs level `admin`; the `guide` template can
+  only be created for a user whose `max_level` is `admin`.
+- **A blanket allow** (`approvals: off`, `default: allow`, a rule with no narrowing fields) on a machine or `local` backend needs an
+  admin-level agent; on a backend with `kind: sandbox` it needs operator. ssh backends default to `kind: machine`.
+- **An agent whose configuration needs more than its level** fails to load until the level is raised (by the user, up to the
+  ceiling) or the configuration is reduced; `python -m src.admin agent check` lists the effective level of each agent.
+- **Dream tools** default to `folders` only; `web` is opt-in and needs the matching tool groups.
+- **MCP tools** need collaborator, respect `allow`/`deny` (an agent with `allow` lists its MCP tool names) and are blocked in
+  disposable chats.
+- **Folders** cannot be rooted in the config, data or log folders, the source tree, `/proc`, `/sys`, `/dev` or key folders;
+  `folders.allowed_roots` in `settings.yaml` can limit them further.
+
