@@ -17,8 +17,9 @@ from the repository root. Agents with a `local` terminal backend run it the same
 | `agent set --user U --agent A [--level L] --set path=value [--set ...]` | change an agent's settings; other settings keep a stored `level` |
 | `agent rename --user U --agent A --new-id B [--name N]` | change the id and move the data folder, like the web UI |
 | `agent delete --user U --agent A --yes` | delete the configuration (the data folder stays) |
-| `agent rules --user U --agent A [--clear]` | list the agent's own [approval rules](terminal.md#approval-rules) (marking the ones learned from approval cards), or with `--clear` remove all of them (the audit file records it with `actor: admin`) |
+| `agent rules --user U --agent A [--clear\|--effective]` | list the agent's own [approval rules](terminal.md#approval-rules) (marking the ones learned from approval cards), with `--clear` remove all of them (the audit file records it with `actor: admin`), or with `--effective` print the installation, user and agent layers, the per-backend `approvals` shorthand and the default that applies (what the web form shows read only) |
 | `agent check [--user U]` | load everything with the real loader; prints each agent's effective level, then `OK` or the precise errors (exit code 1 on error), including agents whose level breaks the [level rule](../reference/agent-yaml.md#level) |
+| `user list` | every user with `max_level`, the number of agents and the level of each (the data of the web **Users** section) |
 | `user show --user U` | `user.yaml` with key variable names; never the password hash |
 | `user set --user U --set path=value` | non-secret fields (`name`, `language`, `models.*`, `provider.name`, `provider.api_key` = a variable NAME, `terminal_backends.*`, ...) |
 | `set-secret NAME [--stdin]` | store a credential in `.config/secrets.env` |
@@ -30,7 +31,7 @@ from the repository root. Agents with a `local` terminal backend run it the same
 
 `max_level` (user) and `level` (agent) take `minimal`, `reader`, `assistant`, `collaborator`, `operator` or `admin`
 (see [permissions](../architecture/permissions.md)). Only this CLI changes a user's `max_level`; an agent's `level` is changed by the user (web form, `agent set`) up to `max_level`, or by an operator agent with the `permissions` group (never above its own level, and only lowering its own):
-`user set --user U --set max_level=operator`. `max_level` is required in `user.yaml` (a user without it does not load). An agent whose level is above it, or below what its
+`user set --user U --set max_level=operator` (or, for a user whose own maximum is `admin`, the **Users** section of the web settings: [users](settings.md#users-administrators-only)). `agent show` ends with the agent's effective level and how it was obtained. `max_level` is required in `user.yaml` (a user without it does not load). An agent whose level is above it, or below what its
 configuration needs, or whose configuration needs more than `max_level`, is refused by `agent create|set` (and by the web) with a
 message naming the service and the level needed. `user set` refuses a `max_level` below the level of one of the user's agents (lower
 those first).

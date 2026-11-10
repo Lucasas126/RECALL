@@ -8,13 +8,14 @@ plus an optional `"code"` (see [error codes](#error-codes)).
 
 | area | routes |
 | --- | --- |
-| session | `POST /api/login`, `POST /api/logout`, `GET /api/me` (the profile and agents, plus the user's effective `max_level` (read-only, [permission levels](../architecture/permissions.md)) and `terminal_backends`: `[{"name", "type", "description"}]` sorted by name, the user's terminal backends for the agent form; never hosts, users or key paths), `GET /api/localization?language=en\|es`, `GET /api/version` (public: `{"version": "0.1.0", "build": null}`; `version` comes from `pyproject.toml`, `build` is the first 7 characters of `RECALL_BUILD` or `null`) |
+| session | `POST /api/login`, `POST /api/logout`, `GET /api/me` (the profile and agents, plus the user's effective `max_level` (read-only, [permission levels](../architecture/permissions.md)) and `terminal_backends`: `[{"name", "type", "description", "kind", "min_level"}]` sorted by name, the user's terminal backends for the agent form (`kind` is `sandbox`, `machine` or `local`, `min_level` the level the backend needs); never hosts, users or key paths), `GET /api/localization?language=en\|es`, `GET /api/version` (public: `{"version": "0.1.0", "build": null}`; `version` comes from `pyproject.toml`, `build` is the first 7 characters of `RECALL_BUILD` or `null`) |
 | preferences | `GET`/`PATCH /api/preferences` ([details](user-yaml.md#preferences-api), including the Telegram orchestrator's `default_agent_id`, `orchestrator` / `core_agent_id` and the read-only `orchestrator_default`; the response also carries a read-only `limits` object `{soul_chars, memory_chars, user_chars}` from the `memory_limits` block of settings.yaml and a read-only `defaults` object with the effective defaults and number bounds), `GET /api/speech-to-text/models` |
 | models | `GET /api/providers/status`, `GET /api/models/catalog`, `GET /api/models`, `GET`/`POST /api/models/favorites`, `DELETE /api/models/favorites/<model_id>` ([models and providers](../user-guide/models-and-providers.md)) |
 | agents | `GET`/`POST /api/agents`, `GET`/`PUT`/`DELETE /api/agents/<agent_id>`, `GET /api/tool-groups`, `GET /api/agents/<agent_id>/index`, `POST /api/agents/<agent_id>/index/reindex` (table below) |
 | MCP | `GET /api/mcp`, `GET /api/mcp/<server_id>/tools`, `POST /api/mcp/<server_id>/connect`, `DELETE /api/mcp/<server_id>/connection` ([MCP servers](../user-guide/mcp.md)) |
 | chats | `GET /api/chats`, `GET`/`POST /api/agents/<agent_id>/chats`, `POST .../chats/<chat_id>/disposable`, `GET`/`DELETE .../chats/<chat_id>`, `GET .../chats/<chat_id>/models`, `PUT .../model`, `PUT .../reasoning-effort`, `PUT .../title`, `POST .../chats/<chat_id>/messages` (SSE, see [architecture](../architecture/overview.md#web-steering)), `GET .../chats/<chat_id>/stream` ([following a running reply](#following-a-running-reply)), `GET .../chats/<chat_id>/approvals`, `POST .../chats/<chat_id>/approvals/<approval_id>` ([terminal approvals](#terminal-approvals)) |
-| approval rules | `GET`/`DELETE /api/agents/<agent_id>/approval-rules`, `DELETE .../approval-rules/<index>`, `POST .../approval-rules/reset` ([learned approval rules](#learned-approval-rules)) |
+| approval rules | `GET`/`DELETE /api/agents/<agent_id>/approval-rules`, `DELETE .../approval-rules/<index>`, `POST .../approval-rules/reset`, `GET .../approval-rules/effective` ([learned approval rules](#learned-approval-rules)) |
+| levels and administration | `GET /api/levels`, `GET /api/admin/users`, `PUT /api/admin/users/<user_id>/max-level` ([permission levels in the web UI](#permission-levels-in-the-web-ui)) |
 | subagent tasks | `GET /api/tasks`, `GET /api/tasks/<task_id>`, `POST .../steer`, `POST .../stop`, `GET .../chat` ([table below](#subagent-tasks)) |
 | dream and soul | `.../dream/settings\|status\|start\|cancel\|sessions`, `.../soul` (the response also carries `max_chars`, the application-wide SOUL limit, and `default`, the default SOUL.md template); `.../memories/<target>` returns its `limit` from settings.yaml, `.../soul/history`, `.../memories/<target>` ([dream mode](../user-guide/dream.md#web-api)) |
 
@@ -62,6 +63,10 @@ message. Errors render as a dismissable card (`role="alert"`) in the transcript,
 | `level_exceeds_max` | an agent's `level` is above the user's `max_level` (HTTP 400, on `POST`/`PUT /api/agents`) | none (choose a lower level) |
 | `level_below_required` | an agent's `level` is below what one of its services needs; the message names the service and the level (HTTP 400, same routes) | none (raise the level or remove the service) |
 | `level_required_above_max` | an agent uses a service that needs more than the user's `max_level` (HTTP 400, same routes; also for an agent without a `level`) | none (remove the service or ask an administrator) |
+| `approval_rule_not_allowed` | a rule, a `default: allow` or the shorthand `off` allows everything on a `machine` or `local` backend for an agent below `admin` (HTTP 400, `POST`/`PUT /api/agents`) | shown under the rule editor |
+| `admin_required` | the caller's `max_level` is not `admin` (HTTP 403, `/api/admin/...`) | none |
+| `max_level_self_change` | an administrator tried to change their own `max_level` (HTTP 400) | none (ask another administrator) |
+| `max_level_below_agents` | the new `max_level` is below the level of some of the user's agents (HTTP 409; the body also has `agents`: `[{"id", "name", "level", "declared"}]`) | the Users section lists them |
 
 New codes are set with `UserMessageError(..., code="...")` or a class-level `code`.
 
@@ -193,6 +198,24 @@ is **approved once**, `scope` is `once` and the response has `error` with the re
 | `422` | `decision` is missing or not exactly `approve` / `deny`, or `scope` is not `once` / `session` / `agent` |
 
 Telegram answers the same approvals with inline buttons (callback data `ap:<approval id>:y|s|a|n`, well under Telegram's 64 bytes).
+
+### Permission levels in the web UI
+
+| call | result |
+| --- | --- |
+| `GET /api/levels` | read only, any logged-in user. `levels`: the six levels in order, each `{name, number, title, parts, description, tool_groups}` (`parts` are the texts of the services the level adds over the one below, `description` joins them; the texts are English and have Spanish translations in `GET /api/localization`); `groups`: tool group id -> minimum level; `services`: every service key of `SERVICE_MIN_LEVEL` -> level; `backend_rules`: `{local, ssh_root, ssh}` -> level of each backend class; `mcp` and `delegation_targets` (their minimum level); `max_level`: the caller's maximum. Built from `src/config/levels.py`, `ceiling.py` and `levels_help.py`, so it is what is enforced. The agent form computes the level its choices need from it |
+| `GET /api/agents/<agent_id>/approval-rules/effective` | owner only (another user's agent is a `404`, an administrator's included). `{layers: [{name: installation\|user\|agent, default, rules: [{index, learned, rule}]}], shorthand: {backend: manual\|smart\|off\|null}, default}`: the three rule layers least to most specific, the legacy per-backend `approvals` shorthand (`null`: the agent file does not set it) and the default that applies when no rule matches |
+| `GET /api/admin/users` | administrators only (`max_level` `admin`; `403 admin_required` for anyone else, `401` without a session). Every user: `{id, name, max_level, agent_count, agents: [{id, name, level, declared}], min_max_level, self}`, or `{id, error}` for a `user.yaml` that does not load. `level` is the higher of the declared and the required level; `min_max_level` the lowest maximum that still fits the agents |
+| `PUT /api/admin/users/<user_id>/max-level` | body `{"max_level": "<level>"}` (unknown name: `422`); administrators only. Writes the line `max_level` of that user's `user.yaml` (comments and other keys stay) under the user's lock; effective on their next request. Refused: your own user (`400 max_level_self_change`), a maximum below the level of one of the user's agents (`409 max_level_below_agents` with the list; nothing is written), an unknown user (`404`). Returns the user's row as in the list. A logger line records who changed what |
+
+This is the only route that sets a `max_level`; every other body that carries one is a `422`.
+
+### Approval rules in the agent body
+
+`POST`/`PUT /api/agents` accept the agent layer `approval_rules` (`{default, rules}`, fields in [terminal](../user-guide/terminal.md#approval-rules)).
+The agent form edits its hand-written rules through `PUT`: a body without `approval_rules` keeps the stored list (learned rules included),
+`{"rules": []}` clears it, and a list replaces it (the form sends its rules followed by the learned ones). An invalid rule is a `422`
+naming the field, the blanket-allow guardrail a `400` with `approval_rule_not_allowed`; nothing is written in either case.
 
 ### Learned approval rules
 

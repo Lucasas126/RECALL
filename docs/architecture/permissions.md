@@ -1,7 +1,7 @@
-# Permission levels (design; steps 1 to 5 implemented)
+# Permission levels (design; steps 1 to 6 implemented)
 
-Status: **steps 1 (schema, validation, API read side), 2 (ceiling enforcement), 3 (the approval rule engine), 4 (approvals with memory) and 5 (the `permissions` tool group and the permission-manager template) are implemented**,
-except the limited dream delegate (see [what is enforced](#what-is-enforced-step-2) and [approval rules](#approval-rules)). The UI is design. The steps are listed under [implementation plan](#implementation-plan). Research behind it: Claude Code permission rules, the Codex
+Status: **steps 1 (schema, validation, API read side), 2 (ceiling enforcement), 3 (the approval rule engine), 4 (approvals with memory), 5 (the `permissions` tool group and the permission-manager template) and 6 (the web UI and the admin screen) are implemented**,
+except the limited dream delegate (see [what is enforced](#what-is-enforced-step-2) and [approval rules](#approval-rules)). The steps are listed under [implementation plan](#implementation-plan). Research behind it: Claude Code permission rules, the Codex
 approval/sandbox split, Meta's *Agents Rule of Two*, OWASP LLM06 (excessive agency) and an audit of RECALL's own code.
 
 ## Principles
@@ -192,6 +192,35 @@ Code: `src/agent/toolsets/permissions.py` (the eight tools and the card), `src/s
 Decisions: a self-change is allowed because it can only stay inside the level the user gave (the human still approves each
 one) and a level can only go down; removing an `ask` or `deny` rule, which loosens the target, is allowed with a warning on the card.
 
+### Implemented (step 6): web UI and admin screen
+
+Code: `src/config/levels_help.py` (`levels_catalog`, `level_description_parts`), `ChatService.levels`, `effective_approval_rules`,
+`list_users` and `set_user_max_level`, `AgentStore.agent_levels` and `set_max_level`, `src/web/app.py` (four routes), `src/admin/agents.py`
+(`user list`, `agent rules --effective`), and `app.js` / `index.html` (the agent form and the **Users** section of the settings dialog).
+Routes: [permission levels in the web UI](../reference/api.md#permission-levels-in-the-web-ui); screens: [agents](../user-guide/agents.md),
+[terminal](../user-guide/terminal.md#in-the-web-ui) and [settings](../user-guide/settings.md#users-administrators-only).
+
+- **One source.** `GET /api/levels` is built from `SERVICE_MIN_LEVEL`, `ceiling.GROUP_MIN_LEVEL` and `backend_min_level`, and the descriptions are
+  the lines of the `permission_levels_help` text (`level_description_parts`). The browser computes the level a configuration requires from that
+  table with the same rule as `required_level_reason` (tool groups, MCP, `local`/root backends, delegation targets); a test runs the browser
+  function against `required_level` for a spread of configurations, so the two cannot drift.
+- **Selector.** In the Basic tab: the six levels, those above `max_level` disabled, the live required level and an inline message that says what to
+  raise, remove or whom to ask. The form sends `level` only when the user chose it (or the choices moved it); server errors
+  (`level_exceeds_max`, `level_below_required`, `level_required_above_max`) are shown in the user's language. Groups that need more than the
+  selected level get a badge in the Tools tab; nothing is hidden. Levels show as badges in the agent list and the form title.
+- **Rule editor.** The agent layer `approval_rules` is edited in the Terminal block (default verdict plus one editable row per hand-written rule) and
+  saved through `PUT /api/agents/<id>`, so the model validation and the blanket-allow guardrail answer inline. Learned rules are kept apart (their own
+  list with *Remove* and *Reset*) and preserved when the list is saved. The installation and user layers and the shorthand are read only
+  (`GET /api/agents/<id>/approval-rules/effective`, owner only). Backends are defined in `user.yaml` only; the form shows their `kind` and level read only.
+- **Admin screen.** A **Users** section (settings dialog) for users whose `max_level` is `admin`: `GET /api/admin/users` and
+  `PUT /api/admin/users/<id>/max-level`, the only route that sets a `max_level`. Admin only (`403 admin_required`), never one's own
+  (`max_level_self_change`), refused below the level of any of the user's agents, declared or required (`409 max_level_below_agents` with the list),
+  written under the user's lock to the `max_level` line of `user.yaml`, effective on the next request, and logged by the web service (a user-level
+  change has no agent audit file). Parity in the CLI: `user list`, `agent rules --effective`, `agent show` ending with the effective level.
+
+Not in this step: session revocation when a maximum is lowered (open sessions keep working, every agent change is checked against the new maximum),
+editing terminal backends or the installation and user rule layers in the web UI.
+
 ## Dream mode
 
 Rule: **read as far as the level allows, plus write the agent's own files**: mind palace, SOUL, memory, USER and skills.
@@ -283,5 +312,5 @@ them, the dream toolset does not use them) and the individually chosen tools of 
 | 3 (done) | Rule engine (`src/terminal/rules.py`): layers, deny/ask/allow, matching, the three legacy modes as a per-backend shorthand, the blanket-allow guardrail, audit fields. Terminal and file tools only; see [implemented](#implemented-step-3). |
 | 4 (done) | Approvals with memory: once / session / always for this agent, web and Telegram, audit. |
 | 5 (done) | `permissions` tool group and a permission-manager agent template; escalation tests (`tests/test_permissions_tool_*.py`). |
-| 6 | Web UI and admin CLI: level selector capped by `max_level`, rule editor, admin screen. |
+| 6 (done) | Web UI and admin CLI: level selector capped by `max_level`, rule editor, admin screen; see [implemented](#implemented-step-6-web-ui-and-admin-screen). |
 | 7 | Final documentation, changelog and remaining-gaps list. |
