@@ -124,7 +124,7 @@ class SkillPageTests(unittest.TestCase):
         text = PAGE.read_text(encoding="utf-8")
         for level in Level:
             self.assertIn(f"`{level.label}`", text)
-        for needle in ("dream", "manual", "smart", "off", "planned", "max_level", "administrator", "ask"):
+        for needle in ("dream", "manual", "smart", "off", "permissions", "max_level", "administrator", "ask"):
             self.assertIn(needle, text)
         self.assertEqual(text, text.replace("\r", ""))
 

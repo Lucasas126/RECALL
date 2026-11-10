@@ -161,7 +161,7 @@ data: {"id": "9f2c1a7be034", "decision": "approved", "reason": "approved", "scop
 ```
 
 `backend` is the name of the user's terminal backend the action targets (the `approvals` mode of that backend decided to ask). `risk` is `dangerous` (flagged by the policy) or `manual` (the backend's approvals are `manual`). `tool` is `terminal`,
-`sandbox_read`, `sandbox_write`, `sandbox_patch` or `sandbox_search`; `command` is the command line or a short description of the
+`sandbox_read`, `sandbox_write`, `sandbox_patch` or `sandbox_search`, or one of the `permissions` tools (`agent_set_level`, `agent_set_tool_groups`, `agent_add_rule`, `agent_remove_rule`, `agent_reset_rules`: `backend` and `cwd` are empty, `command` is the multi-line diff, `options` is always `["once"]` and a `session` or `agent` answer is refused); `command` is the command line or a short description of the
 file operation. `decision` is `approved` or `denied`; `reason` is `approved`, `denied by user`, `timed out`, `cancelled` or
 `service shutdown`. `options` lists the approve scopes the card offers: `once` always, `session` and `agent` when
 [the action may be remembered](../user-guide/terminal.md#remembering-an-approval) (a dangerous action only has `once`); `scope` of the

@@ -13,7 +13,7 @@ from the repository root. Agents with a `local` terminal backend run it the same
 | `create-user [--max-level L]`, `set-password` | create a user / replace the web password (hidden prompt or `--generate`); `--max-level` sets the [permission ceiling](../reference/user-yaml.md#max_level-permission-levels) (default `collaborator`); see [user.yaml](../reference/user-yaml.md#creating-users-administrator) |
 | `agent list --user U` | the user's agents |
 | `agent show --user U --agent A` | the agent yaml as the loader sees it |
-| `agent create --user U --id A [--name N] [--from-template default\|guide] [--level L] [--set path=value ...]` | create an agent (same checks as the web UI); `--level` is the same as `--set level=L` |
+| `agent create --user U --id A [--name N] [--from-template default\|guide\|permission-manager] [--level L] [--set path=value ...]` | create an agent (same checks as the web UI); `--level` is the same as `--set level=L` |
 | `agent set --user U --agent A [--level L] --set path=value [--set ...]` | change an agent's settings; other settings keep a stored `level` |
 | `agent rename --user U --agent A --new-id B [--name N]` | change the id and move the data folder, like the web UI |
 | `agent delete --user U --agent A --yes` | delete the configuration (the data folder stays) |
@@ -38,6 +38,9 @@ those first).
 The `guide` template (`agent create --from-template guide`) uses the `local` terminal backend, a shell on the RECALL host, which only
 the level `admin` may use: for a user whose `max_level` is below `admin` the command fails with a message that says so and writes
 nothing.
+
+The `permission-manager` template (`agent create --from-template permission-manager`) needs a user whose `max_level` is at least
+`operator`: below that the command fails with a message that names the level and the `user set` command, and writes nothing.
 
 ## Setting values
 
@@ -66,6 +69,12 @@ The agent's **display name** is its `name` (shown in the web UI and Telegram); c
 built-in [RECALL knowledge](recall-knowledge.md), use this CLI instead of editing YAML, run `agent check`, ask before anything
 destructive, never read or print secrets and never touch another user's folders. The guide owns its SOUL and can later be renamed
 and reshaped into the user's main agent. It only works when the server allows local backends (`RECALL_TERMINAL_ALLOW_LOCAL=true`).
+
+`permission-manager` creates an agent named `Permission manager` at level `operator` with the tool groups `memory_read`, `memory_edit`,
+`self` and `permissions` (no terminal, no web) and a short SOUL: it explains the levels, reviews what each of the user's agents can
+do, proposes a change and its trade-off before making it, recommends the lowest level that does the job and never tries to go around a
+limit or an approval. Each change it makes shows the user an approval card (approve once or deny, never "always") and is audited. See
+[tools](../reference/tools.md#permissions).
 
 ## Changes made from another process
 

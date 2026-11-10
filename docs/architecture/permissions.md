@@ -1,8 +1,7 @@
-# Permission levels (design; steps 1, 2 and 3 implemented)
+# Permission levels (design; steps 1 to 5 implemented)
 
-Status: **steps 1 (schema, validation, API read side), 2 (ceiling enforcement) and 3 (the approval rule engine) are implemented**,
-except the limited dream delegate (see [what is enforced](#what-is-enforced-step-2) and [approval rules](#approval-rules)). Approvals with memory
-("always allow") and the UI are design. The steps are listed under [implementation plan](#implementation-plan). Research behind it: Claude Code permission rules, the Codex
+Status: **steps 1 (schema, validation, API read side), 2 (ceiling enforcement), 3 (the approval rule engine), 4 (approvals with memory) and 5 (the `permissions` tool group and the permission-manager template) are implemented**,
+except the limited dream delegate (see [what is enforced](#what-is-enforced-step-2) and [approval rules](#approval-rules)). The UI is design. The steps are listed under [implementation plan](#implementation-plan). Research behind it: Claude Code permission rules, the Codex
 approval/sandbox split, Meta's *Agents Rule of Two*, OWASP LLM06 (excessive agency) and an audit of RECALL's own code.
 
 ## Principles
@@ -141,7 +140,47 @@ Telegram buttons.
   `python -m src.admin agent rules`; the layer `default` stays.
 - **Saving the agent form keeps the rules.** A save that does not send `approval_rules` keeps the stored list.
 
-Not in this step: the `permissions` tool (step 5), rules for folder operations and MCP calls.
+Not in this step: rules for folder operations and MCP calls.
+
+### Implemented (step 5): the `permissions` tool group
+
+Code: `src/agent/toolsets/permissions.py` (the eight tools and the card), `src/service/agent_permissions.py` (checks, plan, apply, audit),
+`AgentStore.modify` (read-modify-write under the user's lock), `src/config/levels_help.py` (the text of `permission_levels_help`),
+`src/agent/templates.py` (`permission-manager`).
+
+- **Group.** `permissions`, minimum level `operator` (`SERVICE_MIN_LEVEL`, `GROUP_MIN_LEVEL`, the web catalog, Spanish text). An agent
+  below operator cannot hold it (validation, like any group); it is never a default and a worker cannot be granted it.
+- **Tools.** Reads: `agents_list` (id, name, effective, required and declared level, groups, number of learned rules),
+  `agent_get_permissions(agent_id)` (also the user's `max_level`, terminal backends with kind, approval rules per layer) and
+  `permission_levels_help(capability="")` (text built from `ceiling.py`/`levels.py`). Changes: `agent_set_level`, `agent_set_tool_groups`,
+  `agent_add_rule`, `agent_remove_rule`, `agent_reset_rules`. Results are JSON (names and rule texts are data) or `error: ...`.
+- **Scope.** The user is the caller's own (no user argument) and the target must be in that user's `agents`; an id of another user,
+  a path-like id or an unknown id gives the same refusal. A change never targets the caller itself (level, groups or rules).
+- **Level.** `agent_set_level` needs level <= the user's `max_level`, <= the caller's effective level (the lower of the running level,
+  so a worker's, and the stored one) and >= what the target's configuration requires. A caller whose stored level fell below operator,
+  or who lost the group, is refused.
+- **Groups.** Every group must be allowed by the target's current level (so an undeclared agent is never raised implicitly), a group
+  that is added must also be allowed by the caller's level, and `terminal` needs the target's `terminal` block.
+- **Rules.** The rule is validated like the API validates it (unknown keys, `default` and the reason reserved for learned rules are
+  refused). The blanket-allow guardrail runs with the target's level (through `AgentStore.modify`, as on a form save) and again with
+  the caller's: a caller below admin cannot grant a blanket allow on a `machine` or `local` backend even to an admin target.
+- **Human approval.** Every change asks through the approval broker with a card: caller (name, id, level), target, field and the
+  before -> after (rules are listed). The card offers `once` and *Deny* only: `ApprovalBroker.answer` refuses `session` and `agent`
+  for it (`InputError`), no learn hook exists and nothing is remembered. Denied, timed out, cancelled, shut down, no chat client
+  (dream, scheduled task, worker task: the tools are not built there and refuse if called) and a missing audit trail all end with
+  `error: ...` and no change. After the approval the plan is computed again under the lock and must equal what was approved, so a
+  change made meanwhile (or a lowered `max_level`) cancels it.
+- **Audit.** One line per attempt in `terminal_audit.jsonl` of the target and of the caller: `event: permission_change`, `actor`
+  (caller id), `actor_kind: agent`, `user`, `agent` (file owner), `target`, `tool`, `field`, `action`, `before`, `after`,
+  `decision` (`approved`, `denied`, or `refused` for an attempt the rules blocked before anyone was asked; that one only goes to the
+  caller's file), `reason`, `approval_id`, `chat`, `applied`, and `rule` / `index` / `rules` for rules. Rule commands are redacted.
+- **Running targets.** The file changes at once and the target's other chats rebuild before their next reply (as for rules learned
+  from a card); a reply already running keeps its old configuration until it ends.
+- **Template.** `agent create --from-template permission-manager`: level `operator`, groups `memory_read`, `memory_edit`, `self`,
+  `permissions` (no terminal, no web), a short SOUL. It fails with a clear message for a user whose `max_level` is below operator.
+
+Decisions: a mutation on the caller itself is refused for every field (an agent adding rules or groups to itself is the same
+escalation as raising its level); removing an `ask` or `deny` rule, which loosens the target, is allowed with a warning on the card.
 
 ## Dream mode
 
@@ -208,10 +247,10 @@ One module, `src/config/ceiling.py`, derives from an effective level what is all
 | Dispatch (chats and dreams) | a call to a tool the level does not cover is refused with a tool error even if a handler exists; a name that is neither built in nor an MCP tool is refused as well. |
 | Delegation | a worker's level is `min(target's own level, launcher's level)` (stored in the task mark); launching needs collaborator, handing a task to another agent needs the launcher at operator; groups, backends and delegation targets of a worker above its level are dropped. |
 | Dreams | follow the [dream table](#dream-mode): memory read from reader; `memory_edit` and `self` from assistant (and the chat group); folders read-only from reader (and `dream.tools: [folders]`); web from assistant (and `dream.tools: [web]`); never a terminal, tasks or permissions. A dream of a `minimal` agent does not run (the session fails with a message). |
-| Templates | `guide` needs the `local` backend, so `agent create --from-template guide` fails for a user whose `max_level` is below admin. |
+| Templates | `guide` needs the `local` backend, so `agent create --from-template guide` fails for a user whose `max_level` is below admin; `permission-manager` needs operator. |
 
 Not built yet: the limited dream delegate, MCP read-only tools and read-only sandbox tools in dreams (the ceiling already reports
-them, the dream toolset does not use them), the individually chosen tools of L0, and the `permissions` prompt block.
+them, the dream toolset does not use them) and the individually chosen tools of L0.
 
 ## Known gaps, out of scope for the level work
 
@@ -222,7 +261,7 @@ them, the dream toolset does not use them), the individually chosen tools of L0,
 | Real isolation between users (per-user path limit) | Behavioural only today; levels reinforce but do not replace it. |
 | Budgets (tokens and spend per agent, allowed models) | Partial for delegated tasks. |
 | Session revocation on demotion, login throttle, CSRF token | Not present. |
-| Audit of every write (files, memory, self, permission changes) | Only the terminal is audited today. |
+| Audit of every write (files, memory, self) | Only the terminal and agent-made permission changes are audited today. |
 
 ## Implementation plan
 
@@ -232,7 +271,7 @@ them, the dream toolset does not use them), the individually chosen tools of L0,
 | 1 (done) | Schema: `max_level` (required, admin only), agent `level`, validation, effective levels. No migration code: the project is in development. |
 | 2 (done, except the dream limited delegate and the prompt block) | Ceiling enforcement in one module (`src/config/ceiling.py`): when tools are built (chats, workers, dreams), at dispatch, on config save and on load. Still to do: the `permissions` prompt block and skill page, and the limited dream delegate. |
 | 3 (done) | Rule engine (`src/terminal/rules.py`): layers, deny/ask/allow, matching, the three legacy modes as a per-backend shorthand, the blanket-allow guardrail, audit fields. Terminal and file tools only; see [implemented](#implemented-step-3). |
-| 4 | Approvals with memory: once / session / always for this agent, web and Telegram, audit. |
-| 5 | `permissions` tool group and a permission-manager agent template; escalation tests. |
+| 4 (done) | Approvals with memory: once / session / always for this agent, web and Telegram, audit. |
+| 5 (done) | `permissions` tool group and a permission-manager agent template; escalation tests (`tests/test_permissions_tool_*.py`). |
 | 6 | Web UI and admin CLI: level selector capped by `max_level`, rule editor, admin screen. |
 | 7 | Final documentation, changelog and remaining-gaps list. |

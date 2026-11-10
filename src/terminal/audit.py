@@ -74,3 +74,30 @@ def write_rule_audit(
     if index is not None:
         fields["index"] = index
     return write_audit(path, **fields, **extra)
+
+
+def _redacted(value):
+    """A copy of a JSON-like value with every `command` string redacted and shortened (rules hold commands)."""
+    if isinstance(value, dict):
+        return {key: (redact(item)[:_MAX_COMMAND] if key == "command" and isinstance(item, str) else _redacted(item))
+                for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redacted(item) for item in value]
+    return value
+
+
+def write_permission_audit(
+    path: Path | None, *, actor: str, user: str, agent: str, target: str, tool: str, field: str, action: str,
+    before: object, after: object, decision: str, **extra,
+) -> bool:
+    """Record an agent's permission change (`event: permission_change`), approved or not, in the same audit file.
+
+    `actor` is the agent that asked, `target` the agent changed (`agent` is the owner of the file this line goes to),
+    `decision` is `approved`, `denied`, `refused` (blocked before anyone was asked) or `unattended`.
+    """
+    fields = {
+        "event": "permission_change", "actor": actor, "actor_kind": "agent", "user": user, "agent": agent,
+        "target": target, "tool": tool, "field": field, "action": action,
+        "before": _redacted(before), "after": _redacted(after), "decision": decision,
+    }
+    return write_audit(path, **fields, **{key: _redacted(value) for key, value in extra.items()})

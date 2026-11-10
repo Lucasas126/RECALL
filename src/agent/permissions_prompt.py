@@ -19,7 +19,10 @@ _CAN: dict[Level, str] = {
     Level.READER: "read your own memory and the user's folder list",
     Level.ASSISTANT: "read and edit your memory, USER, SOUL and skills; search the web",
     Level.COLLABORATOR: "edit user folders, use MCP servers and run web-only workers (some actions ask the user first)",
-    Level.OPERATOR: "use terminal backends (asking the user) and hand tasks to the user's other agents",
+    Level.OPERATOR: (
+        "use terminal backends (asking the user), hand tasks to the user's other agents and, with the permissions tools, "
+        "view and adjust the permissions of the user's other agents (every change needs the user's approval)"
+    ),
     Level.ADMIN: "all of it, including the local or root terminal, other users' data and the admin CLI (with approval)",
 }
 _CANNOT: dict[Level, str] = {

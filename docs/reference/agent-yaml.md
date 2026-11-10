@@ -29,7 +29,7 @@ chat_config:
   recall_knowledge: true             # the built-in, read-only `recall` skill (how RECALL works); false hides it from this agent
   conversation_messages_retained: 20 # at most N messages kept in context; cuts go below N (see prompt caching)
   tools: true                       # enable the selected tool groups
-  tool_groups: [memory_read, memory_edit, self]  # memory_read, memory_edit, web, self, folders_read, folders_edit, terminal, delegate
+  tool_groups: [memory_read, memory_edit, self]  # memory_read, memory_edit, web, self, folders_read, folders_edit, terminal, delegate, permissions
   mcp:                               # MCP servers enabled for this agent (see mcp.md)
     google_calendar: {tools: null, read_only: false, instructions: ""}
 dream:                               # background self-review sessions (see dream.md)
@@ -114,6 +114,10 @@ layout and the prompt assembly. when `tool_groups` is omitted, the default is
 `[memory_read, memory_edit, web, self]`; folder groups are always explicit.
 
 ## level
+
+The `permissions` tool group (view and change the levels, tool groups and approval rules of the user's other agents, each change with the
+user's approval) needs `level: operator` or higher, so `tool_groups: [..., permissions]` with a lower declared level is refused like any
+group above the level. The `permission-manager` template ([admin CLI](../user-guide/admin-cli.md#templates)) sets it up.
 
 `level` is a top-level field (never under `chat_config`, which accepts unknown keys). It is optional. Without it the agent's
 effective level is the lowest level that covers its configuration (tool groups, terminal backends, MCP servers, delegation

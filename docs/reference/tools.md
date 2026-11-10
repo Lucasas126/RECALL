@@ -9,7 +9,7 @@ Implementations are grouped under `src/agent/toolsets/`: `memory.py` contains
 memory search, listing and reading; `tags.py` contains tag lookup;
 `editing.py` contains memory mutations; `web.py` contains public web
 search and retrieval; `self_files.py` contains the tools that edit the agent's
-own files; `folders.py` contains the user folder tools; and `dream.py` contains the
+own files; `folders.py` contains the user folder tools; `permissions.py` contains the tools that manage the permissions of the user's other agents; and `dream.py` contains the
 review-queue tools of dream sessions. Shared source checks are in `common.py`.
 
 ## Tool-group catalog
@@ -57,9 +57,23 @@ The web **Agents** tab configures these groups for each agent:
   - `task_wait(ids, timeout_s=60)`: block until every task ended or the timeout (**at most 120 s**; a user message steering the parent ends the wait). Returns `{done: [...], running: [ids]}`; results read here are consumed (no wake).
   Needs the group in `tool_groups`; the `delegation` block is optional. Limit errors name the limit hit. See the [delegation guide](../user-guide/delegation.md).
 
+<a id="permissions"></a>
+- `permissions` (level `operator`): view and change the levels, tool groups and approval rules of the **same user's other agents**. Results are
+  JSON or `error: ...`; names and rule texts are data. Reads: `agents_list()` (per agent: `id`, `name`, effective `level`, `required_level`,
+  `declared_level` or `null`, `tool_groups`, `learned_rules`), `agent_get_permissions(agent_id)` (adds the user's `max_level`, terminal
+  backends with their `kind`, and the approval rules of the installation, user and agent layers; agent rules come with their index) and
+  `permission_levels_help(capability="")` (every level and what it allows, built from the code; or the level one capability needs).
+  Changes: `agent_set_level(agent_id, level)` (at most the user's `max_level` and the caller's own level, at least what the target
+  needs), `agent_set_tool_groups(agent_id, groups)` (the complete new list; each group must be allowed by the target's level and a
+  group added by the caller's), `agent_add_rule(agent_id, rule)`, `agent_remove_rule(agent_id, index)` and `agent_reset_rules(agent_id)`
+  (the agent layer only; a blanket allow on a machine or local backend needs `admin` for the target and for the caller). An agent
+  cannot change itself or another user's agents. Every change shows the user a card (caller, target, before -> after) that offers only
+  *Approve* and *Deny*; it is never remembered, is audited (`permission_change` in `terminal_audit.jsonl`) and applied through the same
+  validation as the web form. Not available in dreams, scheduled tasks or workers. See [permissions](../architecture/permissions.md#implemented-step-5-the-permissions-tool-group).
+
 In a [disposable chat](../user-guide/memory.md#disposable-chats) the write tools of
 `memory_edit`, `self` (`memory`, `skill_manage`, `soul_edit`) and `folders_edit` are
-removed, whatever the groups, and the whole `terminal` group and the `delegate` tools are not built; the read tools stay. MCP tools are refused as a class
+removed, whatever the groups, and the whole `terminal` group, the `delegate` tools and the `permissions` tools are not built; the read tools stay. MCP tools are refused as a class
 (none are built and any call is rejected), not by name. The exception is the hidden chat of a
 subagent task that was granted terminal backends: it is excluded from learning (no Dream, no indexing) like any disposable chat but keeps the terminal group it was granted, restricted to those
 backends and to `manual` approvals; its memory, self and folder-edit tools stay removed.

@@ -2,7 +2,7 @@
 
 `python -m src.admin <command>` changes RECALL through the same code and validation as the web UI. Run it from the repository root (`/app` in Docker, which is the `local` backend's working directory). Use it instead of editing YAML by hand: it validates before writing, takes the same locks, writes atomically and refuses an agent that is busy. It never prints a secret: YAML holds the NAMES of environment variables.
 
-Values after `=` are YAML: `true`, `42`, `[a, b]`, `{k: v}`, `null`, or a quoted string. Paths are dotted keys into the file. Output names the paths changed, never the values.
+Values after `=` are YAML: `true`, `42`, `[a, b]`, `{k: v}`, `null`, or a quoted string. Paths are dotted keys into the file.
 
 ## Agents
 
@@ -12,6 +12,7 @@ Values after `=` are YAML: `true`, `42`, `[a, b]`, `{k: v}`, `null`, or a quoted
 | `python -m src.admin agent show --user U --agent A` | the agent yaml as the loader sees it (defaults filled in) |
 | `python -m src.admin agent create --user U --id A --name N [--level L]` | new agent with the default SOUL |
 | `python -m src.admin agent create --user U --id A --from-template guide` | a setup guide: tool groups `memory_read`, `memory_edit`, `web`, `self`, `terminal`, local backend, its own SOUL; the local backend is admin-only, so it fails for a user whose `max_level` is below `admin` |
+| `python -m src.admin agent create --user U --id A --from-template permission-manager` | level `operator`, groups `memory_read`, `memory_edit`, `self`, `permissions`; needs `max_level` operator+ |
 | `python -m src.admin agent set --user U --agent A --set path=value` | change settings (repeat `--set`); `--level L` sets the permission level |
 | `python -m src.admin agent rename --user U --agent A --new-id B --name N` | new id (and optional name); moves `data/U/A` to `data/U/B` exactly like the web UI |
 | `python -m src.admin agent delete --user U --agent A --yes` | remove the configuration; the data folder stays on disk |
@@ -28,7 +29,7 @@ python -m src.admin agent create --user user-a --id travel --name Travel --set d
 ```
 
 - A model is checked against the provider catalog like in the web UI, so a typo or an unavailable provider is refused with a message.
-- Values are parsed as YAML: wrap text containing `": "` (or starting with `[`, `{`, `#`, `*`, `&`) in quotes. Exceptions: when the target field is a plain string (`description`, `name`, ...) the value is taken raw, so `--set description="Veterinaria: salud y cuidado"` works as typed (one pair of surrounding quotes is stripped); if YAML parsing fails validation, the command retries once with the raw text. Lists, maps, booleans, numbers and optional fields (`null` clears them) keep YAML. `user set` works the same way.
+- Values are parsed as YAML: wrap text containing `": "` (or starting with `[`, `{`, `#`, `*`, `&`) in quotes. A plain string field (`description`, `name`, ...) takes the value raw (`--set description="Veterinaria: salud"` works as typed); if YAML parsing fails validation, the command retries once with the raw text. `user set` works the same way.
 - The DISPLAY NAME is `name`, separate from the SOUL (a rename changes both; SOUL via `soul_edit`). The `id` is the folder/URL and normally stays.
 - `id` cannot be changed with `set`; use `rename`. A backend named in `terminal.backends` must exist in the user's `terminal_backends` (see `user set`).
 - The file is rewritten from the validated config: YAML comments are not kept.
