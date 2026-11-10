@@ -16,7 +16,7 @@ JS = (STATIC / "appearance.js").read_text(encoding="utf-8")
 
 ACCENTS = ("pink", "blue", "gold", "green", "violet", "cyan")
 FONT_FILES = {"Fraunces": "fraunces.woff2", "Inter": "inter.woff2", "Geist Mono": "geist-mono.woff2"}
-ART_FILES = ("arcade.svg", "login-arch.svg", "plinth.svg", "capital.svg")
+ART_FILES = ("login-arch.svg", "plinth.svg", "capital.svg")
 MIN_CONTRAST = 4.5
 
 
@@ -203,7 +203,7 @@ class AppearanceMarkupTests(unittest.TestCase):
     def test_appearance_section_lives_in_the_settings_dialog(self) -> None:
         dialog = HTML[HTML.index('<dialog id="settings-dialog"'):HTML.index("</dialog>", HTML.index('<dialog id="settings-dialog"'))]
         self.assertIn('id="appearance-title">Appearance</h3>', dialog)
-        self.assertIn('id="appearance-ornaments"', dialog)
+        self.assertNotIn('ornaments', dialog)
         self.assertEqual(dialog.count('name="accent"'), len(ACCENTS) + 1)   # the named swatches and "custom"
         for element_id in ("appearance-accent-color", "accent-panel", "accent-sv", "accent-hue", "accent-hex"):
             self.assertIn(f'id="{element_id}"', dialog)
@@ -212,7 +212,7 @@ class AppearanceMarkupTests(unittest.TestCase):
     def test_preferences_are_browser_only_and_applied_before_paint(self) -> None:
         self.assertIn('localStorage', JS)
         self.assertIn("dataset.accent", JS)
-        self.assertIn("dataset.ornaments", JS)
+        self.assertNotIn("ornaments", JS)
         head = HTML.split("</head>")[0]
         self.assertIn('<script src="/static/appearance.js"></script>', head)      # blocking, so it runs before first paint
         self.assertLess(head.index("/static/appearance.js"), HTML.index("<body"))
@@ -228,7 +228,7 @@ class ArtSlotTests(unittest.TestCase):
             self.assertNotIn("<script", svg.lower())
             self.assertNotRegex(svg.replace('xmlns="http://www.w3.org/2000/svg"', ""), r"https?://")
         tokens = declarations(block(":root", many=True))
-        for slot, extension in (("arcade", "svg"), ("login-arch", "svg"), ("capital", "png"), ("plinth", "svg")):
+        for slot, extension in (("login-arch", "svg"), ("capital", "png"), ("plinth", "svg")):
             self.assertIn(f"/static/art/{slot}.{extension}", tokens[f"--art-{slot}"])
         self.assertTrue((STATIC / "art" / "capital.png").is_file())
         self.assertTrue((STATIC / "art" / "README.md").is_file())
@@ -238,10 +238,10 @@ class ArtSlotTests(unittest.TestCase):
         self.assertNotIn("/static/art/", outside_root)
 
     def test_ornaments_are_decorative(self) -> None:
-        self.assertIn('<div class="art-arcade" aria-hidden="true"></div>', HTML)
+        self.assertNotIn("art-arcade", HTML + CSS)                          # the header arcade was removed
         self.assertIn('<div class="login-art" aria-hidden="true">', HTML)
         self.assertIn('<div class="login-arch" aria-hidden="true"></div>', HTML)
-        for selector in (".art-arcade", ".login-arch"):
+        for selector in (".login-arch",):
             rule = next(line for line in CSS.splitlines() if line.startswith(f"{selector} {{"))
             self.assertIn("pointer-events: none", rule, selector)
 

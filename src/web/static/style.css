@@ -17,12 +17,11 @@
   --prose-max: 150ch; --user-bubble-max: 80rem; --wide-bubble-max: 1800px;   /* widest line of the assistant's text, of the user's bubble, and of edited bubbles and task notes */
   --ease: .16s ease;
   /* Decorative art. Each piece is referenced from this one place; see art/README.md to swap in PNGs. */
-  --art-arcade: url("/static/art/arcade.svg");
   --art-login-arch: url("/static/art/login-arch.svg");
   --art-capital: url("/static/art/capital.png");
   --art-plinth: url("/static/art/plinth.svg");
   --art-render: pixelated;                      /* set to pixelated when the files are MagicaVoxel PNGs */
-  --orn-a: .16; --orn-arch-a: .45; --orn-arcade-a: .16;
+  --orn-a: .16; --orn-arch-a: .45;
 }
 :root {
   color-scheme: dark;
@@ -32,7 +31,7 @@
   --ok: #7fc79a; --shade: #ededed26; --backdrop: #000a; --shadow: 0 6px 24px #0007, 0 1px 2px #0008;
 }
 :root[data-theme="light"] {
-  color-scheme: light; --orn-arcade-a: .3; --orn-a: .1;
+  color-scheme: light; --orn-a: .1;
   --bg: #fafaf8; --panel: #ffffff; --raised: #ebebe6; --line: #dcdcd6; --line-strong: #8a8a84; --side: #f4f4f1; --code-bg: #f3f3ef;
   --text: #161616; --muted: #4a4a45; --accent: #b0205e; --accent-strong: #8d1a4b; --on-accent: #ffffff;
   --accent-soft: #f7e9ef; --danger: #b42318; --warn: #7a5a00; --warn-bg: #fbf1d3; --warn-line: #d3b24f;
@@ -40,7 +39,7 @@
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) {
-    color-scheme: light; --orn-arcade-a: .3; --orn-a: .1;
+    color-scheme: light; --orn-a: .1;
     --bg: #fafaf8; --panel: #ffffff; --raised: #ebebe6; --line: #dcdcd6; --line-strong: #8a8a84; --side: #f4f4f1; --code-bg: #f3f3ef;
     --text: #161616; --muted: #4a4a45; --accent: #b0205e; --accent-strong: #8d1a4b; --on-accent: #ffffff;
     --accent-soft: #f7e9ef; --danger: #b42318; --warn: #7a5a00; --warn-bg: #fbf1d3; --warn-line: #d3b24f;
@@ -831,13 +830,9 @@ input[type="checkbox"]:disabled { opacity: .5; cursor: not-allowed; }
 .approval-backend { padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--raised); font-size: .8em; }
 select.warning { border-color: var(--warn); color: var(--warn); }
 
-/* Structure ornament: an arcade runs under the header. Decorative only: aria-hidden, pointer-events none, never under text. */
-.art-arcade { display: none; position: absolute; left: 0; right: 0; bottom: 0; height: 8px; pointer-events: none; background: var(--art-arcade) left bottom / 12px 8px repeat-x; image-rendering: var(--art-render); opacity: var(--orn-arcade-a); }
-:root:not([data-ornaments="off"]) .art-arcade { display: block; }
-main:has(#chat-view[hidden]) .art-arcade { display: none; }
-@media (forced-colors: active) { .art-arcade, .login-arch, .art-capital { display: none !important; } }
+@media (forced-colors: active) { .login-arch, .art-capital { display: none !important; } }
 
-/* Appearance group of the settings dialog (General): accent swatches and the ornaments switch */
+/* Appearance group of the settings dialog (General): accent swatches */
 .appearance { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; padding: 14px 0 20px; border-top: 1px solid var(--line); }
 .appearance h3 { margin: 0; }
 .appearance .model-note { margin: 0; }

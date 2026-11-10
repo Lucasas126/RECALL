@@ -79,7 +79,7 @@ function loadPanel({ theme = "dark", accent, colour } = {}) {
       getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }), setPointerCapture() {},
     }, extra);
   };
-  const ids = ["appearance-accent-color", "accent-panel", "accent-sv", "accent-sv-thumb", "accent-hue", "accent-hex", "accent-preview", "accent-note", "appearance-accent-custom", "appearance-ornaments"];
+  const ids = ["appearance-accent-color", "accent-panel", "accent-sv", "accent-sv-thumb", "accent-hue", "accent-hex", "accent-preview", "accent-note", "appearance-accent-custom"];
   const els = Object.fromEntries(ids.map((id) => [id, make()]));
   const radios = ["pink", "custom"].map((value) => make({ value, checked: false, type: "radio" }));
   let ready;
