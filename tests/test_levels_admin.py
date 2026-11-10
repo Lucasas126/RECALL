@@ -189,22 +189,22 @@ class RemovedMigrationTests(LevelAdminBase):
 
 
 class GuideTemplateTests(LevelAdminBase):
-    def test_guide_needs_admin_because_of_the_local_backend(self) -> None:
+    def test_guide_works_for_an_operator_user(self) -> None:
         self.set_max("operator")
+        code, out, err = self.run_cli(["agent", "create", "--user", "user-a", "--id", "guide", "--from-template", "guide"])
+        self.assertEqual((code, err), (0, ""), out)
+        self.assertEqual(load_agent_config("user-a", "guide").level.label, "operator")
+        self.assertNotIn("terminal_backends", self.read("user-a/user.yaml"))
+
+    def test_guide_is_refused_below_operator(self) -> None:
+        self.set_max("collaborator")
         before = self.read("user-a/user.yaml")
         code, out, err = self.run_cli(["agent", "create", "--user", "user-a", "--id", "guide", "--from-template", "guide"])
         self.assertEqual(code, 1, out)
-        self.assertIn("local terminal backend", err)
-        self.assertIn("'admin'", err)
         self.assertIn("'operator'", err)
+        self.assertIn("'collaborator'", err)
         self.assertEqual(self.read("user-a/user.yaml"), before)
         self.assertFalse((self.config_dir / "user-a" / "agents" / "guide.yaml").exists())
-
-    def test_guide_works_for_an_admin(self) -> None:
-        code, out, err = self.run_cli(["agent", "create", "--user", "user-a", "--id", "guide", "--from-template", "guide"])
-        self.assertEqual((code, err), (0, ""), out)
-        self.assertIs(load_agent_config("user-a", "guide").level, None)
-        self.assertIn("local", self.yaml_of("user-a/user.yaml")["terminal_backends"])
 
 
 class ExampleConfigTests(unittest.TestCase):

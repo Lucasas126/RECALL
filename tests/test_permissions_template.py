@@ -31,14 +31,14 @@ class TemplateTests(unittest.TestCase):
         self.assertNotIn("terminal", config.chat_config.tool_groups)
         self.assertNotIn("web", config.chat_config.tool_groups)
         self.assertIsNone(config.terminal)
-        self.assertFalse(chosen.needs_backend)
         self.assertEqual(chosen.min_level, Level.OPERATOR)
 
-    def test_the_guide_template_is_unchanged(self) -> None:
+    def test_the_guide_template_is_an_operator_without_terminal(self) -> None:
         guide = templates.templates()["guide"]
-        self.assertTrue(guide.needs_backend)
-        self.assertIsNone(guide.min_level)
-        self.assertEqual(guide.config["chat_config"]["tool_groups"], ["memory_read", "memory_edit", "web", "self", "terminal"])
+        self.assertEqual(guide.min_level, Level.OPERATOR)
+        self.assertEqual(guide.config["level"], "operator")
+        self.assertEqual(guide.config["chat_config"]["tool_groups"], ["memory_read", "memory_edit", "web", "self", "agents", "permissions"])
+        self.assertNotIn("terminal", guide.config)
 
     def test_soul_is_short_english_and_names_real_tools(self) -> None:
         soul = templates.templates()[NAME].soul

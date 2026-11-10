@@ -100,15 +100,14 @@ class AgentCliTests(AdminFixture):
         soul = SourceRegistry.for_agent("user-a", "notes", data_dir=self.data_dir).agent_files().soul()
         self.assertIn("SOUL", soul)
 
-    def test_create_guide_adds_backend_soul_and_terminal_block(self) -> None:
+    def test_create_guide_gives_the_agents_groups_soul_and_no_terminal(self) -> None:
         code, out, err = self.run_cli(["agent", "create", "--user", "user-a", "--id", "guide", "--from-template", "guide"])
         self.assertEqual((code, err), (0, ""), out)
         config = load_agent_config("user-a", "guide")
         self.assertEqual(config.name, "Guide")
-        self.assertEqual(config.chat_config.tool_groups, ["memory_read", "memory_edit", "web", "self", "terminal"])
-        self.assertEqual(config.terminal.backends["local"].approvals, "manual")
-        backend = load_user("user-a").terminal_backends["local"]
-        self.assertEqual((backend.type, backend.workdir), ("local", "/app"))
+        self.assertEqual(config.chat_config.tool_groups, ["memory_read", "memory_edit", "web", "self", "agents", "permissions"])
+        self.assertIsNone(config.terminal)
+        self.assertNotIn("terminal_backends", self.read("user-a/user.yaml"))  # no backend is added any more
         soul = SourceRegistry.for_agent("user-a", "guide", data_dir=self.data_dir).agent_files().soul()
         self.assertIn("setup guide", soul)
         self.assertEqual(load_user("user-a").agents, ["bot", "guide"])
@@ -131,13 +130,6 @@ class AgentCliTests(AdminFixture):
                 self.assertTrue(err.startswith("error:"), err)
         self.assertEqual(self.read("user-a/user.yaml"), before)
         self.assertEqual(sorted(p.name for p in (self.config_dir / "user-a" / "agents").iterdir() if p.suffix == ".yaml"), ["bot.yaml"])
-
-    def test_guide_creation_failure_restores_user_yaml(self) -> None:
-        before = self.read("user-a/user.yaml")
-        with patch.object(self.service, "create_agent", side_effect=RuntimeError("boom")):
-            with self.assertRaises(RuntimeError):
-                self.run_cli(["agent", "create", "--user", "user-a", "--id", "guide", "--from-template", "guide"])
-        self.assertEqual(self.read("user-a/user.yaml"), before)
 
     def test_set_validates_before_writing(self) -> None:
         code, out, _ = self.run_cli(["agent", "set", "--user", "user-a", "--agent", "bot", "--set", "chat_config.stream=false",
@@ -294,24 +286,18 @@ class TemplateTests(unittest.TestCase):
             if re.fullmatch(r"[a-z]+_[a-z_]+", token):
                 self.assertIn(token, tools, token)
         self.assertIn("skill_view('recall')", guide.soul)
-        self.assertIn("agent check", guide.soul)
-        self.assertIn('--set name=', guide.soul)  # display name is `name`, separate from the SOUL
-        self.assertIn(".venv", guide.soul)
+        self.assertNotIn("python -m src.admin", guide.soul)  # no admin CLI: it needs the admin level
+        self.assertIn("agent_create", guide.soul)
+        self.assertIn("administrator", guide.soul)
         for page in ("recipes", "admin-cli", "agent-config"):
             text = (Path(__file__).resolve().parents[1] / "src" / "knowledge" / "recall" / "references" / f"{page}.md").read_text(encoding="utf-8")
             self.assertIn("DISPLAY NAME", text, page)
-        for command in re.findall(r"python -m src\.admin ([a-z-]+(?: [a-z-]+)?)", guide.soul):
-            head = command.split()[0]
-            self.assertIn(head, {"agent", "user", "secret", "set-secret", "set-password", "create-user"}, command)
 
     def test_guide_config_is_valid_and_uses_known_groups(self) -> None:
         config, _, chosen = templates.build("guide", "guide", "Guide")
-        self.assertTrue(chosen.needs_backend)
-        self.assertEqual(config.chat_config.tool_groups, ["memory_read", "memory_edit", "web", "self", "terminal"])
+        self.assertIsNone(config.terminal)
+        self.assertEqual(config.chat_config.tool_groups, ["memory_read", "memory_edit", "web", "self", "agents", "permissions"])
         self.assertTrue(set(config.chat_config.tool_groups) <= TOOL_GROUP_IDS)
-        self.assertEqual(list(config.terminal.backends), [templates.GUIDE_BACKEND])
-        self.assertEqual(config.terminal.backends["local"].workdir, "/app")
-        self.assertEqual(config.terminal.backends["local"].approvals, "manual")
         with self.assertRaises(ValueError):
             templates.build("nope", "x", "X")
 

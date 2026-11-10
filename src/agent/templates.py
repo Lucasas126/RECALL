@@ -1,4 +1,4 @@
-"""Agent templates for `python -m src.admin agent create --from-template`: a config plus a starting SOUL.md."""
+"""Agent templates (`python -m src.admin agent create --from-template` and the `agent_create` tool): a config plus a starting SOUL.md."""
 
 from __future__ import annotations
 
@@ -9,10 +9,6 @@ from src.agent.default_soul import default_soul
 from src.config.levels import Level
 from src.config.models import AgentConfig
 
-GUIDE_BACKEND = "local"  # the user backend the guide's terminal block points at
-GUIDE_BACKEND_DEFINITION = {
-    "type": "local", "workdir": "/app", "description": "RECALL container: the admin CLI and the config folders",
-}
 SOUL_MAX_CHARS = 2000
 
 
@@ -22,7 +18,6 @@ class AgentTemplate:
     description: str
     config: dict  # AgentConfig fields except id and name
     soul: str
-    needs_backend: bool = False  # the user must define the `local` terminal backend
     min_level: Level | None = None  # the lowest `max_level` a user needs for this template
     display_name: str = ""  # name given to the agent when none is chosen (default: the agent id)
 
@@ -40,14 +35,14 @@ def templates() -> dict[str, AgentTemplate]:
         "default": AgentTemplate("default", "a plain agent with the default SOUL", {}, default_soul()),
         "guide": AgentTemplate(
             "guide",
-            "setup guide: administers RECALL through the terminal group and the admin CLI",
+            "setup guide: explains RECALL and, with your approval, creates and adjusts your agents and their permissions (no terminal)",
             {
                 "description": "Guides the user through configuring RECALL; can create and change agents.",
-                "chat_config": {"tool_groups": ["memory_read", "memory_edit", "web", "self", "terminal"]},
-                "terminal": {"backends": {GUIDE_BACKEND: {"workdir": "/app", "approvals": "manual"}}},
+                "level": "operator",
+                "chat_config": {"tool_groups": ["memory_read", "memory_edit", "web", "self", "agents", "permissions"]},
             },
             _guide_soul(),
-            needs_backend=True, display_name="Guide",
+            min_level=Level.OPERATOR, display_name="Guide",
         ),
         "permission-manager": AgentTemplate(
             "permission-manager",
