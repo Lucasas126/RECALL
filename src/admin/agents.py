@@ -7,6 +7,7 @@
     python -m src.admin agent rename --user U --agent A --new-id B [--name N]
     python -m src.admin agent delete --user U --agent A --yes
     python -m src.admin agent check [--user U]      (prints each agent's effective level)
+    python -m src.admin agent rules --user U --agent A [--clear]   (list the agent's approval rules, or remove them all)
     python -m src.admin user show --user U
     python -m src.admin user set --user U --set path=value [--set ...]
 
@@ -341,6 +342,33 @@ def agent_delete(service, user_id: str, agent_id: str, *, yes: bool) -> int:
     return 0
 
 
+def _rule_line(entry: dict) -> str:
+    rule = entry["rule"]
+    target = rule.get("command") or rule.get("path") or "(everything)"
+    where = f" on {rule['backend']}" if rule.get("backend") else ""
+    tool = rule.get("tool", "any")
+    tags = [name for name, on in (("exact", rule.get("exact")), ("learned", entry["learned"])) if on]
+    return f"  [{entry['index']}] {rule['verdict']} {tool}: {target}{where}" + (f"  ({', '.join(tags)})" if tags else "")
+
+
+def agent_rules(service, user_id: str, agent_id: str, *, clear: bool) -> int:
+    """List the agent's own approval rules, or remove all of them (`--clear`: back to the installation and user defaults)."""
+    _require_user(user_id)
+    if clear:
+        before = len(service.list_approval_rules(user_id, agent_id))
+        service.clear_approval_rules(user_id, agent_id, actor="admin")
+        print(f"Removed {before} approval rule(s) of agent '{agent_id}' of '{user_id}'. Applies on the next message.")
+        return 0
+    rules = service.list_approval_rules(user_id, agent_id)
+    if not rules:
+        print(f"Agent '{agent_id}' of '{user_id}' has no approval rules of its own.")
+        return 0
+    print(f"Approval rules of agent '{agent_id}' of '{user_id}' (the agent layer; user and installation rules are not shown):")
+    for entry in rules:
+        print(_rule_line(entry))
+    return 0
+
+
 # ------------------------------------------------------------------ check
 
 
@@ -547,6 +575,8 @@ def add_parsers(sub) -> None:
     rename.add_argument("--name", help="also set a new display name")
     delete = with_user(asub.add_parser("delete", help="delete an agent's configuration (data kept)"), True)
     delete.add_argument("--yes", action="store_true", help="confirm the deletion")
+    rules = with_user(asub.add_parser("rules", help="list the agent's own approval rules, or remove them all"), True)
+    rules.add_argument("--clear", action="store_true", help="remove every approval rule of the agent (audited)")
     check = asub.add_parser("check", help="load every user and agent with the real loader; exit 1 on errors")
     check.add_argument("--user", help="only this user")
 
@@ -580,6 +610,8 @@ def run(args, service=None) -> int:
                                 assignments=args.sets)
         if command == "set":
             return agent_set(service, args.user, args.agent, args.sets)
+        if command == "rules":
+            return agent_rules(service, args.user, args.agent, clear=args.clear)
         if command == "rename":
             return agent_rename(service, args.user, args.agent, args.new_id, args.name)
         return agent_delete(service, args.user, args.agent, yes=args.yes)

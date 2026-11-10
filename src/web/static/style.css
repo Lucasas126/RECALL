@@ -803,6 +803,12 @@ input[type="checkbox"]:disabled { opacity: .5; cursor: not-allowed; }
 .terminal-backend { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
 .terminal-backend-details { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
 .terminal-backend-details[hidden] { display: none; }
+.approval-rules { display: flex; flex-direction: column; gap: 6px; }
+.approval-rules[hidden] { display: none; }
+.approval-rules-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.approval-rules-list li { display: flex; align-items: center; gap: 8px; justify-content: space-between; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; }
+.approval-rule-text { font: 13px/1.4 var(--mono); overflow-wrap: anywhere; }
+.approval-rules > button { align-self: flex-start; }
 .approval-backend { padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--raised); font-size: .8em; }
 select.warning { border-color: var(--warn); color: var(--warn); }
 
