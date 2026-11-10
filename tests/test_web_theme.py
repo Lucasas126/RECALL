@@ -156,11 +156,12 @@ class AccentContrastTests(unittest.TestCase):
         self.assertNotRegex(CSS, r"::placeholder\s*\{[^}]*opacity:\s*0?\.\d")
         self.assertNotRegex(CSS, r"font-size:\s*(?:10|[0-9])px")
 
-    def test_login_inputs_have_accessible_names_not_placeholders(self) -> None:
+    def test_login_inputs_have_accessible_names_and_placeholders(self) -> None:
         login = HTML[HTML.index('<section id="login"'):HTML.index("</section>", HTML.index('<section id="login"'))]
-        self.assertNotIn("placeholder=", login)
-        self.assertIn('id="login-user" aria-label="User"', login)
-        self.assertIn('id="login-password" type="password" aria-label="Password"', login)
+        self.assertIn('id="login-user" placeholder="User" aria-label="User"', login)
+        self.assertIn('id="login-password" type="password" placeholder="Password" aria-label="Password"', login)
+        self.assertIn('<label for="login-user">User</label>', login)      # the label stays for screen readers
+        self.assertIn('<label for="login-password">Password</label>', login)
 
     def test_assistant_messages_are_an_open_block(self) -> None:
         self.assertRegex(CSS, r"\.msg\.assistant \{[^}]*border: 0;[^}]*background: none;")
@@ -225,8 +226,9 @@ class ArtSlotTests(unittest.TestCase):
             self.assertNotIn("<script", svg.lower())
             self.assertNotRegex(svg.replace('xmlns="http://www.w3.org/2000/svg"', ""), r"https?://")
         tokens = declarations(block(":root", many=True))
-        for slot in ("column", "arcade", "login-arch", "capital", "plinth"):
-            self.assertIn(f"/static/art/{slot}.svg", tokens[f"--art-{slot}"])
+        for slot, extension in (("column", "svg"), ("arcade", "svg"), ("login-arch", "svg"), ("capital", "png"), ("plinth", "svg")):
+            self.assertIn(f"/static/art/{slot}.{extension}", tokens[f"--art-{slot}"])
+        self.assertTrue((STATIC / "art" / "capital.png").is_file())
         self.assertTrue((STATIC / "art" / "README.md").is_file())
 
     def test_art_is_only_referenced_through_the_custom_properties(self) -> None:
@@ -255,8 +257,8 @@ class ArtSlotTests(unittest.TestCase):
         self.assertNotIn("crest", login.lower())
         self.assertNotIn("cross", login.lower())
         self.assertLess(login.index("login-arch"), login.index("art-capital"))
-        self.assertLess(login.index("art-capital"), login.index("art-plinth"))
-        self.assertLess(login.index("art-plinth"), login.index("<h1>RECALL</h1>"))
+        self.assertLess(login.index("art-capital"), login.index("<h1>RECALL</h1>"))
+        self.assertNotIn("art-plinth", login)                              # the logo floats above the capital now
 
 
 class StaticServingTests(unittest.TestCase):
