@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from src.config.levels import check_agent_level
 from src.config.models import AgentConfig, UserConfig
+from src.terminal.rules import ApprovalRule, ApprovalRuleList, rule_key
 from src.utils.files import atomic_write_text, exclusive_file_lock
 from src.utils.i18n import UserMessageError
 
@@ -24,6 +25,10 @@ class AgentConfigError(UserMessageError, ValueError):
 
 class AgentModelError(AgentConfigError):
     """An agent's default chat model cannot be used under the user's policy."""
+
+
+class UnknownApprovalRule(AgentConfigError):
+    """No agent approval rule at that position."""
 
 
 class AgentConflict(AgentConfigError):
@@ -131,8 +136,14 @@ class AgentStore:
         with self._locked(user_id):
             user = self._read_user(user_id)
             old_path = self.path_for(user_id, agent_id)
-            if config.level is None:  # callers that do not know the field (the web form) must not drop the stored level
-                config = config.model_copy(update={"level": self._read(old_path).level})
+            if config.level is None or config.approval_rules is None:
+                # callers that do not know these fields (the web form) must not drop the stored level or the approval
+                # rules (hand-written ones and the ones learned from approval cards); `approval_rules: {rules: []}` clears
+                stored = self._read(old_path)
+                config = config.model_copy(update={
+                    "level": stored.level if config.level is None else config.level,
+                    "approval_rules": stored.approval_rules if config.approval_rules is None else config.approval_rules,
+                })
             self._check_level(user, config)
             renamed = config.id != agent_id
             new_path = old_path
@@ -177,6 +188,75 @@ class AgentStore:
                 raise AgentConfigError(
                     "Could not delete the agent file '{file}'; check file permissions.", file=path.name,
                 ) from exc
+
+    # ------------------------------------------------------------------ agent approval rules
+
+    def approval_rules(self, user_id: str, agent_id: str) -> list[ApprovalRule]:
+        """The rules of the agent's own `approval_rules` list, in order (empty when it has none)."""
+        rules = self.load(user_id, agent_id).approval_rules
+        return list(rules.rules) if rules is not None else []
+
+    def add_approval_rules(self, user_id: str, agent_id: str, rules: list[ApprovalRule]) -> list[ApprovalRule]:
+        """Append rules that the agent's list does not hold yet; returns the ones really added.
+
+        Same path as an edit from the web form: under the user's lock, the whole agent is validated again, level and
+        blanket-allow guardrail included (`check_agent_level`). Nothing is written when anything fails.
+        """
+        with self._locked(user_id):
+            user = self._read_user(user_id)
+            path = self.path_for(user_id, agent_id)
+            config = self._read(path)
+            current = config.approval_rules or ApprovalRuleList()
+            known = {rule_key(rule) for rule in current.rules}
+            added: list[ApprovalRule] = []
+            for rule in rules:
+                if rule_key(rule) not in known:
+                    known.add(rule_key(rule))
+                    added.append(rule)
+            if not added:
+                return []
+            updated = self._with_rules(config, current, [*current.rules, *added])
+            self._check_level(user, updated)
+            self._write_agent(path, updated)
+            return added
+
+    def remove_approval_rule(self, user_id: str, agent_id: str, index: int) -> ApprovalRule:
+        """Remove the rule at `index` of the agent's list (a removal can only narrow what is allowed, but may lift a deny)."""
+        with self._locked(user_id):
+            self._read_user(user_id)
+            path = self.path_for(user_id, agent_id)
+            config = self._read(path)
+            current = config.approval_rules or ApprovalRuleList()
+            if not 0 <= index < len(current.rules):
+                raise UnknownApprovalRule("There is no approval rule number {index} on this agent.", index=index)
+            rules = list(current.rules)
+            removed = rules.pop(index)
+            self._write_agent(path, self._with_rules(config, current, rules))
+            return removed
+
+    def clear_approval_rules(self, user_id: str, agent_id: str) -> list[ApprovalRule]:
+        """Remove every rule of the agent's list (its `default`, if any, stays); returns what was removed."""
+        with self._locked(user_id):
+            self._read_user(user_id)
+            path = self.path_for(user_id, agent_id)
+            config = self._read(path)
+            current = config.approval_rules or ApprovalRuleList()
+            if not current.rules:
+                return []
+            self._write_agent(path, self._with_rules(config, current, []))
+            return list(current.rules)
+
+    @staticmethod
+    def _with_rules(config: AgentConfig, current: ApprovalRuleList, rules: list[ApprovalRule]) -> AgentConfig:
+        try:
+            replaced = ApprovalRuleList(default=current.default, rules=rules)
+        except ValidationError as exc:
+            raise AgentConfigError(
+                "Invalid approval rules: {details}", details="; ".join(error["msg"] for error in exc.errors()),
+            ) from exc
+        if not replaced.rules and replaced.default is None:
+            replaced = None
+        return config.model_copy(update={"approval_rules": replaced})
 
     # ------------------------------------------------------------------ helpers
 

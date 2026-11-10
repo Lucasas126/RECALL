@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.middleware.sessions import SessionMiddleware
 
-from src.config.agents import AgentConflict
+from src.config.agents import AgentConflict, UnknownApprovalRule
 from src.config.favorites import FavoriteModelId, FavoritesError
 from src.config.models import AgentConfig, DreamConfig, ReasoningEffort
 from src.core.sources.agent_files import MemoryTarget
@@ -96,6 +96,7 @@ class TextIn(BaseModel):
 
 class ApprovalIn(BaseModel):
     decision: Literal["approve", "deny"]
+    scope: Literal["once", "session", "agent"] = "once"  # what an approval is remembered for; ignored for a deny
 
 
 class TaskSteerIn(BaseModel):
@@ -195,6 +196,7 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     @app.exception_handler(UnknownChat)
     @app.exception_handler(UnknownTask)
     @app.exception_handler(ApprovalNotFound)
+    @app.exception_handler(UnknownApprovalRule)
     @app.exception_handler(UnknownDreamSession)
     def _not_found(request: Request, exc: ServiceError):
         return localized_error(request, 404, exc)
@@ -527,7 +529,23 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     def resolve_approval(
         agent_id: str, chat_id: str, approval_id: str, body: ApprovalIn, user_id: str = Depends(current_user),
     ):
-        return service.resolve_approval(user_id, agent_id, chat_id, approval_id, body.decision)
+        return service.resolve_approval(user_id, agent_id, chat_id, approval_id, body.decision, body.scope)
+
+    @app.get("/api/agents/{agent_id}/approval-rules")
+    def list_approval_rules(agent_id: str, user_id: str = Depends(current_user)):
+        return service.list_approval_rules(user_id, agent_id)
+
+    @app.delete("/api/agents/{agent_id}/approval-rules")
+    def clear_approval_rules(agent_id: str, user_id: str = Depends(current_user)):
+        return service.clear_approval_rules(user_id, agent_id)
+
+    @app.post("/api/agents/{agent_id}/approval-rules/reset")
+    def reset_approval_rules(agent_id: str, user_id: str = Depends(current_user)):
+        return service.clear_approval_rules(user_id, agent_id)
+
+    @app.delete("/api/agents/{agent_id}/approval-rules/{index}")
+    def remove_approval_rule(agent_id: str, index: int, user_id: str = Depends(current_user)):
+        return service.remove_approval_rule(user_id, agent_id, index)
 
     # ------------------------------------------------------------------ subagent tasks
 

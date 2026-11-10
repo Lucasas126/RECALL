@@ -20,7 +20,7 @@ from src.agent.agent import Agent, embeddings_provider, main_provider, model_pro
 from src.agent.tools import chat_folder_options
 from src.agent.dream import DEFAULT_DREAM_PROMPT
 from src.agent.default_soul import default_soul
-from src.config.agents import AgentStore
+from src.config.agents import AgentConfigError, AgentStore
 from src.config.errors import describe_config_error
 from src.config.levels import check_agent_level, effective_agent_level
 from src.config.favorites import ModelFavorites
@@ -66,11 +66,13 @@ from src.service.dream import (
 from src.agent.toolsets.delegate import TaskError
 from src.service.tasks import TaskManager
 from src.terminal.approvals import ApprovalBroker, ApprovalNotFound
+from src.terminal.audit import audit_path, audit_writable, write_rule_audit
+from src.terminal.rules import LEARNED_REASON, ApprovalRule
 from src.terminal.context import RunContext, run_context
 from src.utils.logger import get_logger
 from src.utils.media import VideoDecomposition, decompose_video
 from src.utils.pdf import extract_pdf_text, run_tesseract
-from src.utils.i18n import InputError, UserMessageError, message
+from src.utils.i18n import InputError, UserMessageError, error_message, message
 from src.web.auth import verify_password
 
 logger = get_logger("service")
@@ -1283,6 +1285,7 @@ class ChatService:
                 raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from e
             with slot.state:
                 slot.agents.pop(chat_id, None)
+        self._approvals.forget_chat(user_id, agent_id, chat_id)
         try:
             self._agent_index(user_id, agent_id).forget_chat(chat_id)
         except Exception:  # the chat is gone; a stale index entry is dropped by the next reconcile anyway
@@ -1490,13 +1493,67 @@ class ChatService:
         except UnknownChat:
             return None, ""
 
-    def resolve_approval(self, user_id: str, agent_id: str, chat_id: str, approval_id: str, decision: str) -> dict:
-        """Approve or deny a pending approval of the chat; raises ApprovalNotFound / ApprovalForbidden."""
+    def resolve_approval(
+        self, user_id: str, agent_id: str, chat_id: str, approval_id: str, decision: str, scope: str = "once",
+    ) -> dict:
+        """Approve or deny a pending approval of the chat; raises ApprovalNotFound / ApprovalForbidden.
+
+        `scope` (approve only): `once`, `session` (this exact action, until the chat ends) or `agent` (a narrow allow
+        rule in the agent's configuration). When the agent rule cannot be saved the action is still approved once and
+        the answer carries `error`. The answer is `{status, scope}` (`scope` is what was really granted; `deny` for a refusal).
+        """
         self._owned_agent(user_id, agent_id)
         pending = self._approvals.get(approval_id)
         if pending is not None and (pending["agent_id"], pending["chat_id"]) != (agent_id, chat_id):
             raise ApprovalNotFound("unknown or expired approval: {approval_id}", approval_id=approval_id)
-        return {"status": self._approvals.resolve(approval_id, user_id, decision)}
+        answer = self._approvals.answer(approval_id, user_id, decision, scope)
+        result = {"status": answer.status, "scope": answer.scope}
+        if answer.error is not None:
+            result["error"] = error_message(self.language(user_id), answer.error)
+        return result
+
+    # ------------------------------------------------------------------ the agent's approval rules (learned by 'always for this agent')
+
+    def list_approval_rules(self, user_id: str, agent_id: str) -> list[dict]:
+        """The rules of the agent's own `approval_rules` list: `{index, learned, rule}` each."""
+        self._owned_agent(user_id, agent_id)
+        return [
+            {"index": index, "learned": rule.reason == LEARNED_REASON, "rule": rule.model_dump(mode="json", exclude_none=True)}
+            for index, rule in enumerate(self._agents.approval_rules(user_id, agent_id))
+        ]
+
+    def remove_approval_rule(self, user_id: str, agent_id: str, index: int, *, actor: str = "user") -> list[dict]:
+        """Remove one rule of the agent's list by position; returns the list that remains."""
+        self._owned_agent(user_id, agent_id)
+        removed = self._agents.remove_approval_rule(user_id, agent_id, index)
+        self._audit_rules(user_id, agent_id, "remove", [removed], actor=actor, index=index)
+        return self.list_approval_rules(user_id, agent_id)
+
+    def clear_approval_rules(self, user_id: str, agent_id: str, *, actor: str = "user") -> list[dict]:
+        """Reset to defaults: remove every rule of the agent's list (the layer `default`, if set, stays)."""
+        self._owned_agent(user_id, agent_id)
+        removed = self._agents.clear_approval_rules(user_id, agent_id)
+        self._audit_rules(user_id, agent_id, "remove", removed, actor=actor, via="reset")
+        return self.list_approval_rules(user_id, agent_id)
+
+    def learn_approval_rules(self, user_id: str, agent_id: str, rules: list[ApprovalRule], *, chat_id: str = "") -> list[ApprovalRule]:
+        """Save narrow allow rules from an approval card to the agent (validated like a form edit, audited).
+
+        Raises when the audit trail cannot be written or when the agent would no longer be valid (the guardrail);
+        nothing is saved then.
+        """
+        self._owned_agent(user_id, agent_id)
+        if not audit_writable(audit_path(DATA_DIR, user_id, agent_id)):
+            raise AgentConfigError("The audit trail of this agent cannot be written, so no approval rule was saved.")
+        added = self._agents.add_approval_rules(user_id, agent_id, rules)
+        self._audit_rules(user_id, agent_id, "add", added, actor="user", chat=chat_id)
+        return added
+
+    def _audit_rules(self, user_id: str, agent_id: str, action: str, rules: list[ApprovalRule], *, actor: str, **extra) -> None:
+        path = audit_path(DATA_DIR, user_id, agent_id)
+        for rule in rules:
+            write_rule_audit(path, actor=actor, action=action, user=user_id, agent=agent_id,
+                             rule=rule.model_dump(mode="json", exclude_none=True), **extra)
 
     def send_system(
         self, user_id: str, agent_id: str, chat_id: str, text: str, *, source: str, meta: Optional[dict] = None,
@@ -1803,6 +1860,7 @@ class ChatService:
                 user_id, agent_id, chat_id, self._approvals,
                 lambda kind, data, run=run: run.events.put(ChatEvent(kind, data=data, generation_id=run.generation_id)),
                 run.cancellation, tasks=self._tasks, interactive=True,
+                learn_rules=lambda target, rules, chat=chat_id: self.learn_approval_rules(user_id, target, rules, chat_id=chat),
             )
             if (mark := self._conversations(user_id, agent_id).task_mark(chat_id)) is not None:
                 self._tasks.bind_worker(context, mark)  # a worker's approvals are asked in its parent's chat
