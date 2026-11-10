@@ -103,10 +103,10 @@ terminal:
   backends:                                # 1+ keys of the user's terminal_backends, each with its own policy
     sandbox:
       workdir: ~/workspace                 # default directory on that backend (default ~, the login user's home)
-      approvals: smart                     # manual | smart | off (default manual)
+      approvals: smart                     # shorthand: manual | smart | off (quote it: bare off is a YAML boolean); see approval rules
     pc:
       workdir: ~
-      approvals: manual                    # a real machine: keep it manual
+      approvals: manual                    # a real machine: keep it manual (off here needs level admin)
       # timeout_seconds: 120               # optional per-backend override
   default_backend: sandbox                 # required when more than one; used when a call names no backend
   timeout_seconds: 60                      # default command timeout, 1-600
@@ -134,11 +134,67 @@ The tools are never built in [disposable chats](memory.md#disposable-chats).
 
 ## approvals
 
+Every action is decided in this order: (1) the fixed floor, [hardline](#hardline-and-dangerous) commands and
+[protected paths](#protected-paths-local-backend), refused in every case; (2) the [approval rules](#approval-rules); (3) the person,
+when the verdict is `ask`.
+
+The per-backend `approvals` of the agent file is a shorthand for that backend:
+
 | mode | what asks for approval |
 | --- | --- |
-| `manual` (default) | every command and every file operation, reads included |
+| `manual` | every command and every file operation, reads included (the default when nothing else is configured) |
 | `smart` | only the *dangerous* actions listed below |
-| `off` | nothing asks while a person is attached to the chat; the hardline (and, on a local backend, the [protected paths](#protected-paths-local-backend)) still applies. When nobody is attached it is **not** a free pass: see [unattended runs](#unattended-runs) |
+| `off` | nothing asks while a person is attached to the chat; the floor still applies. When nobody is attached it is **not** a free pass: see [unattended runs](#unattended-runs). On a real machine (`kind: machine`, or `local`) it needs an `admin` agent |
+
+## approval rules
+
+Rules replace the fixed modes as the decision source. There are three lists, from least to most specific: installation
+(`approval_rules` in [settings.yaml](../reference/settings-yaml.md#approval_rules)), user (`approval_rules` in
+[user.yaml](../reference/user-yaml.md#approval-rules)) and agent (`approval_rules` in the [agent file](../reference/agent-yaml.md)).
+Design: [permissions](../architecture/permissions.md#approval-rules).
+
+```yaml
+approval_rules:
+  default: ask                          # optional: allow | ask | deny for what no rule covers
+  rules:
+    - {verdict: allow, tool: terminal, backend_kind: sandbox, command: "git status"}
+    - {verdict: allow, tool: file_read, backend_kind: sandbox, path: "~/workspace/*"}
+    - {verdict: ask,   tool: terminal, dangerous: true, reason: destructive command}
+    - {verdict: deny,  tool: terminal, command: "git push*", id: no-push}
+```
+
+| field | meaning |
+| --- | --- |
+| `verdict` | `allow`, `ask` or `deny` (required) |
+| `tool` | `terminal` (the shell command), `file_read` (`sandbox_read`, `sandbox_search`), `file_write` (`sandbox_write`, `sandbox_patch`) or `any` (default) |
+| `command` | for `terminal` or `any`. A plain text is a word prefix (`git status` matches `git status -s`, not `git statusx`); with `*`, `?` or `[` it is a glob over the whole segment |
+| `path` | for file tools or `any`. A glob over the resolved target (relative paths hang from the backend's workdir; `~` stays as typed, so write `~/workspace/*`) |
+| `backend` | backend name, glob allowed (`lab*`) |
+| `backend_kind` | `sandbox`, `machine` or `local` (see [kind](../reference/user-yaml.md#terminal-backends)) |
+| `dangerous` | `true` matches what the [dangerous list](#hardline-and-dangerous) flags, `false` what it does not |
+| `id`, `reason` | optional: a stable name for the audit trail, and a short text for the approval card |
+
+All the fields you set must match. Unknown keys and combinations that cannot match (`command` with `file_read`, `path` with `terminal`) are
+refused when the file loads.
+
+**Resolution.** Every matching rule of every layer is collected and the worst verdict wins: deny beats ask beats allow, so a
+more specific layer cannot lift a deny. When none matches, the backend's `approvals` applies if the agent file sets it, else the `default`
+of the most specific layer that has one (agent, user, installation), else `ask`. A rule that matches still applies on top of a shorthand:
+`deny` and `ask` rules beat `smart`/`off`'s allow, and an `allow` rule lifts `manual` for the actions it names.
+
+**Commands are judged segment by segment.** `ls && rm x` is two segments (`&&`, `||`, `;`, `|`, `&`, newlines, subshells, `$(...)`,
+backticks and the script of `bash -c` count); each is judged and the worst verdict wins. A redirection is judged as its own segment
+(`> out`), so allowing `cat` does not allow `cat a > b`. `sudo ls`, `env X=1 ls` or `timeout 5 ls` do not match a rule for `ls`. The
+parser is best effort; keep `ask` or `deny` rules for what matters and add an `ask` rule with `dangerous: true` next to broad allows.
+
+**Shipped behaviour.** `settings.yaml` ships `default: ask` and no rules, which reproduces `manual` exactly; it carries a commented
+example that lets agents run `ls`, `cat` and `git status` on sandbox backends without asking.
+
+**Guardrail.** Allowing everything on a real machine needs an `admin` agent. A rule that allows without a `command`, `path` or `dangerous`
+condition, a `default: allow`, or `approvals: off`, reaching a `machine` or `local` backend the agent uses, makes the agent invalid
+(the error names the rule and the backend) unless its level is `admin`. On a `kind: sandbox` backend it is allowed from `operator`.
+
+**Unattended runs.** `allow` still runs and every `ask` becomes `deny` ([below](#unattended-runs)).
 
 An approval is shown to the chat's owner while the reply waits:
 
@@ -257,7 +313,7 @@ safety net, not a security boundary: the boundary is the sandbox itself.
 
 ## unattended runs
 
-Nobody can answer when there is no attached client, so the policy never waits: with `approvals: manual` everything is denied;
+Nobody can answer when there is no attached client, so the policy never waits: every `ask` becomes a denial and `allow` runs. So with `approvals: manual` (or no rule that allows) everything is denied;
 with `smart` normal actions run and dangerous ones are denied; with `off` the behaviour is that of `smart` (dangerous actions are denied) and `sandbox_write`/`sandbox_patch` are denied too, so `off` never widens what runs unattended. The hardline and protected paths apply as always. A run counts as attended only when the chat path says so explicitly (`RunContext.interactive` defaults to `False`). The mode is
 that of the backend the call targets. The denial text tells the model so. This applies to runs without an interactive client and to dream sessions.
 
@@ -265,7 +321,7 @@ that of the backend the call targets. The denial text tells the model so. This a
 
 An agent with the `delegate` group can grant a [worker task](delegation.md#terminal-and-approvals) some of its backends (`task_start(backends=[...])`).
 For the worker those backends are always on `manual`, whatever mode the agent has for them (`off` and `smart` become `manual`, `local` included),
-and it only gets backends the agent itself has. Hardline rules, dangerous-command detection and protected paths apply unchanged. The approval card
+and it only gets backends the agent itself has. The approval rules still apply to it, so an `allow` rule lifts `manual` for the worker too. Hardline rules, dangerous-command detection and protected paths apply unchanged. The approval card
 is shown in the chat that launched the task (web card or Telegram message), labelled *Task <title> (ephemeral) wants to run:*, and answering it
 resumes the worker; the task's timeout is paused while it waits. A worker run nobody watches follows the [unattended](#unattended-runs) rules:
 `manual` and dangerous actions are denied. The audit records those commands under the agent like any other.
@@ -318,15 +374,15 @@ See the [security notes](../deployment/security.md#terminal-sandbox) before enab
 Every executed or refused action appends one JSON line (`backend` is the configured backend name) to `data/<user_id>/<agent_id>/terminal_audit.jsonl`:
 
 ```json
-{"ts": 1767225600.123, "user": "user-a", "agent": "aria", "backend": "sandbox", "tool": "terminal", "command": "ls -la", "cwd": "~/workspace", "decision": "approved", "exit_code": 0, "duration_ms": 412, "timed_out": false}
+{"ts": 1767225600.123, "user": "user-a", "agent": "aria", "backend": "sandbox", "tool": "terminal", "command": "ls -la", "cwd": "~/workspace", "decision": "approved", "exit_code": 0, "duration_ms": 412, "timed_out": false, "verdict": "normal", "layer": "user", "rule": "user:0", "rule_verdict": "ask", "approval_id": "3f9c0a1b7d2e"}
 ```
 
 The `terminal` result starts with one line telling the agent how the command was authorized (`[approved by the user]`, `[ran without approval: smart mode, normal command]` or `[approvals off]`).
 
-`decision` is one of `approved`, `approved:same-operation`, `auto:smart`, `auto:off`, `hardline`, `denied:protected`, `denied:unattended`, `denied:invalid` (NUL byte, too long, bad path),
+`decision` is one of `approved`, `approved:same-operation`, `auto:smart`, `auto:off`, `auto:rule` (allowed by a rule), `auto:default` (allowed by a layer default), `denied:rule` (denied by a rule), `hardline`, `denied:protected`, `denied:unattended`, `denied:invalid` (NUL byte, too long, bad path),
 `denied:<reason>` (`denied by user`, `timed out`, `cancelled`, `service shutdown`) or `cancelled`. The command is redacted
 for known secret formats and cut at 2000 characters; the output is not recorded. The agent's own tools cannot read or edit
-this file: the memory/palace/folder tools only reach their sources, and the sandbox tools only reach the sandbox. Records carry the `verdict` (`normal`, `dangerous`, `hardline`, `protected`) of refused and executed actions. **The audit trail fails closed:** when it cannot be written (full disk, bad permissions) the action is refused with an error instead of running unrecorded. The approval card of `sandbox_write`/`sandbox_patch` shows a truncated preview (400 characters) of the content, or of the old and new text; the preview is not written to the audit trail. Each
+this file: the memory/palace/folder tools only reach their sources, and the sandbox tools only reach the sandbox. Records carry the `verdict` (`normal`, `dangerous`, `hardline`, `protected`) of refused and executed actions, and which rule decided: `layer` (`installation`, `user`, `agent`, `builtin` when no layer defines a default, `floor` for hardline and protected), `rule` (`agent:2`, or `user:<id>` for a rule with an `id`; `approvals:smart` for the shorthand; absent when a layer default decided), `rule_verdict` (`allow`, `ask` or `deny`: what the engine said before the person answered) and, when a card was shown, its `approval_id`. The approval card shows the rule that asked in its reason. **The audit trail fails closed:** when it cannot be written (full disk, bad permissions) the action is refused with an error instead of running unrecorded. The approval card of `sandbox_write`/`sandbox_patch` shows a truncated preview (400 characters) of the content, or of the old and new text; the preview is not written to the audit trail. Each
 decision is also kept in an in-memory log of the last 50 per user.
 
 ## limits and privacy

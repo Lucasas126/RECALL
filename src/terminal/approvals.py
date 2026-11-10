@@ -42,6 +42,7 @@ class Outcome:
     approved: bool
     reason: str  # 'approved' | 'denied by user' | 'timed out' | 'cancelled' | 'service shutdown'
     by_user: bool = False
+    approval_id: str = ""  # the card that was answered; empty when nobody was asked (a cap, a shutdown)
 
     @property
     def status(self) -> str:
@@ -148,6 +149,7 @@ class ApprovalBroker:
         with self._lock:
             if item.outcome is not None:
                 return False
+            outcome.approval_id = item.id
             item.outcome = outcome
             self._pending.pop(item.id, None)
             self._closed_ids[item.id] = (item.user_id, outcome)

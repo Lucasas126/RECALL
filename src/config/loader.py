@@ -163,4 +163,6 @@ def load_agent(user_id: str, agent_id: Optional[str] = None, *, check_agent_mode
         ollama=user.ollama,
         level=level,
         max_level=max_level,
+        user_approval_rules=user.approval_rules,
+        approval_rules=agent.approval_rules,
     )

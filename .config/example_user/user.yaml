@@ -13,3 +13,15 @@ provider:
   name: openrouter
   api_key: OPENROUTER_USER_A_API_KEY
 agents: [example_agent]
+# terminal_backends:    # machines the user's agents may run commands on (docs/user-guide/terminal.md)
+#   sandbox:
+#     type: ssh
+#     kind: sandbox     # sandbox = disposable machine; machine (default) = one of your real machines
+#     host: 192.0.2.10
+#     user: agent
+#     key_file: /path/to/key
+#     known_hosts_file: /path/to/known_hosts
+# approval_rules:       # approval rules for all of this user's agents (docs/user-guide/terminal.md#approval-rules)
+#   rules:              # deny beats ask beats allow; hardline commands and protected paths are always refused first
+#     - {verdict: allow, tool: terminal, backend_kind: sandbox, command: "git status"}
+#     - {verdict: deny, tool: terminal, command: "git push*"}

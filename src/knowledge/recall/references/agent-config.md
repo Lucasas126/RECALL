@@ -1,13 +1,13 @@
 # Configuration fields
 
-Unknown keys are rejected in the agent yaml and most blocks (not in `chat_config`). The user edits these files or uses the Agents tab. Only an agent with the `terminal` group and a local backend (the setup guide) changes them with `python -m src.admin` (`references/admin-cli.md`). Keys use dotted names below.
+Unknown keys are rejected in the agent yaml and most blocks (not in `chat_config`). The user edits these files or uses the Agents tab; only the setup guide (terminal group, local backend) uses `python -m src.admin` (`references/admin-cli.md`). Keys use dotted names below.
 
 ## When a change takes effect
 
 | Change | Applies |
 | --- | --- |
 | Agent yaml saved from the Agents tab | next message (cached runtime is rebuilt); refused with 409 while a reply is active or queued |
-| Agent yaml edited by hand or with `python -m src.admin agent set` (another process) | next message: the file is compared with what the cached runtime was built from and rebuilt between replies; an INVALID file keeps the last good config (error logged, notice in the chat) |
+| Agent yaml edited by hand or with `python -m src.admin agent set` | next message (rebuilt between replies); an INVALID file keeps the last good config (error logged, notice in the chat) |
 | `user.yaml` (`user set`, by hand) | same: next message |
 | `settings.yaml`, `.env`, `RECALL_*` variables | restart web and Telegram |
 | a key stored with `set-secret` | next message (`references/admin-cli.md`) |
@@ -26,7 +26,8 @@ Unknown keys are rejected in the agent yaml and most blocks (not in `chat_config
 | `folders` | up to 20 user folders |
 | `terminal` | block below; needed by the `terminal` tool group |
 | `delegation` | block below; the `delegate` tool group, which gets the defaults when this is omitted |
-| `level` | `minimal`, `reader`, `assistant`, `collaborator`, `operator` or `admin`; between what its tools need and the owner's `max_level`, else invalid (the error names the service). Unset = what its tools need; kept when saved without it. Enforced at build and call |
+| `approval_rules` | agent layer of approval rules `{default, rules}` (`references/terminal-and-approvals.md`) |
+| `level` | `minimal`, `reader`, `assistant`, `collaborator`, `operator` or `admin`; between what its tools need and the owner's `max_level`, else invalid (the error names the service). Unset = what its tools need. Enforced at build and call |
 
 ### `chat_config` (Agents tab: Basic, Basic > Advanced and Tools)
 
@@ -83,7 +84,7 @@ MCP entry fields: `tools` (list; omitted means all of the server's tools), `read
 | --- | --- |
 | `terminal.backends` | map of backend name (a key of the user's `terminal_backends`) to its policy |
 | `workdir` | per backend, directory inside it (`~`) |
-| `approvals` | per backend: `manual` (default), `smart`, `off` |
+| `approvals` | per backend shorthand: `manual` (default), `smart`, `off` (quote it: bare `off` is a YAML boolean); `off` on a real machine needs level `admin` |
 | `timeout_seconds` | agent-wide command timeout 1-600 (60); a backend may override it |
 | `terminal.default_backend` | required with more than one backend |
 | `terminal.max_output_chars` | 500-200000 (20000) |
@@ -113,10 +114,11 @@ MCP entry fields: `tools` (list; omitted means all of the server's tools), `read
 | `models` | defaults `chat`, `stt`, `embeddings` |
 | `openrouter`, `ollama`, `claude_subscription` | provider options |
 | `terminal_backends` | named machines agents may use |
+| `approval_rules` | user layer of approval rules (`{default, rules}`) |
 | `max_level` | required; highest agent `level`; only an admin sets it (`user set`) |
 
-Provider options: `ollama.host`; `claude_subscription` takes `claude_config_dir` (inside the user's own config folder), `command` (a bare executable name; absolute paths are admin-only via `settings.yaml` or `RECALL_CLAUDE_COMMAND`), `claude_code_telemetry`, `timeout_seconds`; `openrouter.api_key` is an env var NAME.
+Provider options: `ollama.host`; `claude_subscription` takes `claude_config_dir` (inside the user's own config folder), `command` (a bare executable name), `claude_code_telemetry`, `timeout_seconds`; `openrouter.api_key` is an env var NAME.
 
-Backends (`terminal_backends.<name>`): `type` is `ssh` (`host`, `port`, `user`, `key_file`, `known_hosts_file`) or `local` (`workdir`; refused unless `terminal.allow_local` in `settings.yaml`); both take `description`.
+Backends (`terminal_backends.<name>`): `type` is `ssh` (`host`, `port`, `user`, `key_file`, `known_hosts_file`) or `local` (`workdir`; refused unless `terminal.allow_local` in `settings.yaml`); both take `description`; `ssh` also takes `kind` (`machine` default, or `sandbox` for a disposable one). `local` is its own kind.
 
-Preferences (`preferences.json`, Settings dialog and Telegram `/settings`) are separate from the yaml and apply from the next read. The Settings dialog has General (thinking, theme, accent colour and ornaments, language, default agent), Models (default LLM and speech-to-text), Chats & memory (associative matches, disposable days), Telegram (orchestrator, core agent) and Connections; a row's reset button stores nothing (null), so the setting follows the default again.
+Preferences (`preferences.json`, Settings dialog and Telegram `/settings`) are separate from the yaml and apply from the next read. The Settings dialog has General, Models, Chats & memory, Telegram and Connections; a row's reset button stores nothing (null), so the setting follows the default again.

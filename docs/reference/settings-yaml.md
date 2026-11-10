@@ -238,6 +238,21 @@ inside it. It has no effect on SSH backends.
 backend without editing the tracked file); see [environment variables](environment-variables.md). A local backend gives its agent
 the whole host: inside Docker, every user's `/app/.config` and `/app/data` ([security notes](../deployment/security.md#terminal-sandbox)).
 
+## approval_rules
+
+The installation layer of the [approval rules](../user-guide/terminal.md#approval-rules) (same shape as in `user.yaml` and the agent file):
+
+```yaml
+approval_rules:
+  default: ask   # allow | ask | deny; the shipped value reproduces the manual mode
+  rules: []      # [{verdict, tool, id, command, path, backend, backend_kind, dangerous, reason}]
+```
+
+Shipped: `default: ask` and no rules (every action asks, as with `manual`), plus a commented example that allows `ls`, `cat`, `git status`
+and file reads on `sandbox` backends. Deny beats ask beats allow across the three layers; the user and agent lists add to this one. Hardline
+commands and protected paths are refused before any rule is read. Unknown keys stop the start-up. A rule or default that allows everything on
+a `machine` or `local` backend makes every agent below `admin` that uses such a backend invalid. Edit it and restart.
+
 ## subagents
 
 Framework-wide limits of the [delegate tool group](../user-guide/delegation.md) (a worker agent in a hidden chat); every key is optional and unknown keys

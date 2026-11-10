@@ -127,6 +127,25 @@ terminal:
   max_output_chars: 20000        # ceiling for the output returned to the model
   protected_paths: []            # extra glob patterns (repo-relative or absolute) a `local` backend may never read or use; see docs/user-guide/terminal.md
 
+# Approval rules, installation layer (see docs/architecture/permissions.md and docs/user-guide/terminal.md#approval-rules).
+# Users add a layer in user.yaml and agents one in their agent file (`approval_rules:`, same shape); the verdicts of
+# every matching rule are combined (deny beats ask beats allow) and `default` of the most specific layer covers the rest.
+# Hardline commands and protected paths are refused before any rule is read; no rule can allow them.
+# Shipped behaviour: every action asks. A per-backend `approvals: manual|smart|off` in an agent still works as a
+# shorthand scoped to that backend. A rule that allows everything on a `machine` or `local` backend (no command,
+# path or dangerous condition) is only valid for admin agents.
+approval_rules:
+  default: ask
+  rules: []
+  # Example: let agents read and list things on disposable sandboxes without asking. `command` is a word prefix
+  # (`git status` also matches `git status -s`) or a glob, and is matched against EVERY segment of the command, so
+  # `ls && rm x` still asks because of `rm x`; a redirection (`ls > f`) is judged separately and still asks.
+  #   - {verdict: allow, tool: terminal, backend_kind: sandbox, command: ls}
+  #   - {verdict: allow, tool: terminal, backend_kind: sandbox, command: cat}
+  #   - {verdict: allow, tool: terminal, backend_kind: sandbox, command: git status}
+  #   - {verdict: allow, tool: file_read, backend_kind: sandbox}
+  #   - {verdict: ask, tool: terminal, dangerous: true, reason: destructive command}   # keep dangerous commands asking
+
 # Subagents (the `delegate` tool group, see docs/user-guide/delegation.md): a parent agent hands a task to a short-lived worker
 # in a hidden chat. An agent's `delegation` block can only lower these numbers. Depth is fixed at 1: a worker cannot launch tasks.
 subagents:

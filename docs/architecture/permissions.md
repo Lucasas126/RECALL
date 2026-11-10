@@ -1,8 +1,8 @@
-# Permission levels (design; steps 1 and 2 implemented)
+# Permission levels (design; steps 1, 2 and 3 implemented)
 
-Status: **steps 1 (schema, validation, API read side) and 2 (ceiling enforcement) are implemented**, except the limited dream
-delegate and the `permissions` prompt block (see [what is enforced](#what-is-enforced-step-2)). The rule engine, approvals and
-the UI are design. The steps are listed under [implementation plan](#implementation-plan). Research behind it: Claude Code permission rules, the Codex
+Status: **steps 1 (schema, validation, API read side), 2 (ceiling enforcement) and 3 (the approval rule engine) are implemented**,
+except the limited dream delegate (see [what is enforced](#what-is-enforced-step-2) and [approval rules](#approval-rules)). Approvals with memory
+("always allow") and the UI are design. The steps are listed under [implementation plan](#implementation-plan). Research behind it: Claude Code permission rules, the Codex
 approval/sandbox split, Meta's *Agents Rule of Two*, OWASP LLM06 (excessive agency) and an audit of RECALL's own code.
 
 ## Principles
@@ -72,6 +72,44 @@ They replace the fixed per-backend modes `manual | smart | off`.
 - **Equivalence with today:** `manual` = ask always; `smart` = ask only the dangerous list; `off` = allow all except the floor.
 
 The command parser stays best effort. The boundaries are the level, the backend kind and the approval, not the parser.
+
+### Implemented (step 3)
+
+Code: `src/terminal/rules.py` (pure: `RuleSet`, `evaluate`, `blanket_allows`), `src/terminal/policy.py` (`command_units`),
+`TerminalSession.decide` and the file tools (callers), `src/config/levels.py` (`check_approval_rules`, the guardrail).
+
+- **Order.** Protected paths and hardline first (fixed floor, nothing below can change it, and the audit records `layer: floor`);
+  then the rules; then the person if the verdict is `ask`.
+- **Lists.** `approval_rules: {default: allow|ask|deny, rules: [...]}` in `settings.yaml` (installation), `user.yaml` (user) and the
+  agent file (agent). A rule is `{verdict, tool, id, command, path, backend, backend_kind, dangerous, reason}` with unknown keys
+  refused. `tool` is `terminal`, `file_read` (`sandbox_read`, `sandbox_search`), `file_write` (`sandbox_write`, `sandbox_patch`) or `any`.
+- **Resolution.** Every matching rule of every layer is collected; deny beats ask beats allow (on a tie the audit names the most
+  specific layer, then the first rule). With no match: the backend's legacy `approvals` if the agent file sets it, else the `default` of
+  the most specific layer that defines one (agent, user, installation), else `ask`.
+- **Commands** are split with the policy parser into segments (`&&`, `||`, `;`, `|`, `&`, newlines, subshells, `$(...)`, backticks,
+  `bash -c`, `eval`); every segment is judged and the worst verdict wins. A redirection is a segment of its own (`> target`), so an
+  allow rule for `cat` does not cover `cat a > b`. A segment that starts with a wrapper (`sudo`, `env`, `timeout`) does not match
+  `ls`. `command` without glob characters is a word prefix; with `*`, `?` or `[` it is a full `fnmatch`. `path` is an `fnmatch` on the
+  resolved target (relative paths hang from the workdir, `~` is kept as typed). `dangerous` follows `policy.assess` for the whole action.
+- **Legacy shorthand.** A backend's `approvals` is the most specific default for that backend, only when the agent file sets it
+  (absent: the layer defaults decide): `manual` = ask, `smart` = allow and ask for dangerous, `off` = allow. Matching rules apply
+  on top (deny and ask from any layer beat its allow; an allow rule lifts `manual`). The web form always writes the key.
+- **Unattended** (dreams, tasks, no client): `allow` runs, every `ask` becomes `deny`. `off` additionally asks (so denies) dangerous actions
+  and file writes, as before.
+- **Backend kind.** ssh backends have `kind: sandbox | machine` (default `machine`); `local` backends are `local`.
+- **Guardrail.** A rule that allows without a `command`, `path` or `dangerous` condition, a `default: allow` that is the effective default,
+  or the shorthand `off`, on a `machine` or `local` backend the agent uses, is a validation error unless the agent's effective level is
+  `admin` (`ApprovalRuleNotAllowed`, raised by `check_agent_level`, so on load, create, update and `agent check`). On a `sandbox`
+  backend it is allowed from operator.
+- **Audit** (`terminal_audit.jsonl`): `verdict` stays the policy assessment (`normal`, `dangerous`, `hardline`, `protected`); new keys
+  `layer` (`installation`, `user`, `agent`, `builtin`, `floor`), `rule` (`agent:2`, `user:<id>`, `approvals:smart`; absent for a layer
+  default), `rule_verdict` (`allow`, `ask`, `deny`) and `approval_id` (the card that was answered). The card's `reason` names the rule.
+- **Workers** keep `approvals` pinned to `manual` (or `smart` when unattended), and the rules of the agent still apply to them.
+
+Not routed through the engine yet (backlog): destructive folder operations (`folder_delete`, `folder_move`, memory delete/move on
+user folders) and non-read-only MCP tools. Today they never ask; routing them needs per-call plumbing and cards for actions with
+no command or backend.
+
 
 ## Dream mode
 
@@ -161,7 +199,7 @@ them, the dream toolset does not use them), the individually chosen tools of L0,
 | 0 | This specification (done with this page). |
 | 1 (done) | Schema: `max_level` (required, admin only), agent `level`, validation, effective levels. No migration code: the project is in development. |
 | 2 (done, except the dream limited delegate and the prompt block) | Ceiling enforcement in one module (`src/config/ceiling.py`): when tools are built (chats, workers, dreams), at dispatch, on config save and on load. Still to do: the `permissions` prompt block and skill page, and the limited dream delegate. |
-| 3 | Rule engine: layers, deny/ask/allow, matching, the three legacy modes as presets. |
+| 3 (done) | Rule engine (`src/terminal/rules.py`): layers, deny/ask/allow, matching, the three legacy modes as a per-backend shorthand, the blanket-allow guardrail, audit fields. Terminal and file tools only; see [implemented](#implemented-step-3). |
 | 4 | Approvals with memory: once / session / always for this agent, web and Telegram, audit. |
 | 5 | `permissions` tool group and a permission-manager agent template; escalation tests. |
 | 6 | Web UI and admin CLI: level selector capped by `max_level`, rule editor, admin screen. |

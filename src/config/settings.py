@@ -163,3 +163,9 @@ def parse_allow_local(yaml_value: object, env_value: str | None = None) -> objec
 _terminal = dict(_raw.get("terminal") or {})
 _terminal["allow_local"] = parse_allow_local(_terminal.get("allow_local"), os.environ.get("RECALL_TERMINAL_ALLOW_LOCAL"))
 TERMINAL = TerminalSettings.model_validate(_terminal)
+
+
+# ------------------------------------------------------------------ approval rules (the installation layer)
+from src.terminal.rules import ApprovalRuleList  # noqa: E402  (after the models: it validates the settings block)
+
+APPROVAL_RULES = ApprovalRuleList.model_validate(_raw.get("approval_rules") or {})
