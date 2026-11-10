@@ -66,10 +66,10 @@ class IconPageTests(unittest.TestCase):
                 continue                    # served by a route, tested below
             self.assertTrue((STATIC / href.removeprefix("/static/")).is_file(), href)
 
-    def test_logo_stands_on_the_login_plinth_and_sits_next_to_the_name_in_the_sidebar(self) -> None:
+    def test_logo_floats_above_the_login_capital_and_sits_next_to_the_name_in_the_sidebar(self) -> None:
         page = (STATIC / "index.html").read_text(encoding="utf-8")
         self.assertEqual(page.count('src="/static/icons/recall-logo.svg"'), 2)
-        self.assertRegex(page, r'<div class="art-plinth"><img class="brand-logo"[^>]*alt=""[^>]*></div>')
+        self.assertRegex(page, r'<div class="art-capital"><img class="brand-logo"[^>]*alt=""[^>]*></div>')
         self.assertRegex(page, r'<span class="brand"><img class="brand-logo"[^>]*alt=""[^>]*><span>RECALL</span></span>')
 
 
