@@ -2116,6 +2116,7 @@ async function refreshAgents(previousId, currentId) {
   renderAgentOptions();
   renderAgentsEmpty();
   await loadAgentConfigs();
+  renderAgentBanner();   // the saved picture style (circle or free) reaches the chat header at once
   if (previousId && previousId === state.agentId && previousId !== currentId) {
     // the server moved the preference when the agent was renamed or deleted
     const preferences = await refreshPreferences();

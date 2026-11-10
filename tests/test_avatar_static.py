@@ -105,6 +105,13 @@ class AvatarTranslationTests(unittest.TestCase):
 
 
 class AvatarScriptTests(unittest.TestCase):
+    def test_saving_an_agent_repaints_the_chat_header_avatar(self) -> None:
+        """The header avatar reads the picture style from the agent list: a save that changes it must repaint the header."""
+        body = APP_JS[APP_JS.index("async function refreshAgents("):]
+        body = body[: body.index("\n}\n")]
+        self.assertIn("state.user.agents = me.agents", body)
+        self.assertIn("renderAgentBanner()", body)
+
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_app_js_parses(self) -> None:
         subprocess.run(["node", "--check", str(STATIC / "app.js")], check=True)
