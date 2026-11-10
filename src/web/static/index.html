@@ -639,7 +639,16 @@
                   <label class="sw" style="--d:#b79cff;--l:#5b3fc4"><input type="radio" name="accent" value="violet" aria-label="Violet accent"><span class="dot" aria-hidden="true"></span><span>Violet</span></label>
                   <label class="sw" style="--d:#5fd0e0;--l:#0b6b7a"><input type="radio" name="accent" value="cyan" aria-label="Cyan accent"><span class="dot" aria-hidden="true"></span><span>Cyan</span></label>
                   <label id="appearance-accent-custom" class="sw" style="--d:#ff6b9d;--l:#ff6b9d"><input type="radio" name="accent" value="custom" aria-label="Custom accent"><span class="dot" aria-hidden="true"></span><span>Custom</span></label>
-                  <input id="appearance-accent-color" class="accent-picker" type="color" value="#ff6b9d" aria-label="Pick a custom accent colour" title="Pick a custom accent colour">
+                  <button id="appearance-accent-color" class="accent-picker" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="accent-panel" aria-label="Pick a custom accent colour" title="Pick a custom accent colour"></button>
+                </div>
+                <div id="accent-panel" class="accent-panel" role="group" aria-label="Custom accent colour" hidden>
+                  <div id="accent-sv" class="accent-sv" tabindex="0" role="application" aria-label="Saturation and brightness: arrow keys move the point"><span id="accent-sv-thumb" class="accent-thumb"></span></div>
+                  <input id="accent-hue" class="accent-hue" type="range" min="0" max="360" step="1" value="340" aria-label="Hue">
+                  <div class="accent-row">
+                    <span id="accent-preview" class="accent-preview" aria-hidden="true"></span>
+                    <input id="accent-hex" class="accent-hex" type="text" maxlength="7" spellcheck="false" autocomplete="off" value="#ff6b9d" aria-label="Hex colour">
+                  </div>
+                  <p id="accent-note" class="model-note"></p>
                 </div>
               </fieldset>
               <label class="tgl"><span class="tgl-text"><span id="appearance-ornaments-label">Architecture ornaments</span><span class="tgl-desc">Decorative columns and arcade lines around the chat.</span></span><input id="appearance-ornaments" type="checkbox" role="switch" checked><span class="track" aria-hidden="true"></span></label>

@@ -42,6 +42,18 @@
     const [r, g, b] = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x] : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
     return toHex([(r + m) * 255, (g + m) * 255, (b + m) * 255]);
   };
+  const toHsv = (hex) => {
+    const [r, g, b] = toRgb(hex).map((v) => v / 255);
+    const max = Math.max(r, g, b), d = max - Math.min(r, g, b);
+    let h = 0;
+    if (d) { h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4; h = (h * 60 + 360) % 360; }
+    return [h, max ? d / max : 0, max];
+  };
+  const fromHsv = (h, s, v) => {
+    const hh = ((h % 360) + 360) % 360, c = v * s, x = c * (1 - Math.abs(((hh / 60) % 2) - 1)), m = v - c;
+    const [r, g, b] = hh < 60 ? [c, x, 0] : hh < 120 ? [x, c, 0] : hh < 180 ? [0, c, x] : hh < 240 ? [0, x, c] : hh < 300 ? [x, 0, c] : [c, 0, x];
+    return toHex([(r + m) * 255, (g + m) * 255, (b + m) * 255]);
+  };
   const mix = (a, b, share) => toHex(toRgb(a).map((v, i) => v * share + toRgb(b)[i] * (1 - share)));
   const worst = (hex, surfaces) => Math.min(...surfaces.map((surface) => contrast(hex, surface)));
 
@@ -96,15 +108,38 @@
   try { matchMedia("(prefers-color-scheme: light)").addEventListener("change", retheme); } catch { /* idem */ }
 
   document.addEventListener("DOMContentLoaded", () => {
+    const $ = (id) => document.getElementById(id);
     const radios = [...document.querySelectorAll('input[name="accent"]')];
-    const picker = document.getElementById("appearance-accent-color");
-    const customSwatch = document.getElementById("appearance-accent-custom");
-    const ornaments = document.getElementById("appearance-ornaments");
-    const showCustom = () => {
-      if (picker) picker.value = custom;
+    const trigger = $("appearance-accent-color"), panel = $("accent-panel"), area = $("accent-sv"), thumb = $("accent-sv-thumb");
+    const hue = $("accent-hue"), hexField = $("accent-hex"), preview = $("accent-preview"), note = $("accent-note");
+    const customSwatch = $("appearance-accent-custom");
+    const ornaments = $("appearance-ornaments");
+    let hsv = toHsv(custom);
+
+    const paint = (fromHexField = false) => {
       if (customSwatch) { customSwatch.style.setProperty("--d", custom); customSwatch.style.setProperty("--l", custom); }
+      if (trigger) trigger.style.background = custom;
+      if (!panel) return;
+      const [h, s, v] = hsv;
+      area.style.setProperty("--h", String(Math.round(h)));
+      thumb.style.left = `${s * 100}%`;
+      thumb.style.top = `${(1 - v) * 100}%`;
+      hue.value = String(Math.round(h));
+      if (!fromHexField) hexField.value = custom;
+      const applied = accentVariables(custom, currentTheme())["--accent"];
+      preview.style.background = applied;
+      note.textContent = applied === custom ? "" : "Adjusted slightly so it stays readable in this theme.";
     };
-    showCustom();
+    const commit = (fromHexField = false) => {
+      custom = fromHsv(...hsv);
+      setAccent("custom");
+      write(CUSTOM_KEY, custom);
+      write(ACCENT_KEY, "custom");
+      for (const radio of radios) radio.checked = radio.value === "custom";
+      paint(fromHexField);
+    };
+
+    paint();
     for (const radio of radios) {
       radio.checked = radio.value === root.dataset.accent;
       radio.addEventListener("change", () => {
@@ -113,14 +148,39 @@
         write(ACCENT_KEY, radio.value);
       });
     }
-    if (picker) {
-      picker.addEventListener("input", () => {
-        custom = validColour(picker.value) ?? custom;
-        showCustom();
-        setAccent("custom");
-        write(CUSTOM_KEY, custom);
-        write(ACCENT_KEY, "custom");
-        for (const radio of radios) radio.checked = radio.value === "custom";
+    if (trigger && panel) {
+      const toggle = (open) => { panel.hidden = !open; trigger.setAttribute("aria-expanded", String(open)); };
+      trigger.addEventListener("click", () => toggle(panel.hidden));
+      panel.addEventListener("keydown", (event) => { if (event.key === "Escape") { toggle(false); trigger.focus?.(); } });
+
+      // saturation (x) and brightness (y) on the square; arrows move 1%, with Shift 10%
+      const pick = (event) => {
+        const box = area.getBoundingClientRect();
+        const clamp = (value) => Math.min(1, Math.max(0, value));
+        hsv = [hsv[0], clamp((event.clientX - box.left) / (box.width || 1)), clamp(1 - (event.clientY - box.top) / (box.height || 1))];
+        commit();
+      };
+      area.addEventListener("pointerdown", (event) => { area.setPointerCapture?.(event.pointerId); area.dragging = true; pick(event); });
+      area.addEventListener("pointermove", (event) => { if (area.dragging) pick(event); });
+      const stop = () => { area.dragging = false; };
+      area.addEventListener("pointerup", stop);
+      area.addEventListener("pointercancel", stop);
+      area.addEventListener("keydown", (event) => {
+        const amount = event.shiftKey ? 0.1 : 0.01;
+        const move = { ArrowLeft: [-amount, 0], ArrowRight: [amount, 0], ArrowUp: [0, amount], ArrowDown: [0, -amount] }[event.key];
+        if (!move) return;
+        event.preventDefault();
+        hsv = [hsv[0], Math.min(1, Math.max(0, hsv[1] + move[0])), Math.min(1, Math.max(0, hsv[2] + move[1]))];
+        commit();
+      });
+      hue.addEventListener("input", () => { hsv = [Number(hue.value) % 360, hsv[1], hsv[2]]; commit(); });
+      hexField.addEventListener("input", () => {
+        const typed = hexField.value.trim();
+        const hex = validColour(typed.startsWith("#") ? typed : `#${typed}`);
+        if (!hex) return;
+        const [h, s, v] = toHsv(hex);
+        hsv = [s && v ? h : hsv[0], s, v];   // grey and black carry no hue: keep the one on the slider
+        commit(true);
       });
     }
     if (ornaments) {
