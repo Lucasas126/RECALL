@@ -21,7 +21,7 @@ Status: phase 1. Commands run in the foreground and are killed at the timeout; t
 | `local` | on the RECALL host itself, in a working directory, with an environment ALLOWLIST (`PATH`, `HOME`, `LANG`, `LC_*`, `TERM`, `TMPDIR`, `USER`, `LOGNAME`, `SHELL`, `TZ`); nothing else is inherited (no `SSH_AUTH_SOCK`, `DOCKER_HOST`, `KUBECONFIG`, `DBUS_SESSION_BUS_ADDRESS`, `DATABASE_URL`, proxies, keys, tokens or `RECALL_*`) | only when `settings.yaml` has `terminal.allow_local: true` or the server environment sets `RECALL_TERMINAL_ALLOW_LOCAL=true`; trusted installs only |
 
 Pointing an agent at the RECALL container itself (a `local` backend) gives it every user's `.config` and `data`. The only intended
-use is the setup guide of the [Admin CLI](admin-cli.md#templates), with `approvals: manual`. See
+use is an `admin` agent that runs the [Admin CLI](admin-cli.md), with `approvals: manual` (the `guide` template no longer does). See
 [security notes](../deployment/security.md#terminal-sandbox).
 
 ## setting up an SSH sandbox

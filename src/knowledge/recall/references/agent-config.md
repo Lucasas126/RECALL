@@ -1,6 +1,6 @@
 # Configuration fields
 
-Unknown keys are rejected in the agent yaml and most blocks (not in `chat_config`). The user edits these files or uses the Agents tab; only the setup guide (terminal group, local backend) uses `python -m src.admin` (`references/admin-cli.md`). Keys use dotted names below.
+Unknown keys are rejected in the agent yaml and most blocks (not in `chat_config`). The user edits these or uses the Agents tab; an agent with the `agents` group uses its tools (`references/permissions.md`), an admin the CLI (`references/admin-cli.md`). Keys are dotted.
 
 ## When a change takes effect
 

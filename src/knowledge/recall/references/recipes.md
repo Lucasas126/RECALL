@@ -1,6 +1,6 @@
 # Recipes
 
-Each recipe uses the `terminal` tool (one approval card per command) and `python -m src.admin`. Explain a step, run it, read the result, then continue. Replace `U` with the user's id. Finish every recipe that touched a yaml by hand with `python -m src.admin agent check`.
+With the `agents` tools (the guide) do agent recipes with `agent_create`, `agent_update`, `agent_rename`, `agent_delete` (one approval card per change; no `U`, no CLI); levels and groups go through the permissions tools. The commands below are for an admin agent with the `terminal` tool and `python -m src.admin` (one card per command): explain a step, run it, read the result. Replace `U` with the user's id. Finish every recipe that touched a yaml by hand with `python -m src.admin agent check`. Terminal backends, folders, users and secrets are the administrator's: the guide tells the user what to ask for.
 
 ## Create an agent for a topic
 
@@ -17,7 +17,7 @@ Each recipe uses the `terminal` tool (one approval card per command) and `python
 
 ## Turn the guide into the user's main agent
 
-1. Set the display name (what the web UI and Telegram show): `python -m src.admin agent set --user U --agent guide --set name="Main"`. The `name` in the yaml is separate from the SOUL, so changing only the SOUL leaves the old name in the UI.
+1. Set the display name (what the web UI and Telegram show): the user does it in the Agents tab (you cannot rename yourself); an admin: `python -m src.admin agent set --user U --agent guide --set name="Main"`. The `name` is separate from the SOUL, so changing only the SOUL leaves the old name in the UI.
 2. Rewrite your own SOUL with `soul_edit`: new name and role, keep the rules about secrets, approvals and other users. Tell the user what changed (SOUL and display name).
 3. Keep the `id` (folder and URL) unless the user asks for a new one. Renaming the id of the agent running the current chat moves its data and can break the open chat: only do it on request, with `python -m src.admin agent rename --user U --agent guide --new-id main`, and tell the user to open a new chat afterwards. The data folder moves with it; chats, memories and skills stay.
 4. Run `python -m src.admin agent check`.

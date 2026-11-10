@@ -36,9 +36,9 @@ configuration needs, or whose configuration needs more than `max_level`, is refu
 message naming the service and the level needed. `user set` refuses a `max_level` below the level of one of the user's agents (lower
 those first).
 
-The `guide` template (`agent create --from-template guide`) uses the `local` terminal backend, a shell on the RECALL host, which only
-the level `admin` may use: for a user whose `max_level` is below `admin` the command fails with a message that says so and writes
-nothing.
+The `guide` template (`agent create --from-template guide`) is an `operator` agent with the `agents` and `permissions` tool groups and no terminal, so it
+needs a user whose `max_level` is at least `operator`: below that the command fails with a message that names the level and the `user set`
+command, and writes nothing. It no longer uses the admin CLI or the `local` backend.
 
 The `permission-manager` template (`agent create --from-template permission-manager`) needs a user whose `max_level` is at least
 `operator`: below that the command fails with a message that names the level and the `user set` command, and writes nothing.
@@ -64,12 +64,13 @@ The agent's **display name** is its `name` (shown in the web UI and Telegram); c
 
 ## Templates
 
-`--from-template default` is the plain agent with the default SOUL. `guide` is the setup guide: tool groups `memory_read`,
-`memory_edit`, `web`, `self` and `terminal`; a `terminal` block with a backend named `local` (working directory `/app`,
-`approvals: manual`); the user's `terminal_backends.local` is added when missing; and a short SOUL that tells it to read the
-built-in [RECALL knowledge](recall-knowledge.md), use this CLI instead of editing YAML, run `agent check`, ask before anything
-destructive, never read or print secrets and never touch another user's folders. The guide owns its SOUL and can later be renamed
-and reshaped into the user's main agent. It only works when the server allows local backends (`RECALL_TERMINAL_ALLOW_LOCAL=true`).
+`--from-template default` is the plain agent with the default SOUL. `guide` is the setup guide: level `operator`, tool groups `memory_read`,
+`memory_edit`, `web`, `self`, `agents` and `permissions` (no terminal, no backend), and a short SOUL that tells it to read the
+built-in [RECALL knowledge](recall-knowledge.md), manage the user's agents with the [`agents` tools](../reference/tools.md#agents) and their
+permissions with the `permissions` tools (every change on an approval card), ask before anything destructive and never read or print
+secrets. It says plainly that terminal backends, users and provider keys are managed by the administrator and cannot be changed from a
+chat. The guide owns its SOUL; it cannot rename or delete itself (the user does it in the Agents tab), and it can be reshaped into the
+user's main agent. An administrator who wants an agent that runs this CLI gives an `admin` agent the `terminal` group by hand.
 
 `permission-manager` creates an agent named `Permission manager` at level `operator` with the tool groups `memory_read`, `memory_edit`,
 `self` and `permissions` (no terminal, no web) and a short SOUL: it explains the levels, reviews what each of the user's agents can

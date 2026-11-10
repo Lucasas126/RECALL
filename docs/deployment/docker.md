@@ -156,7 +156,7 @@ host.
   (a commented placeholder is in `.env.deploy.example`); without it the
   notification is text-only.
 - Optional `RECALL_TERMINAL_ALLOW_LOCAL=true`: accept `type: local` terminal backends (commands run inside the container as
-  the `app` user in `/app`). Needed for the setup guide agent of the [Admin CLI](../user-guide/admin-cli.md); read the
+  the `app` user in `/app`). Only for an `admin` agent that runs the [Admin CLI](../user-guide/admin-cli.md) (the `guide` template no longer needs it); read the
   [risks](security.md#terminal-sandbox) first, since the agent can reach every user's `/app/.config` and `/app/data`. Add it
   to the environment of both services and restart them.
 - Credentials can also live in `.config/secrets.env` (inside the mounted config folder), written with

@@ -11,7 +11,7 @@ Values after `=` are YAML: `true`, `42`, `[a, b]`, `{k: v}`, `null`, or a quoted
 | `python -m src.admin agent list --user U` | id, name, level, model and tool groups |
 | `python -m src.admin agent show --user U --agent A` | the agent yaml as loaded, plus its level |
 | `python -m src.admin agent create --user U --id A --name N [--level L]` | new agent with the default SOUL |
-| `python -m src.admin agent create --user U --id A --from-template guide` | a setup guide: tool groups `memory_read`, `memory_edit`, `web`, `self`, `terminal`, local backend, its own SOUL; the local backend is admin-only, so it fails for a user whose `max_level` is below `admin` |
+| `python -m src.admin agent create --user U --id A --from-template guide` | the setup guide: level `operator`, groups `memory_read`, `memory_edit`, `web`, `self`, `agents`, `permissions`, no terminal, its own SOUL; needs `max_level` operator+ |
 | `python -m src.admin agent create --user U --id A --from-template permission-manager` | level `operator`, groups `memory_read`, `memory_edit`, `self`, `permissions`; needs `max_level` operator+ |
 | `python -m src.admin agent set --user U --agent A --set path=value` | change settings (repeat `--set`); `--level L` sets the permission level |
 | `python -m src.admin agent rename --user U --agent A --new-id B --name N` | new id (and optional name); moves `data/U/A` to `data/U/B` exactly like the web UI |

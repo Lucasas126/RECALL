@@ -20,7 +20,7 @@ Paths are relative to the repository root. In Docker the same tree sits under `/
 | `src/agent/profile.py` | reads SOUL, memories, skills, questions; builds the system-prompt blocks |
 | `src/agent/default_soul.md` | template SOUL.md given to new agents |
 | `src/agent/default_soul.py` | loads that template |
-| `src/agent/templates.py` | agent templates for `agent create --from-template` (`default`, `guide`, `permission-manager`; SOULs in `src/agent/*_soul.md`) |
+| `src/agent/templates.py` | agent templates for `agent create --from-template` and `agent_create` (`default`, `guide`, `permission-manager`; SOULs in `src/agent/*_soul.md`) |
 | `src/agent/tools.py` | `build_tools`: assembles tools from groups, `allow`/`deny`, disposable rules |
 | `src/agent/tool_groups.py` | tool-group catalog and which tools each group holds |
 | `src/agent/tooling.py` | the `@tool` decorator and schema generation |
@@ -32,6 +32,8 @@ Paths are relative to the repository root. In Docker the same tree sits under `/
 | `src/agent/toolsets/web.py` | `web_search`, `web_retrieve` |
 | `src/agent/toolsets/terminal.py` | terminal tools and the prompt notice for them |
 | `src/agent/toolsets/delegate.py` | the seven `task_*` tools, the delegation limits and the prompt notice for them |
+| `src/agent/toolsets/agents.py` | the `agents` tools (built like the `permissions` ones) |
+| `src/service/agent_admin.py` | the checks, plans and audit behind the `agents` tools |
 | `src/agent/toolsets/mcp.py` | MCP tools |
 | `src/agent/toolsets/dream.py` | dream review-queue tools |
 | `src/agent/associative.py` | associative-memory query and fragment formatting |

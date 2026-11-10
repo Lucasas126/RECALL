@@ -29,7 +29,7 @@ chat_config:
   recall_knowledge: true             # the built-in, read-only `recall` skill (how RECALL works); false hides it from this agent
   conversation_messages_retained: 20 # at most N messages kept in context; cuts go below N (see prompt caching)
   tools: true                       # enable the selected tool groups
-  tool_groups: [memory_read, memory_edit, self]  # memory_read, memory_edit, web, self, folders_read, folders_edit, terminal, delegate, permissions
+  tool_groups: [memory_read, memory_edit, self]  # memory_read, memory_edit, web, self, folders_read, folders_edit, terminal, delegate, permissions, agents
   mcp:                               # MCP servers enabled for this agent (see mcp.md)
     google_calendar: {tools: null, read_only: false, instructions: ""}
 dream:                               # background self-review sessions (see dream.md)
@@ -129,6 +129,9 @@ data. Change the style from the CLI with `python -m src.admin agent set --user U
 The `permissions` tool group (view the user's agents and change their level, tool groups and approval rules; on itself groups and rules within its level and its level only lower; each change with the
 user's approval) needs `level: operator` or higher, so `tool_groups: [..., permissions]` with a lower declared level is refused like any
 group above the level. The `permission-manager` template ([admin CLI](../user-guide/admin-cli.md#templates)) sets it up.
+
+The `agents` tool group (list, create, edit, rename and delete the user's agents, never their level, groups or rules; each change with the user's approval) has the same
+minimum level, `operator`. The `guide` template holds both groups.
 
 `level` is a top-level field (never under `chat_config`, which accepts unknown keys). It is optional. Without it the agent's
 effective level is the lowest level that covers its configuration (tool groups, terminal backends, MCP servers, delegation

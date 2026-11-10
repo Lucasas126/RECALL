@@ -54,7 +54,6 @@ Not built yet, in the order they matter (see the [known gaps](../architecture/pe
 - **Outbound network control**: a domain allowlist for `web`/`web_retrieve` and egress rules for the terminal sandbox; the largest remaining exfiltration channel.
 - **Dream extras**: the limited read-only delegate (configurable, off by default), MCP read-only tools and `sandbox_read`/`sandbox_search` on disposable sandboxes.
 - **Folder and MCP actions through the rule engine** (deletes, moves, non-read-only MCP tools), with approval cards that do not assume a command.
-- **Scoped admin tools for the setup guide**, so it no longer needs the `local` backend and can run below admin.
 - **Per-user path isolation**, **session revocation on demotion**, **login throttle** and a **CSRF token**.
 - **Audit of every write** (files, memory, self), not only terminal and permission changes; **budgets** per agent.
 - **Outbound messages to third parties** as their own service, never below operator.

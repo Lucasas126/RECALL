@@ -1,6 +1,6 @@
 # Security for admins
 
-For an agent that administers RECALL through a `type: local` terminal backend (the setup guide). Read this before running any admin command.
+For an admin-level agent that administers RECALL through a `type: local` terminal backend (the setup guide no longer does: it uses the `agents` tools). Read this before running any admin command.
 
 ## What the local backend can reach
 

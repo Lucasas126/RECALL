@@ -9,7 +9,7 @@ Implementations are grouped under `src/agent/toolsets/`: `memory.py` contains
 memory search, listing and reading; `tags.py` contains tag lookup;
 `editing.py` contains memory mutations; `web.py` contains public web
 search and retrieval; `self_files.py` contains the tools that edit the agent's
-own files; `folders.py` contains the user folder tools; `permissions.py` contains the tools that manage the permissions of the user's other agents; and `dream.py` contains the
+own files; `folders.py` contains the user folder tools; `permissions.py` contains the tools that manage the permissions of the user's other agents; `agents.py` contains the tools that create, edit, rename and delete them; and `dream.py` contains the
 review-queue tools of dream sessions. Shared source checks are in `common.py`.
 
 ## Tool-group catalog
@@ -73,9 +73,25 @@ The web **Agents** tab configures these groups for each agent:
   *Approve* and *Deny*; it is never remembered, is audited (`permission_change` in `terminal_audit.jsonl`) and applied through the same
   validation as the web form. Not available in dreams, scheduled tasks or workers. See [permissions](../architecture/permissions.md#implemented-step-5-the-permissions-tool-group).
 
+<a id="agents"></a>
+- `agents` (level `operator`): create, edit, rename and delete the **same user's agents**, never another user's and never by a path. Results are JSON or `error: ...`;
+  names, descriptions and SOULs are data. Reads (no card): `agent_list()` (per agent: `id`, `name`, `description`, effective `level`, default `model`, `tool_groups`,
+  `enabled`, `memory`, `dream_enabled`, `is_you`), `agent_get(agent_id)` (the whole configuration and the SOUL; never keys or credentials; approval rules only as a count)
+  and `agent_templates()` (each template: description, level, tool groups, SOUL size, and whether the caller may use it). Changes:
+  `agent_create(agent_id, name, description="", template="", model="", level="", soul="")` (the level defaults to the lowest that covers the template and is at most the
+  caller's and the user's `max_level`; what the template gives must be covered by the caller's level), `agent_update(agent_id, name, description, model, soul, settings)`
+  (`settings` takes the plain form settings `enabled`, `has_memory`, `stream`, `reasoning`, `reasoning_effort`, `reasoning_tokens`, `keep_reasoning_in_memory`,
+  `conversation_messages_retained`, `associative_memory`, `associative_execution`, `recall_knowledge`, `avatar_style`, `dream_enabled`; `level`, tool groups and approval
+  rules are refused with a pointer to the `permissions` tools, `terminal`, `mcp`, `folders` and `delegation` are the user's), `agent_rename(agent_id, new_id)` (moves the data
+  folder, the picture, the preferences and delegation targets like the web) and `agent_delete(agent_id)` (the configuration goes, the data folder stays). An agent above
+  the caller's level is read-only for it; the caller changes only its own description and SOUL and never renames or deletes itself; the user's last agent is never deleted.
+  Every change shows the user a card (caller, target, summary or diff) that offers only *Approve* and *Deny*; it is never remembered, is audited (`permission_change` in
+  `terminal_audit.jsonl`) and applied through the same code as the web form. Not available in dreams, scheduled tasks or workers. See
+  [permissions](../architecture/permissions.md#implemented-step-8-the-agents-tool-group).
+
 In a [disposable chat](../user-guide/memory.md#disposable-chats) the write tools of
 `memory_edit`, `self` (`memory`, `skill_manage`, `soul_edit`) and `folders_edit` are
-removed, whatever the groups, and the whole `terminal` group, the `delegate` tools and the `permissions` tools are not built; the read tools stay. MCP tools are refused as a class
+removed, whatever the groups, and the whole `terminal` group, the `delegate`, `permissions` and `agents` tools are not built; the read tools stay. MCP tools are refused as a class
 (none are built and any call is rejected), not by name. The exception is the hidden chat of a
 subagent task that was granted terminal backends: it is excluded from learning (no Dream, no indexing) like any disposable chat but keeps the terminal group it was granted, restricted to those
 backends and to `manual` approvals; its memory, self and folder-edit tools stay removed.
