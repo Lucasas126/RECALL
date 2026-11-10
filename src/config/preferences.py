@@ -39,6 +39,8 @@ class UserPreferences(BaseModel):
     default_agent_id: Annotated[str, Field(strict=True, pattern=r"^[A-Za-z0-9_-]{1,64}$")] | None = None
     # agent used when the orchestrator is unsure (greetings, general talk); None means the default agent
     core_agent_id: Annotated[str, Field(strict=True, pattern=r"^[A-Za-z0-9_-]{1,64}$")] | None = None
+    # how the user's own profile picture is shown: cropped into a circle, or as it is (for transparent PNGs)
+    avatar_style: Literal["circle", "free"] = "circle"
 
     def language_for(self, configured: str) -> Literal["en", "es"]:
         """Resolve an explicit language override or the legacy YAML language."""

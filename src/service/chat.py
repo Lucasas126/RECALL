@@ -74,6 +74,7 @@ from src.terminal.context import RunContext, run_context
 from src.utils.logger import get_logger
 from src.utils.media import VideoDecomposition, decompose_video
 from src.utils.pdf import extract_pdf_text, run_tesseract
+from src.utils.avatars import USER_KEY, Avatar, AvatarStore, normalise_image
 from src.utils.i18n import InputError, UserMessageError, error_message, message
 from src.web.auth import verify_password
 
@@ -201,6 +202,12 @@ class OwnMaxLevel(InputError):
     """An administrator tried to change their own maximum level."""
 
     code = "max_level_self_change"
+
+
+class NoAvatar(ServiceError):
+    """The user or agent has no profile picture."""
+
+    code = "no_avatar"
 
 
 class UnknownDreamSession(ServiceError):
@@ -362,6 +369,7 @@ class ChatService:
         self._favorites = ModelFavorites(CONFIG_DIR)
         self._preferences = UserPreferencesStore(CONFIG_DIR)
         self._agents = AgentStore(CONFIG_DIR, DATA_DIR)
+        self._avatars = AvatarStore(DATA_DIR)  # profile pictures, beside (never inside) the agents' data folders
         self._permissions = AgentPermissions(self._agents)
         # last configs that loaded fine: another process (the admin CLI, a hand edit) may leave a file invalid for a
         # while, and the running service keeps using the previous good one instead of failing
@@ -433,6 +441,7 @@ class ChatService:
             "provider": user.provider.name,
             "require_zdr": user.require_zdr,
             "max_level": user.max_level.label,  # read-only: only an administrator changes it
+            "avatar": self._user_avatar_view(user_id),
             "agents": self.list_agents(user_id),
             # names, types and descriptions only, to choose backends in the agent form; never hosts, users or key paths
             "terminal_backends": [
@@ -463,9 +472,9 @@ class ChatService:
                 cfg = self._agent_config(user_id, agent_id)
             except Exception as exc:  # one unreadable agent file must not hide the list
                 logger.error("agent list: %s/%s: %s", user_id, agent_id, describe_config_error(exc))
-                agents.append({"id": agent_id, "name": agent_id})
+                agents.append({"id": agent_id, "name": agent_id, "avatar": None})
                 continue
-            agents.append({"id": cfg.id, "name": cfg.name})
+            agents.append({"id": cfg.id, "name": cfg.name, "avatar": self._agent_avatar_view(user_id, cfg)})
         return agents
 
     def list_agent_configs(self, user_id: str) -> list[dict]:
@@ -559,7 +568,73 @@ class ChatService:
         """An agent's config as the API shows it (the personality is SOUL.md, served by the soul routes)."""
         view = config.model_dump(mode="json")
         view["level"] = effective_agent_level(config, self._user(user_id)).label  # declared, else what its config needs
+        view["avatar"] = self._agent_avatar_view(user_id, config)  # read-only: changed through the avatar routes
         return view
+
+    # ------------------------------------------------------------------ profile pictures (the owner's own only)
+
+    def _agent_avatar_view(self, user_id: str, config: AgentConfig) -> dict | None:
+        """`{url, version, style}` of an agent's picture, or None when it has none."""
+        if config.id == USER_KEY:
+            return None
+        avatar = self._avatars.get(user_id, config.id)
+        if avatar is None:
+            return None
+        return {"url": f"/api/agents/{config.id}/avatar", "version": avatar.version, "style": config.avatar_style}
+
+    def _user_avatar_view(self, user_id: str) -> dict | None:
+        avatar = self._avatars.get(user_id, USER_KEY)
+        if avatar is None:
+            return None
+        try:
+            style = self._preferences.get(user_id).avatar_style
+        except (PreferencesError, ValueError):
+            style = "circle"  # a broken preferences file must not break the profile
+        return {"url": "/api/me/avatar", "version": avatar.version, "style": style}
+
+    def check_agent_owned(self, user_id: str, agent_id: str) -> None:
+        """Raise UnknownAgent unless the user owns the agent (the web routes check before they read an upload)."""
+        self._owned_agent(user_id, agent_id)
+
+    def _agent_avatar_key(self, user_id: str, agent_id: str) -> str:
+        self._owned_agent(user_id, agent_id)
+        if agent_id == USER_KEY:  # that file name is the user's own picture
+            raise InputError("This agent id cannot have a profile picture.")
+        return agent_id
+
+    def set_agent_avatar(self, user_id: str, agent_id: str, data: bytes) -> dict:
+        key = self._agent_avatar_key(user_id, agent_id)
+        return self._store_avatar(user_id, key, data, f"/api/agents/{key}/avatar")
+
+    def get_agent_avatar(self, user_id: str, agent_id: str) -> tuple[Avatar, bytes]:
+        return self._read_avatar(user_id, self._agent_avatar_key(user_id, agent_id), "This agent has no profile picture.")
+
+    def delete_agent_avatar(self, user_id: str, agent_id: str) -> None:
+        self._avatars.delete(user_id, self._agent_avatar_key(user_id, agent_id))
+
+    def set_user_avatar(self, user_id: str, data: bytes) -> dict:
+        self._user(user_id)
+        return self._store_avatar(user_id, USER_KEY, data, "/api/me/avatar")
+
+    def get_user_avatar(self, user_id: str) -> tuple[Avatar, bytes]:
+        self._user(user_id)
+        return self._read_avatar(user_id, USER_KEY, "You have no profile picture.")
+
+    def delete_user_avatar(self, user_id: str) -> None:
+        self._user(user_id)
+        self._avatars.delete(user_id, USER_KEY)
+
+    def _store_avatar(self, user_id: str, key: str, data: bytes, url: str) -> dict:
+        png, has_alpha = normalise_image(data)
+        avatar = self._avatars.save(user_id, key, png)
+        return {"url": url, "has_alpha": has_alpha, "version": avatar.version}
+
+    def _read_avatar(self, user_id: str, key: str, missing: str) -> tuple[Avatar, bytes]:
+        avatar = self._avatars.get(user_id, key)
+        content = self._avatars.read(avatar) if avatar is not None else None
+        if avatar is None or content is None:
+            raise NoAvatar(missing)
+        return avatar, content
 
     def _check_agent_model(self, user: UserConfig, config: AgentConfig, current: str | None) -> AgentConfig:
         """Validate a new or changed agent default model (provider usable, model offered, ZDR policy).
@@ -747,6 +822,7 @@ class ChatService:
                     "default": ASSOC.top_n,
                     "min": ASSOCIATIVE_MAX_MATCHES_BOUNDS[0], "max": ASSOCIATIVE_MAX_MATCHES_BOUNDS[1],
                 },
+                "avatar_style": "circle",
                 "disposable_retention_days": {
                     "default": DEFAULT_DISPOSABLE_RETENTION_DAYS,
                     "min": DISPOSABLE_RETENTION_DAYS_BOUNDS[0], "max": DISPOSABLE_RETENTION_DAYS_BOUNDS[1],

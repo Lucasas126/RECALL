@@ -24,7 +24,7 @@ APP_JS = (STATIC / "app.js").read_text(encoding="utf-8")
 INDEX_HTML = (STATIC / "index.html").read_text(encoding="utf-8")
 
 NEW_IDS = (
-    "agent-level-section", "agent-level", "agent-level-description", "agent-level-required", "agent-level-message",
+    "agent-level-section", "agent-level", "agent-level-description", "agent-level-info", "agent-level-message",
     "agent-form-level", "agent-rules", "agent-rules-default", "agent-rules-list", "agent-rules-empty", "agent-rules-add",
     "agent-rules-error", "agent-rules-backends", "agent-rules-effective", "agent-rules-effective-body",
     "settings-tab-users", "users-admin", "users-list", "users-status", "users-error",

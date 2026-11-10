@@ -724,6 +724,8 @@ class AgentConfig(BaseModel):
     # permission level, at most the owner's max_level; None = not declared (the lowest level covering the config applies)
     level: Optional[LevelField] = None
     approval_rules: Optional[ApprovalRuleList] = None  # the `agent` layer of the approval rules
+    # profile picture style: `circle` crops it into the accent-bordered circle, `free` shows it as it is (transparent PNGs)
+    avatar_style: Literal["circle", "free"] = "circle"
 
     @model_validator(mode="after")
     def _delegate_group_has_a_block(self) -> "AgentConfig":
@@ -748,6 +750,9 @@ class AgentConfig(BaseModel):
         # legacy: the size limits moved to settings.yaml (memory_limits); old agent files still carry the key
         if isinstance(data, dict) and "memory_limits" in data:
             data = {key: value for key, value in data.items() if key != "memory_limits"}
+        # the API view of an agent carries a read-only `avatar` (url, version, style); a body sent back as read is accepted
+        if isinstance(data, dict) and "avatar" in data:
+            data = {key: value for key, value in data.items() if key != "avatar"}
         return data
 
     @field_validator("folders")

@@ -6,12 +6,22 @@ across the top on narrow screens); only one section shows at a time.
 
 | Section | Settings |
 | --- | --- |
-| General | show model thinking; theme, accent colour and architecture ornaments (**Appearance**, this browser only, applied at once); language of alerts and errors; **Default agent** (the agent new chats open with when you do not pick one, and the Telegram router's fallback when it is unsure and no core agent is set; empty means the first agent in your list) |
+| General | show model thinking; your **Profile picture**; theme, accent colour and architecture ornaments (**Appearance**, this browser only, applied at once); language of alerts and errors; **Default agent** (the agent new chats open with when you do not pick one, and the Telegram router's fallback when it is unsure and no core agent is set; empty means the first agent in your list) |
 | Models | default LLM model and default speech-to-text model (the model picker) |
 | Chats & memory | maximum associative memory matches (1-20); days to keep disposable chats (1-365) |
 | Telegram | choose the agent automatically (the orchestrator) and the core agent used when it is unsure (empty: *Same as default agent*) |
 | Connections | your own account for each MCP server (see [MCP servers](mcp.md)); it has no Save button |
 | Users | only for a user whose maximum level is `admin` (the tab is hidden for everyone else); see [users](#users-administrators-only) |
+
+## profile picture
+
+**Settings > General > Profile picture** sets your own picture, shown instead of the first letter of your name at the bottom of the left
+panel (32 px). **Upload image** takes a PNG, JPEG or WEBP file of up to 2 MiB and 4096 x 4096 pixels; the server turns it into a PNG of at
+most 256 px on its longest side (EXIF rotation applied, metadata removed; SVG and GIF are refused). **Remove** goes back to the letter.
+**No circle or border** shows the image as it is, with no circle, border or background (meant for transparent PNGs); without it the image
+is cropped to fill the accent-bordered circle. Like Appearance, these apply at once and do not count as unsaved changes; the style is
+saved as `avatar_style` in `preferences.json`. The file is `data/<user>/.avatars/_user.png`. Agents get their own picture in the
+[agent form](agents.md).
 
 ## defaults and reset
 

@@ -468,6 +468,14 @@ function translateInterface() {
     ["settings-language-label", "Alerts and errors"], ["settings-theme-label", "Theme"],
     ["settings-language-hint", "Language of alerts and error messages, here and in Telegram."],
     ["settings-theme-hint", "Applied at once and remembered in this browser only."],
+    ["agent-avatar-legend", "Profile picture"], ["agent-avatar-upload", "Upload image"], ["agent-avatar-remove", "Remove"],
+    ["agent-avatar-free-label", "No circle or border"],
+    ["agent-avatar-free-hint", "For transparent PNGs: the image is shown as it is, without cropping."],
+    ["settings-avatar-title", "Profile picture"], ["settings-avatar-upload", "Upload image"], ["settings-avatar-remove", "Remove"],
+    ["settings-avatar-note", "Your profile picture is shown next to your name. It applies at once and needs no Save."],
+    ["settings-avatar-hint", "PNG, JPEG or WEBP, up to 2 MiB. Shown at 32 px."],
+    ["settings-avatar-free-label", "No circle or border"],
+    ["settings-avatar-free-hint", "For transparent PNGs: the image is shown as it is, without cropping."],
     ["settings-theme-system", "System"], ["settings-theme-light", "Light"], ["settings-theme-dark", "Dark"],
     ["settings-note", "Settings are shared with Telegram. Chats without a selected model use your current defaults."],
     ["settings-llm-label", "Default LLM model"], ["settings-stt-label", "Default STT model"],
@@ -509,7 +517,6 @@ function translateInterface() {
     ["agent-terminal-no-backends", "No terminal backends are configured. Add one under terminal_backends in your user configuration; see docs/user-guide/terminal.md."],
     ["agent-terminal-timeout-label", "Command timeout (seconds)"],
     ["agent-level-legend", "Permission level"], ["agent-level-label", "Level"],
-    ["agent-level-hint", "The level is a ceiling over what the agent may use: tools, MCP, terminal and delegation. Choose the lowest level that does the job. Only an administrator changes your maximum level."],
     ["agent-rules-label", "Approval rules"],
     ["agent-rules-hint", "Rules of this agent for commands and file operations. The strictest verdict wins: deny beats ask, ask beats allow. Hardline commands and protected paths are always refused."],
     ["agent-rules-default-label", "When no rule matches"], ["agent-rules-default-inherit", "Follow the user and installation defaults"],
@@ -584,6 +591,7 @@ function translateInterface() {
   ]) $(id).textContent = tr(text);
   $("settings-nav").setAttribute("aria-label", tr("Settings sections"));
   renderAgentsEmpty();
+  renderAgentAvatarField();
   refreshRows();
   $("dream-model").placeholder = tr("Your chat model");
   $("agent-model").placeholder = tr("Your default model");
@@ -732,6 +740,142 @@ function renderAgentOptions() {
   renderAgentBanner();
 }
 
+// ---- profile pictures (avatarView and avatarFileProblem are DOM-free and unit-tested)
+const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+const AVATAR_TYPES = ["image/png", "image/jpeg", "image/webp"];
+
+// What to draw for a user or an agent: the stored image (`?v=<version>` makes a new upload replace the cached one)
+// or, without one, the first letter of the name. `free` = shown as it is, without the circle and border.
+function avatarView(avatar, name) {
+  const letter = [...(name ?? "")][0]?.toUpperCase() ?? "?";
+  if (!avatar || typeof avatar.url !== "string" || !avatar.url.startsWith("/api/")) return { src: null, free: false, letter };
+  return { src: `${avatar.url}?v=${encodeURIComponent(avatar.version ?? "")}`, free: avatar.style === "free", letter };
+}
+
+// A message template (with values) when the file cannot be uploaded, else null; the server checks again.
+function avatarFileProblem(file) {
+  if (!AVATAR_TYPES.includes(file.type)) return { template: "Use a PNG, JPEG or WEBP image.", values: {} };
+  if (file.size > AVATAR_MAX_BYTES) return { template: "The image is larger than {limit} MiB.", values: { limit: AVATAR_MAX_BYTES / (1024 * 1024) } };
+  return null;
+}
+
+// The image is decorative (the name is already text); a failed load falls back to the letter.
+function renderAvatar(element, avatar, name) {
+  const view = avatarView(avatar, name);
+  if (view.free && view.src) element.dataset.avatarStyle = "free"; else delete element.dataset.avatarStyle;
+  if (!view.src) { element.replaceChildren(view.letter); return; }
+  const image = document.createElement("img");
+  image.alt = "";
+  image.draggable = false;
+  image.addEventListener("error", () => { delete element.dataset.avatarStyle; element.replaceChildren(view.letter); });
+  image.src = view.src;
+  element.replaceChildren(image);
+}
+
+function renderUserAvatar() {
+  renderAvatar($("user-avatar"), state.user?.avatar, state.user?.name);
+  renderUserAvatarField();
+}
+
+function renderUserAvatarField() {
+  renderAvatar($("settings-avatar-preview"), state.user?.avatar, state.user?.name);
+  $("settings-avatar-remove").hidden = !state.user?.avatar;
+  $("settings-avatar-free").checked = state.preferences?.avatar_style === "free";
+}
+
+function renderAgentAvatarField() {
+  const saved = Boolean(state.agentForm.originalId);
+  const avatar = state.agentForm.avatar;
+  // the checkbox previews the style before the agent is saved
+  renderAvatar($("agent-avatar-preview"), avatar && { ...avatar, style: $("agent-avatar-free").checked ? "free" : "circle" }, $("agent-name").value.trim());
+  $("agent-avatar-upload").disabled = !saved;
+  $("agent-avatar-remove").hidden = !avatar;
+  $("agent-avatar-hint").textContent = tr(saved ? "PNG, JPEG or WEBP, up to 2 MiB. Shown at 32 px." : "Save the agent first to add a profile picture.");
+}
+
+// Uploads (a File) or removes (null) a picture at once; returns whether it worked, the error shown in `errorElement`.
+async function changeAvatar(path, file, errorElement) {
+  errorElement.textContent = "";
+  try {
+    if (file) {
+      const problem = avatarFileProblem(file);
+      if (problem) throw new Error(tr(problem.template, problem.values));
+      await api(path, {
+        method: "PUT", body: file,
+        headers: { "Content-Type": file.type, "Accept-Language": state.preferences?.language ?? "en" },
+      });
+    } else {
+      await api(path, { method: "DELETE" });
+    }
+    return true;
+  } catch (err) {
+    errorElement.textContent = err.message;
+    return false;
+  }
+}
+
+// After an upload, a removal or a style change: the pictures come back with /api/me.
+async function refreshAvatars(session) {
+  const me = await api("/api/me");
+  if (session !== state.session || !state.user) return;
+  state.user.agents = me.agents;
+  state.user.avatar = me.avatar ?? null;
+  for (const config of state.agentConfigs) config.avatar = me.agents.find((a) => a.id === config.id)?.avatar ?? null;
+  state.agentForm.avatar = state.agentConfigs.find((a) => a.id === state.agentForm.originalId)?.avatar ?? null;
+  renderAgentBanner();
+  renderUserAvatar();
+  renderAgentAvatarField();
+}
+
+function pickAvatar(fileInput, path, errorElement) {
+  const file = fileInput.files[0];
+  fileInput.value = "";  // the same file can be chosen again later
+  if (!file) return;
+  const session = state.session;
+  const target = path();
+  if (!target) return;
+  changeAvatar(target, file, errorElement).then(async (done) => {
+    if (done && session === state.session) { await refreshAvatars(session); errorElement.textContent = ""; }
+    return done;
+  }).catch((err) => { errorElement.textContent = err.message; });
+}
+
+function removeAvatar(path, errorElement) {
+  const session = state.session;
+  const target = path();
+  if (!target) return;
+  changeAvatar(target, null, errorElement).then(async (done) => {
+    if (done && session === state.session) await refreshAvatars(session);
+  }).catch((err) => { errorElement.textContent = err.message; });
+}
+
+const agentAvatarPath = () => (state.agentForm.originalId ? `/api/agents/${encodeURIComponent(state.agentForm.originalId)}/avatar` : null);
+$("agent-avatar-upload").addEventListener("click", () => $("agent-avatar-file").click());
+$("agent-avatar-file").addEventListener("change", () => pickAvatar($("agent-avatar-file"), agentAvatarPath, $("agent-avatar-error")));
+$("agent-avatar-remove").addEventListener("click", () => removeAvatar(agentAvatarPath, $("agent-avatar-error")));
+$("agent-avatar-free").addEventListener("change", renderAgentAvatarField);
+$("settings-avatar-upload").addEventListener("click", () => $("settings-avatar-file").click());
+$("settings-avatar-file").addEventListener("change", () => pickAvatar($("settings-avatar-file"), () => "/api/me/avatar", $("settings-avatar-error")));
+$("settings-avatar-remove").addEventListener("click", () => removeAvatar(() => "/api/me/avatar", $("settings-avatar-error")));
+// the user's picture style is a preference that applies at once, like the Appearance options
+$("settings-avatar-free").addEventListener("change", async () => {
+  const session = state.session;
+  const style = $("settings-avatar-free").checked ? "free" : "circle";
+  $("settings-avatar-error").textContent = "";
+  try {
+    const preferences = await api("/api/preferences", { method: "PATCH", body: JSON.stringify({ avatar_style: style }) });
+    if (session !== state.session) return;
+    if (state.preferences) state.preferences.avatar_style = preferences.avatar_style;
+    await refreshAvatars(session);
+  } catch (err) {
+    if (session === state.session) {
+      $("settings-avatar-error").textContent = err.message;
+      renderUserAvatarField();
+    }
+  }
+});
+// ---- end profile pictures
+
 function currentAgentName() {
   return state.user?.agents.find((a) => a.id === state.agentId)?.name ?? "";
 }
@@ -740,7 +884,7 @@ function currentAgentName() {
 function renderAgentBanner() {
   const name = currentAgentName();
   $("agent-title").textContent = name || "—";
-  $("agent-avatar").textContent = [...name][0]?.toUpperCase() ?? "?";
+  renderAvatar($("agent-avatar"), state.user?.agents.find((a) => a.id === state.agentId)?.avatar, name);
   $("input").placeholder = state.busy
     ? "Send another message to steer the response..."
     : name ? `Message ${name}...` : "Write a message...";
@@ -784,7 +928,7 @@ async function showApp(user) {
   $("login").hidden = true;
   $("app").hidden = false;
   $("user-name").textContent = user.name;
-  $("user-avatar").textContent = [...user.name][0]?.toUpperCase() ?? "?";
+  renderUserAvatar();
   renderThemeToggle();
   renderAgentOptions();
   showTab("chats");
@@ -1075,6 +1219,10 @@ function fillAgentForm(agent) {
   state.agentForm.initialLevel = state.agentForm.originalId ? agent.level ?? null : null;
   $("agent-name").value = agent.name;
   $("agent-description").value = agent.description ?? "";
+  $("agent-avatar-free").checked = agent.avatar_style === "free";
+  $("agent-avatar-error").textContent = "";
+  state.agentForm.avatar = agent.avatar ?? null;
+  renderAgentAvatarField();
   // only a new agent's form has the personality field: it becomes SOUL.md right after the agent is created;
   // a saved agent's SOUL.md is edited in its own tab, with history
   if (!state.agentForm.originalId) $("agent-prompt").value = "";
@@ -1190,10 +1338,17 @@ function updateLevelUi() {
     select.value = catalog.levels[target].name;
   }
   const advice = levelAdvice(catalog, select.value, choices, max);
-  $("agent-level-description").textContent = levelDescriptionText(catalog, select.value, translatedText);
-  $("agent-level-required").textContent = tr("Required by the current choices: {level} ({service})", {
-    level: levelTitle(catalog, advice.required.level), service: levelReasonText(advice.required.reason, toolGroupName),
-  });
+  $("agent-level-description").replaceChildren(...levelDescriptionItems(catalog, select.value, translatedText).map((item) => {
+    const line = Object.assign(document.createElement("li"), { textContent: item.text });
+    if (item.detail) line.title = item.detail;
+    return line;
+  }));
+  $("agent-level-info").title = [
+    tr("The level is a ceiling over what the agent may use: tools, MCP, terminal and delegation. Choose the lowest level that does the job. Only an administrator changes your maximum level."),
+    tr("Required by the current choices: {level} ({service})", {
+      level: levelTitle(catalog, advice.required.level), service: levelReasonText(advice.required.reason, toolGroupName),
+    }),
+  ].join("\n\n");
   $("agent-level-message").textContent = levelMessage(catalog, advice, select.value, max, toolGroupName);
   $("agent-level").classList.toggle("warning", advice.problem !== null);
   const badge = $("agent-form-level");
@@ -1912,6 +2067,7 @@ function agentFormBody() {
     id: state.agentForm.originalId ?? agentIdFromName(name),
     name,
     description: $("agent-description").value.trim(),
+    avatar_style: $("agent-avatar-free").checked ? "free" : "circle",
     // edited in the Dream tab; sent back unchanged so saving the agent does not reset it
     ...(saved ? { dream: saved.dream } : {}),
     folders: agentFoldersBody(),
@@ -1960,6 +2116,7 @@ async function refreshAgents(previousId, currentId) {
   renderAgentOptions();
   renderAgentsEmpty();
   await loadAgentConfigs();
+  renderAgentBanner();   // the saved picture style (circle or free) reaches the chat header at once
   if (previousId && previousId === state.agentId && previousId !== currentId) {
     // the server moved the preference when the agent was renamed or deleted
     const preferences = await refreshPreferences();
@@ -2249,6 +2406,8 @@ function fillSettings() {
   defaultAgent.replaceChildren(new Option(tr("First agent in the list"), ""), ...(state.user?.agents ?? []).map((a) => new Option(a.name, a.id)));
   defaultAgent.value = state.preferences.default_agent_id ?? "";
   $("settings-theme").value = localStorage.getItem("theme") ?? "system";
+  $("settings-avatar-error").textContent = "";
+  renderUserAvatarField();
   renderSettingsModels();
 }
 
@@ -5122,7 +5281,23 @@ function levelOptions(catalog, maxName) {
 // One line for a level, from the texts of its services (translate: the same function for every part).
 function levelDescriptionText(catalog, name, translate) {
   const found = (catalog?.levels ?? []).find((level) => level.name === name);
-  return found ? found.parts.map(translate).join("; ") : "";
+  return found ? sentenceCase(found.parts.map(translate).join("; ")) : "";
+}
+
+function sentenceCase(text) {
+  const chars = [...String(text ?? "")];
+  return chars.length ? chars[0].toUpperCase() + chars.slice(1).join("") : "";
+}
+
+// The items of a level's description: the short text (capitalised) and, apart, the technical detail that the service text
+// carries in parentheses (tool group names, when it asks), which the UI shows as a tooltip instead of in the line.
+function levelDescriptionItems(catalog, name, translate) {
+  const found = (catalog?.levels ?? []).find((level) => level.name === name);
+  return (found?.parts ?? []).map((part) => {
+    const text = String(translate(part));
+    const match = text.match(/^([^(]*?)\s*\(([^)]*)\)\s*$/);
+    return match ? { text: sentenceCase(match[1]), detail: sentenceCase(match[2]) } : { text: sentenceCase(text), detail: "" };
+  });
 }
 
 // Badges for the Tools tab: the tool groups that need more than the selected level, and whether the user's maximum

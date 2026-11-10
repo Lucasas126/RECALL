@@ -32,6 +32,9 @@ data/<user_id>/<agent_id>/
   .index/                                         vector index (Chroma + manifest)
 ```
 
+Profile pictures live beside these folders, never inside one: `data/<user_id>/.avatars/<agent_id>.png` and `_user.png` (the user's own),
+so no agent tool can list or write them (see [profile pictures](../reference/api.md#profile-pictures)).
+
 Everything an agent produces lives under its user's folder. The vector index belongs to the agent, so retrieval never
 crosses users or agents. See [dream mode](../user-guide/dream.md#per-agent-files) for the file roles.
 

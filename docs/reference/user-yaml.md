@@ -195,6 +195,10 @@ notices/errors are implemented in both channels.
 - `core_agent_id`: an agent id this user owns, or `null` (default: the default agent). The orchestrator's fallback
   agent when it is unsure (greetings, general talk). An unknown or foreign agent is `404`; deleting the agent clears
   it and renaming follows the new id.
+- `avatar_style`: `circle` (default) or `free`; how the user's own profile picture is drawn: cropped into the accent-bordered circle, or
+  shown as it is with no circle or border (for transparent PNGs). Anything else is `422` and it cannot be `null`. Edited in **Settings >
+  General > Profile picture** (applied at once); the picture itself is uploaded with `PUT /api/me/avatar`
+  ([API](api.md#profile-pictures)) and stored as `data/<user_id>/.avatars/_user.png`.
 - `agent_id`: must identify an agent configured for this user with an existing
   agent configuration. Without an override, or with `null`, it resolves to the
   user's first agent; users without agents receive `null`. This preference is
@@ -259,6 +263,7 @@ holds what each setting follows when nothing is saved, for the Settings dialog's
 | `show_thinking`, `theme` | `true`, `"system"` (browser only) |
 | `default_agent_id` | `null` (the first agent) |
 | `core_agent_id` | `null` (the default agent) |
+| `avatar_style` | `"circle"` |
 | `language` | the user's `language` from `user.yaml` reduced to `en` or `es` |
 | `default_llm_model`, `default_stt_model` | `models.chat` and `models.stt` of `user.yaml` |
 | `agents` | `[{id, name}]` of the user's agents, for the core-agent choice |
