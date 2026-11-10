@@ -53,7 +53,7 @@ terminal:                            # required by the `terminal` tool group (se
   backends:                          # 1+ names from the user's `terminal_backends` in user.yaml, each with its own policy
     sandbox:
       workdir: ~/workspace           # default directory inside this backend (default ~ = its user's home)
-      approvals: smart               # manual (asks for everything, default) | smart (asks for dangerous) | off; hardline always refused
+      approvals: smart               # optional shorthand for this backend: manual (asks for everything) | smart (asks for dangerous) | off (quote it); hardline always refused
       # timeout_seconds: 120         # optional per-backend override of the command timeout
     pc:
       workdir: ~
@@ -61,6 +61,10 @@ terminal:                            # required by the `terminal` tool group (se
   default_backend: sandbox           # one of the keys above; required when more than one, used when a call names no backend
   timeout_seconds: 60                # default command timeout, 1-600 (capped by settings.yaml terminal.max_timeout_seconds)
   max_output_chars: 20000            # output returned to the model, 500-200000 (capped by settings.yaml)
+approval_rules:                      # optional: this agent's layer of approval rules (see below and the terminal guide)
+  default: ask                       # allow | ask | deny for what no rule covers
+  rules:
+    - {verdict: allow, tool: file_write, backend_kind: sandbox, path: "~/workspace/*"}
 level: collaborator                  # optional permission level (minimal|reader|assistant|collaborator|operator|admin); at most the owner's max_level
 delegation:                          # the `delegate` tool group (see the delegation guide); optional, defaults apply when the group is selected
   enabled: true                      # false removes `task_start` without removing the group
@@ -80,6 +84,12 @@ picks. A backend that does not resolve (unknown name, `local` while `terminal.al
 in the log and the agent keeps the others; when none resolves, or the block is missing, the agent still loads with the
 terminal tools not built. `terminal.backend`, `workdir` and `approvals` at the top level of the block no longer exist. Dreams have no terminal: `dream.tools: [terminal]` and `terminal.allow_in_dream` are rejected with a validation error. See the
 [terminal guide](../user-guide/terminal.md).
+
+<a id="approval_rules"></a>`approval_rules` (optional) is the agent layer of the [approval rules](../user-guide/terminal.md#approval-rules): `default` (`allow`, `ask` or `deny`)
+and `rules`, a list of `{verdict, tool, id, command, path, backend, backend_kind, dangerous, reason}`; unknown keys are rejected. It adds to the
+installation and user lists; deny beats ask beats allow. The backend `approvals` key is a shorthand that only counts when the file sets it (the Agents tab
+always writes it); `off`, a `default: allow` or a rule that allows everything on a `machine` or `local` backend needs `level: admin` (a `sandbox` backend
+only needs operator), else the agent does not load.
 
 <a id="delegation"></a>The `delegation` block belongs to the `delegate` tool group, which exposes `task_start` (phase 1: a synchronous worker in a hidden
 chat). The group is opt-in; selecting it without the block saves the defaults above. Unknown keys are rejected, and `allowed_groups` entries other

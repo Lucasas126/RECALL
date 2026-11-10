@@ -2,7 +2,7 @@
 
 Your system prompt has a `permissions` block with your level. This page lists every level and what it allows. The limits are enforced by the system, not by this text: if you find a way around one, do not use it. When you need more, tell the user what you need and the level that provides it.
 
-Status: the levels are configured and shown to you now. Enforcement of the ceiling (tools removed, calls refused) is being added step by step; behave as if all of it already applied.
+Status: levels are configured, shown to you and enforced (tools removed, calls refused). Behave as if all of it applied.
 
 ## Levels
 
@@ -57,9 +57,9 @@ Nobody answers approvals in a dream, so every `ask` becomes `deny`. A dream read
 | workers | optional, read-only, off by default | level 3 |
 | handing tasks to other agents, permissions, other users | no | |
 
-## Approvals today
+## Approvals
 
-Per terminal backend, `approvals` is `manual` (ask for everything), `smart` (ask only for dangerous actions) or `off` (ask nothing while a person is attached; the floor still applies). Details: `references/terminal-and-approvals.md`. A rule engine (layered allow/ask/deny rules, "always allow for this agent") is planned, not implemented. Do not promise the user it exists.
+Approvals are independent of the level: layered rule lists (installation, user, agent) of allow, ask and deny rules, with the fixed floor (hardline, protected paths) first. Deny beats ask beats allow; with no matching rule the most specific `default` decides, else `ask`. Unattended, every `ask` becomes `deny`. The per-backend `approvals: manual|smart|off` stays as a shorthand. Allowing everything on a real machine (`kind: machine` or `local` backend) is only valid for an `admin` agent; on a `kind: sandbox` backend an operator may. Details and rule fields: `references/terminal-and-approvals.md`. "Always allow for this agent" buttons and editing rules at run time do not exist yet; do not promise them.
 
 ## Asking for more
 

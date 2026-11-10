@@ -8,6 +8,7 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstr
 from src.agent.tool_groups import validate_tool_groups
 from src.config.levels import LevelField
 from src.config.zdr import ensure_zdr_compatible
+from src.terminal.rules import ApprovalRuleList
 from src.config.model_refs import (
     CAPABILITIES, CLAUDE_SUBSCRIPTION, MAIN_PROVIDERS, OPENROUTER, prefix_of, validate_reference,
 )
@@ -372,6 +373,13 @@ class SshBackendConfig(BaseModel):
     key_file: str = Field(min_length=1, max_length=1024)
     known_hosts_file: str = Field(min_length=1, max_length=1024)
     description: str = Field(default="", max_length=200)  # free text shown to the model and in the agent form
+    # `sandbox`: a disposable machine whose mistakes cost little; `machine`: one of the user's real machines. Approval
+    # rules can match the kind, and a blanket allow on a machine is admin-only (docs/architecture/permissions.md).
+    kind: Literal["sandbox", "machine"] = "machine"
+
+    @property
+    def backend_kind(self) -> str:
+        return self.kind
 
 
 class LocalBackendConfig(BaseModel):
@@ -383,6 +391,10 @@ class LocalBackendConfig(BaseModel):
     workdir: str = Field(min_length=1, max_length=1024)
     description: str = Field(default="", max_length=200)
 
+    @property
+    def backend_kind(self) -> str:
+        return "local"  # the RECALL host itself: always its own kind
+
 
 TerminalBackendConfig = Annotated[Union[SshBackendConfig, LocalBackendConfig], Field(discriminator="type")]
 
@@ -393,6 +405,7 @@ class AgentTerminalBackend(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     workdir: str = Field(default="~", min_length=1, max_length=1024)  # a path inside the backend
+    # legacy shorthand scoped to this backend: the most specific default of the approval rules (see `shorthand`)
     approvals: TerminalApprovals = "manual"
     timeout_seconds: Optional[int] = Field(default=None, ge=1, le=600, strict=True)  # overrides the agent-wide one
 
@@ -426,6 +439,15 @@ class AgentTerminalConfig(BaseModel):
         elif self.default_backend not in self.backends:
             raise ValueError(f"terminal.default_backend '{self.default_backend}' is not one of terminal.backends")
         return self
+
+    def shorthand(self, name: str) -> Optional[TerminalApprovals]:
+        """The `approvals` mode of a backend when the config sets it (a hand-made entry or a YAML key), else None.
+
+        Absent means the approval rules' defaults decide; `manual` without the key and with it are the same thing
+        when no rule list changes a default.
+        """
+        entry = self.backends[name]
+        return entry.approvals if "approvals" in entry.model_fields_set else None
 
     def timeout_for_backend(self, name: str) -> int:
         return self.backends[name].timeout_seconds or self.timeout_seconds
@@ -547,6 +569,8 @@ class UserConfig(BaseModel):
     )
     # highest level the user's agents may have; required, set only by an administrator (see config/levels.py)
     max_level: LevelField
+    # approval rules for all of the user's agents (the `user` layer; see docs/architecture/permissions.md)
+    approval_rules: Optional[ApprovalRuleList] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -699,6 +723,7 @@ class AgentConfig(BaseModel):
     delegation: Optional[AgentDelegationConfig] = None  # the `delegate` tool group; defaults when the group is selected
     # permission level, at most the owner's max_level; None = not declared (the lowest level covering the config applies)
     level: Optional[LevelField] = None
+    approval_rules: Optional[ApprovalRuleList] = None  # the `agent` layer of the approval rules
 
     @model_validator(mode="after")
     def _delegate_group_has_a_block(self) -> "AgentConfig":
@@ -772,6 +797,9 @@ class ResolvedAgent(BaseModel):
     # covers what it is configured with; `max_level` stays None then.
     level: Optional[LevelField] = None
     max_level: Optional[LevelField] = None
+    # the user and agent layers of the approval rules (the installation layer is settings.APPROVAL_RULES)
+    user_approval_rules: Optional[ApprovalRuleList] = None
+    approval_rules: Optional[ApprovalRuleList] = None
 
     @model_validator(mode="after")
     def _effective_level(self) -> "ResolvedAgent":

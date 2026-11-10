@@ -17,3 +17,7 @@ folders: []            # user folders, each a source named after it; e.g.
 #    path: /path/to/obsidian-vault
 #    indexed: true      # feeds associative memory (default true)
 #    read_only: false   # never writable, whatever the tool groups
+# approval_rules:         # the agent's own rules, the most specific layer (same shape as in user.yaml)
+#   default: ask          # optional; allow/ask/deny for what no rule covers
+#   rules:
+#     - {verdict: allow, tool: file_write, backend_kind: sandbox, path: "~/workspace/*"}

@@ -13,7 +13,7 @@ Agent files are described in [agent.yaml](agent-yaml.md); framework-wide values 
 | `agents.lock`, `preferences.lock` | coordination files for atomic writes; never delete them between requests |
 
 Keys of `user.yaml`: `id`, `name`, `password_hash` (optional), `language`, `require_zdr`, `max_level`, `provider`, `embeddings_provider`
-(optional, falls back to `provider`), `agents`, `models`, `openrouter`, `ollama`, `claude_subscription` and `terminal_backends`. Unknown keys inside
+(optional, falls back to `provider`), `agents`, `models`, `openrouter`, `ollama`, `claude_subscription`, `terminal_backends` and `approval_rules`. Unknown keys inside
 the provider blocks are rejected.
 
 ## max_level (permission levels)
@@ -298,15 +298,24 @@ are rejected; key files are paths, never inline secrets.
 
 | type | keys |
 | --- | --- |
-| `ssh` | `host` (name or address), `port` (default 22), `user`, `key_file`, `known_hosts_file` (all required except `port`), `description` (optional); strict host-key checking and key-only login are always on |
+| `ssh` | `host` (name or address), `port` (default 22), `user`, `key_file`, `known_hosts_file` (all required except `port`), `description` and `kind` (optional); strict host-key checking and key-only login are always on |
 | `local` | `workdir`, `description` (optional); refused unless `settings.yaml` sets `terminal.allow_local: true` or the server sets `RECALL_TERMINAL_ALLOW_LOCAL=true` |
 
 Every backend also accepts an optional `description` (free text, at most 200 characters, for example `User A's Windows PC, real
 files, Git Bash`). The model sees it next to the backend's name in its instructions, and the agent form shows it; use it to say
 whether the machine is a disposable sandbox or a real machine.
 
+`kind` (ssh only) is `machine` (default: one of your real machines) or `sandbox` (a disposable one). Approval rules can match it with `backend_kind`, and allowing everything is allowed on a `sandbox` from the `operator` level but needs `admin` on a `machine`. A `local` backend always has the kind `local` and takes no `kind` key.
+
 Check a backend with `python -m src.admin terminal-test --user <user_id> --backend <name>` (runs `echo ok; uname -sr`, 15 s
 timeout, prints the exit code and the redacted output, never the key). Setup walk-through: [terminal guide](../user-guide/terminal.md).
+
+## approval rules
+
+`approval_rules` (optional) is the user layer of the [approval rules](../user-guide/terminal.md#approval-rules), applied to all the user's agents on top of the
+installation list ([settings.yaml](settings-yaml.md#approval_rules)) and under each agent's own list: `default` (`allow`, `ask` or `deny`) and `rules`
+(`{verdict, tool, id, command, path, backend, backend_kind, dangerous, reason}`). Unknown keys are rejected. Deny beats ask beats allow across the three layers.
+A rule or default that allows everything on a `machine` or `local` backend is only valid for admin agents.
 
 ## example
 
@@ -329,7 +338,9 @@ models:
 # claude_subscription:                  # optional, advanced; see the Claude subscription guide
 #   claude_config_dir: /path/to/this-users-claude-login
 # terminal_backends:                    # optional; sandboxes the user's agents may run commands in (see below)
-#   sandbox: {type: ssh, host: 192.0.2.10, port: 22, user: agent, key_file: /app/.config/keys/sandbox_ed25519, known_hosts_file: /app/.config/keys/sandbox_known_hosts, description: Disposable sandbox}
+#   sandbox: {type: ssh, kind: sandbox, host: 192.0.2.10, port: 22, user: agent, key_file: /app/.config/keys/sandbox_ed25519, known_hosts_file: /app/.config/keys/sandbox_known_hosts, description: Disposable sandbox}
+# approval_rules:                       # optional; rules for all of this user's agents (deny beats ask beats allow)
+#   rules: [{verdict: allow, tool: terminal, backend_kind: sandbox, command: "git status"}]
 ```
 
 A complete, working example lives in `.config/example_user/`.

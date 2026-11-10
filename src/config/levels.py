@@ -90,6 +90,17 @@ class LevelRequiredAboveMax(InputError):
     code = "level_required_above_max"
 
 
+class ApprovalRuleNotAllowed(InputError):
+    """An approval rule, default or shorthand that allows everything on a real machine, for an agent below admin."""
+
+    code = "approval_rule_not_allowed"
+
+
+APPROVAL_RULE_NOT_ALLOWED = (
+    "Agent '{agent_id}' has the level '{level}', but {problem}. Allowing everything on a real machine needs the level "
+    "'admin'. Narrow the rule (add a command, path or dangerous condition), use approvals 'manual' or 'smart', set "
+    "kind: sandbox on the backend if it is a disposable sandbox, or ask for the level 'admin'."
+)
 LEVEL_EXCEEDS_MAX = (
     "The level '{level}' of agent '{agent_id}' is above your maximum level '{max_level}'. "
     "Choose '{max_level}' or lower, or ask an administrator to raise your maximum."
@@ -179,6 +190,34 @@ def effective_agent_level(agent: Any, user: Any) -> Level:
     return required_level(agent, user.terminal_backends)
 
 
+def check_approval_rules(agent: Any, user: Any, installation: Any = None) -> None:
+    """The blanket-allow guardrail: below admin, nothing may allow everything on a `machine` or `local` backend.
+
+    Looks at the three rule layers and the per-backend `approvals` shorthand of the backends the agent uses. On a
+    `sandbox` backend a blanket allow is fine from operator. `installation` defaults to settings.yaml `approval_rules`.
+    Raises ApprovalRuleNotAllowed naming the offending rule.
+    """
+    from src.terminal.rules import RuleSet, blanket_allows
+
+    if agent.terminal is None or "terminal" not in selected_tool_groups(agent):
+        return
+    level = effective_agent_level(agent, user)
+    if level >= Level.ADMIN:
+        return
+    if installation is None:
+        from src.config.settings import APPROVAL_RULES
+
+        installation = APPROVAL_RULES
+    defined = user.terminal_backends
+    kinds = {name: defined[name].backend_kind for name in agent.terminal.backends if name in defined}
+    shorthands = {name: agent.terminal.shorthand(name) for name in kinds}
+    problems = blanket_allows(RuleSet.build(installation, user.approval_rules, agent.approval_rules), kinds, shorthands)
+    if problems:
+        raise ApprovalRuleNotAllowed(
+            APPROVAL_RULE_NOT_ALLOWED, agent_id=agent.id, level=level.label, problem="; ".join(problems),
+        )
+
+
 def check_agent_level(agent: Any, user: Any, max_level: Level) -> None:
     """The config rule: required_level(agent) <= effective level <= the owner's `max_level`, else the agent is invalid.
 
@@ -198,3 +237,4 @@ def check_agent_level(agent: Any, user: Any, max_level: Level) -> None:
         raise LevelBelowRequired(
             LEVEL_BELOW_REQUIRED, agent_id=agent.id, level=agent.level.label, service=service, needed=needed.label,
         )
+    check_approval_rules(agent, user)

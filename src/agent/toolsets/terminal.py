@@ -4,11 +4,12 @@ from typing import Annotated, Callable
 
 from src.agent.tooling import tool
 from src.config.models import ResolvedAgent
-from src.config.settings import DATA_DIR, TERMINAL
+from src.config.settings import APPROVAL_RULES, DATA_DIR, TERMINAL
 from src.terminal import files
 from src.terminal.audit import audit_path
 from src.terminal.backends import Backend, build_backend
 from src.terminal.output import clean
+from src.terminal.rules import RuleSet
 from src.terminal.session import TerminalSession
 
 BACKEND_HELP = "which backend (machine) to use; omit for the default"
@@ -36,6 +37,17 @@ APPROVAL_MODES = {
 }
 
 
+def _approval_text(shorthand: str | None, rules: RuleSet) -> str:
+    """How a backend's actions are authorized, in one clause for the system prompt."""
+    if shorthand is not None:
+        return APPROVAL_MODES[shorthand]
+    layer = rules.default_layer()
+    default = layer.default if layer is not None else "ask"
+    base = {"allow": "actions run without asking unless a rule says otherwise", "ask": "actions ask first unless a rule allows them",
+            "deny": "actions are refused unless a rule allows them"}[default or "ask"]
+    return f"{base} (approval rules decide; some actions are always blocked)"
+
+
 def make_backend(name: str, config) -> Backend:
     """Indirection so tests can swap the backend."""
     return build_backend(name, config)
@@ -46,6 +58,7 @@ def terminal_notice(config: ResolvedAgent) -> str | None:
     if config.terminal is None or not config.terminal_backends:
         return None
     lines = []
+    rules = RuleSet.build(APPROVAL_RULES, config.user_approval_rules, config.approval_rules)
     for name, entry in config.terminal.backends.items():
         if name not in config.terminal_backends:
             continue
@@ -53,7 +66,7 @@ def terminal_notice(config: ResolvedAgent) -> str | None:
         tag = " (default)" if name == config.terminal.default_backend else ""
         lines.append(
             f"- `{name}`{tag}" + (f": {description}" if description else "")
-            + f". Working directory {entry.workdir}; approvals: {APPROVAL_MODES[entry.approvals]}."
+            + f". Working directory {entry.workdir}; approvals: {_approval_text(config.terminal.shorthand(name), rules)}."
         )
     return TERMINAL_NOTICE.format(backends="\n".join(lines))
 
@@ -76,7 +89,8 @@ def build_terminal_tools(
         sessions[name] = TerminalSession(
             backend, cfg, TERMINAL, name=name, user_id=config.user_id, agent_id=config.id,
             audit_file=audit_path(DATA_DIR, config.user_id, config.id), unattended=unattended,
-            local=backend_config.type == "local",
+            local=backend_config.type == "local", kind=backend_config.backend_kind,
+            rules=RuleSet.build(APPROVAL_RULES, config.user_approval_rules, config.approval_rules),
         )
     if not sessions:
         return []

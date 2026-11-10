@@ -43,10 +43,10 @@ documents and images the user attaches, and the output of its own commands. Any 
 
 **A PC backend means the RECALL host can act on a real machine.** When an agent is allowed a backend that is your own PC (or
 any machine that is not a throwaway sandbox), the sandbox boundary above does not exist for that backend: a prompt injection
-that gets a command approved acts on real files and credentials. So: keep that backend on `approvals: manual` and read each
+that gets a command approved acts on real files and credentials. So: keep that backend on `approvals: manual` (or no rule that allows more than narrow read-only commands) and read each
 command before approving; use a dedicated key pair that is used for nothing else and a dedicated, preferably unprivileged,
 account; allow inbound SSH only from the RECALL host with a firewall rule; disable password login on the PC; pin its host key.
-Approvals are per backend, so a `smart` or `off` sandbox next to a `manual` PC does not loosen the PC. Setup:
+Approvals are per backend, so a `smart` or `off` sandbox next to a `manual` PC does not loosen the PC. [Approval rules](../user-guide/terminal.md#approval-rules) (installation, user, agent) can allow, ask or deny by command, path, backend and backend `kind` (`sandbox` or `machine`; mark disposable machines `kind: sandbox`); deny beats ask beats allow, and allowing everything on a machine or the local backend (a blanket rule, `default: allow` or `approvals: off`) is refused unless the agent is `admin`. Hardline and protected paths come first and no rule changes them. Setup:
 [using your own PC as a backend](../user-guide/terminal.md#using-your-own-pc-as-a-backend).
 
 **Local backend.** `type: local` runs commands on the RECALL host as the RECALL user, with an environment
@@ -67,7 +67,7 @@ environment) and only suitable for an installation you would also trust a shell 
 user's SSH backends (so a guide for user B cannot use the owner's PC key), `.config/secrets.env`, `.env` files, anything under a
 `keys` folder in the config dir, Claude login credentials and `/proc/*/environ`, plus the patterns in
 `terminal.protected_paths`, and the per-user `mcp/` credential folders; it also refuses *writes* to the audit trail, every `user.yaml`,
-agent yaml, `settings.yaml` and `known_hosts` files (a `user.yaml` that cannot be parsed still protects the keys it names) (details in the [terminal guide](../user-guide/terminal.md#protected-paths-local-backend)). With `approvals: off` an unattended run (dream, scheduled task, no chat client) behaves like `smart` and may not write files. The file
+agent yaml, `settings.yaml` and `known_hosts` files (a `user.yaml` that cannot be parsed still protects the keys it names) (details in the [terminal guide](../user-guide/terminal.md#protected-paths-local-backend)). With `approvals: off` (admin only on a machine or local backend) an unattended run (dream, scheduled task, no chat client) behaves like `smart` and may not write files. The file
 tools enforce it exactly (symlinks and `..` resolved). Command scanning is **best effort**: an obfuscated command (a path built
 from pieces, a hard link, a script the agent writes and runs through an interpreter) can bypass it, so approval cards remain the
 second barrier. `user.yaml`, other users' data and the audit logs stay readable on purpose (writing them is refused). Stronger measures are on the
