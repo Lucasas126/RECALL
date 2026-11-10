@@ -24,6 +24,7 @@ GROUP_MIN_LEVEL: dict[str, Level] = {
     "web": SERVICE_MIN_LEVEL["web"],
     "folders_edit": SERVICE_MIN_LEVEL["folders_edit"],
     "delegate": SERVICE_MIN_LEVEL["delegate"],
+    "permissions": SERVICE_MIN_LEVEL["permissions"],
     "terminal": SERVICE_MIN_LEVEL["terminal_ssh"],
 }
 
@@ -80,6 +81,11 @@ def usable_backends(level: Level, backends: Mapping[str, Any]) -> dict[str, Any]
 def delegation_targets_allowed(level: Level) -> bool:
     """Handing tasks to the user's other agents."""
     return level >= SERVICE_MIN_LEVEL["delegation_targets"]
+
+
+def permissions_allowed(level: Level) -> bool:
+    """Viewing and adjusting the permissions of the same user's other agents (the `permissions` group)."""
+    return group_allowed(level, "permissions")
 
 
 def workers_allowed(level: Level) -> bool:
@@ -240,6 +246,7 @@ class Capabilities:
     terminal_privileged: bool   # the local backend and root ssh users
     delegation_workers: bool
     delegation_targets: bool
+    permissions: bool
     dream: DreamCapabilities
 
 
@@ -252,5 +259,6 @@ def capabilities(level: Level) -> Capabilities:
         terminal_privileged=level >= SERVICE_MIN_LEVEL["terminal_local"],
         delegation_workers=workers_allowed(level),
         delegation_targets=delegation_targets_allowed(level),
+        permissions=permissions_allowed(level),
         dream=dream_capabilities(level),
     )

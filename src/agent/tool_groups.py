@@ -43,11 +43,23 @@ TOOL_GROUP_CATALOG: Final[tuple[dict[str, str], ...]] = (
         "name": "Delegate subtasks",
         "description": "Hand a self-contained task to a short-lived worker in a hidden chat and get its result back.",
     },
+    {
+        "id": "permissions",
+        "name": "Manage permissions",
+        "description": "View and change the levels, tool groups and approval rules of your other agents, each change with your approval.",
+    },
 )
 
 TOOL_GROUP_IDS: Final[frozenset[str]] = frozenset(item["id"] for item in TOOL_GROUP_CATALOG)
 # used when an agent sets no tool_groups; folder access is always an explicit choice
 DEFAULT_TOOL_GROUPS: Final[tuple[str, ...]] = ("memory_read", "memory_edit", "web", "self")
+
+# the `permissions` group: reads, then the mutations (each one asks the user, once, and is audited)
+PERMISSION_READ_TOOLS: Final[tuple[str, ...]] = ("agents_list", "agent_get_permissions", "permission_levels_help")
+PERMISSION_CHANGE_TOOLS: Final[tuple[str, ...]] = (
+    "agent_set_level", "agent_set_tool_groups", "agent_add_rule", "agent_remove_rule", "agent_reset_rules",
+)
+PERMISSION_TOOLS: Final[tuple[str, ...]] = (*PERMISSION_READ_TOOLS, *PERMISSION_CHANGE_TOOLS)
 
 TOOL_GROUP_TOOLS: Final[dict[str, tuple[str, ...]]] = {
     "memory_read": (
@@ -63,6 +75,7 @@ TOOL_GROUP_TOOLS: Final[dict[str, tuple[str, ...]]] = {
     ),
     "terminal": ("terminal", "sandbox_read", "sandbox_write", "sandbox_patch", "sandbox_search"),
     "delegate": ("task_start", "task_list", "task_result", "task_steer", "task_send", "task_stop", "task_wait"),
+    "permissions": PERMISSION_TOOLS,
 }
 
 # the groups a parent may hand to a subagent (phase 1: read-only web access); memory, self, folders, terminal,
@@ -76,6 +89,7 @@ DISPOSABLE_BLOCKED_TOOLS: Final[frozenset[str]] = frozenset(
     | {name for name in TOOL_GROUP_TOOLS["folders_edit"] if name not in TOOL_GROUP_TOOLS["folders_read"]}
     | set(TOOL_GROUP_TOOLS["terminal"])  # a disposable chat never gets the terminal at all
     | set(TOOL_GROUP_TOOLS["delegate"])  # nor can it launch tasks: this also gives depth 1 (children are disposable)
+    | set(TOOL_GROUP_TOOLS["permissions"])  # nor change anyone's permissions: workers never hold that group
 )
 
 
