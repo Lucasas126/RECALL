@@ -19,9 +19,9 @@
   --art-column: url("/static/art/column.svg"); --art-column-slice: 28 0 22 0;
   --art-arcade: url("/static/art/arcade.svg");
   --art-login-arch: url("/static/art/login-arch.svg");
-  --art-capital: url("/static/art/capital.svg");
+  --art-capital: url("/static/art/capital.png");
   --art-plinth: url("/static/art/plinth.svg");
-  --art-render: auto;                      /* set to pixelated when the files are MagicaVoxel PNGs */
+  --art-render: pixelated;                      /* set to pixelated when the files are MagicaVoxel PNGs */
   --orn-a: .16; --orn-arch-a: .45; --orn-arcade-a: .16;
 }
 :root {
@@ -88,17 +88,16 @@ button.link { background: none; border: none; color: var(--muted); padding: 0; }
 .login-stage { position: relative; isolation: isolate; margin: auto; width: min(344px, 100%); padding: calc(18px + 40px * var(--k)) 26px 38px; display: flex; flex-direction: column; align-items: center; }
 .login-arch { position: absolute; inset: 0; z-index: -1; pointer-events: none; background: var(--art-login-arch) center / 100% 100% no-repeat; image-rendering: var(--art-render); opacity: var(--orn-arch-a); }   /* the side strokes run straight to the bottom edge of the box: the arch is closed visually, no base line */
 .login-art { display: flex; flex-direction: column; align-items: center; gap: 0; margin-bottom: 8px; pointer-events: none; }
-.art-capital { width: calc(160px * var(--k)); height: calc(92px * var(--k)); flex: none; margin: 0; background: var(--art-capital) center / contain no-repeat; image-rendering: var(--art-render); }
-.art-plinth { position: relative; width: 144px; height: 96px; flex: none; margin-top: -12px; background: var(--art-plinth) center / 100% 100% no-repeat; image-rendering: var(--art-render); }
-.art-plinth .brand-logo { position: absolute; left: 48px; top: 16px; width: 48px; height: 42px; }   /* the 24x21 logo at exactly 2x; its feet (y 58) sit on the front half of the top face (diamond y 20-80) */
+.art-capital { --u: 1px; position: relative; margin-top: 48px; width: calc(94 * var(--u)); height: calc(92 * var(--u)); flex: none; background: var(--art-capital) center / 100% 100% no-repeat; image-rendering: var(--art-render); }   /* hand-drawn 94x92 sprite shown at an integer scale (1 art px = --u) */
+.art-capital .brand-logo { position: absolute; left: 50%; top: -46px; width: 48px; height: 42px; margin-left: -24px; image-rendering: auto; }   /* logo keeps its 2x size and levitates above the capital: its feet hover over the centre of the top face */
 #login-form { display: flex; flex-direction: column; gap: 10px; width: 100%; text-align: center; }
 #login-form h1 { margin: 0; font: 350 var(--s4)/1 var(--serif); letter-spacing: .22em; text-indent: .22em; font-variation-settings: "SOFT" 40, "WONK" 0; }
 .login-lede { margin: 0 0 6px; color: var(--muted); font-size: var(--s-1); line-height: 1.4; }
 #login-form .field { display: flex; flex-direction: column; gap: 5px; text-align: left; }
-#login-form .field label { font: 600 .6875rem/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
-#login-form input { width: 100%; height: 48px; padding: 0 14px; border-radius: var(--radius); font-size: 16px; }
+#login-form .field label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }   /* the placeholder names the field; the label stays for screen readers */
+#login-form input { width: 100%; height: 44px; padding: 0 14px; border-radius: 5px; font-size: 16px; }
 #login-form input:focus { border-color: var(--accent); }
-#login-form button[type="submit"] { height: 48px; margin-top: 4px; border-radius: var(--radius); letter-spacing: .01em; }
+#login-form button[type="submit"] { height: 44px; margin-top: 4px; border-radius: 5px; letter-spacing: .01em; }
 #login-form .error:empty { min-height: 0; }
 .app-version { margin: 2px 0 0; color: var(--muted); /* >= 4.5:1 */ font: 400 .6875rem/1.4 var(--mono); text-align: center; letter-spacing: .02em; }
 @media (min-height: 800px) { #login { --k: 1; } }
