@@ -37,7 +37,7 @@ Documentation map. The root [README](../README.md) gives the short pitch; [AGENT
 - [Sources](architecture/sources.md): source types, addressing, `SourceRegistry`.
 - [Associative memory internals](architecture/associative-memory.md): indexing, chunking, concurrency.
 - [Obsidian overlay](architecture/obsidian-overlay.md): safe/auto overlay design (planned).
-- [Permission levels](architecture/permissions.md): levels L0-L5, approval rules, dream limits and known gaps (design, planned).
+- [Permission levels](architecture/permissions.md): levels L0-L5, approval rules, dream limits and known gaps (implemented).
 
 ## deployment
 
