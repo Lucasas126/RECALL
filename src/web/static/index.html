@@ -155,13 +155,11 @@
             <fieldset id="agent-level-section" class="agent-section" hidden>
               <legend id="agent-level-legend">Permission level</legend>
               <label>
-                <span id="agent-level-label">Level</span>
+                <span class="level-label-row"><span id="agent-level-label">Level</span><span id="agent-level-info" class="info-tip" tabindex="0" role="img" aria-label="Level information">&#9432;</span></span>
                 <select id="agent-level"></select>
               </label>
-              <p id="agent-level-description" class="model-note"></p>
-              <p id="agent-level-required" class="model-note" role="status"></p>
+              <ul id="agent-level-description" class="level-parts"></ul>
               <p id="agent-level-message" class="error" role="alert"></p>
-              <p id="agent-level-hint" class="model-note">The level is a ceiling over what the agent may use: tools, MCP, terminal and delegation. Choose the lowest level that does the job. Only an administrator changes your maximum level.</p>
             </fieldset>
             <fieldset class="agent-section">
               <legend id="agent-model-legend">Model and reasoning</legend>
@@ -640,6 +638,8 @@
                   <label class="sw" style="--d:#6fbf8e;--l:#277340"><input type="radio" name="accent" value="green" aria-label="Green accent"><span class="dot" aria-hidden="true"></span><span>Green</span></label>
                   <label class="sw" style="--d:#b79cff;--l:#5b3fc4"><input type="radio" name="accent" value="violet" aria-label="Violet accent"><span class="dot" aria-hidden="true"></span><span>Violet</span></label>
                   <label class="sw" style="--d:#5fd0e0;--l:#0b6b7a"><input type="radio" name="accent" value="cyan" aria-label="Cyan accent"><span class="dot" aria-hidden="true"></span><span>Cyan</span></label>
+                  <label id="appearance-accent-custom" class="sw" style="--d:#ff6b9d;--l:#ff6b9d"><input type="radio" name="accent" value="custom" aria-label="Custom accent"><span class="dot" aria-hidden="true"></span><span>Custom</span></label>
+                  <input id="appearance-accent-color" class="accent-picker" type="color" value="#ff6b9d" aria-label="Pick a custom accent colour" title="Pick a custom accent colour">
                 </div>
               </fieldset>
               <label class="tgl"><span class="tgl-text"><span id="appearance-ornaments-label">Architecture ornaments</span><span class="tgl-desc">Decorative columns and arcade lines around the chat.</span></span><input id="appearance-ornaments" type="checkbox" role="switch" checked><span class="track" aria-hidden="true"></span></label>

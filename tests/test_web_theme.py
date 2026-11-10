@@ -204,7 +204,8 @@ class AppearanceMarkupTests(unittest.TestCase):
         dialog = HTML[HTML.index('<dialog id="settings-dialog"'):HTML.index("</dialog>", HTML.index('<dialog id="settings-dialog"'))]
         self.assertIn('id="appearance-title">Appearance</h3>', dialog)
         self.assertIn('id="appearance-ornaments"', dialog)
-        self.assertEqual(dialog.count('name="accent"'), len(ACCENTS))
+        self.assertEqual(dialog.count('name="accent"'), len(ACCENTS) + 1)   # the named swatches and "custom"
+        self.assertIn('id="appearance-accent-color" class="accent-picker" type="color"', dialog)
         self.assertNotIn('id="appearance"', HTML.replace('id="appearance-', ""))   # no separate popover
 
     def test_preferences_are_browser_only_and_applied_before_paint(self) -> None:

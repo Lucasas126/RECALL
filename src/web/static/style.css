@@ -427,6 +427,13 @@ details.msg.task-wake { align-self: flex-start; padding: 6px 12px; border-style:
 .agent-form .setting-row { padding: 8px 0; }
 .agent-form fieldset > .setting-row:first-of-type { border-top: 0; padding-top: 0; }
 .agent-form legend { padding: 0 6px; color: var(--muted); }
+.agent-form fieldset > p:empty { display: none; }   /* an empty message must not add a flex gap */
+.level-label-row { display: inline-flex; align-items: center; gap: 6px; }
+.info-tip { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; color: var(--muted); font-size: 14px; line-height: 1; cursor: help; }
+.info-tip:hover, .info-tip:focus-visible { color: var(--accent); }
+.level-parts { margin: 0; padding: 0 0 0 18px; color: var(--muted); font-size: .85em; line-height: 1.45; }
+.level-parts li { margin: 0 0 2px; cursor: default; }
+.level-parts li[title] { text-decoration: underline dotted var(--line-strong); text-underline-offset: 3px; }
 .agent-form .agent-actions { display: flex; gap: 8px; }
 .agent-panel { display: flex; flex-direction: column; gap: 12px; }
 .agent-panel[hidden] { display: none; }
@@ -832,6 +839,10 @@ main:has(#chat-view[hidden]) .art-arcade { display: none; }
 .sw .dot { position: relative; flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--d); }
 :root[data-theme="light"] .sw .dot { background: var(--l); }
 @media (prefers-color-scheme: light) { :root:not([data-theme]) .sw .dot { background: var(--l); } }
+.accent-picker { flex: none; width: 36px; height: 36px; min-height: 0; padding: 2px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel); cursor: pointer; align-self: center; }
+.accent-picker::-webkit-color-swatch-wrapper { padding: 0; }
+.accent-picker::-webkit-color-swatch { border: 0; border-radius: 5px; }
+.accent-picker::-moz-color-swatch { border: 0; border-radius: 5px; }
 .sw .dot::after { content: ""; position: absolute; left: 7px; top: 3px; width: 6px; height: 11px; border: solid #0f0f14; border-width: 0 2px 2px 0; transform: rotate(45deg); opacity: 0; }
 :root[data-theme="light"] .sw .dot::after { border-color: #fff; }
 @media (prefers-color-scheme: light) { :root:not([data-theme]) .sw .dot::after { border-color: #fff; } }
