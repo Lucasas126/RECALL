@@ -29,7 +29,7 @@ from the repository root. Agents with a `local` terminal backend run it the same
 ## Permission levels
 
 `max_level` (user) and `level` (agent) take `minimal`, `reader`, `assistant`, `collaborator`, `operator` or `admin`
-(see [permissions](../architecture/permissions.md)). Only this CLI changes a user's `max_level`:
+(see [permissions](../architecture/permissions.md)). Only this CLI changes a user's `max_level`; an agent's `level` is changed by the user (web form, `agent set`) up to `max_level`, or by an operator agent with the `permissions` group (never above its own level, and only lowering its own):
 `user set --user U --set max_level=operator`. `max_level` is required in `user.yaml` (a user without it does not load). An agent whose level is above it, or below what its
 configuration needs, or whose configuration needs more than `max_level`, is refused by `agent create|set` (and by the web) with a
 message naming the service and the level needed. `user set` refuses a `max_level` below the level of one of the user's agents (lower
@@ -72,7 +72,7 @@ and reshaped into the user's main agent. It only works when the server allows lo
 
 `permission-manager` creates an agent named `Permission manager` at level `operator` with the tool groups `memory_read`, `memory_edit`,
 `self` and `permissions` (no terminal, no web) and a short SOUL: it explains the levels, reviews what each of the user's agents can
-do, proposes a change and its trade-off before making it, recommends the lowest level that does the job and never tries to go around a
+do (levels, tool groups and rules it may change; its own only within its level, and its level only lower), proposes a change and its trade-off before making it, recommends the lowest level that does the job and never tries to go around a
 limit or an approval. Each change it makes shows the user an approval card (approve once or deny, never "always") and is audited. See
 [tools](../reference/tools.md#permissions).
 

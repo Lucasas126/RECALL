@@ -24,6 +24,8 @@ BACKENDS = (
 )
 BOSS = "id: boss\nname: Boss\nlevel: operator\nchat_config:\n  tool_groups: [memory_read, permissions]\n"
 BOT = "id: bot\nname: Bot\nlevel: assistant\nchat_config:\n  tool_groups: [memory_read, memory_edit]\n"
+BOT_GROUPS = ["memory_read", "memory_edit"]
+MORE_GROUPS = ["memory_read", "memory_edit", "web"]  # a change of bot that its level (assistant) allows
 OPS = (
     "id: ops\nname: Ops\nlevel: operator\nchat_config:\n  tool_groups: [terminal]\nterminal:\n  default_backend: pc\n"
     "  backends: {pc: {}}\n"

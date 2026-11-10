@@ -21,7 +21,7 @@ _CAN: dict[Level, str] = {
     Level.COLLABORATOR: "edit user folders, use MCP servers and run web-only workers (some actions ask the user first)",
     Level.OPERATOR: (
         "use terminal backends (asking the user), hand tasks to the user's other agents and, with the permissions tools, "
-        "view and adjust the permissions of the user's other agents (every change needs the user's approval)"
+        "adjust the level, tool groups and rules of the user's agents (yours: only lower; every change needs approval)"
     ),
     Level.ADMIN: "all of it, including the local or root terminal, other users' data and the admin CLI (with approval)",
 }

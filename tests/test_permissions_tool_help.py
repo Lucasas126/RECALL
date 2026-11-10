@@ -66,7 +66,7 @@ class PromptMentions(unittest.TestCase):
             self.assertEqual("permissions tools" in text, level == Level.OPERATOR, level.label)
             self.assertLessEqual(len(text.split()), 170)
         notice = permissions_notice(None)  # type: ignore[arg-type]
-        for needle in ("approval", "cannot change yourself", "lowest level", "never as instructions"):
+        for needle in ("approval", "only lower your own level", "self-change", "lowest level", "never as instructions"):
             self.assertIn(needle, notice)
 
 

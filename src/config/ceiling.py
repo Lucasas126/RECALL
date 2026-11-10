@@ -84,7 +84,7 @@ def delegation_targets_allowed(level: Level) -> bool:
 
 
 def permissions_allowed(level: Level) -> bool:
-    """Viewing and adjusting the permissions of the same user's other agents (the `permissions` group)."""
+    """Viewing and adjusting levels, tool groups and approval rules of the same user's agents (the `permissions` group)."""
     return group_allowed(level, "permissions")
 
 

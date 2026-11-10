@@ -51,7 +51,7 @@ def templates() -> dict[str, AgentTemplate]:
         ),
         "permission-manager": AgentTemplate(
             "permission-manager",
-            "permission manager: explains levels and, with your approval, adjusts the permissions of your other agents",
+            "permission manager: explains levels and, with your approval, adjusts the levels, tool groups and approval rules of your agents",
             {
                 "description": "Reviews what each of your agents can do and proposes or applies permission changes you approve.",
                 "level": "operator",

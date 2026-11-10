@@ -27,7 +27,7 @@ SERVICE_TEXT = {
     "mcp": "use MCP servers the user allows (asks)",
     "terminal_ssh": "use a terminal on an ssh backend without root (tool group terminal; always asks)",
     "delegation_targets": "hand tasks to the user's other agents (delegation.targets)",
-    "permissions": "view and adjust the levels, tool groups and approval rules of the SAME user's other agents (tool group permissions; every change needs the user's approval)",
+    "permissions": "view and adjust the levels, tool groups and approval rules of the SAME user's agents, itself included within its own level (tool group permissions; every change needs the user's approval; its own level only lower)",
     "terminal_local": "use the `local` terminal backend (a shell on the RECALL host)",
     "terminal_root": "use an ssh backend whose user is root",
 }
@@ -98,8 +98,11 @@ def levels_help(capability: str = "") -> str:
         "- Allowing everything on a real machine (a blanket allow rule, default allow or approvals off) needs the level admin.",
         "- The `local` backend and root ssh users are admin only; unprivileged ssh backends start at operator.",
         "- Unattended runs (dreams, scheduled tasks) deny whatever would ask; they never change permissions.",
-        "- An agent with the `permissions` group can only act on agents of its own user, never on itself, never above its own "
-        "level or the user's max_level, and every change shows the user a card to approve once or deny.",
+        "- An agent with the `permissions` group changes tool groups and approval rules of agents of its own user (itself "
+        "included, never beyond its own level) and every change shows the user a card to approve once or deny. "
+        "It sets the level of other agents up to its own level and the user's maximum, and may only lower its own (then it loses "
+        "the group). The user can always change any level (Agents tab > level) up to their maximum level; only an administrator "
+        "changes the maximum.",
         "Recommend the lowest level that does the job.",
     ]
     return "\n".join(lines)

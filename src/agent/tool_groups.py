@@ -46,7 +46,7 @@ TOOL_GROUP_CATALOG: Final[tuple[dict[str, str], ...]] = (
     {
         "id": "permissions",
         "name": "Manage permissions",
-        "description": "View and change the levels, tool groups and approval rules of your other agents, each change with your approval.",
+        "description": "View and change the levels, tool groups and approval rules of your agents (yours too: groups and rules within your level, your level only lower), each change with your approval.",
     },
 )
 

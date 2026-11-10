@@ -115,7 +115,7 @@ layout and the prompt assembly. when `tool_groups` is omitted, the default is
 
 ## level
 
-The `permissions` tool group (view and change the levels, tool groups and approval rules of the user's other agents, each change with the
+The `permissions` tool group (view the user's agents and change their level, tool groups and approval rules; on itself groups and rules within its level and its level only lower; each change with the
 user's approval) needs `level: operator` or higher, so `tool_groups: [..., permissions]` with a lower declared level is refused like any
 group above the level. The `permission-manager` template ([admin CLI](../user-guide/admin-cli.md#templates)) sets it up.
 
