@@ -599,7 +599,7 @@ class ChatConfig(BaseModel):
     # effort level for models that support it (minimal|low|medium|high|xhigh|max); openrouter maps it
     reasoning_effort: Optional[str] = "medium"
     reasoning_tokens: Optional[int] = Field(default=None, ge=1)
-    keep_reasoning_in_memory: bool = False
+    keep_reasoning_in_memory: bool = True
     # last N conversation messages kept in context (None = all); system prompt is always kept
     conversation_messages_retained: Optional[int] = Field(default=30, ge=1)
     # let the model call tools (memory recall, source read/write/list)
@@ -779,7 +779,7 @@ class ResolvedAgent(BaseModel):
     reasoning: bool = True
     reasoning_effort: Optional[str] = None
     reasoning_tokens: Optional[int] = Field(default=None, ge=1)
-    keep_reasoning_in_memory: bool = False
+    keep_reasoning_in_memory: bool = True
     conversation_messages_retained: Optional[int] = None
     tools: bool = True
     tool_groups: list[str] | None = None

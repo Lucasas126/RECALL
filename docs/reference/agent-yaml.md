@@ -25,7 +25,7 @@ chat_config:
   model: null                        # optional default chat model, e.g. claude_subscription:sonnet (see models and providers)
   associative_memory: llm            # off | llm | question_only (see memory)
   associative_execution: parallel    # parallel | sequential
-  keep_reasoning_in_memory: false    # store the thinking in context/history
+  keep_reasoning_in_memory: true     # store the thinking in context/history
   recall_knowledge: true             # the built-in, read-only `recall` skill (how RECALL works); false hides it from this agent
   conversation_messages_retained: 20 # at most N messages kept in context; cuts go below N (see prompt caching)
   tools: true                       # enable the selected tool groups
