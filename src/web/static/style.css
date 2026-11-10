@@ -104,7 +104,7 @@ button.link { background: none; border: none; color: var(--muted); padding: 0; }
 @media (min-height: 800px) { #login { --k: 1; } }
 @media (max-height: 700px) { #login-form { gap: 9px; } .login-lede { margin-bottom: 2px; } }
 
-#app { height: 100%; display: grid; grid-template-columns: 300px minmax(0, 1fr); --col-max: 46rem; --gutter: max(16px, calc((100% - var(--col-max)) / 2)); transition: grid-template-columns .2s ease; }
+#app { height: 100%; display: grid; grid-template-columns: 300px minmax(0, 1fr); --col-max: 100rem; --gutter: max(16px, calc((100% - var(--col-max)) / 2)); transition: grid-template-columns .2s ease; }
 aside { background: var(--side); border-right: 1px solid var(--line); padding: 22px 16px 12px; min-width: 0; display: flex; flex-direction: column; gap: 16px; overflow: hidden; min-height: 0; }
 aside .bar { display: flex; align-items: center; padding: 0 6px; }
 #chat-list { list-style: none; margin: 0 -4px; padding: 0 4px; overflow-y: auto; flex: 1; min-height: 0; }
