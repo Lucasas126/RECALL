@@ -64,3 +64,75 @@ test("a named swatch sets no inline variables, a bad stored colour falls back, a
   assert.equal(load({ accent: "nope" }).root.dataset.accent, "pink");
   assert.equal(load({}).root.dataset.accent, "pink");
 });
+
+// ---- the picker panel, with a fake DOM
+function loadPanel({ theme = "dark", accent, colour } = {}) {
+  const store = { ...(accent ? { "recall.accent": accent } : {}), ...(colour ? { "recall.accentColor": colour } : {}) };
+  const properties = {};
+  const root = { dataset: { theme }, style: { setProperty: (n, v) => { properties[n] = v; }, removeProperty: (n) => { delete properties[n]; } } };
+  const make = (extra = {}) => {
+    const handlers = {};
+    const style = {};
+    return Object.assign({
+      handlers, style: { setProperty: (n, v) => { style[n] = v; }, values: style, set background(v) { style.background = v; } },
+      addEventListener: (name, fn) => { handlers[name] = fn; }, setAttribute() {}, focus() {}, hidden: true, value: "", textContent: "",
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 100 }), setPointerCapture() {},
+    }, extra);
+  };
+  const ids = ["appearance-accent-color", "accent-panel", "accent-sv", "accent-sv-thumb", "accent-hue", "accent-hex", "accent-preview", "accent-note", "appearance-accent-custom", "appearance-ornaments"];
+  const els = Object.fromEntries(ids.map((id) => [id, make()]));
+  const radios = ["pink", "custom"].map((value) => make({ value, checked: false, type: "radio" }));
+  let ready;
+  const context = vm.createContext({
+    document: { documentElement: root, addEventListener: (name, fn) => { ready = fn; }, getElementById: (id) => els[id], querySelectorAll: () => radios },
+    localStorage: { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = v; } },
+    matchMedia: () => ({ matches: false, addEventListener() {} }), MutationObserver: class { observe() {} },
+  });
+  vm.runInContext(source, context);
+  ready();
+  return { els, radios, root, properties, store };
+}
+
+test("typing a hex colour applies it, stores it and selects the custom swatch", () => {
+  const { els, radios, root, store, properties } = loadPanel();
+  els["accent-hex"].value = "00ff88";
+  els["accent-hex"].handlers.input();
+  assert.equal(root.dataset.accent, "custom");
+  assert.equal(store["recall.accentColor"], "#00ff88");
+  assert.equal(store["recall.accent"], "custom");
+  assert.equal(properties["--accent"], "#00ff88");
+  assert.equal(radios.find((r) => r.value === "custom").checked, true);
+  els["accent-hex"].value = "zzz";            // an invalid value changes nothing
+  els["accent-hex"].handlers.input();
+  assert.equal(store["recall.accentColor"], "#00ff88");
+});
+
+test("the hue slider keeps saturation and brightness, and the square sets them", () => {
+  const { els, store } = loadPanel({ accent: "custom", colour: "#ff0000" });
+  els["accent-hue"].value = "120";
+  els["accent-hue"].handlers.input();
+  assert.equal(store["recall.accentColor"], "#00ff00");
+  els["accent-sv"].handlers.pointerdown({ clientX: 100, clientY: 50, pointerId: 1 });   // centre: s 0.5, v 0.5
+  assert.equal(store["recall.accentColor"], "#408040");
+  els["accent-sv"].handlers.pointermove({ clientX: 200, clientY: 0 });                  // top right: full colour
+  assert.equal(store["recall.accentColor"], "#00ff00");
+  els["accent-sv"].handlers.pointerup({});
+  els["accent-sv"].handlers.pointermove({ clientX: 0, clientY: 100 });                  // not dragging any more
+  assert.equal(store["recall.accentColor"], "#00ff00");
+});
+
+test("arrow keys move the point, the button opens the panel and Escape closes it", () => {
+  const { els, store } = loadPanel({ accent: "custom", colour: "#ff0000" });
+  els["accent-sv"].handlers.keydown({ key: "ArrowLeft", shiftKey: true, preventDefault() {} });
+  assert.equal(store["recall.accentColor"], "#ff1919");
+  els["appearance-accent-color"].handlers.click();
+  assert.equal(els["accent-panel"].hidden, false);
+  els["accent-panel"].handlers.keydown({ key: "Escape" });
+  assert.equal(els["accent-panel"].hidden, true);
+});
+
+test("a colour that needed adjusting says so", () => {
+  const { els } = loadPanel({ theme: "dark", accent: "custom", colour: "#101040" });
+  assert.match(els["accent-note"].textContent, /readable/);
+  assert.equal(loadPanel({ theme: "dark", accent: "custom", colour: "#ff6b9d" }).els["accent-note"].textContent, "");
+});
