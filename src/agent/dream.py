@@ -141,7 +141,7 @@ def build_dream_tools(
         funcs.extend(build_folder_tools(host, writable=False))
     if "web" in host.config.dream.tools and caps.web and web_client is not None:
         funcs.extend(build_web_tools(web_client))
-    # never the terminal, tasks or permissions: a dream has none, whatever the agent's config says
+    # never the terminal, tasks, permissions or agents: a dream has none, whatever the agent's config says
     allowed = dream_allowed_tools(host.config.level)
     funcs = [func for func in funcs if func.tool_spec["function"]["name"] in allowed]
     return [func.tool_spec for func in funcs], {func.tool_spec["function"]["name"]: func for func in funcs}

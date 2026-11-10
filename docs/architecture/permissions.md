@@ -1,6 +1,6 @@
 # Permission levels (implemented)
 
-Status: **steps 1 (schema, validation, API read side), 2 (ceiling enforcement), 3 (the approval rule engine), 4 (approvals with memory), 5 (the `permissions` tool group and the permission-manager template) and 6 (the web UI and the admin screen) are implemented**,
+Status: **steps 1 (schema, validation, API read side), 2 (ceiling enforcement), 3 (the approval rule engine), 4 (approvals with memory), 5 (the `permissions` tool group and the permission-manager template) 6 (the web UI and the admin screen) and 8 (the `agents` tool group and the guide template on it) are implemented**,
 except the limited dream delegate (see [what is enforced](#what-is-enforced-step-2) and [approval rules](#approval-rules)). The steps are listed under [implementation plan](#implementation-plan). Research behind it: Claude Code permission rules, the Codex
 approval/sandbox split, Meta's *Agents Rule of Two*, OWASP LLM06 (excessive agency) and an audit of RECALL's own code.
 
@@ -37,6 +37,7 @@ approval/sandbox split, Meta's *Agents Rule of Two*, OWASP LLM06 (excessive agen
 | `terminal` on a real machine with sudo/root, and the `local` backend | no | no | no | no | no | ask |
 | `delegate`: hand tasks to the user's other agents | no | no | no | no | yes | yes |
 | `permissions`: view and adjust levels and rules of the same user's agents, up to the user's `max_level` | no | no | no | no | yes | yes |
+| `agents`: list, create, edit, rename and delete the same user's agents (never their level, groups or rules) | no | no | no | no | yes | yes |
 | act on other users' agents, data and settings; admin CLI | no | no | no | no | no | yes |
 | dreams / unattended runs | no | read only | see [dream table](#dream-mode) | see table | see table | see table |
 
@@ -48,7 +49,7 @@ Notes:
 - A permission change made by an agent always needs human approval (it cannot be set to "always allow"), is written to the audit
   log with a diff, and can be reset to the defaults.
 - The `local` backend runs commands as the RECALL OS user on the RECALL host. It is a host shell and belongs to L5 only. The
-  setup guide template therefore needs a non-shell mechanism (see the plan) before it can be used below L5.
+  setup guide template no longer uses it: it holds the `agents` and `permissions` groups at operator level instead.
 
 ## Approval rules
 
@@ -192,6 +193,50 @@ Code: `src/agent/toolsets/permissions.py` (the eight tools and the card), `src/s
 Decisions: a self-change is allowed because it can only stay inside the level the user gave (the human still approves each
 one) and a level can only go down; removing an `ask` or `deny` rule, which loosens the target, is allowed with a warning on the card.
 
+### Implemented (step 8): the `agents` tool group
+
+Code: `src/agent/toolsets/agents.py` (the seven tools, the card and the prompt notice), `src/service/agent_admin.py` (checks, plans,
+apply, audit), `ChatService.create_agent` / `update_agent` / `delete_agent` / `update_soul` (the same code the web form uses: validation,
+model check, avatar and preferences that follow a rename, delegation targets), `src/agent/templates.py` (`guide`). It is built like the
+`permissions` group (same card, same broker, same audit, same refusal outside a chat with the user) and replaces the terminal plus
+admin CLI the guide used.
+
+- **Group.** `agents`, minimum level `operator` (`SERVICE_MIN_LEVEL`, `GROUP_MIN_LEVEL`, the web catalog, Spanish text). An agent below
+  operator cannot hold it (the same validation as any group); never a default; a worker, a dream and a scheduled task do not get it.
+- **Tools.** Reads (no card): `agent_list`, `agent_get(agent_id)` (configuration and SOUL, never keys or credentials; the approval
+  rules appear only as a count: the `permissions` tools show them) and `agent_templates`. Changes (card): `agent_create`,
+  `agent_update`, `agent_rename`, `agent_delete`. The names are singular on purpose: `agents_list` belongs to `permissions`.
+- **Scope.** The user is the caller's own (no user or path argument); the target must be in that user's `agents`. An id of another
+  user, a path-like id or an unknown id gives the same refusal. A caller whose stored level fell below operator or who lost the group is refused.
+- **Create.** From a template (`agent_templates`) or the defaults. The level defaults to the lowest one that covers the configuration
+  (a template may declare a higher one); an explicit level must be <= the caller's level, <= the user's `max_level` and >= what the
+  configuration needs. What the template gives the agent (groups, terminal backends, MCP) must be allowed by the CALLER's level, and a
+  template with a minimum level (`guide`, `permission-manager`) needs both the user's maximum and the caller to reach it. The agent can
+  get `agents` or `permissions` only through a template whose level allows it, and the card says so; the human approves each creation.
+- **Update.** Name, description, default model, SOUL and the plain settings of the form (`enabled`, `has_memory`, `stream`,
+  `reasoning`, `reasoning_effort`, `reasoning_tokens`, `keep_reasoning_in_memory`, `conversation_messages_retained`,
+  `associative_memory`, `associative_execution`, `recall_knowledge`, `avatar_style`, `dream_enabled`). `level`, tool groups and approval
+  rules (and `allow`/`deny`) are refused with a pointer to the `permissions` tools; `terminal`, `mcp`, `folders`, `delegation` and `id` are
+  refused as the user's (they grant access to machines, servers or files). The level and the rules of the target are kept as stored.
+- **Higher agents.** An agent whose effective level is above the caller's can be read but not updated, renamed or deleted.
+- **Self.** The caller can change only its own description and SOUL (`agent_update`, written with `AgentStore.modify` because its own
+  slot is busy running this reply); it can never rename or delete itself, and the user's last agent is never deleted. The user (Agents tab)
+  does those. This is the decision for the guide: it cannot rename itself, so the user does it (or the guide's SOUL says so).
+- **Rename and delete.** Exactly the web semantics: a rename moves the data folder, the profile picture, the preferences and the
+  delegation targets of the other agents; a delete removes the configuration and keeps the data folder. An agent with an active or
+  queued reply is refused with the same message as the web.
+- **Human approval.** Every create, update, rename and delete asks through the approval broker with a card (caller, target and a
+  readable summary or diff, a SOUL change as a unified diff) offering `once` and *Deny* only: never remembered, never "always". After
+  the approval the target is checked again and must not have changed meanwhile. Denied, timed out, cancelled, no chat client (dream,
+  scheduled task, worker: the tools are not built and refuse if called) and a missing audit trail all end with `error: ...` and no change.
+- **Audit.** The same `permission_change` line as the permissions tools, in the caller's `terminal_audit.jsonl` and in the target's
+  (`tool` is the agent tool, `field: agent`, `action` create/update/rename/delete; `refused` only in the caller's file). Before and
+  after hold the changed settings; a SOUL is recorded as its length and a short hash, never as text.
+- **Template `guide`.** Level `operator`, groups `memory_read`, `memory_edit`, `web`, `self`, `agents`, `permissions`; no terminal and no
+  backend, so a user with `max_level` operator can create it (`agent create --from-template guide`, or `agent_create`). Terminal
+  backends, users and provider keys stay with the administrator. An agent file written for the old guide (terminal group plus the
+  `local` backend) still loads; the ceiling refuses it below admin like any such agent, and nothing is migrated.
+
 ### Implemented (step 6): web UI and admin screen
 
 Code: `src/config/levels_help.py` (`levels_catalog`, `level_description_parts`), `ChatService.levels`, `effective_approval_rules`,
@@ -239,7 +284,7 @@ Nobody answers approvals in a dream, so every `ask` becomes `deny`.
 | `terminal`: `sandbox_read`, `sandbox_search` | read only | level >= L4, disposable sandbox backends only |
 | `delegate`: limited workers | configurable, off by default | level >= L3; read-only workers (`memory_read`, `folders_read`, `web` if the dream has it), no terminal, no writes, no handoff; lower limits than a chat; set in the agent's `dream` block; results return to the dream, which does the writing |
 | `delegate`: hand tasks to other agents | no | |
-| `permissions`, other users, admin | no | |
+| `permissions`, `agents`, other users, admin | no | |
 
 Risk: a dream that reads the web or an MCP server and then writes its own SOUL or memory can persist a prompt injection.
 Conversation and worker text reaches dreams marked as untrusted, and web and MCP are a ceiling, not a default.
@@ -285,8 +330,8 @@ One module, `src/config/ceiling.py`, derives from an effective level what is all
 | MCP (`build_mcp_tools`, refresh each turn) | no MCP tool and no note below collaborator. |
 | Dispatch (chats and dreams) | a call to a tool the level does not cover is refused with a tool error even if a handler exists; a name that is neither built in nor an MCP tool is refused as well. |
 | Delegation | a worker's level is `min(target's own level, launcher's level)` (stored in the task mark); launching needs collaborator, handing a task to another agent needs the launcher at operator; groups, backends and delegation targets of a worker above its level are dropped. |
-| Dreams | follow the [dream table](#dream-mode): memory read from reader; `memory_edit` and `self` from assistant (and the chat group); folders read-only from reader (and `dream.tools: [folders]`); web from assistant (and `dream.tools: [web]`); never a terminal, tasks or permissions. A dream of a `minimal` agent does not run (the session fails with a message). |
-| Templates | `guide` needs the `local` backend, so `agent create --from-template guide` fails for a user whose `max_level` is below admin; `permission-manager` needs operator. |
+| Dreams | follow the [dream table](#dream-mode): memory read from reader; `memory_edit` and `self` from assistant (and the chat group); folders read-only from reader (and `dream.tools: [folders]`); web from assistant (and `dream.tools: [web]`); never a terminal, tasks, permissions or agents. A dream of a `minimal` agent does not run (the session fails with a message). |
+| Templates | `guide` and `permission-manager` are level operator: `agent create --from-template` fails for a user whose `max_level` is below operator (a clear message, nothing written). |
 
 Not built yet: the limited dream delegate, MCP read-only tools and read-only sandbox tools in dreams (the ceiling already reports
 them, the dream toolset does not use them) and the individually chosen tools of L0.
@@ -306,7 +351,7 @@ them, the dream toolset does not use them) and the individually chosen tools of 
 | Individually chosen tools of the `minimal` level | Not built: a `minimal` agent has no tools. |
 | Folder and MCP actions through the rule engine | Folder deletes and moves and non-read-only MCP tools never ask today; routing them needs approval cards without a command. |
 | Approval cards of file writes | The content preview is appended to the command text; the web may not link the card to its tool step. |
-| The `local` backend | A host shell as the RECALL OS user: admin only, and the setup guide needs it. Replacing it with scoped tools is open. |
+| The `local` backend | A host shell as the RECALL OS user: admin only. The setup guide no longer needs it (the `agents` and `permissions` tools replace it). |
 
 ## Implementation plan
 
@@ -318,5 +363,6 @@ them, the dream toolset does not use them) and the individually chosen tools of 
 | 3 (done) | Rule engine (`src/terminal/rules.py`): layers, deny/ask/allow, matching, the three legacy modes as a per-backend shorthand, the blanket-allow guardrail, audit fields. Terminal and file tools only; see [implemented](#implemented-step-3). |
 | 4 (done) | Approvals with memory: once / session / always for this agent, web and Telegram, audit. |
 | 5 (done) | `permissions` tool group and a permission-manager agent template; escalation tests (`tests/test_permissions_tool_*.py`). |
+| 8 (done) | `agents` tool group and the guide template rebased on it ([implemented](#implemented-step-8-the-agents-tool-group); `tests/test_agents_tool*.py`). |
 | 6 (done) | Web UI and admin CLI: level selector capped by `max_level`, rule editor, admin screen; see [implemented](#implemented-step-6-web-ui-and-admin-screen). |
 | 7 (done) | Final documentation and the remaining-gaps list (this page, the [security notes](../deployment/security.md#permission-levels) and the [backlog](../project/backlog.md#permission-level-follow-ups)). |

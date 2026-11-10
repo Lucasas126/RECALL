@@ -48,6 +48,11 @@ TOOL_GROUP_CATALOG: Final[tuple[dict[str, str], ...]] = (
         "name": "Manage permissions",
         "description": "View and change the levels, tool groups and approval rules of your agents (yours too: groups and rules within your level, your level only lower), each change with your approval.",
     },
+    {
+        "id": "agents",
+        "name": "Manage agents",
+        "description": "List, create, edit, rename and delete your agents (not their level, tool groups or rules), each change with your approval.",
+    },
 )
 
 TOOL_GROUP_IDS: Final[frozenset[str]] = frozenset(item["id"] for item in TOOL_GROUP_CATALOG)
@@ -60,6 +65,12 @@ PERMISSION_CHANGE_TOOLS: Final[tuple[str, ...]] = (
     "agent_set_level", "agent_set_tool_groups", "agent_add_rule", "agent_remove_rule", "agent_reset_rules",
 )
 PERMISSION_TOOLS: Final[tuple[str, ...]] = (*PERMISSION_READ_TOOLS, *PERMISSION_CHANGE_TOOLS)
+
+# the `agents` group: reads, then the mutations (each one asks the user, once, and is audited). Singular `agent_*` names;
+# the `permissions` group owns `agents_list` and the `agent_set_*` / `agent_*_rule(s)` ones
+AGENT_READ_TOOLS: Final[tuple[str, ...]] = ("agent_list", "agent_get", "agent_templates")
+AGENT_CHANGE_TOOLS: Final[tuple[str, ...]] = ("agent_create", "agent_update", "agent_rename", "agent_delete")
+AGENT_TOOLS: Final[tuple[str, ...]] = (*AGENT_READ_TOOLS, *AGENT_CHANGE_TOOLS)
 
 TOOL_GROUP_TOOLS: Final[dict[str, tuple[str, ...]]] = {
     "memory_read": (
@@ -76,6 +87,7 @@ TOOL_GROUP_TOOLS: Final[dict[str, tuple[str, ...]]] = {
     "terminal": ("terminal", "sandbox_read", "sandbox_write", "sandbox_patch", "sandbox_search"),
     "delegate": ("task_start", "task_list", "task_result", "task_steer", "task_send", "task_stop", "task_wait"),
     "permissions": PERMISSION_TOOLS,
+    "agents": AGENT_TOOLS,
 }
 
 # the groups a parent may hand to a subagent (phase 1: read-only web access); memory, self, folders, terminal,
@@ -90,6 +102,7 @@ DISPOSABLE_BLOCKED_TOOLS: Final[frozenset[str]] = frozenset(
     | set(TOOL_GROUP_TOOLS["terminal"])  # a disposable chat never gets the terminal at all
     | set(TOOL_GROUP_TOOLS["delegate"])  # nor can it launch tasks: this also gives depth 1 (children are disposable)
     | set(TOOL_GROUP_TOOLS["permissions"])  # nor change anyone's permissions: workers never hold that group
+    | set(TOOL_GROUP_TOOLS["agents"])  # nor create, change or delete agents: same
 )
 
 

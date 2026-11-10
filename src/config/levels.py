@@ -66,6 +66,7 @@ SERVICE_MIN_LEVEL: dict[str, Level] = {
     "delegate": Level.COLLABORATOR,
     "mcp": Level.COLLABORATOR,
     "permissions": Level.OPERATOR,
+    "agents": Level.OPERATOR,
     "terminal_ssh": Level.OPERATOR,
     "delegation_targets": Level.OPERATOR,
     "terminal_local": Level.ADMIN,

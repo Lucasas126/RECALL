@@ -23,7 +23,6 @@ import copy
 import re
 import sys
 import typing
-from types import SimpleNamespace
 from pathlib import Path
 
 import yaml
@@ -33,7 +32,7 @@ from src.admin.users import AdminError, _ENV_NAME_RE, check_user_id
 from src.agent import templates as agent_templates
 from src.config.agents import AgentConfigError, AgentStore
 from src.config.errors import describe_config_error
-from src.config.levels import Level, check_agent_level, effective_agent_level, required_level, required_level_reason
+from src.config.levels import Level, check_agent_level, effective_agent_level, required_level_reason
 from src.config.loader import agent_default_model, load_agent_config, load_user
 from src.config.models import AgentConfig, UserConfig
 from src.config.secrets import is_set
@@ -236,24 +235,6 @@ def agent_show(service, user_id: str, agent_id: str) -> int:
     return 0
 
 
-def _ensure_guide_backend(user_id: str, name: str, definition: dict) -> bool:
-    """Add the user's terminal backend `name` when missing (True when added); refuses to replace another type."""
-    path = _user_dir(user_id) / "user.yaml"
-    with exclusive_file_lock(_user_dir(user_id) / "agents.lock"):
-        text = path.read_text(encoding="utf-8")
-        raw = yaml.safe_load(text) or {}
-        backends = raw.get("terminal_backends") or {}
-        existing = backends.get(name)
-        if existing is not None:
-            if existing.get("type") != definition["type"]:
-                raise AdminError(f"user '{user_id}' already defines terminal backend '{name}' with another type; "
-                                 f"rename it or pick another template.")
-            return False
-        raw["terminal_backends"] = {**backends, name: definition}
-        _write_validated_user(path, text, raw)
-    return True
-
-
 def _write_validated_user(path: Path, previous: str, raw: dict) -> None:
     try:
         model = UserConfig.model_validate(raw)
@@ -283,41 +264,16 @@ def agent_create(service, user_id: str, agent_id: str, *, name: str | None, temp
         max_level = load_user(user_id).max_level
         if max_level < chosen.min_level:
             raise AdminError(
-                f"the '{template}' template gives the agent the level '{chosen.min_level.label}' (it manages the permissions of the "
-                f"user's other agents), and the maximum level of user '{user_id}' is '{max_level.label}'. Ask an administrator to "
+                f"the '{template}' template gives the agent the level '{chosen.min_level.label}' (it manages the user's other agents "
+                f"and their permissions), and the maximum level of user '{user_id}' is '{max_level.label}'. Ask an administrator to "
                 f"raise it (`python -m src.admin user set --user {user_id} --set max_level={chosen.min_level.label}`) or use another "
                 "template. Nothing was written."
             )
     config = apply_validated(_clean(config), assignments, AgentConfig, _validate_agent)
-    previous = (_user_dir(user_id) / "user.yaml").read_text(encoding="utf-8")
-    backend_added = False
-    if chosen.needs_backend:
-        needed = required_level(config, {agent_templates.GUIDE_BACKEND: SimpleNamespace(**agent_templates.GUIDE_BACKEND_DEFINITION)})
-        max_level = load_user(user_id).max_level
-        if needed > max_level:
-            raise AdminError(
-                f"the '{template}' template needs the local terminal backend (a shell on the RECALL host), which only the "
-                f"level '{needed.label}' may use, and the maximum level of user '{user_id}' is '{max_level.label}'. "
-                f"Ask an administrator to raise it (`python -m src.admin user set --user {user_id} --set "
-                f"max_level={needed.label}`) or use another template. Nothing was written."
-            )
-        backend_added = _ensure_guide_backend(user_id, agent_templates.GUIDE_BACKEND, agent_templates.GUIDE_BACKEND_DEFINITION)
-    try:
-        service.create_agent(user_id, config)
-        if soul != agent_templates.templates()["default"].soul:
-            service.update_soul(user_id, agent_id, soul)
-    except Exception:
-        if backend_added:  # do not leave the backend behind for an agent that was not created
-            with exclusive_file_lock(_user_dir(user_id) / "agents.lock"):
-                atomic_write_text(_user_dir(user_id) / "user.yaml", previous)
-        raise
+    service.create_agent(user_id, config)
+    if soul != agent_templates.templates()["default"].soul:
+        service.update_soul(user_id, agent_id, soul)
     print(f"Created agent '{agent_id}' ({display}) for user '{user_id}' from template '{template}'.")
-    if backend_added:
-        print(f"Added terminal backend '{agent_templates.GUIDE_BACKEND}' (type local, workdir /app) to user.yaml.")
-    if chosen.needs_backend:
-        print("Note: the local backend only works when the server allows it (settings.yaml terminal.allow_local or "
-              "RECALL_TERMINAL_ALLOW_LOCAL=true in the server's environment); commands run as the app user and "
-              "reach every user's config. Read references/security-for-admins.md first.")
     print("It is available on the next message in the web UI and Telegram; no restart needed.")
     return 0
 

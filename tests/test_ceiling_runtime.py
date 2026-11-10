@@ -384,22 +384,24 @@ class GuideTemplateLevelTests(AdminFixture):
         self.write_user(re.sub(r"max_level: \w+", f"max_level: {max_level}", self.read("user-a/user.yaml")))
         return self.run_cli(["agent", "create", "--user", "user-a", "--id", "guide", "--from-template", "guide"])
 
-    def test_guide_is_refused_below_admin_and_writes_nothing(self) -> None:
-        for level in ("minimal", "reader", "assistant", "collaborator", "operator"):
-            before = self.read("user-a/user.yaml")
+    def test_guide_is_refused_below_operator_and_writes_nothing(self) -> None:
+        for level in ("minimal", "reader", "assistant", "collaborator"):
             code, _, err = self.create(level)
             with self.subTest(level=level):
                 self.assertEqual(code, 1)
-                self.assertIn("local terminal backend", err)
                 self.assertIn(f"'{level}'", err)
-                self.assertIn("'admin'", err)
-                self.assertNotIn("terminal_backends", self.read("user-a/user.yaml").replace(before, ""))
+                self.assertIn("'operator'", err)
+                self.assertNotIn("terminal_backends", self.read("user-a/user.yaml"))
                 self.assertFalse((self.config_dir / "user-a" / "agents" / "guide.yaml").exists())
 
-    def test_guide_is_created_for_an_admin(self) -> None:
-        code, out, err = self.create("admin")
-        self.assertEqual((code, err), (0, ""), out)
-        self.assertTrue((self.config_dir / "user-a" / "agents" / "guide.yaml").exists())
+    def test_guide_is_created_for_an_operator_and_an_admin(self) -> None:
+        for level in ("operator", "admin"):
+            code, out, err = self.create(level)
+            with self.subTest(level=level):
+                self.assertEqual((code, err), (0, ""), out)
+                self.assertTrue((self.config_dir / "user-a" / "agents" / "guide.yaml").exists())
+                (self.config_dir / "user-a" / "agents" / "guide.yaml").unlink()
+                self.write_user(self.read("user-a/user.yaml").replace("agents: [bot, guide]", "agents: [bot]"))
 
 
 if __name__ == "__main__":

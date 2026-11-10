@@ -41,6 +41,8 @@ class RunContext:
     # the `permissions` tools' port (src/service/agent_permissions.AgentPermissions); None where the service does not
     # own the agent files, and then those tools refuse
     permissions: Any = None
+    # the `agents` tools' port (src/service/agent_admin.AgentAdmin); same rule
+    agents: Any = None
 
 
 _current: ContextVar[RunContext | None] = ContextVar("recall_terminal_run", default=None)

@@ -65,6 +65,7 @@ from src.service.dream import (
     parse_dream_command, summary_block,
 )
 from src.agent.toolsets.delegate import TaskError
+from src.service.agent_admin import AgentAdmin
 from src.service.agent_permissions import AgentPermissions
 from src.service.tasks import TaskManager
 from src.terminal.approvals import ApprovalBroker, ApprovalNotFound
@@ -371,6 +372,7 @@ class ChatService:
         self._agents = AgentStore(CONFIG_DIR, DATA_DIR)
         self._avatars = AvatarStore(DATA_DIR)  # profile pictures, beside (never inside) the agents' data folders
         self._permissions = AgentPermissions(self._agents)
+        self._agent_admin = AgentAdmin(self)  # the `agents` tools: the web form's own create/update/delete
         # last configs that loaded fine: another process (the admin CLI, a hand edit) may leave a file invalid for a
         # while, and the running service keeps using the previous good one instead of failing
         self._good_users: dict[str, UserConfig] = {}
@@ -2031,7 +2033,7 @@ class ChatService:
                 lambda kind, data, run=run: run.events.put(ChatEvent(kind, data=data, generation_id=run.generation_id)),
                 run.cancellation, tasks=self._tasks, interactive=True,
                 learn_rules=lambda target, rules, chat=chat_id: self.learn_approval_rules(user_id, target, rules, chat_id=chat),
-                permissions=self._permissions,
+                permissions=self._permissions, agents=self._agent_admin,
             )
             if (mark := self._conversations(user_id, agent_id).task_mark(chat_id)) is not None:
                 self._tasks.bind_worker(context, mark)  # a worker's approvals are asked in its parent's chat

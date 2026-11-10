@@ -18,6 +18,7 @@ from src.agent.profile import AgentProfile, load_profile, system_prompt
 from src.agent.tool_groups import DISPOSABLE_BLOCKED_TOOLS, TOOL_GROUP_TOOLS
 from src.agent.tools import TOOL_ORDER, build_tools, chat_folder_options
 from src.agent.toolsets.delegate import delegate_notice, worker_prompt
+from src.agent.toolsets.agents import agents_notice
 from src.agent.toolsets.permissions import permissions_notice
 from src.agent.toolsets.terminal import terminal_notice
 from src.agent.toolsets.mcp import build_mcp_tools
@@ -378,6 +379,8 @@ class Agent:
             blocks.append(notice)
         if "agent_set_level" in self._tool_handlers:
             blocks.append(permissions_notice(self.config))
+        if "agent_create" in self._tool_handlers:
+            blocks.append(agents_notice(self.config))
         if self._mcp_notes:
             blocks.append("## Connected services (MCP)\n\n" + "\n\n".join(self._mcp_notes))
         return system_prompt(self.profile, blocks, block_for(self.config))

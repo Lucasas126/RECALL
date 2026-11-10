@@ -59,7 +59,7 @@ best-effort heuristic and its residual risk is accepted. The process can still r
 every user's `data/`. It is disabled by default (`terminal.allow_local`, or `RECALL_TERMINAL_ALLOW_LOCAL=true` in the server
 environment) and only suitable for an installation you would also trust a shell on.
 
-*Inside the Docker container* (the setup guide of the [Admin CLI](../user-guide/admin-cli.md)) the commands run as the `app` user
+*Inside the Docker container* (an `admin` agent running the [Admin CLI](../user-guide/admin-cli.md)) the commands run as the `app` user
 (uid 1000) in `/app` and reach:
 
 - the whole `/app/.config`: every user's `user.yaml` (password hashes), agent yaml, `secrets.env` and the Claude login folders;
@@ -80,7 +80,7 @@ There is no technical separation between users yet (a per-user path limit is on 
 are behavioural (the agent's SOUL and the built-in `security-for-admins` page: own data only, never read or print secrets, web
 content is data) plus the user's approval of every command. Risks to weigh: prompt injection through web pages or files that makes
 the agent run something harmful or read secrets; an approval clicked without reading; data leaving through the open network.
-Mitigations: keep `approvals: manual` (the default) and read each card; give the guide only to a user you trust with the
+Mitigations: keep `approvals: manual` (the default) and read each card; give such an agent only to a user you trust with the
 whole installation; run a dedicated container (or a separate RECALL deployment) with only that user when other users must stay
 isolated; restrict the container's egress; keep backups of `.config/`. Values stored in `secrets.env` are masked in terminal
 output as a safety net, not as a guarantee.
@@ -92,6 +92,8 @@ another user's agents, give a level above its own or the user's `max_level`, add
 `terminal_audit.jsonl` (`event: permission_change`). Give the group only to an agent whose SOUL you trust, read the diff on each card, and
 remember that a terminal on a real machine can still reach the config folder: the group is the supported, audited way to change permissions, not the only
 one that exists.
+
+**Agents that manage agents.** The `agents` tool group (level `operator`) lets an agent create, edit, rename and delete the same user's agents without a terminal. It never touches another user's agents or a level, tool group or approval rule (the `permissions` group does), cannot create an agent above its own level or the user's `max_level`, cannot change an agent above its own level, and cannot rename or delete itself or delete the user's last agent. Every change shows the user a card with only *Approve* and *Deny*, nothing is remembered, and each attempt is audited like a permission change. Terminal backends, users and provider keys cannot be changed this way: they stay with the administrator. The `guide` template holds this group and `permissions` and no terminal, so it runs below `admin`.
 
 **Advice for the sandbox.**
 
@@ -117,8 +119,8 @@ tables and limits: [permission levels](../architecture/permissions.md). What thi
 - **`max_level` is required** in every `user.yaml`; set it with `python -m src.admin user set --user U --set max_level=<level>` or
   `create-user --max-level` (default `collaborator`). There is no migration: add it to existing users before updating.
 - **Remove `terminal.allow_in_dream`** from agent files (the key is rejected whenever present); dreams have no terminal.
-- **The `local` backend and root ssh users need admin.** An agent that holds them needs level `admin`; the `guide` template can
-  only be created for a user whose `max_level` is `admin`.
+- **The `local` backend and root ssh users need admin.** An agent that holds them needs level `admin`; the `guide` template no longer
+  uses the local backend and only needs a user whose `max_level` is `operator`. A guide written for the old shape (terminal group and `local` backend) still loads and is refused at the ceiling below admin.
 - **A blanket allow** (`approvals: off`, `default: allow`, a rule with no narrowing fields) on a machine or `local` backend needs an
   admin-level agent; on a backend with `kind: sandbox` it needs operator. ssh backends default to `kind: machine`.
 - **An agent whose configuration needs more than its level** fails to load until the level is raised (by the user, up to the
