@@ -505,7 +505,18 @@ details.msg.task-wake { align-self: flex-start; padding: 6px 12px; border-style:
 #agent-banner:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
 #agent-banner select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; padding: 0; border-radius: 999px; }
 #agent-banner select:disabled { cursor: default; }
-#agent-avatar, #user-avatar { flex-shrink: 0; display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid var(--accent); border-radius: 50%; color: var(--accent); font: 600 .875rem/1 var(--sans); }
+#agent-avatar, #user-avatar, .avatar-preview { flex-shrink: 0; display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid var(--accent); border-radius: 50%; overflow: hidden; color: var(--accent); font: 600 .875rem/1 var(--sans); }
+/* profile pictures: a circle crops the image to the accent-bordered circle; "free" shows it as it is (transparent PNGs) */
+#agent-avatar img, #user-avatar img, .avatar-preview img { display: block; width: 100%; height: 100%; object-fit: cover; }
+#agent-avatar[data-avatar-style="free"], #user-avatar[data-avatar-style="free"], .avatar-preview[data-avatar-style="free"] { border: 0; border-radius: 0; background: none; overflow: visible; }
+[data-avatar-style="free"] img { object-fit: contain; }
+.avatar-field { display: flex; gap: 12px; align-items: flex-start; }
+.avatar-controls { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.avatar-controls p { margin: 0; }
+.avatar-controls .error:empty { display: none; }
+.avatar-block { display: flex; flex-direction: column; gap: 6px; padding: 14px 0 20px; border-top: 1px solid var(--line); }
+.avatar-block h3 { margin: 0; }
+.avatar-block > .model-note { margin: 0; }
 #agent-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.1; gap: 3px; }
 #agent-label { color: var(--muted); font: 600 .6875rem/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; }
 #agent-title { font: 600 var(--s0)/1.1 var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -152,6 +152,23 @@
                 <span id="agent-prompt-hint" class="model-note">Saved as the agent's SOUL.md. Leave it empty to start with the default SOUL.md; edit it later in the Soul &amp; memory tab.</span>
               </label>
             </fieldset>
+            <fieldset id="agent-avatar-section" class="agent-section">
+              <legend id="agent-avatar-legend">Profile picture</legend>
+              <div class="avatar-field">
+                <span id="agent-avatar-preview" class="avatar-preview" aria-hidden="true"></span>
+                <div class="avatar-controls">
+                  <div class="agent-actions">
+                    <button id="agent-avatar-upload" type="button">Upload image</button>
+                    <button id="agent-avatar-remove" type="button" hidden>Remove</button>
+                    <input id="agent-avatar-file" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+                  </div>
+                  <p id="agent-avatar-hint" class="model-note">PNG, JPEG or WEBP, up to 2 MiB. Shown at 32 px.</p>
+                  <label class="model-filter"><input id="agent-avatar-free" type="checkbox"> <span id="agent-avatar-free-label">No circle or border</span></label>
+                  <p id="agent-avatar-free-hint" class="model-note">For transparent PNGs: the image is shown as it is, without cropping.</p>
+                  <p id="agent-avatar-error" class="error" role="alert"></p>
+                </div>
+              </div>
+            </fieldset>
             <fieldset id="agent-level-section" class="agent-section" hidden>
               <legend id="agent-level-legend">Permission level</legend>
               <label>
@@ -668,6 +685,24 @@
                 <button type="button" class="icon-btn setting-reset">↺</button>
               </div>
               <p class="setting-default model-note"></p>
+            </div>
+            <div id="settings-avatar" class="avatar-block" role="group" aria-labelledby="settings-avatar-title">
+              <h3 id="settings-avatar-title">Profile picture</h3>
+              <p id="settings-avatar-note" class="model-note">Your profile picture is shown next to your name. It applies at once and needs no Save.</p>
+              <div class="avatar-field">
+                <span id="settings-avatar-preview" class="avatar-preview" aria-hidden="true"></span>
+                <div class="avatar-controls">
+                  <div class="agent-actions">
+                    <button id="settings-avatar-upload" type="button">Upload image</button>
+                    <button id="settings-avatar-remove" type="button" hidden>Remove</button>
+                    <input id="settings-avatar-file" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+                  </div>
+                  <p id="settings-avatar-hint" class="model-note">PNG, JPEG or WEBP, up to 2 MiB. Shown at 32 px.</p>
+                  <label class="model-filter"><input id="settings-avatar-free" type="checkbox"> <span id="settings-avatar-free-label">No circle or border</span></label>
+                  <p id="settings-avatar-free-hint" class="model-note">For transparent PNGs: the image is shown as it is, without cropping.</p>
+                  <p id="settings-avatar-error" class="error" role="alert"></p>
+                </div>
+              </div>
             </div>
           </section>
           <section id="settings-section-models" class="settings-section" aria-labelledby="settings-tab-models" hidden>

@@ -66,6 +66,7 @@ approval_rules:                      # optional: this agent's layer of approval 
   rules:
     - {verdict: allow, tool: file_write, backend_kind: sandbox, path: "~/workspace/*"}
 level: collaborator                  # optional permission level (minimal|reader|assistant|collaborator|operator|admin); at most the owner's max_level
+avatar_style: circle                 # optional: circle (default, the picture cropped into the accent-bordered circle) | free (shown as it is, for transparent PNGs)
 delegation:                          # the `delegate` tool group (see the delegation guide); optional, defaults apply when the group is selected
   enabled: true                      # false removes `task_start` without removing the group
   allowed_groups: [web]              # groups a task may be granted; only `web` is grantable (never memory, folders, terminal, mcp, delegate)
@@ -112,6 +113,16 @@ missing file is an empty personality; the agent YAML has no personality field),
 with its memories and skills next to it; see [dream mode](../user-guide/dream.md#per-agent-files) for the
 layout and the prompt assembly. when `tool_groups` is omitted, the default is
 `[memory_read, memory_edit, web, self]`; folder groups are always explicit.
+
+## avatar_style
+
+`avatar_style` is a top-level field, `circle` (default) or `free`; any other value is invalid. It only says how the agent's profile picture is
+drawn: `circle` crops the image to fill the 32 px accent-bordered circle, `free` shows it whole (`object-fit: contain`) with no circle, border
+or background, for transparent PNGs. It is written to the file only when it is not the default. A save without it (an API client that does not
+know the field) keeps the stored value; the web form always sends it. The picture itself is not in this file: it is uploaded in the web form
+(Basic > Profile picture) or with `PUT /api/agents/<agent_id>/avatar` ([API](api.md#profile-pictures)) and stored as
+`data/<user_id>/.avatars/<agent_id>.png`, outside the agent's data folder. Renaming the agent moves it; deleting the agent keeps it, like the rest of the
+data. Change the style from the CLI with `python -m src.admin agent set --user U --agent A --set avatar_style=free`.
 
 ## level
 

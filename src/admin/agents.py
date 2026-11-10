@@ -196,11 +196,15 @@ def _agent_data(service, user_id: str, agent_id: str) -> dict:
     data = service.get_agent(user_id, agent_id)
     if load_agent_config(user_id, agent_id).level is None:
         data.pop("level", None)  # the view shows the effective level; only a declared one is written back
+    data.pop("avatar", None)  # the view's picture info is read-only; the picture style is the `avatar_style` field
     return data
 
 
 def _clean(config: AgentConfig) -> dict:
-    return config.model_dump(mode="json", exclude_none=True)
+    data = config.model_dump(mode="json", exclude_none=True)
+    if data.get("avatar_style") == "circle":
+        del data["avatar_style"]  # the default is not written, as in the agent file
+    return data
 
 
 # ------------------------------------------------------------------ agent commands

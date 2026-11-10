@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from src.config.levels import Level, check_agent_level, effective_agent_level, parse_level, required_level
 from src.config.models import AgentConfig, UserConfig
 from src.terminal.rules import ApprovalRule, ApprovalRuleList, rule_key
+from src.utils.avatars import AvatarStore
 from src.utils.files import atomic_write_text, exclusive_file_lock
 from src.utils.i18n import UserMessageError
 
@@ -154,13 +155,16 @@ class AgentStore:
         with self._locked(user_id):
             user = self._read_user(user_id)
             old_path = self.path_for(user_id, agent_id)
-            if config.level is None or config.approval_rules is None:
-                # callers that do not know these fields (the web form) must not drop the stored level or the approval
-                # rules (hand-written ones and the ones learned from approval cards); `approval_rules: {rules: []}` clears
+            keep_style = "avatar_style" not in config.model_fields_set
+            if config.level is None or config.approval_rules is None or keep_style:
+                # callers that do not know these fields (the web form) must not drop the stored level, the approval
+                # rules (hand-written ones and the ones learned from approval cards) or the picture style;
+                # `approval_rules: {rules: []}` clears
                 stored = self._read(old_path)
                 config = config.model_copy(update={
                     "level": stored.level if config.level is None else config.level,
                     "approval_rules": stored.approval_rules if config.approval_rules is None else config.approval_rules,
+                    "avatar_style": stored.avatar_style if keep_style else config.avatar_style,
                 })
             self._check_level(user, config)
             renamed = config.id != agent_id
@@ -181,6 +185,8 @@ class AgentStore:
                     old_path.unlink()
                 if renamed:
                     self._write_user_agents(user_id, [config.id if item == agent_id else item for item in user.agents])
+                    # the profile picture lives beside the data folders, so it moves with the agent
+                    AvatarStore(self.data_dir).move(user_id, agent_id, config.id)
             except BaseException:
                 if new_path != old_path:
                     new_path.unlink(missing_ok=True)
@@ -435,8 +441,11 @@ class AgentStore:
             ) from exc
 
     def _write_agent(self, path: Path, config: AgentConfig) -> None:
+        data = config.model_dump(mode="json", exclude_none=True)
+        if data.get("avatar_style") == "circle":
+            del data["avatar_style"]  # the default is not written
         text = yaml.dump(
-            config.model_dump(mode="json", exclude_none=True),
+            data,
             Dumper=_Dumper, sort_keys=False, allow_unicode=True,
         )
         try:

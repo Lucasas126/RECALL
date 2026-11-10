@@ -19,7 +19,7 @@ Unknown keys are rejected in the agent yaml and most blocks (not in `chat_config
 | Field | Meaning (default) |
 | --- | --- |
 | `id` | `[A-Za-z0-9_-]{1,64}`, names the data folder |
-| `name` | 1-100 chars; the DISPLAY NAME shown in the web UI and Telegram. Separate from the SOUL: when renaming an agent update both (`soul_edit` and `agent set --set name="New"`). The `id` is the folder/URL and normally stays |
+| `name` | 1-100 chars; the DISPLAY NAME in the web UI and Telegram, separate from the SOUL: when renaming update both (`soul_edit`, `agent set --set name="New"`). The `id` normally stays |
 | `description` | 0-500 chars; shown in the agent list and read by the Telegram orchestrator |
 | `chat_config` | block below |
 | `dream` | block below |
@@ -27,7 +27,8 @@ Unknown keys are rejected in the agent yaml and most blocks (not in `chat_config
 | `terminal` | block below; needed by the `terminal` tool group |
 | `delegation` | block below; the `delegate` tool group, which gets the defaults when this is omitted |
 | `approval_rules` | agent layer of approval rules `{default, rules}`; cards append exact `allow` rules (`references/terminal-and-approvals.md`) |
-| `level` | `minimal`, `reader`, `assistant`, `collaborator`, `operator` or `admin`; between what its tools need and the owner's `max_level`, else invalid (the error names the service). Unset = what its tools need. Enforced at build and call |
+| `level` | `minimal`, `reader`, `assistant`, `collaborator`, `operator` or `admin`; between what its tools need and the owner's `max_level`, else invalid. Unset = what its tools need |
+| `avatar_style` | `circle` (default) or `free` (the profile picture shown as it is, no circle). The user uploads the picture in the web form; agents never touch it |
 
 ### `chat_config` (Agents tab: Basic, Basic > Advanced and Tools)
 
@@ -45,11 +46,11 @@ Basic holds Identity (name, description, personality) and Model and reasoning (`
 | `tools` | allow tools at all (true) |
 | `tool_groups` | list of groups; omitted means `memory_read`, `memory_edit`, `web`, `self` |
 | `allow`, `deny` | extra per-tool filters |
-| `mcp` | MCP servers enabled for this agent, keyed by server id (see `tools` / `read_only` / `instructions` below) |
+| `mcp` | MCP servers enabled for this agent, keyed by server id |
 | `associative_memory` | `off`, `llm` (default), `question_only` |
 | `associative_execution` | `parallel` (default) or `sequential` |
 | `model` | default chat model, `provider:model` or a bare id; empty follows the user's |
-| `recall_knowledge` | gives you this built-in skill (true); Advanced section checkbox |
+| `recall_knowledge` | gives you this built-in skill (true) |
 
 MCP entry fields: `tools` (list; omitted means all of the server's tools), `read_only`, `instructions`.
 

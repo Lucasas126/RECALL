@@ -8,10 +8,10 @@ plus an optional `"code"` (see [error codes](#error-codes)).
 
 | area | routes |
 | --- | --- |
-| session | `POST /api/login`, `POST /api/logout`, `GET /api/me` (the profile and agents, plus the user's effective `max_level` (read-only, [permission levels](../architecture/permissions.md)) and `terminal_backends`: `[{"name", "type", "description", "kind", "min_level"}]` sorted by name, the user's terminal backends for the agent form (`kind` is `sandbox`, `machine` or `local`, `min_level` the level the backend needs); never hosts, users or key paths), `GET /api/localization?language=en\|es`, `GET /api/version` (public: `{"version": "0.1.0", "build": null}`; `version` comes from `pyproject.toml`, `build` is the first 7 characters of `RECALL_BUILD` or `null`) |
+| session | `POST /api/login`, `POST /api/logout`, `GET /api/me` (the profile and agents, each agent and the user with `avatar` (see [profile pictures](#profile-pictures)), plus the user's effective `max_level` (read-only, [permission levels](../architecture/permissions.md)) and `terminal_backends`: `[{"name", "type", "description", "kind", "min_level"}]` sorted by name, the user's terminal backends for the agent form (`kind` is `sandbox`, `machine` or `local`, `min_level` the level the backend needs); never hosts, users or key paths), `GET /api/localization?language=en\|es`, `GET /api/version` (public: `{"version": "0.1.0", "build": null}`; `version` comes from `pyproject.toml`, `build` is the first 7 characters of `RECALL_BUILD` or `null`) |
 | preferences | `GET`/`PATCH /api/preferences` ([details](user-yaml.md#preferences-api), including the Telegram orchestrator's `default_agent_id`, `orchestrator` / `core_agent_id` and the read-only `orchestrator_default`; the response also carries a read-only `limits` object `{soul_chars, memory_chars, user_chars}` from the `memory_limits` block of settings.yaml and a read-only `defaults` object with the effective defaults and number bounds), `GET /api/speech-to-text/models` |
 | models | `GET /api/providers/status`, `GET /api/models/catalog`, `GET /api/models`, `GET`/`POST /api/models/favorites`, `DELETE /api/models/favorites/<model_id>` ([models and providers](../user-guide/models-and-providers.md)) |
-| agents | `GET`/`POST /api/agents`, `GET`/`PUT`/`DELETE /api/agents/<agent_id>`, `GET /api/tool-groups`, `GET /api/agents/<agent_id>/index`, `POST /api/agents/<agent_id>/index/reindex` (table below) |
+| agents | `GET`/`POST /api/agents`, `GET`/`PUT`/`DELETE /api/agents/<agent_id>`, `GET`/`PUT`/`DELETE /api/agents/<agent_id>/avatar` ([profile pictures](#profile-pictures)), `GET /api/tool-groups`, `GET /api/agents/<agent_id>/index`, `POST /api/agents/<agent_id>/index/reindex` (table below) |
 | MCP | `GET /api/mcp`, `GET /api/mcp/<server_id>/tools`, `POST /api/mcp/<server_id>/connect`, `DELETE /api/mcp/<server_id>/connection` ([MCP servers](../user-guide/mcp.md)) |
 | chats | `GET /api/chats`, `GET`/`POST /api/agents/<agent_id>/chats`, `POST .../chats/<chat_id>/disposable`, `GET`/`DELETE .../chats/<chat_id>`, `GET .../chats/<chat_id>/models`, `PUT .../model`, `PUT .../reasoning-effort`, `PUT .../title`, `POST .../chats/<chat_id>/messages` (SSE, see [architecture](../architecture/overview.md#web-steering)), `GET .../chats/<chat_id>/stream` ([following a running reply](#following-a-running-reply)), `GET .../chats/<chat_id>/approvals`, `POST .../chats/<chat_id>/approvals/<approval_id>` ([terminal approvals](#terminal-approvals)) |
 | approval rules | `GET`/`DELETE /api/agents/<agent_id>/approval-rules`, `DELETE .../approval-rules/<index>`, `POST .../approval-rules/reset`, `GET .../approval-rules/effective` ([learned approval rules](#learned-approval-rules)) |
@@ -48,6 +48,7 @@ message. Errors render as a dismissable card (`role="alert"`) in the transcript,
 
 | code | raised when | web action |
 | --- | --- | --- |
+| `invalid_image`, `image_too_large`, `unsupported_image_type` | a profile picture upload is not a usable PNG/JPEG/WEBP (400), is over 2 MiB (413) or has another `Content-Type` (415); see [profile pictures](#profile-pictures) | the message is shown under the upload button |
 | `no_agents` | the user has no agents (HTTP 404) | Create an agent (opens the new-agent form); the chat shows an empty state instead |
 | `unknown_agent`, `unknown_chat` | the agent/chat does not exist or is not the user's | `unknown_chat`: Start a new chat |
 | `missing_api_key` | the provider's API key variable is not set on the server | Choose another model |
@@ -82,8 +83,8 @@ New codes are set with `UserMessageError(..., code="...")` or a class-level `cod
 | `GET` | `/api/agents` | full configuration of each agent the user owns, including `chat_config.tool_groups` and `level`, its effective permission level: the declared one, else the lowest level covering its configuration |
 | `GET` | `/api/agents/defaults` | defaults and bounds of the agent form fields, generated from the configuration models: `{chat_config, dream, terminal}`, each field `{default, min, max}` (`null` where the model has no default or bound), e.g. `dream.max_steps` `{default: 60, min: 1, max: 500}`, `chat_config.conversation_messages_retained` `{default: 30, min: 1, max: null}` |
 | `POST` | `/api/agents` | creates `agents/<id>.yaml` and appends the id to `agents` in `user.yaml` (`201`) |
-| `GET` | `/api/agents/<agent_id>` | one agent's configuration, with the effective `level` |
-| `PUT` | `/api/agents/<agent_id>` | replaces the agent; the body `id` may differ, which renames it. A body without `level` keeps the stored level |
+| `GET` | `/api/agents/<agent_id>` | one agent's configuration, with the effective `level` and `avatar` |
+| `PUT` | `/api/agents/<agent_id>` | replaces the agent; the body `id` may differ, which renames it (its profile picture moves with it). A body without `level` keeps the stored level, and one without `avatar_style` keeps the stored style |
 | `DELETE` | `/api/agents/<agent_id>` | removes the agent from `user.yaml` and deletes its file (`204`) |
 | `GET` | `/api/agents/<agent_id>/index` | memory index status: `sources`, `files`, `chats`, `chunks`, `last_reconcile`, `folders_reconciled_at`, `rebuilding`, `busy`, `model`, `error` |
 | `POST` | `/api/agents/<agent_id>/index/reindex` | queues a reconcile of every source, folders included (`202`); body `{"full": true}` drops the index and rebuilds it |
@@ -97,6 +98,42 @@ The rules these routes follow (ids, renames, deletion, locks, `409` while replie
 `level_below_required` / `level_required_above_max` (the rule applies to agents without a `level` too); an unknown name is a `422`. A `PUT` without `level` keeps the stored one. Reads always return the effective
 `level`. The user's `max_level` is only exposed by `POST /api/login` and `GET /api/me`; no route accepts or changes it (it is not an
 agent field and `PATCH /api/preferences` rejects it with `422`): only an administrator sets it, with the admin CLI.
+
+## Profile pictures
+
+Users and agents can have a picture. Only the owner reaches it: the routes are scoped to the session user, and an agent id that is not the
+user's is a `404` (`unknown_agent`) before anything is read. An agent never sees these routes (the `permissions` tool group does not touch them).
+
+| method | route | result |
+| --- | --- | --- |
+| `PUT` | `/api/agents/<agent_id>/avatar` | stores the picture of the agent; `200` `{"url", "has_alpha", "version"}` |
+| `GET` | `/api/agents/<agent_id>/avatar` | the stored PNG; `404` (`no_avatar`) when there is none |
+| `DELETE` | `/api/agents/<agent_id>/avatar` | removes it (`204`, also when there was none) |
+| `PUT` / `GET` / `DELETE` | `/api/me/avatar` | the same for the user's own picture |
+
+`PUT` takes the **raw image bytes** as the body (no multipart) with `Content-Type: image/png`, `image/jpeg` or `image/webp`. The declared type is only
+checked against that list: the bytes are decoded with Pillow and the format is decided by their content. Limits: 2 MiB of body and 4096 x 4096
+pixels (checked from the header, before decoding). The stored file is a PNG of at most 256 px on its longest side, with the EXIF rotation applied,
+the first frame only and no metadata. `url` is the route to `GET` (add `?v=<version>`), `has_alpha` is true when some pixel is transparent, and
+`version` changes with every upload. `GET` answers `Content-Type: image/png`, `X-Content-Type-Options: nosniff`,
+`Cache-Control: private, max-age=0, must-revalidate` and an `ETag`; a request with a matching `If-None-Match` gets `304`.
+
+| status | code | when |
+| --- | --- | --- |
+| `400` | `invalid_image` | not a decodable PNG, JPEG or WEBP (SVG, GIF, text, truncated files) or more than 4096 pixels on a side |
+| `413` | `image_too_large` | more than 2 MiB (refused while reading, without buffering the rest) |
+| `415` | `unsupported_image_type` | the `Content-Type` is not `image/png`, `image/jpeg` or `image/webp` |
+| `404` | `no_avatar`, `unknown_agent` | `GET` without a picture; an agent the user does not own |
+| `400` | none | the agent id `_user` (the file name of the user's own picture) cannot have a picture |
+| `500` | `avatar_storage` | the file could not be written, moved or removed |
+
+The payloads carry the picture: `GET /api/agents`, `GET`/`POST`/`PUT /api/agents/<agent_id>` and the `agents` of `GET /api/me` and `POST /api/login`
+have `avatar`, and `GET /api/me` / `POST /api/login` have the user's own `avatar`: `null`, or `{"url", "version", "style"}`, where `style`
+is the saved style, `circle` or `free`. The agent's style is its `avatar_style` field ([agent.yaml](agent-yaml.md#avatar_style)); the user's is the
+`avatar_style` preference ([preferences](user-yaml.md#preferences-api)). `avatar` is read-only information, not an agent field: a body read with `GET` and sent back with `PUT` is accepted and its `avatar` is ignored (only `avatar_style` is saved).
+
+Files live in `data/<user_id>/.avatars/<agent_id>.png` and `_user.png`, outside every agent's data folder, so the `agent:` source, the
+folder tools and the memory tools cannot list or write them.
 
 ## Disposable chats
 

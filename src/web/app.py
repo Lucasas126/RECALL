@@ -8,6 +8,7 @@ from typing import AsyncIterator, Iterator, Literal, Optional
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -34,6 +35,10 @@ from src.service.chat import (
     UnknownManagedUser,
     UnknownUser,
     NotAdministrator,
+    NoAvatar,
+)
+from src.utils.avatars import (
+    MAX_UPLOAD_BYTES, AvatarStorageError, ImageTooLarge, InvalidImage, UnsupportedImageType, check_content_type,
 )
 from src.utils.logger import get_logger
 from src.terminal.approvals import ApprovalForbidden, ApprovalNotFound
@@ -108,6 +113,33 @@ class MaxLevelIn(BaseModel):
 
 class TaskSteerIn(BaseModel):
     text: str
+
+
+async def _read_upload(request: Request) -> bytes:
+    """The raw request body, refused as soon as it is over the avatar size limit (never fully buffered)."""
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > MAX_UPLOAD_BYTES:
+        raise ImageTooLarge("The image is larger than {limit} MiB.", limit=MAX_UPLOAD_BYTES // (1024 * 1024))
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > MAX_UPLOAD_BYTES:
+            raise ImageTooLarge("The image is larger than {limit} MiB.", limit=MAX_UPLOAD_BYTES // (1024 * 1024))
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _avatar_response(request: Request, avatar, content: bytes) -> Response:
+    """The stored PNG with a revalidating cache: the browser asks every time and gets a 304 while it is unchanged."""
+    headers = {
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, max-age=0, must-revalidate",
+        "ETag": avatar.etag,
+    }
+    if avatar.etag in (tag.strip() for tag in request.headers.get("if-none-match", "").split(",")):
+        return Response(status_code=304, headers=headers)
+    return Response(content, media_type="image/png", headers=headers)
 
 
 def _sse(event: str, data, generation_id: str = "") -> str:
@@ -206,6 +238,7 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     @app.exception_handler(UnknownApprovalRule)
     @app.exception_handler(UnknownDreamSession)
     @app.exception_handler(UnknownManagedUser)
+    @app.exception_handler(NoAvatar)
     def _not_found(request: Request, exc: ServiceError):
         return localized_error(request, 404, exc)
 
@@ -213,6 +246,23 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     @app.exception_handler(NotAdministrator)
     def _approval_forbidden(request: Request, exc: ApprovalForbidden | NotAdministrator):
         return localized_error(request, 403, exc)
+
+    @app.exception_handler(ImageTooLarge)
+    def _image_too_large(request: Request, exc: ImageTooLarge):
+        return localized_error(request, 413, exc)
+
+    @app.exception_handler(UnsupportedImageType)
+    def _unsupported_image(request: Request, exc: UnsupportedImageType):
+        return localized_error(request, 415, exc)
+
+    @app.exception_handler(InvalidImage)
+    def _invalid_image(request: Request, exc: InvalidImage):
+        return localized_error(request, 400, exc)
+
+    @app.exception_handler(AvatarStorageError)
+    def _avatar_storage(request: Request, exc: AvatarStorageError):
+        logger.error("profile picture operation failed: %s", exc)
+        return localized_error(request, 500, exc)
 
     @app.exception_handler(ValueError)
     def _bad_request(request: Request, exc: ValueError):
@@ -281,6 +331,21 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     @app.get("/api/me")
     def me(user_id: str = Depends(current_user)):
         return service.login(user_id)
+
+    @app.put("/api/me/avatar")
+    async def put_user_avatar(request: Request, user_id: str = Depends(current_user)):
+        check_content_type(request.headers.get("content-type"))
+        data = await _read_upload(request)
+        return await run_in_threadpool(service.set_user_avatar, user_id, data)
+
+    @app.get("/api/me/avatar")
+    def get_user_avatar(request: Request, user_id: str = Depends(current_user)):
+        avatar, content = service.get_user_avatar(user_id)
+        return _avatar_response(request, avatar, content)
+
+    @app.delete("/api/me/avatar", status_code=204)
+    def delete_user_avatar(user_id: str = Depends(current_user)):
+        service.delete_user_avatar(user_id)
 
     @app.get("/api/version")
     def version():
@@ -380,6 +445,22 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     @app.delete("/api/agents/{agent_id}", status_code=204)
     def delete_agent(agent_id: str, user_id: str = Depends(current_user)):
         service.delete_agent(user_id, agent_id)
+
+    @app.put("/api/agents/{agent_id}/avatar")
+    async def put_agent_avatar(agent_id: str, request: Request, user_id: str = Depends(current_user)):
+        service.check_agent_owned(user_id, agent_id)  # another user's agent is a 404 before anything is read
+        check_content_type(request.headers.get("content-type"))
+        data = await _read_upload(request)
+        return await run_in_threadpool(service.set_agent_avatar, user_id, agent_id, data)
+
+    @app.get("/api/agents/{agent_id}/avatar")
+    def get_agent_avatar(agent_id: str, request: Request, user_id: str = Depends(current_user)):
+        avatar, content = service.get_agent_avatar(user_id, agent_id)
+        return _avatar_response(request, avatar, content)
+
+    @app.delete("/api/agents/{agent_id}/avatar", status_code=204)
+    def delete_agent_avatar(agent_id: str, user_id: str = Depends(current_user)):
+        service.delete_agent_avatar(user_id, agent_id)
 
     @app.get("/api/chats")
     def list_all_chats(keep: Optional[str] = None, user_id: str = Depends(current_user)):
