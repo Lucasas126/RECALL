@@ -14,6 +14,7 @@ plus an optional `"code"` (see [error codes](#error-codes)).
 | agents | `GET`/`POST /api/agents`, `GET`/`PUT`/`DELETE /api/agents/<agent_id>`, `GET /api/tool-groups`, `GET /api/agents/<agent_id>/index`, `POST /api/agents/<agent_id>/index/reindex` (table below) |
 | MCP | `GET /api/mcp`, `GET /api/mcp/<server_id>/tools`, `POST /api/mcp/<server_id>/connect`, `DELETE /api/mcp/<server_id>/connection` ([MCP servers](../user-guide/mcp.md)) |
 | chats | `GET /api/chats`, `GET`/`POST /api/agents/<agent_id>/chats`, `POST .../chats/<chat_id>/disposable`, `GET`/`DELETE .../chats/<chat_id>`, `GET .../chats/<chat_id>/models`, `PUT .../model`, `PUT .../reasoning-effort`, `PUT .../title`, `POST .../chats/<chat_id>/messages` (SSE, see [architecture](../architecture/overview.md#web-steering)), `GET .../chats/<chat_id>/stream` ([following a running reply](#following-a-running-reply)), `GET .../chats/<chat_id>/approvals`, `POST .../chats/<chat_id>/approvals/<approval_id>` ([terminal approvals](#terminal-approvals)) |
+| approval rules | `GET`/`DELETE /api/agents/<agent_id>/approval-rules`, `DELETE .../approval-rules/<index>`, `POST .../approval-rules/reset` ([learned approval rules](#learned-approval-rules)) |
 | subagent tasks | `GET /api/tasks`, `GET /api/tasks/<task_id>`, `POST .../steer`, `POST .../stop`, `GET .../chat` ([table below](#subagent-tasks)) |
 | dream and soul | `.../dream/settings\|status\|start\|cancel\|sessions`, `.../soul` (the response also carries `max_chars`, the application-wide SOUL limit, and `default`, the default SOUL.md template); `.../memories/<target>` returns its `limit` from settings.yaml, `.../soul/history`, `.../memories/<target>` ([dream mode](../user-guide/dream.md#web-api)) |
 
@@ -153,38 +154,60 @@ generation id):
 
 ```
 event: approval
-data: {"id": "9f2c1a7be034", "tool": "terminal", "backend": "pc", "command": "rm -rf build", "cwd": "~/workspace", "reason": "recursive delete", "risk": "dangerous", "timeout_seconds": 300, "expires_at": 1767225900.5, "chat_id": "20261104-101500-a1b2c3", "agent_id": "aria"}
+data: {"id": "9f2c1a7be034", "tool": "terminal", "backend": "pc", "command": "rm -rf build", "cwd": "~/workspace", "reason": "recursive delete", "risk": "dangerous", "timeout_seconds": 300, "expires_at": 1767225900.5, "chat_id": "20261104-101500-a1b2c3", "agent_id": "aria", "options": ["once", "session", "agent"]}
 
 event: approval_resolved
-data: {"id": "9f2c1a7be034", "decision": "approved", "reason": "approved"}
+data: {"id": "9f2c1a7be034", "decision": "approved", "reason": "approved", "scope": "once"}
 ```
 
 `backend` is the name of the user's terminal backend the action targets (the `approvals` mode of that backend decided to ask). `risk` is `dangerous` (flagged by the policy) or `manual` (the backend's approvals are `manual`). `tool` is `terminal`,
 `sandbox_read`, `sandbox_write`, `sandbox_patch` or `sandbox_search`; `command` is the command line or a short description of the
 file operation. `decision` is `approved` or `denied`; `reason` is `approved`, `denied by user`, `timed out`, `cancelled` or
-`service shutdown`. The stream stays open and silent between the two events, and the reply resumes by itself afterwards.
+`service shutdown`. `options` lists the approve scopes the card offers: `once` always, `session` and `agent` when
+[the action may be remembered](../user-guide/terminal.md#remembering-an-approval) (a dangerous action only has `once`); `scope` of the
+resolved event is what was granted (`once`, `session`, `agent`, `deny` for a refusal). The stream stays open and silent between the two events, and the reply resumes by itself afterwards.
 
 `task_started` (`{"task_id", "goal", "title", "chat_id"}`, `chat_id` of the worker) is sent as soon as a task launched by this reply exists, so a `task_start` call that is still running (`wait=true` blocks until the worker ends) can already show its card with the Open chat button; the same stream also has the final `tool` event with the result.
 
 `GET /api/agents/<agent_id>/chats/<chat_id>/approvals` returns the chat's pending approvals (same objects as the `approval`
 event; `[]` when none), for clients that connect after the event was sent.
 
-`POST /api/agents/<agent_id>/chats/<chat_id>/approvals/<approval_id>` with `{"decision": "approve" | "deny"}` answers one:
+`POST /api/agents/<agent_id>/chats/<chat_id>/approvals/<approval_id>` with `{"decision": "approve" | "deny", "scope": "once" | "session" | "agent"}`
+answers one. `scope` defaults to `once` and is ignored for `deny`:
 
 ```json
-{"status": "approved"}
+{"status": "approved", "scope": "session"}
 ```
 
-(`"denied"` for `deny`). Answering again with the same user is safe and returns the original outcome.
+(`"denied"` and `"scope": "deny"` for `deny`.) `session` remembers that exact action for this chat; `agent` also saves a narrow
+`allow` rule in the agent's `approval_rules` and updates the running agent. A scope the card did not offer in its `options` is a `400`
+and the card stays open. When the agent rule cannot be saved (the blanket-allow guardrail, an unwritable file or audit trail) the action
+is **approved once**, `scope` is `once` and the response has `error` with the reason; nothing is written. Answering again with the same user is safe and returns the original outcome.
 
 | status | when |
 | --- | --- |
 | `200` | answered (or already answered by this user) |
 | `403` | the approval belongs to another user |
 | `404` | unknown, expired, timed-out or cancelled approval, or the chat/agent is not the user's (`code: "unknown_approval"` for the first group) |
-| `422` | `decision` is missing or not exactly `approve` / `deny` |
+| `400` | the `scope` is not one of the card's `options` |
+| `422` | `decision` is missing or not exactly `approve` / `deny`, or `scope` is not `once` / `session` / `agent` |
 
-Telegram answers the same approvals with inline buttons.
+Telegram answers the same approvals with inline buttons (callback data `ap:<approval id>:y|s|a|n`, well under Telegram's 64 bytes).
+
+### Learned approval rules
+
+The rules in the agent file's `approval_rules` (the ones "Always for this agent" appends, and hand-written ones), for the logged-in
+user's own agents only (another user's agent is a `404`):
+
+| call | result |
+| --- | --- |
+| `GET /api/agents/<agent_id>/approval-rules` | `[{"index": 0, "learned": true, "rule": {...}}]`; `learned` is true for rules written from a card |
+| `DELETE /api/agents/<agent_id>/approval-rules/<index>` | removes the rule at that position; returns the list that remains; `404` for a position that does not exist |
+| `DELETE /api/agents/<agent_id>/approval-rules` or `POST .../approval-rules/reset` | removes every rule of the agent's list (its `default` stays); returns `[]` |
+
+Each removal writes an `approval_rule` line to the agent's [audit file](../user-guide/terminal.md#audit). The agent form never overwrites
+these rules: a `PUT /api/agents/<agent_id>` without `approval_rules` keeps the stored ones (`{"rules": []}` clears them). A running reply keeps the rules it
+started with; the next reply uses the file.
 
 ## Subagent tasks
 

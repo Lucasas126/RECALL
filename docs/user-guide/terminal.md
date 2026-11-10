@@ -172,6 +172,7 @@ approval_rules:
 | `backend` | backend name, glob allowed (`lab*`) |
 | `backend_kind` | `sandbox`, `machine` or `local` (see [kind](../reference/user-yaml.md#terminal-backends)) |
 | `dangerous` | `true` matches what the [dangerous list](#hardline-and-dangerous) flags, `false` what it does not |
+| `exact` | `true` compares `command` (the whole segment) and `path` literally: no word prefix, no glob. The rules written by "Always for this agent" use it |
 | `id`, `reason` | optional: a stable name for the audit trail, and a short text for the approval card |
 
 All the fields you set must match. Unknown keys and combinations that cannot match (`command` with `file_read`, `path` with `terminal`) are
@@ -201,25 +202,46 @@ An approval is shown to the chat's owner while the reply waits:
 - **Web**: the `approval` event arrives on the message stream and `POST .../approvals/<id>` answers it
   ([API](../reference/api.md#terminal-approvals)). The bundled web UI draws a card for it
   ([below](#in-the-web-ui)); answers can also be given from Telegram.
-- **Telegram**: a message with the command, backend, working directory, reason and **Approve** / **Deny** buttons; the outcome is
+- **Telegram**: a message with the command, backend, working directory, reason and **Approve once** / **Deny** buttons, plus
+  **Always in this session** and **Always for this agent** when the card offers them (see [remembering an approval](#remembering-an-approval)); the outcome is
   written onto the message when it closes.
 
 An approval is denied automatically after `terminal.approval_timeout_seconds` (default 300 s), when the reply is cancelled
 or interrupted, and when the service shuts down. Only the owner of the chat can answer. A denied action returns text telling
 the model not to retry or work around it. A `sandbox_patch` asks once for both its read and its write.
 
+### remembering an approval
+
+A card offers up to four answers:
+
+| answer | effect |
+| --- | --- |
+| Approve once | this action only (the default of the API) |
+| Always in this session | the same action is not asked again in this chat, until the chat is deleted or the service restarts. Kept in memory, per chat |
+| Always for this agent | adds an **exact** `allow` rule to the agent's `approval_rules` (the exact command, or each segment of a multi-segment command; or the exact path and kind of a file operation), on this backend |
+| Deny | refuses it |
+
+"Always" is not offered for a *dangerous* action, and "for this agent" is not offered when an `ask` rule would still win over the new
+rule, when the command looks like it contains a secret, or in a subagent task. A rule is never a wildcard or a prefix, and it cannot lift the
+[fixed floor](#approvals). If the rule cannot be saved (for instance the agent would break the blanket-allow guardrail), the action is
+approved once and you are told why. The rule is active in the same reply and in every chat of the agent from its next reply.
+
+Every learned rule is listed under **Learned approvals** in the Terminal block of the agent form (each with **Remove**, and **Reset to
+defaults** for all of them), and with `python -m src.admin agent rules --user U --agent A [--clear]`. The rule file edits and every approval
+(with its `scope`) are in the [audit file](#audit).
+
 ### in the web UI
 
 - **Approval card**: when the agent asks, the chat shows a card as a step of the turn: it appears exactly where the tool call happened, between the text written before it and the text written after it, and the tool's result summary follows it. Several approvals each sit at their own step. While any approval waits, a small bar at the bottom of the chat says "1 approval pending, jump to it" and scrolls to it. The card has the command, a small badge with the backend name, the working directory, the reason and a
   countdown to the automatic denial. A flagged action is titled "Dangerous command", any other "Approval required".
-  **Approve** and **Deny** answer it; once closed the card shows an outcome badge (approved, denied, timed out,
+  **Approve once** and **Deny** answer it (with **Always in this session** and **Always for this agent** when offered, see [above](#remembering-an-approval); a card that offers nothing more shows a plain **Approve**); once closed the card shows an outcome badge (approved, denied, timed out,
   cancelled or expired). A resolved card folds into one line ("Approved: terminal [backend] first 60 characters of the command") that expands to the full card, so long histories stay compact.
 - **After a reload** the cards still waiting are restored inside the last assistant message, before the matching tool step when it is identifiable, else at its end. An approval resolved from Telegram shows up in the web card
   within a few seconds.
 - **Agent form**: the **Terminal** block appears in the Tools tab once the terminal group is enabled. It lists your
   backends (name, type and description only, never host or key) each with an **Allow** checkbox that reveals its working
   directory and approvals mode (`off` is shown as a warning), a **Default backend** select limited to the allowed ones, the
-  command timeout. With no backends defined it explains how to add one.
+  command timeout, and the **Learned approvals** (the agent's approval rules, with **Remove** and **Reset to defaults**). With no backends defined it explains how to add one.
 
 ### hardline: always refused, in every mode
 
@@ -382,7 +404,7 @@ The `terminal` result starts with one line telling the agent how the command was
 `decision` is one of `approved`, `approved:same-operation`, `auto:smart`, `auto:off`, `auto:rule` (allowed by a rule), `auto:default` (allowed by a layer default), `denied:rule` (denied by a rule), `hardline`, `denied:protected`, `denied:unattended`, `denied:invalid` (NUL byte, too long, bad path),
 `denied:<reason>` (`denied by user`, `timed out`, `cancelled`, `service shutdown`) or `cancelled`. The command is redacted
 for known secret formats and cut at 2000 characters; the output is not recorded. The agent's own tools cannot read or edit
-this file: the memory/palace/folder tools only reach their sources, and the sandbox tools only reach the sandbox. Records carry the `verdict` (`normal`, `dangerous`, `hardline`, `protected`) of refused and executed actions, and which rule decided: `layer` (`installation`, `user`, `agent`, `builtin` when no layer defines a default, `floor` for hardline and protected), `rule` (`agent:2`, or `user:<id>` for a rule with an `id`; `approvals:smart` for the shorthand; absent when a layer default decided), `rule_verdict` (`allow`, `ask` or `deny`: what the engine said before the person answered) and, when a card was shown, its `approval_id`. The approval card shows the rule that asked in its reason. **The audit trail fails closed:** when it cannot be written (full disk, bad permissions) the action is refused with an error instead of running unrecorded. The approval card of `sandbox_write`/`sandbox_patch` shows a truncated preview (400 characters) of the content, or of the old and new text; the preview is not written to the audit trail. Each
+this file: the memory/palace/folder tools only reach their sources, and the sandbox tools only reach the sandbox. Records carry the `verdict` (`normal`, `dangerous`, `hardline`, `protected`) of refused and executed actions, and which rule decided: `layer` (`installation`, `user`, `agent`, `builtin` when no layer defines a default, `floor` for hardline and protected), `rule` (`agent:2`, or `user:<id>` for a rule with an `id`; `approvals:smart` for the shorthand; absent when a layer default decided), `rule_verdict` (`allow`, `ask` or `deny`: what the engine said before the person answered) and, when a card was shown, its `approval_id` and the `scope` of the answer (`once`, `session`, `agent`, or `deny`; an action allowed by a "for this session" grant is `decision: approved:session` with no `approval_id`). Changes to the agent's learned rules are lines of their own: `event: approval_rule`, `action` (`add` | `remove`), `actor` (`user`, or `admin` from the CLI), `user`, `agent`, the `rule`, and `index`, `chat` or `via: reset` where they apply. The approval card shows the rule that asked in its reason. **The audit trail fails closed:** when it cannot be written (full disk, bad permissions) the action is refused with an error instead of running unrecorded. The approval card of `sandbox_write`/`sandbox_patch` shows a truncated preview (400 characters) of the content, or of the old and new text; the preview is not written to the audit trail. Each
 decision is also kept in an in-memory log of the last 50 per user.
 
 ## limits and privacy

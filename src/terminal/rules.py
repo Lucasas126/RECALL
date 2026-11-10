@@ -54,6 +54,7 @@ class ApprovalRule(BaseModel):
     backend: Optional[str] = Field(default=None, pattern=_BACKEND_GLOB)  # backend name (glob)
     backend_kind: Optional[BackendKind] = None
     dangerous: Optional[bool] = Field(default=None, strict=True)  # matches when the policy assesses the action as dangerous
+    exact: Optional[bool] = Field(default=None, strict=True)  # `command` / `path` are compared literally (no prefix, no glob)
     reason: Optional[str] = Field(default=None, min_length=1, max_length=200)  # shown on the approval card
 
     @field_validator("command", "path")
@@ -71,6 +72,8 @@ class ApprovalRule(BaseModel):
             raise ValueError(f"'command' does not apply to tool '{self.tool}': use 'path'")
         if self.path is not None and self.tool == "terminal":
             raise ValueError("'path' does not apply to tool 'terminal': use 'command'")
+        if self.exact and self.command is None and self.path is None:
+            raise ValueError("'exact' needs a 'command' or a 'path'")
         return self
 
     @property
@@ -205,10 +208,22 @@ def rule_matches(rule: ApprovalRule, action: Action, unit: str | None) -> bool:
         return False
     if rule.dangerous is not None and rule.dangerous != action.dangerous:
         return False
-    if rule.path is not None and not (action.path and fnmatch.fnmatchcase(_norm_path(action.path), rule.path)):
-        return False
-    if rule.command is not None and not (unit is not None and glob_match(rule.command, unit)):
-        return False
+    if rule.path is not None:
+        if not action.path:
+            return False
+        if rule.exact:
+            if _norm_path(action.path) != _norm_path(rule.path):
+                return False
+        elif not fnmatch.fnmatchcase(_norm_path(action.path), rule.path):
+            return False
+    if rule.command is not None:
+        if unit is None:
+            return False
+        if rule.exact:
+            if unit != rule.command:
+                return False
+        elif not glob_match(rule.command, unit):
+            return False
     return True
 
 
@@ -270,6 +285,97 @@ def evaluate(
             "deny", result.layer, result.rule, "unattended", result.reason, asked="ask", segment=result.segment,
         )
     return result
+
+
+# ---------------------------------------------------------------------- learned rules (approve "always for this agent")
+LEARNED_REASON = "approved always for this agent"  # the `reason` of every rule written from an approval card
+SCOPES: tuple[str, ...] = ("once", "session", "agent")  # what an approval may be remembered for (deny has no scope)
+
+
+class NoNarrowRule(ValueError):
+    """The action cannot be turned into a narrow, exact allow rule (so 'always for this agent' is not offered)."""
+
+
+def rules_for_action(action: Action) -> list[ApprovalRule]:
+    """The narrow allow rules that cover exactly `action`, never a wildcard or a prefix.
+
+    A terminal command gets one rule per segment (`command_units`), each matching that segment's exact text on the
+    action's backend; a file operation gets one rule for its exact path and tool kind on the action's backend.
+    Raises `NoNarrowRule` when nothing narrow can be written (no backend name, empty command or path, a segment longer
+    than a rule may be).
+    """
+    if not action.backend:
+        raise NoNarrowRule("the action has no backend name")
+    try:
+        if action.tool == "terminal":
+            units = action.units()
+            if not units:
+                raise NoNarrowRule("the command has no segment to match")
+            rules = [
+                ApprovalRule(verdict="allow", tool="terminal", command=unit, exact=True, backend=action.backend, reason=LEARNED_REASON)
+                for unit in dict.fromkeys(units)
+            ]
+        else:
+            if not action.path:
+                raise NoNarrowRule("the action has no path")
+            rules = [ApprovalRule(
+                verdict="allow", tool=action.tool, path=action.path, exact=True, backend=action.backend, reason=LEARNED_REASON,
+            )]
+    except ValueError as exc:  # pydantic's ValidationError is a ValueError: too long, odd backend name, NUL byte...
+        if isinstance(exc, NoNarrowRule):
+            raise
+        raise NoNarrowRule(str(exc)) from exc
+    from src.terminal.output import redact  # lazily: the config models import this module
+
+    if any(rule.command is not None and redact(rule.command) != rule.command for rule in rules):
+        raise NoNarrowRule("the command looks like it contains a secret, which must not be written to the configuration")
+    if any(rule.blanket for rule in rules):  # cannot happen (command or path is set); kept as the invariant
+        raise NoNarrowRule("the rule would allow everything")
+    return rules
+
+
+def rule_for_action(action: Action) -> ApprovalRule:
+    """The single narrow allow rule of an action with one segment (any file operation, a one-segment command)."""
+    rules = rules_for_action(action)
+    if len(rules) != 1:
+        raise NoNarrowRule("the command has several segments: use rules_for_action")
+    return rules[0]
+
+
+def rule_key(rule: ApprovalRule) -> str:
+    """A canonical text of a rule's content (identical rules, however written, have the same key)."""
+    return rule.model_dump_json(exclude_none=True)
+
+
+def action_signature(action: Action) -> str:
+    """The identity of an action for a session grant: tool kind, backend and the exact command or path."""
+    target = action.command if action.tool == "terminal" else action.path
+    return f"{action.tool}\x1f{action.backend}\x1f{target}"
+
+
+def offered_scopes(rules: RuleSet, action: Action, *, shorthand: Shorthand | None, decision: Decision) -> tuple[str, ...]:
+    """The approve scopes the card may offer for an `ask` decision (always starts with `once`).
+
+    `session` and `agent` are not offered for a dangerous action, nor when the decision is not a plain `ask`, nor when
+    the action has no narrow rule. `agent` is offered only when appending that rule would really allow the action
+    (an `ask` rule of any layer still beats an allow rule, so the rule would never take effect).
+    """
+    scopes = ["once"]
+    if action.dangerous or decision.verdict != "ask" or not action.backend:
+        return tuple(scopes)
+    if not (action.command if action.tool == "terminal" else action.path):
+        return tuple(scopes)
+    scopes.append("session")
+    try:
+        learned = rules_for_action(action)
+    except NoNarrowRule:
+        return tuple(scopes)
+    extended = rules
+    for rule in learned:
+        extended = extended.with_rule("agent", rule)
+    if evaluate(extended, action, shorthand=shorthand, attended=True).verdict == "allow":
+        scopes.append("agent")
+    return tuple(scopes)
 
 
 # ---------------------------------------------------------------------- guardrail

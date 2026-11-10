@@ -15,7 +15,8 @@ Values after `=` are YAML: `true`, `42`, `[a, b]`, `{k: v}`, `null`, or a quoted
 | `python -m src.admin agent set --user U --agent A --set path=value` | change settings (repeat `--set`); `--level L` sets the permission level |
 | `python -m src.admin agent rename --user U --agent A --new-id B --name N` | new id (and optional name); moves `data/U/A` to `data/U/B` exactly like the web UI |
 | `python -m src.admin agent delete --user U --agent A --yes` | remove the configuration; the data folder stays on disk |
-| `python -m src.admin agent check` | load every user and agent with the real loader; prints each agent's effective level, then `OK` or each precise error (exit code 1); `--user U` limits it |
+| `python -m src.admin agent rules --user U --agent A [--clear]` | list the agent's own approval rules, or `--clear` them all (audited) |
+| `python -m src.admin agent check` | load every user and agent with the real loader; prints each agent's effective level, then `OK` or each error (exit code 1); `--user U` limits it |
 
 Examples:
 

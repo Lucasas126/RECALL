@@ -17,6 +17,7 @@ from the repository root. Agents with a `local` terminal backend run it the same
 | `agent set --user U --agent A [--level L] --set path=value [--set ...]` | change an agent's settings; other settings keep a stored `level` |
 | `agent rename --user U --agent A --new-id B [--name N]` | change the id and move the data folder, like the web UI |
 | `agent delete --user U --agent A --yes` | delete the configuration (the data folder stays) |
+| `agent rules --user U --agent A [--clear]` | list the agent's own [approval rules](terminal.md#approval-rules) (marking the ones learned from approval cards), or with `--clear` remove all of them (the audit file records it with `actor: admin`) |
 | `agent check [--user U]` | load everything with the real loader; prints each agent's effective level, then `OK` or the precise errors (exit code 1 on error), including agents whose level breaks the [level rule](../reference/agent-yaml.md#level) |
 | `user show --user U` | `user.yaml` with key variable names; never the password hash |
 | `user set --user U --set path=value` | non-secret fields (`name`, `language`, `models.*`, `provider.name`, `provider.api_key` = a variable NAME, `terminal_backends.*`, ...) |

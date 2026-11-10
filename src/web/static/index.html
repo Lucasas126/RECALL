@@ -278,6 +278,14 @@
                 <p class="setting-default model-note"></p>
                 <p class="setting-error error" role="alert"></p>
               </div>
+              <div id="agent-approval-rules" class="approval-rules" hidden>
+                <span id="agent-approval-rules-label">Learned approvals</span>
+                <p id="agent-approval-rules-hint" class="model-note">Saved when you choose Always for this agent on an approval card. Remove one to be asked again, or reset them all.</p>
+                <ul id="agent-approval-rules-list" class="approval-rules-list"></ul>
+                <p id="agent-approval-rules-empty" class="model-note">No learned approvals.</p>
+                <button id="agent-approval-rules-reset" type="button">Reset to defaults</button>
+                <p id="agent-approval-rules-error" class="error" role="alert"></p>
+              </div>
               <p id="agent-terminal-error" class="error" role="alert"></p>
             </fieldset>
             <fieldset id="agent-delegation" class="agent-terminal" hidden disabled>

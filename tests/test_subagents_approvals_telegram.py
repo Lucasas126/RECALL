@@ -42,7 +42,7 @@ class TaskApprovalTelegramTests(Base):
         self.bot.edit_message_text = AsyncMock()
         query, update = self.query(f"ap:{DATA['id']}:y", message_id=55)
         await approval_callback(update, self.context)
-        self.service.resolve_approval.assert_called_once_with("test-user", "agent-a", "chat-1", DATA["id"], "approve")
+        self.service.resolve_approval.assert_called_once_with("test-user", "agent-a", "chat-1", DATA["id"], "approve", "once")
         self.assertNotIn(DATA["id"], self.state.approvals)
 
     async def test_another_user_cannot_answer(self) -> None:

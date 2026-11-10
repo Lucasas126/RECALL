@@ -26,7 +26,7 @@ Unknown keys are rejected in the agent yaml and most blocks (not in `chat_config
 | `folders` | up to 20 user folders |
 | `terminal` | block below; needed by the `terminal` tool group |
 | `delegation` | block below; the `delegate` tool group, which gets the defaults when this is omitted |
-| `approval_rules` | agent layer of approval rules `{default, rules}` (`references/terminal-and-approvals.md`) |
+| `approval_rules` | agent layer of approval rules `{default, rules}`; cards append exact `allow` rules (`references/terminal-and-approvals.md`) |
 | `level` | `minimal`, `reader`, `assistant`, `collaborator`, `operator` or `admin`; between what its tools need and the owner's `max_level`, else invalid (the error names the service). Unset = what its tools need. Enforced at build and call |
 
 ### `chat_config` (Agents tab: Basic, Basic > Advanced and Tools)

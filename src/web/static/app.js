@@ -508,6 +508,8 @@ function translateInterface() {
     ["agent-terminal-legend", "Terminal"], ["agent-terminal-default-label", "Default backend"],
     ["agent-terminal-no-backends", "No terminal backends are configured. Add one under terminal_backends in your user configuration; see docs/user-guide/terminal.md."],
     ["agent-terminal-timeout-label", "Command timeout (seconds)"],
+    ["agent-approval-rules-label", "Learned approvals"], ["agent-approval-rules-hint", "Saved when you choose Always for this agent on an approval card. Remove one to be asked again, or reset them all."],
+    ["agent-approval-rules-empty", "No learned approvals."], ["agent-approval-rules-reset", "Reset to defaults"],
     ["agent-effort-label", "Reasoning effort"], ["agent-effort-default", "Default"],
     ["agent-tokens-enabled-label", "Limit reasoning tokens"],
     ["agent-delegation-legend", "Delegation"], ["agent-delegation-enabled-label", "Delegation enabled"],
@@ -1124,6 +1126,50 @@ function updateTerminalBlock() {
   $("agent-terminal").disabled = !enabled;  // a disabled fieldset is not validated, so hidden fields never block saving
 }
 
+// One readable line for a rule of the agent's approval list: "allow terminal: git status [box] (exact)".
+function approvalRuleText(rule) {
+  const target = rule?.command ?? rule?.path ?? "";
+  const kind = rule?.tool && rule.tool !== "any" ? `${rule.tool}: ` : "";
+  const where = rule?.backend ? ` [${rule.backend}]` : "";
+  return `${rule?.verdict ?? ""} ${kind}${target}${where}${rule?.exact ? " (exact)" : ""}`.trim();
+}
+
+let approvalRulesRequest = 0;
+
+function drawApprovalRules(rules) {
+  const list = $("agent-approval-rules-list");
+  list.replaceChildren(...rules.map((entry) => {
+    const item = document.createElement("li");
+    const text = Object.assign(document.createElement("span"), { className: "approval-rule-text", textContent: approvalRuleText(entry.rule) });
+    const remove = Object.assign(document.createElement("button"), { type: "button", textContent: tr("Remove") });
+    remove.addEventListener("click", () => changeApprovalRules("DELETE", `/${entry.index}`));
+    item.append(text, remove);
+    return item;
+  }));
+  $("agent-approval-rules-empty").hidden = rules.length > 0;
+  $("agent-approval-rules-reset").hidden = rules.length === 0;
+}
+
+// Loads (no method) or changes the saved agent's approval rules; the form never edits them as part of its own save.
+async function changeApprovalRules(method, suffix = "") {
+  const agentId = state.agentForm.originalId;
+  const block = $("agent-approval-rules");
+  block.hidden = !agentId;
+  if (!agentId) return;
+  const request = ++approvalRulesRequest;
+  $("agent-approval-rules-error").textContent = "";
+  try {
+    const rules = await api(`/api/agents/${encodeURIComponent(agentId)}/approval-rules${suffix}`, method ? { method } : undefined);
+    if (request === approvalRulesRequest && agentId === state.agentForm.originalId) drawApprovalRules(rules);
+  } catch (err) {
+    if (request === approvalRulesRequest) $("agent-approval-rules-error").textContent = err.message;
+  }
+}
+
+$("agent-approval-rules-reset").addEventListener("click", () => {
+  if (confirm(tr("Remove every learned approval of this agent?"))) changeApprovalRules("DELETE");
+});
+
 function renderTerminalBlock(agent) {
   const saved = agent.terminal ?? null;
   const rows = terminalBackendRows(state.user?.terminal_backends, saved);
@@ -1133,6 +1179,7 @@ function renderTerminalBlock(agent) {
   $("agent-terminal-error").textContent = "";
   refreshTerminalDefault(saved?.default_backend);
   updateTerminalBlock();
+  changeApprovalRules();
 }
 
 // The Delegation block follows the `delegate` tool group, like the Terminal block follows `terminal`.
@@ -3188,6 +3235,25 @@ function approvalOutcome(decision, reason) {
   return decision === "approved" ? "approved" : "denied";
 }
 
+// The approve buttons a card offers, from its `options` (approve scopes; a card without them offers `once` only).
+// The first one is the primary button; "Approve" keeps its short label while it is the only choice.
+function approvalScopeButtons(approval) {
+  const offered = Array.isArray(approval?.options) && approval.options.length ? approval.options : ["once"];
+  const labels = {
+    once: offered.length > 1 ? tr("Approve once") : tr("Approve"),
+    session: tr("Always in this session"),
+    agent: tr("Always for this agent"),
+  };
+  return ["once", "session", "agent"].filter((scope) => offered.includes(scope)).map((scope) => ({ scope, label: labels[scope] }));
+}
+
+// " (this session)" / " (always for this agent)" after the outcome of an approval that was remembered; "" otherwise.
+function approvalScopeSuffix(scope) {
+  if (scope === "session") return ` (${tr("this session")})`;
+  if (scope === "agent") return ` (${tr("always for this agent")})`;
+  return "";
+}
+
 function approvalOutcomeLabel(kind) {
   switch (kind) {
     case "approved": return tr("Approved");
@@ -4291,10 +4357,16 @@ function approvalTransition(current, action) {
       return current.phase === "pending" ? { phase: "submitting", kind: null, error: null, decision: action.decision } : current;
     case "resolved":
       if (current.phase === "resolved") return current;
-      return { phase: "resolved", kind: approvalOutcome(action.decision, action.reason), error: null, decision: current.decision };
+      return {
+        phase: "resolved", kind: approvalOutcome(action.decision, action.reason), error: null, decision: current.decision,
+        ...(action.scope ? { scope: action.scope } : {}),
+      };
     case "answered":
       if (settled) return current;
-      return { phase: "resolved", kind: approvalOutcome(action.status, null), error: null, decision: current.decision };
+      return {
+        phase: "resolved", kind: approvalOutcome(action.status, null), error: null, decision: current.decision,
+        ...(action.scope ? { scope: action.scope } : {}),
+      };
     case "failed":
       if (settled) return current;
       if (action.status === 404) return { phase: "expired", kind: "expired", error: null, decision: current.decision };
@@ -4354,25 +4426,31 @@ function buildApprovalCard(entry) {
     row.append(make("strong", null, `${label}: `), document.createTextNode(value));
     detail.append(row);
   }
-  const approve = make("button", "primary", tr("Approve"));
+  const approveButtons = approvalScopeButtons(approval).map(({ scope, label }, index) => {
+    const button = make("button", index === 0 ? "primary" : null, label);
+    button.type = "button";
+    button.dataset.scope = scope;
+    button.addEventListener("click", () => answerApproval(entry, "approve", scope));
+    return button;
+  });
+  const approve = approveButtons[0];
   const deny = make("button", null, tr("Deny"));
-  approve.type = deny.type = "button";
-  approve.addEventListener("click", () => answerApproval(entry, "approve"));
+  deny.type = "button";
   deny.addEventListener("click", () => answerApproval(entry, "deny"));
   const actions = make("div", "approval-actions");
-  actions.append(approve, deny);
+  actions.append(...approveButtons, deny);
   const status = make("p", "approval-status");
   status.setAttribute("role", "status");
   const error = make("p", "approval-error");
   error.setAttribute("role", "alert");
   detail.append(actions, status, error);
-  entry.nodes = { card, summary, countdown, actions, approve, deny, status, error };
+  entry.nodes = { card, summary, countdown, actions, approve, approveButtons, deny, status, error };
   return card;
 }
 
 function renderApproval(entry) {
   const { phase, kind, error, decision } = entry.state;
-  const { card, summary, countdown, actions, approve, deny, status, error: errorNode } = entry.nodes;
+  const { card, summary, countdown, actions, approveButtons, deny, status, error: errorNode } = entry.nodes;
   const active = approvalActive(entry.state);
   card.classList.toggle("resolved", !active);
   summary.hidden = active;
@@ -4387,14 +4465,14 @@ function renderApproval(entry) {
   updateApprovalIndicator();
   card.dataset.outcome = kind ?? "";
   actions.hidden = !active;
-  approve.disabled = deny.disabled = phase === "submitting";
+  for (const button of [...approveButtons, deny]) button.disabled = phase === "submitting";
   countdown.hidden = !active;
   countdown.textContent = formatCountdown(approvalRemaining(entry.data.expires_at, Date.now()));
   if (phase === "submitting") {
     status.textContent = tr(decision === "deny" ? "Denying…" : "Approving…");
   } else if (kind) {
     status.replaceChildren(Object.assign(document.createElement("span"), {
-      className: `approval-badge ${kind}`, textContent: approvalOutcomeLabel(kind),
+      className: `approval-badge ${kind}`, textContent: approvalOutcomeLabel(kind) + (kind === "approved" ? approvalScopeSuffix(entry.state.scope) : ""),
     }));
   } else {
     status.textContent = "";
@@ -4422,21 +4500,25 @@ function showApproval(approval, place) {
   return entry;
 }
 
-function settleApproval({ id, decision, reason }) {
+function settleApproval({ id, decision, reason, scope }) {
   const entry = approvalEntries.get(id);
-  if (entry) applyApproval(entry, { type: "resolved", decision, reason });
+  if (entry) applyApproval(entry, { type: "resolved", decision, reason, scope });
 }
 
-async function answerApproval(entry, decision) {
+async function answerApproval(entry, decision, scope = "once") {
   if (entry.state.phase !== "pending") return;
   applyApproval(entry, { type: "submit", decision });
   const { agent_id: agentId, chat_id: chatId, id } = entry.data;
   try {
     const result = await api(
       `/api/agents/${encodeURIComponent(agentId)}/chats/${encodeURIComponent(chatId)}/approvals/${encodeURIComponent(id)}`,
-      { method: "POST", body: JSON.stringify({ decision }) },
+      { method: "POST", body: JSON.stringify({ decision, scope }) },
     );
-    applyApproval(entry, { type: "answered", status: result?.status });
+    applyApproval(entry, { type: "answered", status: result?.status, scope: result?.scope });
+    if (result?.error) {  // the approval event may have settled the card first: show the note either way
+      entry.state = { ...entry.state, error: tr("Approved once only. The rule was not saved: {error}", { error: result.error }) };
+      renderApproval(entry);
+    }
   } catch (err) {
     applyApproval(entry, {
       type: "failed", status: err.status,

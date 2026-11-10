@@ -5,7 +5,7 @@
     python -m src.admin set-password <user_id> [--generate]
     python -m src.admin route-test "message text" --user <user_id> [--force]
     python -m src.admin terminal-test --user <user_id> --backend <name>
-    python -m src.admin agent list|show|create|set|rename|delete|check ...   (src/admin/agents.py)
+    python -m src.admin agent list|show|create|set|rename|delete|check|rules ...   (src/admin/agents.py)
     python -m src.admin user show|set --user <user_id> ...                   (src/admin/agents.py)
     python -m src.admin set-secret NAME [--stdin]  /  secret list            (src/admin/credentials.py)
     python -m src.admin task run --user U --agent A --goal "..." [--wait]    (src/admin/tasks.py)

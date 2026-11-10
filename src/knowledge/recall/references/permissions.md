@@ -59,7 +59,7 @@ Nobody answers approvals in a dream, so every `ask` becomes `deny`. A dream read
 
 ## Approvals
 
-Approvals are independent of the level: layered rule lists (installation, user, agent) of allow, ask and deny rules, with the fixed floor (hardline, protected paths) first. Deny beats ask beats allow; with no matching rule the most specific `default` decides, else `ask`. Unattended, every `ask` becomes `deny`. The per-backend `approvals: manual|smart|off` stays as a shorthand. Allowing everything on a real machine (`kind: machine` or `local` backend) is only valid for an `admin` agent; on a `kind: sandbox` backend an operator may. Details and rule fields: `references/terminal-and-approvals.md`. "Always allow for this agent" buttons and editing rules at run time do not exist yet; do not promise them.
+Approvals are independent of the level: layered rule lists (installation, user, agent) of allow, ask and deny rules, with the fixed floor (hardline, protected paths) first. Deny beats ask beats allow; with no matching rule the most specific `default` decides, else `ask`. Unattended, every `ask` becomes `deny`. The per-backend `approvals: manual|smart|off` stays as a shorthand. Allowing everything on a real machine (`kind: machine` or `local` backend) is only valid for an `admin` agent; on a `kind: sandbox` backend an operator may. Details and rule fields: `references/terminal-and-approvals.md`. Approval cards offer approve once, always in this session and always for this agent (an exact allow rule saved in the agent file; never for dangerous actions). You cannot edit rules yourself yet (no `permissions` tool); the user can list and reset them with `python -m src.admin agent rules`, the agent form or the API.
 
 ## Asking for more
 

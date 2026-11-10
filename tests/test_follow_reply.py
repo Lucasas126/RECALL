@@ -201,7 +201,7 @@ class FollowApiTests(steering.SteeringFixture):
         replayed = next(viewer)
         self.assertEqual((replayed.kind, replayed.data["id"]), ("approval", pending[0]["id"]))
         answer = self.client.post(f"{self.base}/approvals/{pending[0]['id']}", json={"decision": "approve"})
-        self.assertEqual(answer.json(), {"status": "approved"})
+        self.assertEqual(answer.json(), {"status": "approved", "scope": "once"})
         rest = [e.kind for e in viewer]
         self.assertEqual(rest, ["approval_resolved", "text", "usage"])
         thread.join(5)

@@ -34,7 +34,10 @@ documents and images the user attaches, and the output of its own commands. Any 
 2. **Approvals.** In `manual` mode the user sees every command before it runs; this is the mode that stops a prompt injection
    from acting. `smart` only stops the dangerous list, which is a heuristic, not a guarantee; `off` trusts the model entirely.
    Read the command in the approval before tapping *Approve*; only the chat's owner can answer, and an unanswered approval is
-   denied after the timeout.
+   denied after the timeout. *Always in this session* and *Always for this agent* trade that review for convenience: the first lasts
+   until the chat ends, the second writes an exact-command (or exact-path) `allow` rule to the agent file. Neither is offered for a dangerous
+   action, neither can lift the hardline or protected paths, and each is audited with its `scope`. Review the learned rules from time to time
+   (`python -m src.admin agent rules --user U --agent A`) and clear them with `--clear` if in doubt.
 3. **Hardline blocklist**, enforced in every mode (disk wipes, `rm -rf /`, shutdowns, fork bombs...).
 4. **Containment of the transport**: key-only SSH with strict host-key checking, no agent/X11 forwarding, no local shell, a
    minimal local environment for the `ssh` process, `ssh -F /dev/null` (the server user's `~/.ssh/config` is never read), no secrets in the command line (file contents go on stdin).
