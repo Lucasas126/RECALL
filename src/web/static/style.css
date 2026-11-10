@@ -893,3 +893,20 @@ aside { position: relative; }
 html.resizing-sidebar, html.resizing-sidebar * { cursor: col-resize !important; user-select: none !important; }
 html.resizing-sidebar #app { transition: none; }
 @media (max-width: 800px) { #app { grid-template-columns: minmax(0, 1fr); } #sidebar-resizer { display: none; } }
+
+/* Permission levels: badges, the selector's messages, the approval rule editor and the Users section */
+.level-badge { display: inline-block; flex: none; padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: .75em; font-weight: 500; vertical-align: middle; white-space: nowrap; }
+.level-badge.over-max { border-color: var(--danger); color: var(--danger); }
+.model-filter .level-badge { margin-left: 6px; border-color: var(--warn); color: var(--warn); }
+.model-filter .level-badge.over-max { border-color: var(--danger); color: var(--danger); }
+#agent-form-level { margin-left: 6px; }
+.approval-rules-list li.agent-rule { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 6px 10px; align-items: end; justify-content: stretch; }
+.agent-rule label { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.agent-rule label.model-filter { flex-direction: row; align-items: center; }
+.agent-rule select, .agent-rule input[type="text"], .agent-rule input:not([type]) { width: 100%; min-width: 0; }
+.agent-rule button { justify-self: end; }
+#agent-rules-effective summary { cursor: pointer; color: var(--muted); }
+#agent-rules-effective-body { margin-top: 6px; }
+.users-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.user-admin { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+#agent-level-message:empty { display: none; }

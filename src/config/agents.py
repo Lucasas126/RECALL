@@ -9,7 +9,7 @@ from typing import Callable
 import yaml
 from pydantic import ValidationError
 
-from src.config.levels import check_agent_level
+from src.config.levels import Level, check_agent_level, effective_agent_level, parse_level, required_level
 from src.config.models import AgentConfig, UserConfig
 from src.terminal.rules import ApprovalRule, ApprovalRuleList, rule_key
 from src.utils.files import atomic_write_text, exclusive_file_lock
@@ -30,6 +30,23 @@ class AgentModelError(AgentConfigError):
 
 class UnknownApprovalRule(AgentConfigError):
     """No agent approval rule at that position."""
+
+
+class MaxLevelConflict(AgentConfigError):
+    """A new `max_level` below the level of some of the user's agents (`agents`: id, name, level of each)."""
+
+    code = "max_level_below_agents"
+
+    def __init__(self, template: str, *, agents: list[dict], **values: object) -> None:
+        super().__init__(template, **values)
+        self.agents = agents
+
+
+MAX_LEVEL_BELOW_AGENTS = (
+    "The maximum level '{max_level}' is below the level of these agents of '{user_id}': {names}. "
+    "Lower those agents (or remove the services that need the level) first, then lower the maximum."
+)
+_MAX_LEVEL_LINE = re.compile(r"^max_level\s*:.*$", re.MULTILINE)
 
 
 class AgentConflict(AgentConfigError):
@@ -312,6 +329,51 @@ class AgentStore:
     def _agent_files(self, user_id: str) -> list[Path]:
         agents_dir = self._agents_dir(user_id)
         return sorted(agents_dir.glob("*.yaml")) if agents_dir.is_dir() else []
+
+    def agent_levels(self, user_id: str, user: UserConfig | None = None) -> list[dict]:
+        """`{id, name, level, declared}` of each agent that loads: `level` is the higher of the declared and the required one."""
+        user = user or self._read_user(user_id)
+        rows = []
+        for agent_id in user.agents:
+            try:
+                config = self.load(user_id, agent_id)
+            except (FileNotFoundError, AgentConfigError, yaml.YAMLError):
+                continue  # an unreadable agent has no level to compare
+            level = max(effective_agent_level(config, user), required_level(config, user.terminal_backends))
+            rows.append({"id": config.id, "name": config.name, "level": level.label, "declared": config.level is not None})
+        return rows
+
+    def set_max_level(self, user_id: str, new_max: Level) -> Level:
+        """Set the user's `max_level` (the administrator's job, see `ChatService.set_user_max_level`); returns the old one.
+
+        Under the user's lock. Refuses with MaxLevelConflict when an agent's level (declared or required) is above
+        `new_max`, and rewrites only the `max_level` line of `user.yaml`, so comments and other keys survive.
+        """
+        with self._locked(user_id):
+            user = self._read_user(user_id)
+            above = [row for row in self.agent_levels(user_id, user) if parse_level(row["level"]) > new_max]
+            if above:
+                raise MaxLevelConflict(
+                    MAX_LEVEL_BELOW_AGENTS, agents=above, max_level=new_max.label, user_id=user_id,
+                    names=", ".join(f"{row['id']} ({row['level']})" for row in above),
+                )
+            path = self._user_file(user_id)
+            text = self._read_text(path)
+            line = f"max_level: {new_max.label}"
+            updated = _MAX_LEVEL_LINE.sub(line, text, count=1) if _MAX_LEVEL_LINE.search(text) else f"{text.rstrip()}\n{line}\n"
+            try:
+                checked = UserConfig.model_validate(yaml.safe_load(updated))
+            except ValidationError as exc:
+                raise AgentConfigError("Invalid user configuration '{file}'.", file=path.name) from exc
+            if checked.max_level != new_max:
+                raise AgentConfigError("Invalid user configuration '{file}'.", file=path.name)
+            try:
+                atomic_write_text(path, updated)
+            except OSError as exc:
+                raise AgentConfigError(
+                    "Could not save the user configuration '{file}'; check file permissions.", file=path.name,
+                ) from exc
+            return user.max_level
 
     def _check_level(self, user: UserConfig, config: AgentConfig) -> None:
         """The config rule: required level <= the agent's effective level <= the owner's max_level, else it is refused."""

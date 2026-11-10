@@ -13,6 +13,19 @@ associative-memory options and messages kept in context),
 **Tools** (use tools and the tool groups) and **MCP**; **Folders** holds the user folders and the memory index status. A saved agent also
 has the dream tabs (**Soul & memory**, **Dream**, **Dream sessions**, see [dream mode](dream.md#web-ui)).
 
+**Permission level.** The Basic tab starts with a **Permission level** group (see [permission levels](../architecture/permissions.md)).
+The select lists the six levels (Minimal to Admin) with the description of the selected one, built from the same table the server
+enforces; the options above your maximum level (the `max_level` an administrator gave you) are disabled. Next to it the form shows
+**the level the current choices require**, computed live from the Tools tab (tool groups), the MCP tab, the terminal backends that are
+allowed (a `local` or root ssh backend needs `admin`, any other ssh backend `operator`) and the delegation targets, and says what
+is wrong when the selected level does not fit: *raise the level to X or remove Y* when your maximum allows it, *remove Y or ask an
+administrator to raise your maximum* when it does not. In the Tools tab a group that needs more than the selected level is marked
+with a badge showing the level it needs (the tooltip explains; a red badge means above your maximum); groups are never hidden. A
+new agent starts at the level its choices need and, until you pick one yourself, follows them; the form sends `level` only when you
+chose it (or the choices moved it), otherwise the stored level, or none, is kept. A badge with the level appears on each agent in
+the list and next to the title. The server stays the authority: a refused save shows `level_exceeds_max`, `level_below_required` or
+`level_required_above_max` next to the selector, in your language.
+
 Reasoning is on by default for new agents (and for agent files that omit `reasoning`); turn it off in **Basic > Model and reasoning > Reasoning**.
 Models without reasoning support ignore the request. When it is off, the composer's effort selector reads **Disabled in this agent**.
 

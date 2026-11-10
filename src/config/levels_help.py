@@ -7,8 +7,10 @@ compares them.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from src.config import ceiling
-from src.config.levels import SERVICE_MIN_LEVEL, Level, parse_level
+from src.config.levels import SERVICE_MIN_LEVEL, Level, backend_min_level, parse_level
 
 LEVEL_TITLE = {
     Level.MINIMAL: "Minimal", Level.READER: "Reader", Level.ASSISTANT: "Assistant",
@@ -31,6 +33,46 @@ SERVICE_TEXT = {
     "terminal_local": "use the `local` terminal backend (a shell on the RECALL host)",
     "terminal_root": "use an ssh backend whose user is root",
 }
+
+
+MINIMAL_TEXT = "only the one or two tools chosen for the agent"
+ADMIN_EXTRA_TEXT = "act on other users' agents, data and settings, and the admin CLI (with approval)"
+
+
+def level_description_parts(level: Level) -> list[str]:
+    """What `level` adds over the one below, as the texts of its services (the web selector and the help share them)."""
+    parts = [SERVICE_TEXT[key] for key in _services_added(level)] or [MINIMAL_TEXT]
+    if level == Level.ADMIN:
+        parts.append(ADMIN_EXTRA_TEXT)
+    return parts
+
+
+def levels_catalog() -> dict:
+    """Everything a client needs to show levels and compute the level a configuration requires (GET /api/levels).
+
+    Built from `SERVICE_MIN_LEVEL`, `ceiling.GROUP_MIN_LEVEL` and `backend_min_level`, so it cannot drift from what is
+    enforced. The user's own `max_level` is added by the service.
+    """
+    classes = {
+        "local": SimpleNamespace(type="local"),
+        "ssh_root": SimpleNamespace(type="ssh", user="root"),
+        "ssh": SimpleNamespace(type="ssh", user=""),
+    }
+    return {
+        "levels": [
+            {
+                "name": level.label, "number": int(level), "title": LEVEL_TITLE[level],
+                "parts": level_description_parts(level), "description": "; ".join(level_description_parts(level)),
+                "tool_groups": sorted(ceiling.allowed_groups(level)),
+            }
+            for level in Level
+        ],
+        "groups": {group: level.label for group, level in ceiling.GROUP_MIN_LEVEL.items()},
+        "services": {key: level.label for key, level in SERVICE_MIN_LEVEL.items()},
+        "backend_rules": {name: backend_min_level(backend).label for name, backend in classes.items()},
+        "mcp": SERVICE_MIN_LEVEL["mcp"].label,
+        "delegation_targets": SERVICE_MIN_LEVEL["delegation_targets"].label,
+    }
 
 
 def _name(level: Level) -> str:
@@ -85,10 +127,7 @@ def levels_help(capability: str = "") -> str:
     ]
     for entry in levels_summary():
         level = parse_level(entry["level"])
-        added = [SERVICE_TEXT[key] for key in _services_added(level)]
-        text = "; ".join(added) if added else "only the one or two tools chosen for the agent"
-        if level == Level.ADMIN:
-            text += "; act on other users' agents, data and settings, and the admin CLI (with approval)"
+        text = "; ".join(level_description_parts(level))
         lines.append(f"- {_name(level)} ({LEVEL_TITLE[level]}): {text}")
     lines += [
         "",

@@ -21,8 +21,9 @@ from src.agent.tools import chat_folder_options
 from src.agent.dream import DEFAULT_DREAM_PROMPT
 from src.agent.default_soul import default_soul
 from src.config.agents import AgentConfigError, AgentStore
+from src.config.levels_help import levels_catalog
 from src.config.errors import describe_config_error
-from src.config.levels import check_agent_level, effective_agent_level
+from src.config.levels import Level, backend_min_level, check_agent_level, effective_agent_level, parse_level
 from src.config.favorites import ModelFavorites
 from src.config.loader import agent_default_model, load_agent, load_agent_config, load_user, user_models
 from src.config.model_refs import CLAUDE_SUBSCRIPTION, OPENROUTER, PROVIDERS, is_claude_subscription, model_name, provider_of
@@ -182,6 +183,24 @@ class NoAgents(UnknownAgent):
     """The user has no agents at all, so there is nothing to chat with until one is created."""
 
     code = "no_agents"
+
+
+class NotAdministrator(ServiceError):
+    """The caller's maximum level is not `admin`: the user administration is not theirs."""
+
+    code = "admin_required"
+
+
+class UnknownManagedUser(ServiceError):
+    """The user an administrator tried to manage does not exist."""
+
+    code = "unknown_user"
+
+
+class OwnMaxLevel(InputError):
+    """An administrator tried to change their own maximum level."""
+
+    code = "max_level_self_change"
 
 
 class UnknownDreamSession(ServiceError):
@@ -417,7 +436,11 @@ class ChatService:
             "agents": self.list_agents(user_id),
             # names, types and descriptions only, to choose backends in the agent form; never hosts, users or key paths
             "terminal_backends": [
-                {"name": name, "type": backend.type, "description": backend.description}
+                {
+                    "name": name, "type": backend.type, "description": backend.description,
+                    "kind": backend.backend_kind,  # sandbox | machine | local; the level a backend needs, never host or user
+                    "min_level": backend_min_level(backend).label,
+                }
                 for name, backend in sorted(user.terminal_backends.items())
             ],
         }
@@ -454,6 +477,11 @@ class ChatService:
         """Defaults and bounds of the agent form fields, generated from the configuration models."""
         self._user(user_id)
         return agent_defaults()
+
+    def levels(self, user_id: str) -> dict:
+        """The permission levels as the agent form needs them: names, descriptions, the minimum level of every group and
+        backend class (built from the code that enforces them) and this user's `max_level`."""
+        return {**levels_catalog(), "max_level": self._user(user_id).max_level.label}
 
     def list_tool_groups(self, user_id: str) -> list[dict]:
         """Return the tool-group catalog; `default` marks the groups an agent without `tool_groups` uses."""
@@ -1537,6 +1565,70 @@ class ChatService:
         removed = self._agents.clear_approval_rules(user_id, agent_id)
         self._audit_rules(user_id, agent_id, "remove", removed, actor=actor, via="reset")
         return self.list_approval_rules(user_id, agent_id)
+
+    def effective_approval_rules(self, user_id: str, agent_id: str) -> dict:
+        """The three layers of approval rules that apply to the agent (read only) and its per-backend legacy shorthand."""
+        from src.config.settings import APPROVAL_RULES
+
+        user = self._owned_agent(user_id, agent_id)
+        config = self._agent_config(user_id, agent_id)
+
+        def layer(name: str, rules) -> dict:
+            entries = list(rules.rules) if rules is not None else []
+            return {
+                "name": name, "default": rules.default if rules is not None else None,
+                "rules": [
+                    {"index": index, "learned": rule.reason == LEARNED_REASON, "rule": rule.model_dump(mode="json", exclude_none=True)}
+                    for index, rule in enumerate(entries)
+                ],
+            }
+
+        layers = [layer("installation", APPROVAL_RULES), layer("user", user.approval_rules), layer("agent", config.approval_rules)]
+        terminal = config.terminal
+        shorthand = {name: terminal.shorthand(name) for name in terminal.backends} if terminal is not None else {}
+        default = next((item["default"] for item in reversed(layers) if item["default"]), "ask")
+        return {"layers": layers, "shorthand": shorthand, "default": default}
+
+    # ------------------------------------------------------------------ user administration (administrators only)
+
+    def _require_administrator(self, user_id: str) -> None:
+        if self._user(user_id).max_level != Level.ADMIN:
+            raise NotAdministrator("administrator access is required")
+
+    def user_overview(self) -> list[dict]:
+        """Every user with their maximum level and the level of each agent (what the admin screen and the CLI list)."""
+        rows = []
+        for user_id in sorted(path.parent.name for path in CONFIG_DIR.glob("*/user.yaml") if _ID_RE.match(path.parent.name)):
+            try:
+                user = load_user(user_id)
+                agents = self._agents.agent_levels(user_id, user)
+            except Exception as exc:  # one broken user file must not hide the others
+                rows.append({"id": user_id, "error": describe_config_error(exc)})
+                continue
+            highest = max((parse_level(agent["level"]) for agent in agents), default=Level.MINIMAL)
+            rows.append({
+                "id": user_id, "name": user.name, "max_level": user.max_level.label, "agent_count": len(user.agents),
+                "agents": agents, "min_max_level": highest.label,  # no lower ceiling is possible than the highest agent
+            })
+        return rows
+
+    def list_users(self, admin_id: str) -> list[dict]:
+        self._require_administrator(admin_id)
+        return [{**row, "self": row["id"] == admin_id} for row in self.user_overview()]
+
+    def set_user_max_level(self, admin_id: str, user_id: str, level: Level) -> dict:
+        """An administrator sets another user's `max_level`; refused (with the agents in the way) when it would put
+        one of that user's agents above the new ceiling. Effective on the user's next request."""
+        self._require_administrator(admin_id)
+        if user_id == admin_id:
+            raise OwnMaxLevel("You cannot change your own maximum level; ask another administrator.")
+        self._check_id("user", user_id, UnknownManagedUser)
+        try:
+            old = self._agents.set_max_level(user_id, level)
+        except FileNotFoundError as exc:
+            raise UnknownManagedUser("unknown user: {user_id}", user_id=user_id) from exc
+        logger.info("administrator %s changed the max_level of user %s: %s -> %s", admin_id, user_id, old.label, level.label)
+        return next(row for row in self.list_users(admin_id) if row["id"] == user_id)
 
     def learn_approval_rules(self, user_id: str, agent_id: str, rules: list[ApprovalRule], *, chat_id: str = "") -> list[ApprovalRule]:
         """Save narrow allow rules from an approval card to the agent (validated like a form edit, audited).

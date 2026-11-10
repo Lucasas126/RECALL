@@ -124,7 +124,7 @@
         <p id="agent-status" class="model-note" role="status"></p>
         <p id="agents-empty" class="model-note">Select an agent to edit it, or create a new one.</p>
         <div id="agent-editor" class="agent-form" hidden>
-          <h3 id="agent-form-title">Edit agent</h3>
+          <h3><span id="agent-form-title">Edit agent</span> <span id="agent-form-level" class="level-badge" hidden></span></h3>
           <nav class="tabs agent-tabs" aria-label="Agent configuration">
             <button id="agent-tab-basic" type="button" aria-pressed="true">Basic</button>
             <button id="agent-tab-tools" type="button" aria-pressed="false">Tools</button>
@@ -152,6 +152,17 @@
                 <textarea id="agent-prompt" rows="10" maxlength="15000"></textarea>
                 <span id="agent-prompt-hint" class="model-note">Saved as the agent's SOUL.md. Leave it empty to start with the default SOUL.md; edit it later in the Soul &amp; memory tab.</span>
               </label>
+            </fieldset>
+            <fieldset id="agent-level-section" class="agent-section" hidden>
+              <legend id="agent-level-legend">Permission level</legend>
+              <label>
+                <span id="agent-level-label">Level</span>
+                <select id="agent-level"></select>
+              </label>
+              <p id="agent-level-description" class="model-note"></p>
+              <p id="agent-level-required" class="model-note" role="status"></p>
+              <p id="agent-level-message" class="error" role="alert"></p>
+              <p id="agent-level-hint" class="model-note">The level is a ceiling over what the agent may use: tools, MCP, terminal and delegation. Choose the lowest level that does the job. Only an administrator changes your maximum level.</p>
             </fieldset>
             <fieldset class="agent-section">
               <legend id="agent-model-legend">Model and reasoning</legend>
@@ -285,6 +296,28 @@
                 <p id="agent-approval-rules-empty" class="model-note">No learned approvals.</p>
                 <button id="agent-approval-rules-reset" type="button">Reset to defaults</button>
                 <p id="agent-approval-rules-error" class="error" role="alert"></p>
+              </div>
+              <div id="agent-rules" class="approval-rules">
+                <span id="agent-rules-label">Approval rules</span>
+                <p id="agent-rules-hint" class="model-note">Rules of this agent for commands and file operations. The strictest verdict wins: deny beats ask, ask beats allow. Hardline commands and protected paths are always refused.</p>
+                <label>
+                  <span id="agent-rules-default-label">When no rule matches</span>
+                  <select id="agent-rules-default">
+                    <option value="" id="agent-rules-default-inherit">Follow the user and installation defaults</option>
+                    <option value="ask" id="agent-rules-default-ask">Ask</option>
+                    <option value="deny" id="agent-rules-default-deny">Deny</option>
+                    <option value="allow" id="agent-rules-default-allow">Allow</option>
+                  </select>
+                </label>
+                <ul id="agent-rules-list" class="approval-rules-list"></ul>
+                <p id="agent-rules-empty" class="model-note">This agent has no rules of its own.</p>
+                <datalist id="agent-rules-backends"></datalist>
+                <button id="agent-rules-add" type="button">Add rule</button>
+                <p id="agent-rules-error" class="error" role="alert"></p>
+                <details id="agent-rules-effective" hidden>
+                  <summary id="agent-rules-effective-summary">Effective rules (read only)</summary>
+                  <div id="agent-rules-effective-body" class="approval-rules"></div>
+                </details>
               </div>
               <p id="agent-terminal-error" class="error" role="alert"></p>
             </fieldset>
@@ -568,6 +601,7 @@
         <button id="settings-tab-chats" type="button" data-section="chats" aria-pressed="false"><span id="settings-tab-chats-text" class="settings-tab-text">Chats &amp; memory</span><span class="settings-dot" hidden></span></button>
         <button id="settings-tab-telegram" type="button" data-section="telegram" aria-pressed="false"><span id="settings-tab-telegram-text" class="settings-tab-text">Telegram</span><span class="settings-dot" hidden></span></button>
         <button id="settings-tab-connections" type="button" data-section="connections" aria-pressed="false"><span id="settings-tab-connections-text" class="settings-tab-text">Connections</span></button>
+        <button id="settings-tab-users" type="button" data-section="users" aria-pressed="false" hidden><span id="settings-tab-users-text" class="settings-tab-text">Users</span></button>
       </nav>
       <div class="settings-body">
         <form id="settings-form" novalidate>
@@ -723,6 +757,13 @@
           <p id="connections-browser-note" class="model-note">Sign-in opens in a browser on the computer running RECALL.</p>
           <ul id="connection-list"></ul>
           <p id="connections-error" class="error" role="alert"></p>
+        </section>
+        <section id="users-admin" class="connections settings-section" aria-labelledby="settings-tab-users" hidden>
+          <h3 id="users-title">Users</h3>
+          <p id="users-note" class="model-note">The maximum level is the highest permission level a user may give their agents. Only administrators change it, never their own. A level cannot go below the level of one of the user's agents.</p>
+          <ul id="users-list" class="users-list"></ul>
+          <p id="users-status" class="model-note" role="status"></p>
+          <p id="users-error" class="error" role="alert"></p>
         </section>
       </div>
     </div>

@@ -241,7 +241,20 @@ defaults** for all of them), and with `python -m src.admin agent rules --user U 
 - **Agent form**: the **Terminal** block appears in the Tools tab once the terminal group is enabled. It lists your
   backends (name, type and description only, never host or key) each with an **Allow** checkbox that reveals its working
   directory and approvals mode (`off` is shown as a warning), a **Default backend** select limited to the allowed ones, the
-  command timeout, and the **Learned approvals** (the agent's approval rules, with **Remove** and **Reset to defaults**). With no backends defined it explains how to add one.
+  command timeout, the **Learned approvals** (the rules written by *Always for this agent*, with **Remove** and **Reset to defaults**, which
+  removes only those), and the **Approval rules** editor. With no backends defined it explains how to add one. Each backend also shows,
+  read only, its `kind` (`sandbox`, `machine` or `local`) and the level it needs; backends are defined in `user.yaml` only, never in the web UI.
+- **Approval rules editor** (Terminal block, Tools tab): the agent's own hand-written `approval_rules`. **When no rule matches** is the
+  layer `default` (empty follows the user and installation defaults). **Add rule** appends a row with the fields of a rule: verdict
+  (allow, ask, deny), what it applies to (any action, terminal commands, read files, write files), command, path, backend (name or
+  pattern), kind of backend, danger (any, only dangerous, only not dangerous) and **Exact match**; each row has **Remove**, and keys the
+  editor does not show (`id`, `reason`) survive an edit. Nothing is saved until **Save agent**, which sends the whole list through
+  `PUT /api/agents/<id>`: the rules the model refuses (a `command` with a file tool, `exact` without a command or path, unknown keys) and the
+  [blanket-allow guardrail](#approval-rules) (`approval_rule_not_allowed`: an allow that is not narrowed by a command, path or danger
+  condition on a machine or `local` backend, or a `default: allow` that really is the default, below `admin`) show their message under the
+  editor, and nothing is written. The learned rules are kept as they are when the list is saved. A saved agent also shows **Effective rules (read
+  only)**: the installation, user and agent layers with their defaults, the per-backend `approvals` shorthand and the default that applies
+  (`GET /api/agents/<id>/approval-rules/effective`, owner only).
 
 ### hardline: always refused, in every mode
 

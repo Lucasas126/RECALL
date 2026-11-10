@@ -32,7 +32,7 @@ const state = {
   settingsModelDraft: null,
   chatInfo: null,  // summary of the open chat (disposable flag and expiry)
   preferences: null, preferencesRequest: 0, settingsBusy: false, settingsOriginal: null,
-  translations: null, toolGroupCatalog: [],
+  translations: null, toolGroupCatalog: [], levels: null, adminUsers: [],
   mcpServers: [], mcpTools: new Map(), connectionsPoll: null,
   agentConfigs: [], agentForm: { originalId: null, busy: false },
   dream: null,
@@ -508,6 +508,16 @@ function translateInterface() {
     ["agent-terminal-legend", "Terminal"], ["agent-terminal-default-label", "Default backend"],
     ["agent-terminal-no-backends", "No terminal backends are configured. Add one under terminal_backends in your user configuration; see docs/user-guide/terminal.md."],
     ["agent-terminal-timeout-label", "Command timeout (seconds)"],
+    ["agent-level-legend", "Permission level"], ["agent-level-label", "Level"],
+    ["agent-level-hint", "The level is a ceiling over what the agent may use: tools, MCP, terminal and delegation. Choose the lowest level that does the job. Only an administrator changes your maximum level."],
+    ["agent-rules-label", "Approval rules"],
+    ["agent-rules-hint", "Rules of this agent for commands and file operations. The strictest verdict wins: deny beats ask, ask beats allow. Hardline commands and protected paths are always refused."],
+    ["agent-rules-default-label", "When no rule matches"], ["agent-rules-default-inherit", "Follow the user and installation defaults"],
+    ["agent-rules-default-ask", "Ask"], ["agent-rules-default-deny", "Deny"], ["agent-rules-default-allow", "Allow"],
+    ["agent-rules-empty", "This agent has no rules of its own."], ["agent-rules-add", "Add rule"],
+    ["agent-rules-effective-summary", "Effective rules (read only)"],
+    ["settings-tab-users-text", "Users"], ["users-title", "Users"],
+    ["users-note", "The maximum level is the highest permission level a user may give their agents. Only administrators change it, never their own. A level cannot go below the level of one of the user's agents."],
     ["agent-approval-rules-label", "Learned approvals"], ["agent-approval-rules-hint", "Saved when you choose Always for this agent on an approval card. Remove one to be asked again, or reset them all."],
     ["agent-approval-rules-empty", "No learned approvals."], ["agent-approval-rules-reset", "Reset to defaults"],
     ["agent-effort-label", "Reasoning effort"], ["agent-effort-default", "Default"],
@@ -974,11 +984,13 @@ function showTab(tab) {
 async function loadAgentConfigs() {
   const session = state.session;
   try {
-    const [agents, toolGroups, mcpServers, defaults] = await Promise.all([
+    const [agents, toolGroups, mcpServers, defaults, levels] = await Promise.all([
       api("/api/agents"), api("/api/tool-groups"), api("/api/mcp"),
       api("/api/agents/defaults").catch(() => null), // only the default hints depend on it
+      api("/api/levels").catch(() => null), // without it the form simply has no level selector
     ]);
     if (session !== state.session) return;
+    state.levels = levels;
     state.agentConfigs = agents;
     state.toolGroupCatalog = toolGroups;
     state.agentDefaults = defaults;
@@ -1001,6 +1013,7 @@ function renderAgentList() {
       const name = document.createElement("span");
       name.className = "title";
       name.textContent = agent.name;
+      if (agent.level) name.append(" ", levelBadge(agent.level));
       button.append(name);
       if (agent.description) {
         const description = document.createElement("span");
@@ -1058,6 +1071,8 @@ function setAgentFormOpen(open) {
 function fillAgentForm(agent) {
   const config = agent.chat_config;
   $("agent-form-title").textContent = tr(state.agentForm.originalId ? "Edit agent" : "New agent");
+  state.agentForm.levelTouched = false;
+  state.agentForm.initialLevel = state.agentForm.originalId ? agent.level ?? null : null;
   $("agent-name").value = agent.name;
   $("agent-description").value = agent.description ?? "";
   // only a new agent's form has the personality field: it becomes SOUL.md right after the agent is created;
@@ -1089,7 +1104,9 @@ function fillAgentForm(agent) {
       label.title = description;
       const text = document.createElement("span");
       text.textContent = translatedText(group.name);
-      label.append(checkbox, text);
+      const badge = Object.assign(document.createElement("span"), { className: "level-badge", hidden: true });
+      badge.dataset.group = group.id;
+      label.append(checkbox, text, badge);
       if (group.id === "terminal") checkbox.addEventListener("change", updateTerminalBlock);
       if (group.id === "delegate") checkbox.addEventListener("change", updateDelegationBlock);
       return label;
@@ -1111,9 +1128,227 @@ function fillAgentForm(agent) {
   renderAgentMcp(config.mcp ?? {});
   renderFolders(agent.folders ?? []);
   resetIndexStatus();
+  initAgentLevel();
   showAgentPanel("basic");
   refreshRows($("agent-form"));
 }
+
+// ---- permission level (agent form): the selector, the level the choices need, badges
+function levelBadge(name, extraClass = "") {
+  const badge = Object.assign(document.createElement("span"), {
+    className: `level-badge ${extraClass}`.trim(), textContent: levelTitle(state.levels, name),
+  });
+  const description = levelDescriptionText(state.levels, name, translatedText);
+  if (description) badge.title = description;
+  return badge;
+}
+
+// The form's choices as the level rule sees them.
+function agentLevelChoices() {
+  const mine = state.user?.terminal_backends ?? [];
+  return {
+    toolGroups: [...document.querySelectorAll('input[name="agent-tool-group"]:checked')].map((input) => input.value),
+    mcp: Object.keys(agentMcpBody()).length > 0,
+    backends: readTerminalBackendFields().filter((field) => field.allowed).map((field) => ({
+      name: field.name, min_level: mine.find((backend) => backend.name === field.name)?.min_level,
+    })),
+    delegationTargets: delegationGroupChecked() && $("agent-delegation-enabled").checked
+      && readDelegationTargetFields().some((target) => target.allowed),
+  };
+}
+
+function toolGroupName(id) {
+  const group = state.toolGroupCatalog.find((item) => item.id === id);
+  return group ? translatedText(group.name) : id;
+}
+
+// Builds the selector for the open agent: its level (or, for a new agent, the one its choices need) is selected.
+function initAgentLevel() {
+  const catalog = state.levels;
+  $("agent-level-section").hidden = !catalog;
+  if (!catalog) return;
+  const max = state.user?.max_level ?? catalog.levels[catalog.levels.length - 1].name;
+  $("agent-level").replaceChildren(...levelOptions(catalog, max).map((option) => Object.assign(
+    document.createElement("option"), { value: option.value, textContent: option.label, disabled: option.disabled },
+  )));
+  if (!state.agentForm.initialLevel) state.agentForm.initialLevel = requiredLevelFor(catalog, agentLevelChoices()).level;
+  $("agent-level").value = state.agentForm.initialLevel;
+  updateLevelUi();
+}
+
+// Follows the form: the level the choices need, the message, the header badge and the badges of the tool groups.
+function updateLevelUi() {
+  const catalog = state.levels;
+  if (!catalog || $("agent-level-section").hidden) return;
+  const select = $("agent-level");
+  const max = state.user?.max_level ?? catalog.levels[catalog.levels.length - 1].name;
+  const choices = agentLevelChoices();
+  const required = requiredLevelFor(catalog, choices);
+  if (!state.agentForm.levelTouched) {
+    // an agent the user did not set a level on follows what its choices need (never past their maximum)
+    const target = Math.max(levelNumber(catalog, state.agentForm.initialLevel), Math.min(required.number, levelNumber(catalog, max)));
+    select.value = catalog.levels[target].name;
+  }
+  const advice = levelAdvice(catalog, select.value, choices, max);
+  $("agent-level-description").textContent = levelDescriptionText(catalog, select.value, translatedText);
+  $("agent-level-required").textContent = tr("Required by the current choices: {level} ({service})", {
+    level: levelTitle(catalog, advice.required.level), service: levelReasonText(advice.required.reason, toolGroupName),
+  });
+  $("agent-level-message").textContent = levelMessage(catalog, advice, select.value, max, toolGroupName);
+  $("agent-level").classList.toggle("warning", advice.problem !== null);
+  const badge = $("agent-form-level");
+  badge.hidden = !state.agentForm.originalId;
+  badge.textContent = levelTitle(catalog, state.agentForm.initialLevel ?? select.value);
+  const badges = toolGroupBadges(catalog, select.value, max);
+  for (const node of document.querySelectorAll("#agent-tool-groups .level-badge")) {
+    const entry = badges[node.dataset.group];
+    node.hidden = !entry;
+    if (!entry) continue;
+    const needed = levelTitle(catalog, entry.level);
+    node.textContent = needed;
+    node.classList.toggle("over-max", entry.overMax);
+    node.title = entry.overMax
+      ? tr("Needs the level {needed}, above your maximum level {max}. Ask an administrator to raise your maximum.", { needed, max: levelTitle(catalog, max) })
+      : tr("Needs the level {needed} or higher; this agent is {level}. Raise the level to use it.", { needed, level: levelTitle(catalog, select.value) });
+  }
+}
+
+// ---- approval rule editor (Terminal block): the agent's own hand-written rules, one editable row each
+const RULE_VERDICTS = ["allow", "ask", "deny"];
+const RULE_TOOLS = [["any", "Any action"], ["terminal", "Terminal commands"], ["file_read", "Read files"], ["file_write", "Write files"]];
+const RULE_KINDS = [["", "Any kind"], ["sandbox", "sandbox"], ["machine", "machine"], ["local", "local"]];
+const RULE_DANGEROUS = [["", "Dangerous or not"], ["yes", "Only dangerous actions"], ["no", "Only actions that are not dangerous"]];
+
+function buildRuleRow(rule) {
+  const fields = approvalRuleFields(rule);
+  const item = document.createElement("li");
+  item.className = "agent-rule";
+  item.dataset.base = JSON.stringify(rule ?? {});
+  const control = (tag, name, label, value) => {
+    const element = document.createElement(tag);
+    element.className = `rule-${name}`;
+    element.setAttribute("aria-label", label);
+    if (tag === "input") Object.assign(element, { value, placeholder: label, autocomplete: "off", maxLength: 1024 });
+    return element;
+  };
+  const select = (name, label, options, value) => {
+    const element = control("select", name, label);
+    for (const [optionValue, text] of options) element.append(Object.assign(document.createElement("option"), { value: optionValue, textContent: text }));
+    element.value = value;
+    return element;
+  };
+  const field = (caption, element) => {
+    const label = document.createElement("label");
+    label.append(Object.assign(document.createElement("span"), { className: "model-note", textContent: caption }), element);
+    return label;
+  };
+  const verdict = select("verdict", tr("Verdict"), RULE_VERDICTS.map((v) => [v, tr(v === "allow" ? "Allow" : v === "ask" ? "Ask" : "Deny")]), fields.verdict);
+  const tool = select("tool", tr("Applies to"), RULE_TOOLS.map(([v, text]) => [v, tr(text)]), fields.tool);
+  const command = control("input", "command", tr("Prefix or pattern, e.g. git *"), fields.command);
+  const path = control("input", "path", tr("Pattern, e.g. /etc/*"), fields.path);
+  const backend = control("input", "backend", tr("Name or pattern"), fields.backend);
+  backend.setAttribute("list", "agent-rules-backends");
+  const kind = select("kind", tr("Kind of backend"), RULE_KINDS.map(([v, text]) => [v, v ? text : tr(text)]), fields.backendKind);
+  const dangerous = select("dangerous", tr("Danger"), RULE_DANGEROUS.map(([v, text]) => [v, tr(text)]), fields.dangerous);
+  const exact = Object.assign(document.createElement("input"), { type: "checkbox", className: "rule-exact", checked: fields.exact });
+  const exactLabel = document.createElement("label");
+  exactLabel.className = "model-filter";
+  exactLabel.append(exact, Object.assign(document.createElement("span"), { textContent: tr("Exact match") }));
+  exactLabel.title = tr("The command or path must equal the text: no word prefix, no pattern.");
+  const remove = Object.assign(document.createElement("button"), { type: "button", textContent: tr("Remove") });
+  remove.addEventListener("click", () => {
+    item.remove();
+    ruleEditorChanged();
+  });
+  item.append(
+    field(tr("Verdict"), verdict), field(tr("Applies to"), tool), field(tr("Command"), command), field(tr("Path"), path),
+    field(tr("Backend"), backend), field(tr("Kind of backend"), kind), field(tr("Danger"), dangerous), exactLabel, remove,
+  );
+  return item;
+}
+
+function readRuleRow(item) {
+  const value = (name) => item.querySelector(`.rule-${name}`).value;
+  return buildApprovalRule(JSON.parse(item.dataset.base), {
+    verdict: value("verdict"), tool: value("tool"), command: value("command"), path: value("path"), backend: value("backend"),
+    backendKind: value("kind"), dangerous: value("dangerous"), exact: item.querySelector(".rule-exact").checked,
+  });
+}
+
+function readRuleRows() {
+  return [...document.querySelectorAll("#agent-rules-list .agent-rule")].map(readRuleRow);
+}
+
+function ruleEditorChanged() {
+  state.agentForm.rulesDirty = true;
+  $("agent-rules-empty").hidden = $("agent-rules-list").children.length > 0;
+}
+
+function renderRuleEditor(approvalRules) {
+  state.agentForm.rulesDirty = false;
+  const { manual, learned } = splitApprovalRules(approvalRules?.rules);
+  state.agentForm.learned = learned;
+  $("agent-rules-default").value = approvalRules?.default ?? "";
+  $("agent-rules-list").replaceChildren(...manual.map(buildRuleRow));
+  $("agent-rules-empty").hidden = manual.length > 0;
+  $("agent-rules-error").textContent = "";
+  $("agent-rules-backends").replaceChildren(...(state.user?.terminal_backends ?? []).map((backend) => Object.assign(
+    document.createElement("option"), { value: backend.name },
+  )));
+}
+
+// The `approval_rules` part of the save body: only when the editor was touched (else the stored rules are kept).
+function ruleEditorPayload() {
+  if (!state.agentForm.rulesDirty || !terminalGroupChecked()) return {};
+  return { approval_rules: approvalRulesBody($("agent-rules-default").value, readRuleRows(), state.agentForm.learned ?? []) };
+}
+
+$("agent-rules-add").addEventListener("click", () => {
+  const row = buildRuleRow(null);
+  $("agent-rules-list").append(row);
+  ruleEditorChanged();
+  row.querySelector(".rule-command").focus();
+});
+$("agent-rules").addEventListener("input", () => { state.agentForm.rulesDirty = true; });
+$("agent-rules").addEventListener("change", () => { state.agentForm.rulesDirty = true; });
+
+// Read-only: what applies to the saved agent from the three layers.
+async function loadEffectiveRules() {
+  const agentId = state.agentForm.originalId;
+  const details = $("agent-rules-effective");
+  details.hidden = !agentId;
+  if (!agentId || !details.open) return;
+  const body = $("agent-rules-effective-body");
+  try {
+    const data = await api(`/api/agents/${encodeURIComponent(agentId)}/approval-rules/effective`);
+    if (agentId !== state.agentForm.originalId) return;
+    const names = { installation: tr("Installation (settings.yaml)"), user: tr("You (all your agents)"), agent: tr("This agent") };
+    const nodes = [];
+    for (const layer of data.layers) {
+      const heading = `${names[layer.name] ?? layer.name}${layer.default ? ` — ${tr("default")}: ${layer.default}` : ""}`;
+      const list = document.createElement("ul");
+      list.className = "approval-rules-list";
+      list.append(...layer.rules.map((entry) => Object.assign(document.createElement("li"), {
+        className: "approval-rule-text", textContent: approvalRuleText(entry.rule),
+      })));
+      nodes.push(Object.assign(document.createElement("strong"), { textContent: heading }));
+      nodes.push(layer.rules.length ? list : Object.assign(document.createElement("p"), { className: "model-note", textContent: tr("No rules.") }));
+    }
+    const shorthand = Object.entries(data.shorthand).map(([name, mode]) => `${name}: ${mode ?? tr("not set")}`).join(", ");
+    if (shorthand) nodes.push(Object.assign(document.createElement("p"), { className: "model-note", textContent: `${tr("Approvals per backend")}: ${shorthand}` }));
+    nodes.push(Object.assign(document.createElement("p"), { className: "model-note", textContent: `${tr("When no rule matches")}: ${data.default}` }));
+    body.replaceChildren(...nodes);
+  } catch (err) {
+    if (agentId === state.agentForm.originalId) body.replaceChildren(Object.assign(document.createElement("p"), { className: "error", textContent: err.message }));
+  }
+}
+$("agent-rules-effective").addEventListener("toggle", loadEffectiveRules);
+
+// any change in the form can change the level its choices need
+$("agent-form").addEventListener("change", (event) => {
+  if (event.target.id === "agent-level") state.agentForm.levelTouched = true;
+  if (!event.target.closest("#agent-rules")) updateLevelUi();
+});
 
 // The Terminal block follows the `terminal` tool group: shown (and validated) only while the group is ticked.
 function terminalGroupChecked() {
@@ -1136,8 +1371,11 @@ function approvalRuleText(rule) {
 
 let approvalRulesRequest = 0;
 
-function drawApprovalRules(rules) {
+function drawApprovalRules(entries) {
   const list = $("agent-approval-rules-list");
+  const rules = entries.filter((entry) => entry.learned); // the others are in the rule editor
+  state.agentForm.learnedEntries = rules;
+  state.agentForm.learned = rules.map((entry) => entry.rule);
   list.replaceChildren(...rules.map((entry) => {
     const item = document.createElement("li");
     const text = Object.assign(document.createElement("span"), { className: "approval-rule-text", textContent: approvalRuleText(entry.rule) });
@@ -1166,8 +1404,24 @@ async function changeApprovalRules(method, suffix = "") {
   }
 }
 
+// Removes the learned approvals only (highest position first, so the others keep theirs); the hand-written rules stay.
+async function resetLearnedApprovals() {
+  const agentId = state.agentForm.originalId;
+  const indexes = (state.agentForm.learnedEntries ?? []).map((entry) => entry.index).sort((a, b) => b - a);
+  if (!agentId || !indexes.length) return;
+  $("agent-approval-rules-error").textContent = "";
+  try {
+    let rules = null;
+    for (const index of indexes) rules = await api(`/api/agents/${encodeURIComponent(agentId)}/approval-rules/${index}`, { method: "DELETE" });
+    if (agentId === state.agentForm.originalId) drawApprovalRules(rules);
+  } catch (err) {
+    $("agent-approval-rules-error").textContent = err.message;
+    changeApprovalRules();
+  }
+}
+
 $("agent-approval-rules-reset").addEventListener("click", () => {
-  if (confirm(tr("Remove every learned approval of this agent?"))) changeApprovalRules("DELETE");
+  if (confirm(tr("Remove every learned approval of this agent?"))) resetLearnedApprovals();
 });
 
 function renderTerminalBlock(agent) {
@@ -1179,7 +1433,9 @@ function renderTerminalBlock(agent) {
   $("agent-terminal-error").textContent = "";
   refreshTerminalDefault(saved?.default_backend);
   updateTerminalBlock();
+  renderRuleEditor(agent.approval_rules);
   changeApprovalRules();
+  loadEffectiveRules();
 }
 
 // The Delegation block follows the `delegate` tool group, like the Terminal block follows `terminal`.
@@ -1289,6 +1545,10 @@ function buildTerminalBackendRow(row) {
   head.append(allow, make("span", null, `${tr("Allow")} ${row.label}`));
   box.append(head);
   if (row.description) box.append(make("p", "model-note", row.description));
+  const info = (state.user?.terminal_backends ?? []).find((backend) => backend.name === row.name);
+  if (info?.kind) {  // read only: the kind and the level come from the user's configuration (user.yaml)
+    box.append(make("p", "model-note", tr("Kind: {kind}. Needs the level {level}.", { kind: info.kind, level: levelTitle(state.levels, info.min_level) })));
+  }
   const details = make("div", "terminal-backend-details");
   const workdir = document.createElement("input");
   workdir.className = "terminal-workdir";
@@ -1655,6 +1915,8 @@ function agentFormBody() {
     // edited in the Dream tab; sent back unchanged so saving the agent does not reset it
     ...(saved ? { dream: saved.dream } : {}),
     folders: agentFoldersBody(),
+    ...levelPayload($("agent-level").value, state.agentForm.initialLevel, state.agentForm.levelTouched),
+    ...ruleEditorPayload(),
     terminal: buildTerminalConfig(saved?.terminal, terminalGroupChecked(), {
       backends: readTerminalBackendFields(), defaultBackend: $("agent-terminal-default").value,
       timeout: numberValue("agent-terminal-timeout"),
@@ -1694,6 +1956,7 @@ async function refreshAgents(previousId, currentId) {
   const me = await api("/api/me");
   state.user.agents = me.agents;
   state.user.terminal_backends = me.terminal_backends ?? [];
+  state.user.max_level = me.max_level ?? state.user.max_level;
   renderAgentOptions();
   renderAgentsEmpty();
   await loadAgentConfigs();
@@ -1743,6 +2006,7 @@ $("agent-form").addEventListener("submit", async (event) => {
   $("agent-error").textContent = "";
   $("agent-terminal-error").textContent = "";
   $("agent-delegation-error").textContent = "";
+  $("agent-rules-error").textContent = "";
   $("agent-status").textContent = "";
   try {
     const saved = await api(previousId ? `/api/agents/${previousId}` : "/api/agents", {
@@ -1762,7 +2026,14 @@ $("agent-form").addEventListener("submit", async (event) => {
     $("agent-status").textContent = tr("Agent saved.");
   } catch (err) {
     if (session === state.session) {
-      if (terminalGroupChecked() && isTerminalError(err.message)) {
+      if (isLevelErrorCode(err.code)) {
+        $("agent-level-message").textContent = err.message;
+        $("agent-error").textContent = err.message;
+        showAgentPanel("basic");
+      } else if (terminalGroupChecked() && isRuleError(err)) {
+        $("agent-rules-error").textContent = err.message;
+        showAgentPanel("tools");
+      } else if (terminalGroupChecked() && isTerminalError(err.message)) {
         $("agent-terminal-error").textContent = err.message;
         showAgentPanel("tools");
       } else if (delegationGroupChecked() && isDelegationError(err.message)) {
@@ -1936,13 +2207,22 @@ function updateSettingsUi() {
 }
 
 function showSettingsSection(name) {
-  const view = settingsSectionView(name);
+  const users = name === "users" && isAdministrator(state.user);  // the Users section is outside the settings form, like Connections
+  const view = settingsSectionView(users ? "connections" : name);
   for (const tab of $("settings-nav").querySelectorAll("button")) {
-    tab.setAttribute("aria-pressed", String(view[tab.dataset.section].pressed));
+    tab.setAttribute("aria-pressed", String(users ? tab.dataset.section === "users" : view[tab.dataset.section]?.pressed === true));
   }
   for (const section of Object.keys(view)) {
     if (section === "connections") continue;
     $(`settings-section-${section}`).hidden = view[section].hidden;
+  }
+  $("users-admin").hidden = !users;
+  if (users) {
+    $("settings-form").hidden = true;
+    $("connections").hidden = true;
+    stopConnectionsPoll();
+    loadUsersAdmin();
+    return;
   }
   $("settings-form").hidden = !view.connections.hidden;
   $("connections").hidden = view.connections.hidden;
@@ -1988,6 +2268,7 @@ $("settings-open").addEventListener("click", async () => {
   state.settingsModelDraft = null;
   clearTimeout(settingsSavedTimer);
   $("settings-saved").textContent = "";
+  $("settings-tab-users").hidden = !isAdministrator(state.user);
   showSettingsSection("general");
   renderSettingsModels();
   $("settings-error").textContent = "";
@@ -2021,6 +2302,97 @@ function requestSettingsClose() {
 $("settings-close").addEventListener("click", requestSettingsClose);
 $("settings-dialog").addEventListener("cancel", (event) => { event.preventDefault(); requestSettingsClose(); });
 $("settings-dialog").addEventListener("close", stopConnectionsPoll);
+
+// ------------------------------------------------------------------ users (administrators only): maximum levels
+
+// Only a user whose maximum level is admin sees the section; the server checks it again on every call.
+function isAdministrator(user) {
+  return user?.max_level === "admin";
+}
+
+async function loadUsersAdmin() {
+  const session = state.session;
+  $("users-error").textContent = "";
+  try {
+    const [users, levels] = await Promise.all([api("/api/admin/users"), state.levels ? state.levels : api("/api/levels").catch(() => null)]);
+    if (session !== state.session) return;
+    state.levels = levels;
+    state.adminUsers = users;
+    renderUsersAdmin();
+  } catch (err) {
+    if (session === state.session) $("users-error").textContent = err.message;
+  }
+}
+
+function renderUsersAdmin() {
+  $("users-list").replaceChildren(...state.adminUsers.map(userAdminItem));
+}
+
+function userAdminItem(user) {
+  const item = document.createElement("li");
+  item.className = "connection user-admin";
+  const heading = document.createElement("div");
+  heading.append(Object.assign(document.createElement("strong"), { textContent: user.name ?? user.id }), ` (${user.id}) `);
+  if (user.error) {
+    item.append(heading, Object.assign(document.createElement("p"), { className: "error", textContent: user.error }));
+    return item;
+  }
+  heading.append(levelBadge(user.max_level));
+  heading.append(` · ${tr("Agents: {count}", { count: user.agent_count })}`);
+  item.append(heading);
+  const agents = user.agents.map((agent) => `${agent.name} (${levelTitle(state.levels, agent.level)})`).join(", ");
+  item.append(Object.assign(document.createElement("p"), { className: "model-note", textContent: agents || tr("No agents.") }));
+  const row = document.createElement("div");
+  row.className = "agent-actions";
+  const select = document.createElement("select");
+  select.setAttribute("aria-label", tr("Maximum level of {user}", { user: user.id }));
+  select.append(...(state.levels?.levels ?? []).map((level) => Object.assign(
+    document.createElement("option"), { value: level.name, textContent: `${level.title} (${level.number})` },
+  )));
+  select.value = user.max_level;
+  const apply = Object.assign(document.createElement("button"), { type: "button", textContent: tr("Set maximum level"), disabled: true });
+  const note = Object.assign(document.createElement("p"), { className: "error" });
+  const refresh = () => {
+    const above = agentsAboveCeiling(state.levels, user.agents, select.value);
+    note.textContent = above.length
+      ? tr("These agents would be above the new maximum: {agents}. Lower them first.", {
+        agents: above.map((agent) => `${agent.name} (${levelTitle(state.levels, agent.level)})`).join(", "),
+      })
+      : "";
+    apply.disabled = select.value === user.max_level || above.length > 0;
+  };
+  select.addEventListener("change", refresh);
+  apply.addEventListener("click", () => setUserMaxLevel(user, select.value, apply, note));
+  if (user.self) {
+    select.disabled = true;
+    row.append(select, Object.assign(document.createElement("span"), { className: "model-note", textContent: tr("You cannot change your own maximum level.") }));
+  } else {
+    row.append(select, apply);
+  }
+  item.append(row, note);
+  return item;
+}
+
+async function setUserMaxLevel(user, level, button, note) {
+  const session = state.session;
+  button.disabled = true;
+  note.textContent = "";
+  $("users-status").textContent = "";
+  try {
+    const updated = await api(`/api/admin/users/${encodeURIComponent(user.id)}/max-level`, {
+      method: "PUT", body: JSON.stringify({ max_level: level }),
+    });
+    if (session !== state.session) return;
+    state.adminUsers = state.adminUsers.map((item) => (item.id === updated.id ? updated : item));
+    renderUsersAdmin();
+    $("users-status").textContent = tr("Maximum level of {user} set to {level}.", { user: user.id, level: levelTitle(state.levels, updated.max_level) });
+  } catch (err) {
+    if (session === state.session) {
+      note.textContent = err.message;
+      button.disabled = false;
+    }
+  }
+}
 
 // ------------------------------------------------------------------ providers (model picker)
 
@@ -4684,6 +5056,175 @@ function buildTerminalConfig(saved, enabled, fields) {
     default_backend: terminalDefaultBackend(allowed.map((field) => field.name), fields.defaultBackend),
     timeout_seconds: Number(fields.timeout),
   };
+}
+
+// ------------------------------------------------------------------ permission levels and approval rules (agent form)
+// Pure helpers over the catalog of GET /api/levels (names, descriptions, the minimum level of every group); they mirror
+// required_level_reason() in src/config/levels.py, and the catalog is built from the code that enforces the levels.
+
+const LEARNED_RULE_REASON = "approved always for this agent"; // the `reason` of rules written from an approval card
+
+function levelNumber(catalog, name) {
+  const found = (catalog?.levels ?? []).find((level) => level.name === name);
+  return found ? found.number : -1;
+}
+
+function levelTitle(catalog, name) {
+  const found = (catalog?.levels ?? []).find((level) => level.name === name);
+  return found ? found.title : String(name ?? "");
+}
+
+// The lowest level covering the form's choices and what sets it. `choices`: { toolGroups, mcp, backends: [{name,
+// min_level}] (the terminal backends in use), delegationTargets } where mcp and delegationTargets are booleans.
+function requiredLevelFor(catalog, choices) {
+  let best = { number: 0, level: catalog.levels[0].name, reason: { kind: "none" } };
+  const raise = (name, reason) => {
+    const number = levelNumber(catalog, name);
+    if (number > best.number) best = { number, level: name, reason };
+  };
+  const groups = choices.toolGroups ?? [];
+  for (const group of groups) raise(catalog.groups[group] ?? catalog.levels[0].name, { kind: "group", name: group });
+  if (choices.mcp) raise(catalog.mcp, { kind: "mcp" });
+  if (groups.includes("terminal")) {
+    for (const backend of choices.backends ?? []) {
+      // only the classes above the plain ssh one (local, root) add to the level of the terminal group itself
+      if (levelNumber(catalog, backend.min_level) >= levelNumber(catalog, catalog.services.terminal_root)) {
+        raise(backend.min_level, { kind: "backend", name: backend.name });
+      }
+    }
+  }
+  if (groups.includes("delegate") && choices.delegationTargets) raise(catalog.delegation_targets, { kind: "delegation" });
+  return best;
+}
+
+// How the selected level stands against the choices and the user's maximum: problem is null, "above_max" (the choices
+// need more than the user may give: remove something or ask an administrator), "below_required" (raise the level) or
+// "exceeds_max" (the selected level itself is above the maximum).
+function levelAdvice(catalog, selectedName, choices, maxName) {
+  const required = requiredLevelFor(catalog, choices);
+  const selected = levelNumber(catalog, selectedName);
+  const max = levelNumber(catalog, maxName);
+  let problem = null;
+  if (required.number > max) problem = "above_max";
+  else if (required.number > selected) problem = "below_required";
+  else if (selected > max) problem = "exceeds_max";
+  return { required, problem };
+}
+
+// The select's options: one per level, those above the user's maximum disabled.
+function levelOptions(catalog, maxName) {
+  const max = levelNumber(catalog, maxName);
+  return (catalog?.levels ?? []).map((level) => ({
+    value: level.name, label: `${level.title} (${level.number})`, disabled: level.number > max,
+  }));
+}
+
+// One line for a level, from the texts of its services (translate: the same function for every part).
+function levelDescriptionText(catalog, name, translate) {
+  const found = (catalog?.levels ?? []).find((level) => level.name === name);
+  return found ? found.parts.map(translate).join("; ") : "";
+}
+
+// Badges for the Tools tab: the tool groups that need more than the selected level, and whether the user's maximum
+// also falls short of it. Groups are never hidden.
+function toolGroupBadges(catalog, selectedName, maxName) {
+  const selected = levelNumber(catalog, selectedName);
+  const max = levelNumber(catalog, maxName);
+  const badges = {};
+  for (const [group, level] of Object.entries(catalog?.groups ?? {})) {
+    const number = levelNumber(catalog, level);
+    if (number > selected) badges[group] = { level, overMax: number > max };
+  }
+  return badges;
+}
+
+// What the service that sets the required level is called in a message.
+function levelReasonText(reason, groupName) {
+  switch (reason?.kind) {
+    case "group": return tr("tool group '{name}'", { name: groupName(reason.name) });
+    case "mcp": return tr("MCP servers");
+    case "backend": return tr("terminal backend '{name}'", { name: reason.name });
+    case "delegation": return tr("delegation to other agents");
+    default: return tr("no service");
+  }
+}
+
+// The inline message under the selector ("" when everything fits).
+function levelMessage(catalog, advice, selectedName, maxName, groupName) {
+  const service = levelReasonText(advice.required.reason, groupName);
+  const needed = levelTitle(catalog, advice.required.level);
+  const max = levelTitle(catalog, maxName);
+  switch (advice.problem) {
+    case "above_max":
+      return tr("{service} needs the level {needed}, above your maximum level {max}. Remove {service} or ask an administrator to raise your maximum.", { service, needed, max });
+    case "below_required":
+      return tr("{service} needs the level {needed}, but this agent is {level}. Raise the level to {needed} or remove {service}.", { service, needed, level: levelTitle(catalog, selectedName) });
+    case "exceeds_max":
+      return tr("The level {level} is above your maximum level {max}. Choose {max} or lower, or ask an administrator to raise your maximum.", { level: levelTitle(catalog, selectedName), max });
+    default:
+      return "";
+  }
+}
+
+// The `level` to send: the selected one when the user chose it or the form moved it, else nothing (the stored level, or
+// the one the configuration needs, stays as it is).
+function levelPayload(selectedName, initialName, touched) {
+  return selectedName && (touched || selectedName !== initialName) ? { level: selectedName } : {};
+}
+
+// Server errors about the level (HTTP 400, stable codes) show next to the selector.
+function isLevelErrorCode(code) {
+  return code === "level_exceeds_max" || code === "level_below_required" || code === "level_required_above_max";
+}
+
+// Errors about the approval rules (the model's validation, or the blanket-allow guardrail) show in the rule editor.
+function isRuleError(error) {
+  return error?.code === "approval_rule_not_allowed" || /approval_rules|approval rule/i.test(String(error?.message ?? ""));
+}
+
+// The agent's own rules split into the ones the editor shows (written by hand) and the learned ones (from approval cards).
+function splitApprovalRules(rules) {
+  const learned = (rules ?? []).filter((rule) => rule.reason === LEARNED_RULE_REASON);
+  const manual = (rules ?? []).filter((rule) => rule.reason !== LEARNED_RULE_REASON);
+  return { manual, learned };
+}
+
+// One rule from the editor's fields. `base` is the rule being edited: keys the editor does not show (id, reason) stay.
+function buildApprovalRule(base, fields) {
+  const rule = { ...(base ?? {}), verdict: fields.verdict, tool: fields.tool || "any" };
+  for (const key of ["command", "path", "backend"]) {
+    const value = String(fields[key] ?? "").trim();
+    if (value) rule[key] = value;
+    else delete rule[key];
+  }
+  if (fields.backendKind) rule.backend_kind = fields.backendKind;
+  else delete rule.backend_kind;
+  if (fields.dangerous === "yes") rule.dangerous = true;
+  else if (fields.dangerous === "no") rule.dangerous = false;
+  else delete rule.dangerous;
+  if (fields.exact && (rule.command || rule.path)) rule.exact = true;
+  else delete rule.exact;
+  return rule;
+}
+
+// The editor's values as the fields of one row (the inverse of buildApprovalRule).
+function approvalRuleFields(rule) {
+  return {
+    verdict: rule?.verdict ?? "ask", tool: rule?.tool ?? "any", command: rule?.command ?? "", path: rule?.path ?? "",
+    backend: rule?.backend ?? "", backendKind: rule?.backend_kind ?? "",
+    dangerous: rule?.dangerous === true ? "yes" : rule?.dangerous === false ? "no" : "", exact: Boolean(rule?.exact),
+  };
+}
+
+// The `approval_rules` to save: the editor's rules, then the learned ones (the editor does not show them, saving must not drop them).
+function approvalRulesBody(defaultVerdict, manualRules, learnedRules) {
+  return { ...(defaultVerdict ? { default: defaultVerdict } : {}), rules: [...manualRules, ...learnedRules] };
+}
+
+// Administrator screen: the agents whose level is above a candidate maximum.
+function agentsAboveCeiling(catalog, agents, ceilingName) {
+  const ceiling = levelNumber(catalog, ceilingName);
+  return (agents ?? []).filter((agent) => levelNumber(catalog, agent.level) > ceiling);
 }
 
 // ------------------------------------------------------------------ delegation settings (agent form)

@@ -11,6 +11,7 @@ across the top on narrow screens); only one section shows at a time.
 | Chats & memory | maximum associative memory matches (1-20); days to keep disposable chats (1-365) |
 | Telegram | choose the agent automatically (the orchestrator) and the core agent used when it is unsure (empty: *Same as default agent*) |
 | Connections | your own account for each MCP server (see [MCP servers](mcp.md)); it has no Save button |
+| Users | only for a user whose maximum level is `admin` (the tab is hidden for everyone else); see [users](#users-administrators-only) |
 
 ## defaults and reset
 
@@ -47,3 +48,18 @@ The page sets `data-accent`, `data-ornaments` and `data-theme` on `<html>` befor
 script, so no inline script is needed). Fonts (Fraunces, Inter, Geist Mono) are served from `static/fonts/`, so the page makes no request
 to any other site; their licence (SIL Open Font License 1.1) is in `static/fonts/LICENSES.md`. The ornaments are placeholder SVGs in
 `static/art/` that are meant to be replaced by your own pixel art; `static/art/README.md` lists each slot, its size and how to swap it.
+
+## users (administrators only)
+
+The **Users** section of the settings dialog lists every user of the installation: name and id, maximum level (`max_level`, as a badge),
+the number of agents and each agent with its level. A select and **Set maximum level** change another user's maximum
+(`PUT /api/admin/users/<user_id>/max-level`); the change is written to that user's `user.yaml` and applies on their next request.
+It is only shown to users whose own maximum is `admin` and the server checks it on every call (`403 admin_required` otherwise).
+
+- You **cannot change your own maximum** (the select is disabled; ask another administrator).
+- A maximum **below the level of one of the user's agents** is refused: the level an agent has, or the one its configuration needs when
+  it declares none, counts. Picking such a level in the select lists the agents in the way and disables the button; the server answers
+  `409 max_level_below_agents` with the same list. Lower those agents first (the user, or `python -m src.admin agent set`).
+- Every change is logged by the web service (`administrator <id> changed the max_level of user <id>: <old> -> <new>`). The same can be
+  done from the shell with `python -m src.admin user set --user U --set max_level=<level>`; `python -m src.admin user list` prints
+  what this section shows. Sessions already open are not closed when a maximum is lowered, but every agent change is checked against the new value.

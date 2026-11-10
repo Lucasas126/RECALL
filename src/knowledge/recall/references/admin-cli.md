@@ -8,15 +8,15 @@ Values after `=` are YAML: `true`, `42`, `[a, b]`, `{k: v}`, `null`, or a quoted
 
 | Command | What it does |
 | --- | --- |
-| `python -m src.admin agent list --user U` | id, name, model and tool groups of each agent |
-| `python -m src.admin agent show --user U --agent A` | the agent yaml as the loader sees it (defaults filled in) |
+| `python -m src.admin agent list --user U` | id, name, level, model and tool groups |
+| `python -m src.admin agent show --user U --agent A` | the agent yaml as loaded, plus its level |
 | `python -m src.admin agent create --user U --id A --name N [--level L]` | new agent with the default SOUL |
 | `python -m src.admin agent create --user U --id A --from-template guide` | a setup guide: tool groups `memory_read`, `memory_edit`, `web`, `self`, `terminal`, local backend, its own SOUL; the local backend is admin-only, so it fails for a user whose `max_level` is below `admin` |
 | `python -m src.admin agent create --user U --id A --from-template permission-manager` | level `operator`, groups `memory_read`, `memory_edit`, `self`, `permissions`; needs `max_level` operator+ |
 | `python -m src.admin agent set --user U --agent A --set path=value` | change settings (repeat `--set`); `--level L` sets the permission level |
 | `python -m src.admin agent rename --user U --agent A --new-id B --name N` | new id (and optional name); moves `data/U/A` to `data/U/B` exactly like the web UI |
 | `python -m src.admin agent delete --user U --agent A --yes` | remove the configuration; the data folder stays on disk |
-| `python -m src.admin agent rules --user U --agent A [--clear]` | list the agent's own approval rules, or `--clear` them all (audited) |
+| `python -m src.admin agent rules --user U --agent A [--clear\|--effective]` | the agent's own approval rules; `--clear` removes them (audited); `--effective`: all three layers |
 | `python -m src.admin agent check` | load every user and agent with the real loader; prints each agent's effective level, then `OK` or each error (exit code 1); `--user U` limits it |
 
 Examples:
@@ -39,12 +39,13 @@ python -m src.admin agent create --user user-a --id travel --name Travel --set d
 
 | Command | What it does |
 | --- | --- |
+| `python -m src.admin user list` | users with `max_level` and agent levels |
 | `python -m src.admin user show --user U` | `user.yaml` with key variable NAMES; never the password hash |
 | `python -m src.admin user set --user U --set path=value` | non-secret fields: `name`, `language`, `models.*`, `provider.name`, `provider.api_key` (a variable NAME), `terminal_backends.*`, `claude_subscription.claude_config_dir`, ... |
 
-`max_level` (`minimal`, `reader`, `assistant`, `collaborator`, `operator`, `admin`) is required, is the highest `level` the user's agents may have and can only be set here; it is refused while an agent needs or declares more. `password_hash`, `id` and `agents` are refused (use `set-password` and the `agent` commands). `*.api_key` values must look like a variable name, never a key.
+`max_level` (`minimal`, `reader`, `assistant`, `collaborator`, `operator`, `admin`) is required, is the highest `level` the user's agents may have and is set here or by an admin in Settings > Users (never one's own); refused while an agent needs or declares more. `password_hash`, `id` and `agents` are refused (use `set-password` and the `agent` commands). `*.api_key` values must look like a variable name, never a key.
 
-`python -m src.admin task run --user U --agent A --goal "..." [--context C] [--instructions I] [--notify AGENT:CHAT] [--wait]` starts an **unattended** subagent task with no parent chat (testing entry point for future scheduled jobs): prints `task: <id>`, and with `--wait` the status, tokens and result. Manual and dangerous terminal actions are denied, `smart` normal ones run; limits and the daily token budget apply; without `--wait` it stops when the command exits. See `delegation-processes.md`.
+`python -m src.admin task run --user U --agent A --goal "..." [--context C] [--instructions I] [--notify AGENT:CHAT] [--wait]` starts an **unattended** subagent task with no parent chat: prints `task: <id>` (`--wait`: also status, result). Manual and dangerous terminal actions are denied, `smart` normal ones run; limits and the daily token budget apply; without `--wait` it stops on exit. See `delegation-processes.md`.
 
 Creating users and passwords stays with `python -m src.admin create-user [--max-level L]` (default `collaborator`) and `python -m src.admin set-password`, which the user runs himself (hidden prompt). `python -m src.admin version` prints the running version (and the image build id when set). Other checks: `python -m src.admin terminal-test --user U --backend B` (ssh backends) and `python -m src.admin route-test "text" --user U`.
 
