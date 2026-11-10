@@ -1,5 +1,5 @@
-// Appearance: accent colour and architecture ornaments. Both are per-browser preferences kept in localStorage
-// (like the light/dark theme) and applied as data-accent / data-ornaments on <html>.
+// Appearance: accent colour, a per-browser preference kept in localStorage
+// (like the light/dark theme) and applied as data-accent on <html>.
 // The accent is one of the named swatches or "custom": any colour picked with the colour input, whose variables are derived
 // here for the current theme (kept at least AA, 4.5:1, against the theme's surfaces, like the swatches).
 // This file is loaded synchronously in <head>, so the saved values are applied before first paint (no flash).
@@ -8,7 +8,6 @@
   const ACCENTS = ["pink", "blue", "gold", "green", "violet", "cyan"];
   const ACCENT_KEY = "recall.accent";
   const CUSTOM_KEY = "recall.accentColor";
-  const ORNAMENTS_KEY = "recall.ornaments";
   const DEFAULT_CUSTOM = "#ff6b9d";
   const HEX = /^#[0-9a-f]{6}$/i;
   const MIN_CONTRAST = 4.5;
@@ -95,12 +94,8 @@
     clearCustomVariables();
     root.dataset.accent = ACCENTS.includes(accent) ? accent : "pink";
   }
-  function setOrnaments(on) {
-    root.dataset.ornaments = on ? "on" : "off";
-  }
 
   setAccent(read(ACCENT_KEY));
-  setOrnaments(read(ORNAMENTS_KEY) !== "off");
 
   // the derived variables depend on the theme: recompute when it changes (the toggle, or the system setting when automatic)
   const retheme = () => { if (root.dataset.accent === "custom") applyCustom(); };
@@ -113,7 +108,6 @@
     const trigger = $("appearance-accent-color"), panel = $("accent-panel"), area = $("accent-sv"), thumb = $("accent-sv-thumb");
     const hue = $("accent-hue"), hexField = $("accent-hex"), preview = $("accent-preview"), note = $("accent-note");
     const customSwatch = $("appearance-accent-custom");
-    const ornaments = $("appearance-ornaments");
     let hsv = toHsv(custom);
 
     const paint = (fromHexField = false) => {
@@ -181,13 +175,6 @@
         const [h, s, v] = toHsv(hex);
         hsv = [s && v ? h : hsv[0], s, v];   // grey and black carry no hue: keep the one on the slider
         commit(true);
-      });
-    }
-    if (ornaments) {
-      ornaments.checked = root.dataset.ornaments !== "off";
-      ornaments.addEventListener("change", () => {
-        setOrnaments(ornaments.checked);
-        write(ORNAMENTS_KEY, ornaments.checked ? "on" : "off");
       });
     }
   });
