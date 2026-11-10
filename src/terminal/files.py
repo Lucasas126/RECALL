@@ -64,6 +64,11 @@ def _where(session: TerminalSession, path: str) -> str:
     return path if path.startswith(("/", "~")) else posixpath.join(session.workdir, path)
 
 
+def target_path(session: TerminalSession, path: str) -> str:
+    """The path as the approval rules see it: absolute and normalized, relative paths hung from the workdir (`~` stays)."""
+    return path if path.startswith("~") else posixpath.normpath(_where(session, path))
+
+
 def _problem(code: int | None, path: str, stderr: str) -> str:
     return {
         _MISSING: f"error: no such file: {path}",
@@ -103,7 +108,9 @@ def preview(text: str, limit: int = PREVIEW_CHARS) -> str:
 
 
 def _fetch(session: TerminalSession, tool: str, display: str, path: str, body: str):
-    result, denial = session.run(tool, display, body, assessment=protected_verdict(session, path) or _NORMAL)
+    result, denial = session.run(
+        tool, display, body, assessment=protected_verdict(session, path) or _NORMAL, path=target_path(session, path),
+    )
     return result, denial
 
 
@@ -157,7 +164,7 @@ def _write(session: TerminalSession, tool: str, display: str, path: str, content
     if len(data) > MAX_FILE_BYTES:
         return None, f"error: content is {len(data)} bytes; the limit is {MAX_FILE_BYTES}"
     result, denial = session.run(tool, display, _write_script(path), stdin=data, assessment=assessment, preapproved=preapproved,
-                                  detail=detail)
+                                  detail=detail, path=target_path(session, path))
     if denial:
         return None, denial
     if result.timed_out:
@@ -239,7 +246,9 @@ def sandbox_patch(session: TerminalSession, path: str, old: str, new: str, repla
     ])
     assessment = protected_verdict(session, path, write=True) or assess_write(posixpath.normpath(_where(session, path)))
     detail = f"replace{' all' if replace_all else ''}:\n{preview(old)}\nwith:\n{preview(new)}"
-    result, denial = session.run("sandbox_patch", f"patch {path}", fetch, assessment=assessment, detail=detail)
+    result, denial = session.run(
+        "sandbox_patch", f"patch {path}", fetch, assessment=assessment, detail=detail, path=target_path(session, path),
+    )
     if denial:
         return denial
     if result.timed_out or result.exit_code != 0:
@@ -296,7 +305,10 @@ def sandbox_search(session: TerminalSession, pattern: str, path: str = ".", glob
             f"grep -rIn -E --exclude-dir=.git{include} -e {shlex.quote(pattern)} -- \"$f\" | head -n {cap}"
         )
         display = f"search {pattern} in {path}" + (f" ({glob})" if glob else "")
-    result, denial = session.run("sandbox_search", display, script, assessment=protected_verdict(session, path) or _NORMAL)
+    result, denial = session.run(
+        "sandbox_search", display, script, assessment=protected_verdict(session, path) or _NORMAL,
+        path=target_path(session, path),
+    )
     if denial:
         return denial
     if result.timed_out:

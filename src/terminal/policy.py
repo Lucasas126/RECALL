@@ -487,3 +487,52 @@ def assess_write(path: str, workdir: str | None = None) -> Assessment:
     if _in_system_dir(path):
         return Assessment("dangerous", f"writes into the system path {path}")
     return _NORMAL
+
+
+# ---------------------------------------------------------------------- units for approval rules
+
+
+def _unit_head(segment: _Segment) -> str:
+    """The segment's words without its output redirections (`ls -l > out` -> `ls -l`)."""
+    if not segment.redirects:
+        return segment.text
+    head = segment.text[:segment.redirects[0]].rstrip(">").rstrip()
+    head = re.sub(r"(?:^|\s)(?:\d+|&)$", "", head).rstrip()  # `2>` / `&>`: the descriptor belongs to the redirection
+    return head
+
+
+def command_units(command: str, _depth: int = 0) -> list[str]:
+    """Every part of a command line an approval rule judges on its own, in order and without repeats.
+
+    Each simple command (split on `&&`, `||`, `;`, `|`, `&`, newlines and subshells) is one unit, its output
+    redirections are separate units written `> target` (so an allow rule for `cat` never covers `cat x > y`), the
+    commands inside `$(...)`, backticks and process substitutions are units, and so are the scripts of `bash -c '...'`
+    and `eval`. The parser is best effort, as for `assess`.
+    """
+    segments, inner = split_command(command)
+    units: list[str] = []
+
+    def add(text: str) -> None:
+        if text and text not in units:
+            units.append(text)
+
+    for segment in segments:
+        add(_unit_head(segment))
+        for target in _redirect_targets(segment):
+            add(f"> {target}")
+        if _depth < _MAX_DEPTH:
+            words = _tokens(segment.text)
+            while words and re.match(r"^[A-Za-z_]\w*=", words[0]):
+                words = words[1:]
+            name = posixpath.basename(words[0]) if words else ""
+            if name in _SHELLS and "-c" in words[1:] and words.index("-c") + 1 < len(words):
+                for unit in command_units(words[words.index("-c") + 1], _depth + 1):
+                    add(unit)
+            elif name == "eval" and len(words) > 1:
+                for unit in command_units(" ".join(words[1:]), _depth + 1):
+                    add(unit)
+    if _depth < _MAX_DEPTH:
+        for text in inner:
+            for unit in command_units(text, _depth + 1):
+                add(unit)
+    return units

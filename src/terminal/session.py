@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from src.config.models import AgentTerminalConfig, TerminalSettings
@@ -12,13 +13,15 @@ from src.terminal.backends import Backend, LocalBackend, Result
 from src.terminal.context import current_run
 from src.terminal.policy import Assessment, assess
 from src.terminal.protected import ProtectedPaths, build_protected
+from src.terminal.rules import Action, Decision, RuleSet, evaluate
 from src.utils.logger import get_logger
 
 logger = get_logger("terminal")
 MAX_COMMAND_CHARS = 20_000
 
-# file tools that change files: never run unattended, whatever the approval mode
+# file tools that change files (kind `file_write`); `off` never lets them run unattended
 WRITE_TOOLS = frozenset({"sandbox_write", "sandbox_patch"})
+READ_TOOLS = frozenset({"sandbox_read", "sandbox_search"})
 AUDIT_FAILED = "error: the action was not run because the terminal audit trail could not be written. Tell the user."
 
 DENIED_HINT = "Do not retry this action; tell the user what you wanted to do and why, and let them decide."
@@ -28,6 +31,24 @@ PROTECTED_NOTICE = (
     "user/agent/settings configuration files and known_hosts files. No one can approve access to them from here. "
     "Do not try another way to reach them (other tools, paths, globs, scripts). "
 )
+
+
+def tool_kind(tool: str) -> str:
+    """The rule kind of a terminal tool: `terminal`, `file_read` (sandbox_read/search) or `file_write` (write/patch)."""
+    return "file_write" if tool in WRITE_TOOLS else "file_read" if tool in READ_TOOLS else "terminal"
+
+
+@dataclass(frozen=True)
+class Ruling:
+    """The outcome of `decide`: whether to run, what to tell the model, the audit label and the rule that decided."""
+
+    allowed: bool
+    text: str
+    label: str  # 'approved', 'auto:off', 'denied:unattended', ... (the audit `decision`)
+    decision: Decision | None = None  # None for the fixed floor and for the same-operation second step
+    layer: str | None = None
+    rule: str | None = None
+    approval_id: str = ""
 
 
 class TerminalSession:
@@ -40,7 +61,7 @@ class TerminalSession:
     def __init__(
         self, backend: Backend, config: AgentTerminalConfig, settings: TerminalSettings, *,
         user_id: str, agent_id: str, name: str, audit_file: Path | None = None, unattended: bool = False,
-        local: bool | None = None,
+        local: bool | None = None, rules: RuleSet | None = None, kind: str | None = None,
     ):
         self.backend = backend
         self.name = name  # the key in the user's terminal_backends
@@ -53,6 +74,10 @@ class TerminalSession:
         self.unattended = unattended
         # the protected-path rules apply to the local backend only (ssh backends are other machines)
         self.local = isinstance(backend, LocalBackend) if local is None else local
+        # the approval rules (installation, user and agent layers); none = the legacy per-backend mode alone
+        self.rules = rules if rules is not None else RuleSet()
+        self.kind = kind or ("local" if self.local else "machine")  # sandbox | machine | local
+        self.shorthand = config.shorthand(name)  # the explicit `approvals` mode of this backend, if the config sets one
 
     # ------------------------------------------------------------------ protected paths
     def protected(self) -> ProtectedPaths | None:
@@ -85,51 +110,74 @@ class TerminalSession:
         return float(max(1.0, min(value, self.settings.max_timeout_seconds)))
 
     # ------------------------------------------------------------------ policy
-    def decide(self, tool: str, display: str, assessment: Assessment, cwd: str, detail: str = "") -> tuple[bool, str, str]:
-        """(allowed, text for the model when denied, decision label for the audit trail)."""
-        mode = self.policy.approvals
-        if assessment.level == "protected":  # before every mode and before the unattended handling
-            return False, PROTECTED_NOTICE.format(why=assessment.reason or "keys and secrets") + DENIED_HINT, "denied:protected"
+    def decide(
+        self, tool: str, display: str, assessment: Assessment, cwd: str, detail: str = "", *, command: str = "",
+        path: str = "",
+    ) -> Ruling:
+        """Allow, ask or deny one action: the fixed floor first, then the approval rules (see `src.terminal.rules`)."""
+        if assessment.level == "protected":  # before every rule and before the unattended handling
+            text = PROTECTED_NOTICE.format(why=assessment.reason or "keys and secrets") + DENIED_HINT
+            return Ruling(False, text, "denied:protected", None, "floor", "protected")
         if assessment.level == "hardline":
             why = assessment.reason or "matches the hardline blocklist"
-            return False, (
+            return Ruling(False, (
                 f"Blocked: this action ({why}) is on the hardline blocklist and can never run on this backend, "
                 f"whatever the approval mode. {DENIED_HINT}"
-            ), "hardline"
+            ), "hardline", None, "floor", "hardline")
         run = current_run()
         dangerous = assessment.level == "dangerous"
         attended = not self.unattended and run is not None and run.interactive
-        if mode == "off":
-            if attended:
-                return True, "", "auto:off"
-            # nobody can answer (dreams, cron, tasks without a client): `off` must not widen what runs unattended
-            if dangerous or tool in WRITE_TOOLS:
-                what = f"dangerous ({assessment.reason})" if dangerous else "a file write"
-                return False, f"Denied: this action is {what} and nobody is attached to approve it, whatever the approval mode. {DENIED_HINT}", "denied:unattended"
-            return True, "", "auto:off"
-        if not attended:
-            if mode == "manual":
-                return False, f"Denied: approvals are manual and nobody is attached to approve actions here. {DENIED_HINT}", "denied:unattended"
-            if dangerous:
-                return False, f"Denied: this action is dangerous ({assessment.reason}) and nobody is attached to approve it. {DENIED_HINT}", "denied:unattended"
-            return True, "", "auto:smart"
-        if mode == "smart" and not dangerous:
-            return True, "", "auto:smart"
+        kind = tool_kind(tool)
+        action = Action(
+            kind, command if kind == "terminal" else "", path, self.name, self.kind, dangerous, assessment.reason,
+        )
+        decision = evaluate(self.rules, action, shorthand=self.shorthand, attended=attended)
+        if decision.verdict == "allow":
+            if decision.source == "shorthand":
+                label = "auto:off" if decision.rule == "approvals:off" else "auto:smart"
+            else:
+                label = "auto:rule" if decision.source == "rule" else "auto:default"
+            return Ruling(True, "", label, decision, decision.layer, decision.rule)
+        if decision.verdict == "deny":
+            return Ruling(False, self._denial(decision, assessment), "denied:unattended" if decision.source == "unattended" else "denied:rule",
+                          decision, decision.layer, decision.rule)
         risk = "dangerous" if dangerous else "manual"
+        # a rule's reason says which rule asked; the policy's reason says why the action is dangerous
+        if decision.source == "shorthand":
+            reason = assessment.reason or decision.reason
+        else:
+            reason = decision.reason + (f"; {assessment.reason}" if dangerous and assessment.reason else "")
         # a subagent task's run is answered in its parent's chat, attributed to the task
         target_agent, target_chat = run.approval_target or (self.agent_id, run.chat_id)
         outcome = run.broker.request(
             self.user_id, target_agent, target_chat, run, tool, display + (f"\n{detail}" if detail else ""), cwd,
-            assessment.reason or ("approvals are set to manual" if mode == "manual" else ""), risk, backend=self.name,
-            task=run.task,
+            reason, risk, backend=self.name, task=run.task,
         )
+        approval_id = getattr(outcome, "approval_id", "") or ""
         if outcome.reason == "cancelled" and run.cancellation is not None:
             run.cancellation.raise_if_cancelled()  # the user interrupted: end the turn, not just this tool
         if outcome.approved:
-            return True, "", "approved"
-        return False, f"Denied: the user did not approve this action ({outcome.reason}). {DENIED_HINT}", f"denied:{outcome.reason}"
+            return Ruling(True, "", "approved", decision, decision.layer, decision.rule, approval_id)
+        return Ruling(
+            False, f"Denied: the user did not approve this action ({outcome.reason}). {DENIED_HINT}",
+            f"denied:{outcome.reason}", decision, decision.layer, decision.rule, approval_id,
+        )
 
-    def approval_note(self, decision: str) -> str:
+    @staticmethod
+    def _denial(decision: Decision, assessment: Assessment) -> str:
+        """The text for the model when a rule denies, or when an `ask` became a denial because nobody can answer."""
+        if decision.source != "unattended":
+            return f"Denied: {decision.reason}. {DENIED_HINT}"
+        mode = (decision.rule or "").removeprefix("approvals:") if (decision.rule or "").startswith("approvals:") else ""
+        if mode == "manual":
+            return f"Denied: approvals are manual and nobody is attached to approve actions here. {DENIED_HINT}"
+        if mode == "off":
+            return f"Denied: {decision.reason} and nobody is attached to approve it, whatever the approval mode. {DENIED_HINT}"
+        if mode == "smart":
+            return f"Denied: this action is dangerous ({decision.reason}) and nobody is attached to approve it. {DENIED_HINT}"
+        return f"Denied: this action needs approval ({decision.reason}) and nobody is attached to approve it. {DENIED_HINT}"
+
+    def approval_note(self, decision: str, ruling: Ruling | None = None) -> str:
         """One short line for the model: how a command that ran was authorized (so it knows whether the user saw it)."""
         if decision.startswith("approved"):
             return "[approved by the user]"
@@ -140,17 +188,21 @@ class TerminalSession:
             if self.unattended or run is None or not run.interactive:
                 return "[ran without approval: smart mode, nobody attached to approve]"
             return "[ran without approval: smart mode, normal command]"
+        if decision in ("auto:rule", "auto:default"):
+            by = ruling.rule if ruling is not None and ruling.rule else (ruling.layer + " default" if ruling and ruling.layer else "approval rules")
+            return f"[ran without approval: allowed by {by}]"
         return ""
 
     # ------------------------------------------------------------------ execution
     def run(
         self, tool: str, display: str, command: str, *, cwd: str | None = None, timeout: int | float | None = None,
         stdin: bytes | str | None = None, assessment: Assessment | None = None, preapproved: bool = False,
-        detail: str = "",
+        detail: str = "", path: str = "",
     ) -> tuple[Result | None, str | None]:
         """Authorize and execute; returns (result, None) or (None, denial text for the model).
 
         `detail` is extra text for the approval card only (a preview of what a file tool will write); it is not audited.
+        `path` is the resolved target of a file tool, for the `path` match of the approval rules.
         """
         cwd = cwd or self.workdir
         if "\x00" in command or "\x00" in display:
@@ -164,24 +216,26 @@ class TerminalSession:
         )
         try:
             if preapproved and verdict.level != "protected":  # the second step of an operation whose first step was already authorized
-                allowed, text, decision = True, "", "approved:same-operation"
+                ruling = Ruling(True, "", "approved:same-operation")
             else:
-                allowed, text, decision = self.decide(tool, display, verdict, cwd, detail)
+                ruling = self.decide(tool, display, verdict, cwd, detail, command=command, path=path)
         except GenerationCancelled:
             self._audit(tool, display, cwd, "cancelled", None, 0.0, verdict=verdict.level)
             raise
-        if not allowed:
-            self._audit(tool, display, cwd, decision, None, 0.0, verdict=verdict.level)
+        decision = ruling.label
+        if not ruling.allowed:
+            self._audit(tool, display, cwd, decision, None, 0.0, verdict=verdict.level, ruling=ruling)
             logger.info("terminal %s/%s not run (%s): %s", self.agent_id, self.name, decision, display[:200])
-            return None, text
+            return None, ruling.text
         if not audit_writable(self.audit_file):  # fail closed: nothing runs that cannot be recorded
             logger.error("terminal %s/%s not run: the audit file is not writable", self.agent_id, self.name)
             return None, AUDIT_FAILED
         started = time.monotonic()
         result = self.backend.run(command, cwd, self.timeout_for(timeout), stdin)
         elapsed = time.monotonic() - started
-        result.approval = self.approval_note(decision)
-        self._audit(tool, display, cwd, decision, result.exit_code, elapsed, timed_out=result.timed_out, verdict=verdict.level)
+        result.approval = self.approval_note(decision, ruling)
+        self._audit(tool, display, cwd, decision, result.exit_code, elapsed, timed_out=result.timed_out, verdict=verdict.level,
+                    ruling=ruling)
         logger.info(
             "terminal %s/%s [%s] %s exit=%s decision=%s %.1fs: %s",
             self.user_id, self.agent_id, self.name, tool, result.exit_code, decision, elapsed, display[:200],
@@ -189,8 +243,19 @@ class TerminalSession:
         return result, None
 
     def _audit(self, tool: str, command: str, cwd: str, decision: str, exit_code: int | None, elapsed: float,
-               *, timed_out: bool = False, verdict: str | None = None) -> bool:
-        extra = {"verdict": verdict} if verdict else {}
+               *, timed_out: bool = False, verdict: str | None = None, ruling: Ruling | None = None) -> bool:
+        extra: dict = {"verdict": verdict} if verdict else {}
+        if ruling is not None:  # which layer and rule decided, what they said, and the approval card that was answered
+            if ruling.layer:
+                extra["layer"] = ruling.layer
+            if ruling.rule:
+                extra["rule"] = ruling.rule
+            if ruling.decision is not None:
+                extra["rule_verdict"] = ruling.decision.verdict
+            elif ruling.layer == "floor":
+                extra["rule_verdict"] = "deny"
+            if ruling.approval_id:
+                extra["approval_id"] = ruling.approval_id
         return write_audit(
             self.audit_file, user=self.user_id, agent=self.agent_id, backend=self.name,
             tool=tool, command=command, cwd=cwd, decision=decision, exit_code=exit_code,
