@@ -13,7 +13,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.middleware.sessions import SessionMiddleware
 
-from src.config.agents import AgentConflict, UnknownApprovalRule
+from src.config.agents import AgentConflict, MaxLevelConflict, UnknownApprovalRule
+from src.config.levels import LevelField
 from src.config.favorites import FavoriteModelId, FavoritesError
 from src.config.models import AgentConfig, DreamConfig, ReasoningEffort
 from src.core.sources.agent_files import MemoryTarget
@@ -30,7 +31,9 @@ from src.service.chat import (
     UnknownChat,
     UnknownTask,
     UnknownDreamSession,
+    UnknownManagedUser,
     UnknownUser,
+    NotAdministrator,
 )
 from src.utils.logger import get_logger
 from src.terminal.approvals import ApprovalForbidden, ApprovalNotFound
@@ -97,6 +100,10 @@ class TextIn(BaseModel):
 class ApprovalIn(BaseModel):
     decision: Literal["approve", "deny"]
     scope: Literal["once", "session", "agent"] = "once"  # what an approval is remembered for; ignored for a deny
+
+
+class MaxLevelIn(BaseModel):
+    max_level: LevelField
 
 
 class TaskSteerIn(BaseModel):
@@ -198,11 +205,13 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     @app.exception_handler(ApprovalNotFound)
     @app.exception_handler(UnknownApprovalRule)
     @app.exception_handler(UnknownDreamSession)
+    @app.exception_handler(UnknownManagedUser)
     def _not_found(request: Request, exc: ServiceError):
         return localized_error(request, 404, exc)
 
     @app.exception_handler(ApprovalForbidden)
-    def _approval_forbidden(request: Request, exc: ApprovalForbidden):
+    @app.exception_handler(NotAdministrator)
+    def _approval_forbidden(request: Request, exc: ApprovalForbidden | NotAdministrator):
         return localized_error(request, 403, exc)
 
     @app.exception_handler(ValueError)
@@ -228,6 +237,13 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     @app.exception_handler(McpNotConnected)
     def _agent_conflict(request: Request, exc: AgentBusy | AgentConflict | McpNotConnected):
         return localized_error(request, 409, exc)
+
+    @app.exception_handler(MaxLevelConflict)
+    def _max_level_conflict(request: Request, exc: MaxLevelConflict):
+        response = localized_error(request, 409, exc)
+        body = json.loads(response.body)
+        body["agents"] = exc.agents  # the agents in the way: id, name, level
+        return JSONResponse(body, status_code=409)
 
     @app.exception_handler(UnknownMcpServer)
     def _unknown_mcp_server(request: Request, exc: UnknownMcpServer):
@@ -324,6 +340,10 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     @app.get("/api/agents/defaults")
     def get_agent_defaults(user_id: str = Depends(current_user)):
         return service.agent_defaults(user_id)
+
+    @app.get("/api/levels")
+    def get_levels(user_id: str = Depends(current_user)):
+        return service.levels(user_id)
 
     @app.get("/api/tool-groups")
     def list_tool_groups(user_id: str = Depends(current_user)):
@@ -535,6 +555,10 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     def list_approval_rules(agent_id: str, user_id: str = Depends(current_user)):
         return service.list_approval_rules(user_id, agent_id)
 
+    @app.get("/api/agents/{agent_id}/approval-rules/effective")
+    def effective_approval_rules(agent_id: str, user_id: str = Depends(current_user)):
+        return service.effective_approval_rules(user_id, agent_id)
+
     @app.delete("/api/agents/{agent_id}/approval-rules")
     def clear_approval_rules(agent_id: str, user_id: str = Depends(current_user)):
         return service.clear_approval_rules(user_id, agent_id)
@@ -546,6 +570,16 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     @app.delete("/api/agents/{agent_id}/approval-rules/{index}")
     def remove_approval_rule(agent_id: str, index: int, user_id: str = Depends(current_user)):
         return service.remove_approval_rule(user_id, agent_id, index)
+
+    # ------------------------------------------------------------------ administration (max_level admin only)
+
+    @app.get("/api/admin/users")
+    def admin_list_users(user_id: str = Depends(current_user)):
+        return service.list_users(user_id)
+
+    @app.put("/api/admin/users/{target_id}/max-level")
+    def admin_set_max_level(target_id: str, body: MaxLevelIn, user_id: str = Depends(current_user)):
+        return service.set_user_max_level(user_id, target_id, body.max_level)
 
     # ------------------------------------------------------------------ subagent tasks
 

@@ -157,12 +157,12 @@ class TerminalBackendListingTests(steering.SteeringFixture):
     def test_no_backends_by_default(self) -> None:
         self.assertEqual(self.me().json()["terminal_backends"], [])
 
-    def test_lists_only_name_type_and_description(self) -> None:
+    def test_lists_only_name_type_description_kind_and_min_level(self) -> None:
         self.backends = {"box": self.BACKEND, "alpha": self.BACKEND.model_copy(update={"description": ""})}
         response = self.me()
         self.assertEqual(response.json()["terminal_backends"], [
-            {"name": "alpha", "type": "ssh", "description": ""},
-            {"name": "box", "type": "ssh", "description": "User A's PC, real files"},
+            {"name": "alpha", "type": "ssh", "description": "", "kind": "machine", "min_level": "operator"},
+            {"name": "box", "type": "ssh", "description": "User A's PC, real files", "kind": "machine", "min_level": "operator"},
         ])
         for secret in ("203.0.113.77", "sandboxer", "2222", "/keys/secret_id", "secret_id", "kh_secret"):
             self.assertNotIn(secret, response.text)

@@ -7,7 +7,8 @@
     python -m src.admin agent rename --user U --agent A --new-id B [--name N]
     python -m src.admin agent delete --user U --agent A --yes
     python -m src.admin agent check [--user U]      (prints each agent's effective level)
-    python -m src.admin agent rules --user U --agent A [--clear]   (list the agent's approval rules, or remove them all)
+    python -m src.admin agent rules --user U --agent A [--clear|--effective]   (list the agent's approval rules, remove them all, or show all three layers)
+    python -m src.admin user list                   (every user with max_level and the level of their agents)
     python -m src.admin user show --user U
     python -m src.admin user set --user U --set path=value [--set ...]
 
@@ -224,6 +225,10 @@ def agent_show(service, user_id: str, agent_id: str) -> int:
     _require_user(user_id)
     config = AgentConfig.model_validate(_agent_data(service, user_id, agent_id))
     print(dump_yaml(_clean(config)).rstrip())
+    user = load_user(user_id)
+    needed, service_label = required_level_reason(config, user.terminal_backends)
+    source = "declared" if config.level is not None else f"computed, needs {needed.label} for {service_label}"
+    print(f"# effective level: {effective_agent_level(config, user).label} ({source}); max_level of {user_id}: {user.max_level.label}")
     return 0
 
 
@@ -361,9 +366,24 @@ def _rule_line(entry: dict) -> str:
     return f"  [{entry['index']}] {rule['verdict']} {tool}: {target}{where}" + (f"  ({', '.join(tags)})" if tags else "")
 
 
-def agent_rules(service, user_id: str, agent_id: str, *, clear: bool) -> int:
-    """List the agent's own approval rules, or remove all of them (`--clear`: back to the installation and user defaults)."""
+def _print_effective_rules(service, user_id: str, agent_id: str) -> None:
+    data = service.effective_approval_rules(user_id, agent_id)
+    print(f"Approval rules that apply to agent '{agent_id}' of '{user_id}' (least to most specific; deny beats ask beats allow):")
+    for layer in data["layers"]:
+        default = f", default {layer['default']}" if layer["default"] else ""
+        print(f"{layer['name']} layer{default}:" + ("" if layer["rules"] else " no rules"))
+        for entry in layer["rules"]:
+            print(_rule_line(entry))
+    shorthand = ", ".join(f"{name}={mode or '(not set)'}" for name, mode in data["shorthand"].items()) or "(no terminal)"
+    print(f"per-backend approvals shorthand: {shorthand}\neffective default when no rule matches: {data['default']}")
+
+
+def agent_rules(service, user_id: str, agent_id: str, *, clear: bool, effective: bool = False) -> int:
+    """List the agent's own approval rules (or all three layers with `--effective`), or remove its own (`--clear`)."""
     _require_user(user_id)
+    if effective:
+        _print_effective_rules(service, user_id, agent_id)
+        return 0
     if clear:
         before = len(service.list_approval_rules(user_id, agent_id))
         service.clear_approval_rules(user_id, agent_id, actor="admin")
@@ -503,6 +523,19 @@ def user_show(user_id: str) -> int:
     return 0
 
 
+def user_list(service) -> int:
+    rows = service.user_overview()
+    if not rows:
+        print("No users.")
+    for row in rows:
+        if "error" in row:
+            print(f"{row['id']}  (cannot be read: {row['error']})")
+            continue
+        agents = ", ".join(f"{agent['id']}={agent['level']}" for agent in row["agents"]) or "(no agents)"
+        print(f"{row['id']}  name={row['name']!r}  max_level={row['max_level']}  agents={row['agent_count']}: {agents}")
+    return 0
+
+
 def _check_agents_fit_max_level(user_id: str, updated_user: dict) -> None:
     """Refuse a max_level below the level of one of the user's agents (declared, or what its configuration needs):
     it would stop loading."""
@@ -587,11 +620,13 @@ def add_parsers(sub) -> None:
     delete.add_argument("--yes", action="store_true", help="confirm the deletion")
     rules = with_user(asub.add_parser("rules", help="list the agent's own approval rules, or remove them all"), True)
     rules.add_argument("--clear", action="store_true", help="remove every approval rule of the agent (audited)")
+    rules.add_argument("--effective", action="store_true", help="show the installation, user and agent layers and the shorthand")
     check = asub.add_parser("check", help="load every user and agent with the real loader; exit 1 on errors")
     check.add_argument("--user", help="only this user")
 
     user = sub.add_parser("user", help="show or change non-secret user settings")
     usub = user.add_subparsers(dest="user_command", required=True)
+    usub.add_parser("list", help="every user with max_level and the level of their agents")
     with_user(usub.add_parser("show", help="user.yaml (key variables by NAME, no password hash)"))
     uset = with_user(usub.add_parser("set", help="change non-secret user settings"))
     uset.add_argument("--set", action="append", default=[], metavar="PATH=VALUE", dest="sets",
@@ -604,6 +639,8 @@ def run(args, service=None) -> int:
 
     try:
         if args.command == "user":
+            if args.user_command == "list":
+                return user_list(service or _make_service())
             return user_show(args.user) if args.user_command == "show" else user_set(args.user, args.sets)
         command = args.agent_command
         if command == "check":
@@ -621,7 +658,7 @@ def run(args, service=None) -> int:
         if command == "set":
             return agent_set(service, args.user, args.agent, args.sets)
         if command == "rules":
-            return agent_rules(service, args.user, args.agent, clear=args.clear)
+            return agent_rules(service, args.user, args.agent, clear=args.clear, effective=args.effective)
         if command == "rename":
             return agent_rename(service, args.user, args.agent, args.new_id, args.name)
         return agent_delete(service, args.user, args.agent, yes=args.yes)
