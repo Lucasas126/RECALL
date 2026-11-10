@@ -16,7 +16,7 @@ JS = (STATIC / "appearance.js").read_text(encoding="utf-8")
 
 ACCENTS = ("pink", "blue", "gold", "green", "violet", "cyan")
 FONT_FILES = {"Fraunces": "fraunces.woff2", "Inter": "inter.woff2", "Geist Mono": "geist-mono.woff2"}
-ART_FILES = ("column.svg", "arcade.svg", "login-arch.svg", "plinth.svg", "capital.svg")
+ART_FILES = ("arcade.svg", "login-arch.svg", "plinth.svg", "capital.svg")
 MIN_CONTRAST = 4.5
 
 
@@ -226,7 +226,7 @@ class ArtSlotTests(unittest.TestCase):
             self.assertNotIn("<script", svg.lower())
             self.assertNotRegex(svg.replace('xmlns="http://www.w3.org/2000/svg"', ""), r"https?://")
         tokens = declarations(block(":root", many=True))
-        for slot, extension in (("column", "svg"), ("arcade", "svg"), ("login-arch", "svg"), ("capital", "png"), ("plinth", "svg")):
+        for slot, extension in (("arcade", "svg"), ("login-arch", "svg"), ("capital", "png"), ("plinth", "svg")):
             self.assertIn(f"/static/art/{slot}.{extension}", tokens[f"--art-{slot}"])
         self.assertTrue((STATIC / "art" / "capital.png").is_file())
         self.assertTrue((STATIC / "art" / "README.md").is_file())
@@ -236,19 +236,12 @@ class ArtSlotTests(unittest.TestCase):
         self.assertNotIn("/static/art/", outside_root)
 
     def test_ornaments_are_decorative(self) -> None:
-        self.assertIn('<div class="ornaments" aria-hidden="true">', HTML)
         self.assertIn('<div class="art-arcade" aria-hidden="true"></div>', HTML)
         self.assertIn('<div class="login-art" aria-hidden="true">', HTML)
         self.assertIn('<div class="login-arch" aria-hidden="true"></div>', HTML)
-        for selector in (".ornaments", ".art-arcade", ".login-arch"):
+        for selector in (".art-arcade", ".login-arch"):
             rule = next(line for line in CSS.splitlines() if line.startswith(f"{selector} {{"))
             self.assertIn("pointer-events: none", rule, selector)
-
-    def test_columns_need_a_wide_screen_and_respect_the_off_switch_and_forced_colors(self) -> None:
-        self.assertRegex(CSS, r"@media \(min-width: 1100px\) \{\s*@container main \(min-width: 880px\)")
-        self.assertIn(':root:not([data-ornaments="off"]) .art-column { display: block; }', CSS)
-        self.assertIn(':root:not([data-ornaments="off"]) .art-arcade { display: block; }', CSS)
-        self.assertRegex(CSS, r"@media \(forced-colors: active\) \{ \.ornaments, \.art-arcade[^}]*display: none !important")
 
     def test_login_has_no_cross_or_crest_and_keeps_the_real_ids(self) -> None:
         login = HTML[HTML.index('<section id="login"'):HTML.index("</section>", HTML.index('<section id="login"'))]
@@ -267,7 +260,7 @@ class StaticServingTests(unittest.TestCase):
     def test_fonts_art_and_script_are_public(self) -> None:
         for path, kind in (
             ("/static/fonts/inter.woff2", "font/woff2"), ("/static/fonts/fraunces.woff2", "font/woff2"),
-            ("/static/fonts/geist-mono.woff2", "font/woff2"), ("/static/art/column.svg", "image/svg+xml"),
+            ("/static/fonts/geist-mono.woff2", "font/woff2"), 
             ("/static/art/capital.svg", "image/svg+xml"), ("/static/appearance.js", "javascript"),
         ):
             response = self.client.get(path)

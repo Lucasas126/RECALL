@@ -16,7 +16,6 @@
   --radius: 10px; --radius-sm: 7px;
   --ease: .16s ease;
   /* Decorative art. Each piece is referenced from this one place; see art/README.md to swap in PNGs. */
-  --art-column: url("/static/art/column.svg"); --art-column-slice: 28 0 22 0;
   --art-arcade: url("/static/art/arcade.svg");
   --art-login-arch: url("/static/art/login-arch.svg");
   --art-capital: url("/static/art/capital.png");
@@ -88,8 +87,9 @@ button.link { background: none; border: none; color: var(--muted); padding: 0; }
 .login-stage { position: relative; isolation: isolate; margin: auto; width: min(344px, 100%); padding: calc(18px + 40px * var(--k)) 26px 38px; display: flex; flex-direction: column; align-items: center; }
 .login-arch { position: absolute; inset: 0; z-index: -1; pointer-events: none; background: var(--art-login-arch) center / 100% 100% no-repeat; image-rendering: var(--art-render); opacity: var(--orn-arch-a); }   /* the side strokes run straight to the bottom edge of the box: the arch is closed visually, no base line */
 .login-art { display: flex; flex-direction: column; align-items: center; gap: 0; margin-bottom: 8px; pointer-events: none; }
-.art-capital { --u: 1px; position: relative; margin-top: 48px; width: calc(94 * var(--u)); height: calc(92 * var(--u)); flex: none; background: var(--art-capital) center / 100% 100% no-repeat; image-rendering: var(--art-render); }   /* hand-drawn 94x92 sprite shown at an integer scale (1 art px = --u) */
-.art-capital .brand-logo { position: absolute; left: 50%; top: -46px; width: 48px; height: 42px; margin-left: -24px; image-rendering: auto; }   /* logo keeps its 2x size and levitates above the capital: its feet hover over the centre of the top face */
+.art-capital { --u: 1px; position: relative; margin-top: 48px; width: calc(94 * var(--u)); height: calc(92 * var(--u)); flex: none; }
+.art-capital::before { content: ""; position: absolute; inset: 0; background: var(--art-capital) center / 100% 100% no-repeat; image-rendering: var(--art-render); opacity: .65; }   /* the sprite is drawn at 65% so the logo above it stays at full strength */   /* hand-drawn 94x92 sprite shown at an integer scale (1 art px = --u) */
+.art-capital .brand-logo { position: absolute; left: 50%; top: -58px; width: 64px; height: 54px; margin-left: -32px; image-rendering: var(--art-render); }   /* the 32x27 logo at 2x (pixelated), levitating above the capital: its bottom edge hovers just above the centre of the top face */
 #login-form { display: flex; flex-direction: column; gap: 10px; width: 100%; text-align: center; }
 #login-form h1 { margin: 0; font: 350 var(--s4)/1 var(--serif); letter-spacing: .22em; text-indent: .22em; font-variation-settings: "SOFT" 40, "WONK" 0; }
 .login-lede { margin: 0 0 6px; color: var(--muted); font-size: var(--s-1); line-height: 1.4; }
@@ -563,8 +563,8 @@ details.thinking { border-left: 2px solid var(--line); padding-left: 10px; }
 
 /* Sidebar: brand on top, account and settings at the bottom */
 .brand { font: 500 var(--s0)/1 var(--serif); letter-spacing: .2em; display: inline-flex; align-items: center; gap: 12px; }
-/* 24x21 = the logo's own pixel grid at 1:1, so every cell is a whole number of screen pixels */
-.brand-logo { width: 24px; height: 21px; flex: none; image-rendering: pixelated; }
+/* 32x27 = the logo's own pixel grid at 1:1, so every cell is a whole number of screen pixels */
+.brand-logo { width: 32px; height: 27px; flex: none; image-rendering: pixelated; }   /* the 32x27 sprite at 1 CSS px per art px */
 .sidebar-footer { display: flex; align-items: center; gap: 2px; padding-top: 10px; border-top: 1px solid var(--line); }
 #user-avatar { margin-right: 10px; }   /* shape and colours shared with #agent-avatar */
 .sidebar-footer #user-name { flex: 1; min-width: 0; margin-right: 4px; }
@@ -812,20 +812,11 @@ input[type="checkbox"]:disabled { opacity: .5; cursor: not-allowed; }
 .approval-backend { padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--raised); font-size: .8em; }
 select.warning { border-color: var(--warn); color: var(--warn); }
 
-/* Structure ornaments: columns flank the chat column and an arcade runs under the header. Decorative only: aria-hidden,
-   pointer-events none, never under text. The art comes from the --art-* properties at the top (see art/README.md). */
-.ornaments { position: absolute; inset: 60px 0 16px; z-index: -1; pointer-events: none; }
-.art-column { position: absolute; top: 0; bottom: 0; width: 40px; display: none; opacity: var(--orn-a); border: solid transparent; border-width: 28px 0 22px; border-image: var(--art-column) var(--art-column-slice) fill / 28px 0 22px 0 stretch; image-rendering: var(--art-render); }
-.art-column.l { left: calc(var(--gutter) - 64px); }
-.art-column.r { right: calc(var(--gutter) - 64px); }
+/* Structure ornament: an arcade runs under the header. Decorative only: aria-hidden, pointer-events none, never under text. */
 .art-arcade { display: none; position: absolute; left: 0; right: 0; bottom: 0; height: 8px; pointer-events: none; background: var(--art-arcade) left bottom / 12px 8px repeat-x; image-rendering: var(--art-render); opacity: var(--orn-arcade-a); }
 :root:not([data-ornaments="off"]) .art-arcade { display: block; }
-/* columns: wide screens only, and only when the chat area leaves room for them beside the text column */
-@media (min-width: 1100px) {
-  @container main (min-width: 880px) { :root:not([data-ornaments="off"]) .art-column { display: block; } }
-}
-main:has(#chat-view[hidden]) .ornaments, main:has(#chat-view[hidden]) .art-arcade { display: none; }
-@media (forced-colors: active) { .ornaments, .art-arcade, .login-arch, .art-capital, .art-plinth { display: none !important; } }
+main:has(#chat-view[hidden]) .art-arcade { display: none; }
+@media (forced-colors: active) { .art-arcade, .login-arch, .art-capital { display: none !important; } }
 
 /* Appearance group of the settings dialog (General): accent swatches and the ornaments switch */
 .appearance { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; padding: 14px 0 20px; border-top: 1px solid var(--line); }

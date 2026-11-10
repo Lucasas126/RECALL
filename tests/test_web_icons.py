@@ -40,7 +40,7 @@ class IconFilesTests(unittest.TestCase):
     def test_logo_is_an_svg_with_the_pixel_grid_viewbox(self) -> None:
         svg = (ICONS / "recall-logo.svg").read_text(encoding="utf-8")
         self.assertTrue(svg.startswith("<svg "))
-        self.assertIn('viewBox="0 0 24 21"', svg)
+        self.assertIn('viewBox="0 0 32 27"', svg)
         self.assertNotIn("<script", svg.lower())
 
     def test_manifest_icons_exist_and_are_declared_with_their_real_size(self) -> None:
