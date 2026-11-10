@@ -1197,7 +1197,7 @@ function openNewAgent() {
     name: "", id: "", description: "",
     chat_config: {
       stream: true, has_memory: true, reasoning: true, reasoning_effort: "medium", reasoning_tokens: null,
-      keep_reasoning_in_memory: false, conversation_messages_retained: 30, tools: true, associative_memory: "llm",
+      keep_reasoning_in_memory: true, conversation_messages_retained: 30, tools: true, associative_memory: "llm",
       associative_execution: "parallel", recall_knowledge: true,
     },
   });
