@@ -13,7 +13,8 @@ from src.terminal.backends import Backend, LocalBackend, Result
 from src.terminal.context import current_run
 from src.terminal.policy import Assessment, assess
 from src.terminal.protected import ProtectedPaths, build_protected
-from src.terminal.rules import Action, Decision, RuleSet, evaluate
+from src.terminal.approvals import Learn
+from src.terminal.rules import Action, ApprovalRule, Decision, RuleSet, action_signature, evaluate, offered_scopes, rule_key, rules_for_action
 from src.utils.logger import get_logger
 
 logger = get_logger("terminal")
@@ -49,6 +50,7 @@ class Ruling:
     layer: str | None = None
     rule: str | None = None
     approval_id: str = ""
+    scope: str = ""  # once | session | agent when the user approved, deny when the user was asked and refused, else ''
 
 
 class TerminalSession:
@@ -78,6 +80,16 @@ class TerminalSession:
         self.rules = rules if rules is not None else RuleSet()
         self.kind = kind or ("local" if self.local else "machine")  # sandbox | machine | local
         self.shorthand = config.shorthand(name)  # the explicit `approvals` mode of this backend, if the config sets one
+
+    def add_rules(self, rules: list[ApprovalRule]) -> None:
+        """Append rules to the agent layer of the running rule set (a learned 'always for this agent'); skips duplicates."""
+        current = self.rules
+        known = {rule_key(rule) for rule in current.layer("agent").rules}
+        for rule in rules:
+            if rule_key(rule) not in known:
+                current = current.with_rule("agent", rule)
+                known.add(rule_key(rule))
+        self.rules = current  # one assignment: a concurrent decision sees the old or the new set, never half of it
 
     # ------------------------------------------------------------------ protected paths
     def protected(self) -> ProtectedPaths | None:
@@ -142,26 +154,48 @@ class TerminalSession:
             return Ruling(False, self._denial(decision, assessment), "denied:unattended" if decision.source == "unattended" else "denied:rule",
                           decision, decision.layer, decision.rule)
         risk = "dangerous" if dangerous else "manual"
+        # a subagent task's run is answered in its parent's chat, attributed to the task
+        target_agent, target_chat = run.approval_target or (self.agent_id, run.chat_id)
+        signature = action_signature(action)
+        grants = getattr(run.broker, "session_allows", None)
+        if not dangerous and grants is not None and grants(self.user_id, target_agent, target_chat, signature):
+            return Ruling(True, "", "approved:session", decision, decision.layer, decision.rule, scope="session")
         # a rule's reason says which rule asked; the policy's reason says why the action is dangerous
         if decision.source == "shorthand":
             reason = assessment.reason or decision.reason
         else:
             reason = decision.reason + (f"; {assessment.reason}" if dangerous and assessment.reason else "")
-        # a subagent task's run is answered in its parent's chat, attributed to the task
-        target_agent, target_chat = run.approval_target or (self.agent_id, run.chat_id)
+        options, learn = self._offer(run, action, decision, signature)
         outcome = run.broker.request(
             self.user_id, target_agent, target_chat, run, tool, display + (f"\n{detail}" if detail else ""), cwd,
-            reason, risk, backend=self.name, task=run.task,
+            reason, risk, backend=self.name, task=run.task, **({"options": options, "learn": learn} if learn else {}),
         )
         approval_id = getattr(outcome, "approval_id", "") or ""
         if outcome.reason == "cancelled" and run.cancellation is not None:
             run.cancellation.raise_if_cancelled()  # the user interrupted: end the turn, not just this tool
         if outcome.approved:
-            return Ruling(True, "", "approved", decision, decision.layer, decision.rule, approval_id)
+            return Ruling(True, "", "approved", decision, decision.layer, decision.rule, approval_id,
+                          getattr(outcome, "scope", "") or "once")
         return Ruling(
             False, f"Denied: the user did not approve this action ({outcome.reason}). {DENIED_HINT}",
-            f"denied:{outcome.reason}", decision, decision.layer, decision.rule, approval_id,
+            f"denied:{outcome.reason}", decision, decision.layer, decision.rule, approval_id, "deny",
         )
+
+    def _offer(self, run, action: Action, decision: Decision, signature: str) -> tuple[tuple[str, ...], Learn | None]:
+        """The approve scopes the card offers and what they remember. Only a plain chat run offers more than `once`
+        (a subagent task asks in its parent's chat and is never remembered); `agent` needs the service's writer."""
+        if run.task is not None or getattr(run, "approval_target", None) is not None:
+            return ("once",), None
+        scopes = offered_scopes(self.rules, action, shorthand=self.shorthand, decision=decision)
+        writer = getattr(run, "learn_rules", None)
+        if "agent" in scopes and writer is None:
+            scopes = tuple(scope for scope in scopes if scope != "agent")
+        if len(scopes) == 1:
+            return scopes, None
+        rules = rules_for_action(action) if "agent" in scopes else []
+        agent_id = self.agent_id
+        persist = (lambda learned: writer(agent_id, learned)) if "agent" in scopes else None
+        return scopes, Learn(signature, rules, persist, self.add_rules)
 
     @staticmethod
     def _denial(decision: Decision, assessment: Assessment) -> str:
@@ -179,6 +213,8 @@ class TerminalSession:
 
     def approval_note(self, decision: str, ruling: Ruling | None = None) -> str:
         """One short line for the model: how a command that ran was authorized (so it knows whether the user saw it)."""
+        if decision == "approved:session":
+            return "[approved by the user earlier in this session]"
         if decision.startswith("approved"):
             return "[approved by the user]"
         if decision == "auto:off":
@@ -256,6 +292,8 @@ class TerminalSession:
                 extra["rule_verdict"] = "deny"
             if ruling.approval_id:
                 extra["approval_id"] = ruling.approval_id
+            if ruling.scope:
+                extra["scope"] = ruling.scope
         return write_audit(
             self.audit_file, user=self.user_id, agent=self.agent_id, backend=self.name,
             tool=tool, command=command, cwd=cwd, decision=decision, exit_code=exit_code,

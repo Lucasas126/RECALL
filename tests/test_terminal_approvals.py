@@ -55,7 +55,7 @@ class BrokerTests(unittest.TestCase):
         self.assertTrue(outcome.approved)
         self.assertEqual(self.broker.recent_decisions("u")[-1]["backend"], "pc")
         self.assertEqual(asker.run.kinds(), ["approval", "approval_resolved"])
-        self.assertEqual(asker.run.events[1][1], {"id": asker.id, "decision": "approved", "reason": "approved"})
+        self.assertEqual(asker.run.events[1][1], {"id": asker.id, "decision": "approved", "reason": "approved", "scope": "once"})
         self.assertEqual(self.broker.pending("u", "a", "chat1"), [])
 
     def test_deny(self) -> None:

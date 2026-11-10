@@ -58,3 +58,19 @@ def write_audit(path: Path | None, **fields) -> bool:
         logger.exception("could not write the terminal audit file %s", path)
         return False
     return True
+
+
+def write_rule_audit(
+    path: Path | None, *, actor: str, action: str, user: str, agent: str, rule: dict, index: int | None = None,
+    **extra,
+) -> bool:
+    """Record a change of an agent's approval rules (`event: approval_rule`) in the same audit file.
+
+    `action` is `add` or `remove`; `actor` says who did it (`user` from the web or a card, `admin` from the CLI).
+    """
+    if isinstance(rule.get("command"), str):
+        rule = {**rule, "command": redact(rule["command"])[:_MAX_COMMAND]}
+    fields = {"event": "approval_rule", "action": action, "actor": actor, "user": user, "agent": agent, "rule": rule}
+    if index is not None:
+        fields["index"] = index
+    return write_audit(path, **fields, **extra)

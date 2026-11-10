@@ -35,6 +35,9 @@ class RunContext:
     approval_wait: Callable[[bool], None] | None = None
     # called before each approval request; returns a reason to DENY it without asking anyone (a task's approval cap)
     approval_gate: Callable[[], str | None] | None = None
+    # writes narrow allow rules (a list of ApprovalRule) for an agent id to its configuration; raises when it cannot.
+    # None where the chat service does not own the agent files: 'always for this agent' is then not offered
+    learn_rules: Callable[[str, list], object] | None = None
 
 
 _current: ContextVar[RunContext | None] = ContextVar("recall_terminal_run", default=None)
