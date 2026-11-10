@@ -2,7 +2,7 @@
 
     python -m src.admin agent list --user U
     python -m src.admin agent show --user U --agent A
-    python -m src.admin agent create --user U --id A [--name N] [--from-template default|guide] [--level L] [--set path=value ...]
+    python -m src.admin agent create --user U --id A [--name N] [--from-template default|guide|permission-manager] [--level L] [--set path=value ...]
     python -m src.admin agent set --user U --agent A [--level L] --set path=value [--set ...]
     python -m src.admin agent rename --user U --agent A --new-id B [--name N]
     python -m src.admin agent delete --user U --agent A --yes
@@ -264,11 +264,21 @@ def agent_create(service, user_id: str, agent_id: str, *, name: str | None, temp
     _require_user(user_id)
     if not _ID_RE.match(agent_id):
         raise AdminError("Invalid agent id: use 1-64 letters, digits, '_' or '-'.")
-    display = name or ("Guide" if template == "guide" else agent_id)
+    available = agent_templates.templates()
+    display = name or (available[template].display_name if template in available and available[template].display_name else agent_id)
     try:
         config, soul, chosen = agent_templates.build(template, agent_id, display)
     except ValueError as exc:
         raise AdminError(str(exc)) from exc
+    if chosen.min_level is not None:
+        max_level = load_user(user_id).max_level
+        if max_level < chosen.min_level:
+            raise AdminError(
+                f"the '{template}' template gives the agent the level '{chosen.min_level.label}' (it manages the permissions of the "
+                f"user's other agents), and the maximum level of user '{user_id}' is '{max_level.label}'. Ask an administrator to "
+                f"raise it (`python -m src.admin user set --user {user_id} --set max_level={chosen.min_level.label}`) or use another "
+                "template. Nothing was written."
+            )
     config = apply_validated(_clean(config), assignments, AgentConfig, _validate_agent)
     previous = (_user_dir(user_id) / "user.yaml").read_text(encoding="utf-8")
     backend_added = False
@@ -561,8 +571,8 @@ def add_parsers(sub) -> None:
     with_user(asub.add_parser("show", help="print an agent's yaml as the loader sees it"), True)
     create = with_user(asub.add_parser("create", help="create an agent (validated, same rules as the web UI)"))
     create.add_argument("--id", required=True, dest="agent_id", help="new agent id")
-    create.add_argument("--name", help="display name (default: the id; 'Guide' for the guide template)")
-    create.add_argument("--from-template", default="default", help="default (plain agent) or guide (setup guide)")
+    create.add_argument("--name", help="display name (default: the id; 'Guide' / 'Permission manager' for those templates)")
+    create.add_argument("--from-template", default="default", help="default (plain agent), guide (setup guide) or permission-manager (reviews and adjusts the permissions of your agents)")
     create.add_argument("--set", action="append", default=[], metavar="PATH=VALUE", dest="sets",
                         help="extra setting, dotted path = YAML value (repeatable)")
     create.add_argument("--level", help="permission level of the agent (at most the user's max_level)")

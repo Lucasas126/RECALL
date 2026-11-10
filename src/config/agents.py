@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
+from typing import Callable
 
 import yaml
 from pydantic import ValidationError
@@ -188,6 +189,37 @@ class AgentStore:
                 raise AgentConfigError(
                     "Could not delete the agent file '{file}'; check file permissions.", file=path.name,
                 ) from exc
+
+    def modify(
+        self, user_id: str, agent_id: str, mutate: Callable[[AgentConfig, UserConfig], AgentConfig],
+    ) -> tuple[AgentConfig, AgentConfig]:
+        """Read-modify-write one agent under the user's lock; returns `(before, after)`.
+
+        `mutate(config, user)` returns the new config (it may raise to abort, so a caller can re-check its own
+        constraints against what is stored right now). The result is validated again as a whole, level and blanket-allow
+        guardrail included (`check_agent_level`), before anything is written. The id cannot change here.
+        """
+        with self._locked(user_id):
+            user = self._read_user(user_id)
+            if agent_id not in user.agents:
+                raise FileNotFoundError(f"agent config not found: {agent_id}")
+            path = self.path_for(user_id, agent_id)
+            before = self._read(path)
+            changed = mutate(before, user)
+            try:  # a whole new validation: model_copy skips the validators
+                after = AgentConfig.model_validate(changed.model_dump(mode="json", exclude_none=True))
+            except ValidationError as exc:
+                raise AgentConfigError(
+                    "Invalid agent configuration '{file}': {details}",
+                    file=path.name, details="; ".join(error["msg"] for error in exc.errors()),
+                ) from exc
+            if after.id != before.id:
+                raise AgentConfigError("The id of an agent cannot change here.")
+            if after == before:
+                return before, before
+            self._check_level(user, after)
+            self._write_agent(path, after)
+            return before, after
 
     # ------------------------------------------------------------------ agent approval rules
 

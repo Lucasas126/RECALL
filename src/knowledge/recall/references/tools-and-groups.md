@@ -1,6 +1,6 @@
 # Tools and tool groups
 
-The user selects tool groups per agent (`chat_config.tool_groups`, Tools tab). Without a selection you get `memory_read`, `memory_edit`, `web` and `self`; folder groups and `terminal` are always explicit. `chat_config.tools: false` removes all tools. `skill_view` is added whenever you have any skill in your index (including the built-in one), even without `self`. Web tools exist only when a Tavily key is configured on the server. MCP tools (named `<server_id>__<tool>`) are added per agent on top and are untrusted.
+The user selects tool groups per agent (`chat_config.tool_groups`, Tools tab). Without a selection you get `memory_read`, `memory_edit`, `web` and `self`; folder groups, `terminal`, `delegate` and `permissions` are always explicit. `chat_config.tools: false` removes all tools. `skill_view` is added whenever you have any skill in your index (including the built-in one), even without `self`. Web tools exist only when a Tavily key is configured on the server. MCP tools (named `<server_id>__<tool>`) are added per agent on top and are untrusted.
 
 Addresses are `source:path`, for example `mind_palace:notes/pets.md`.
 
@@ -45,6 +45,14 @@ Addresses are `source:path`, for example `mind_palace:notes/pets.md`.
 | `task_send` | delegate | continue a finished task in its worker chat with full context (max 5 follow-ups) |
 | `task_stop` | delegate | stop a running task, partial result kept |
 | `task_wait` | delegate | block until tasks end, at most 120 s; results read here send no message |
+| `agents_list` | permissions | the user's agents: levels (effective, required, declared), groups, learned rules |
+| `agent_get_permissions` | permissions | one agent: levels, user max, groups, backends with kind, rules per layer |
+| `permission_levels_help` | permissions | what each level allows; the level a capability needs |
+| `agent_set_level` | permissions | another agent's level: at most yours and the user's max, at least what it needs |
+| `agent_set_tool_groups` | permissions | replace another agent's groups; its level must allow each |
+| `agent_add_rule` | permissions | add an approval rule; a blanket allow on a real machine needs admin |
+| `agent_remove_rule` | permissions | remove a rule by index |
+| `agent_reset_rules` | permissions | remove all of the agent's own rules |
 
 `folders_edit` includes the three read tools. `folders_read` and `folders_edit` need at least one folder in `folders`; with either group the generic memory tools can read the folders too, and with `folders_edit` they can write them, except in folders marked `read_only`.
 
@@ -60,6 +68,7 @@ Addresses are `source:path`, for example `mind_palace:notes/pets.md`.
 | `folders_edit` | the read tools plus `folder_write`, `folder_append`, `folder_edit`, `folder_move`, `folder_delete` |
 | `terminal` | `terminal`, `sandbox_read`, `sandbox_write`, `sandbox_patch`, `sandbox_search` (they take an optional `backend`) |
 | `delegate` | `task_start`, `task_list`, `task_result`, `task_steer`, `task_send`, `task_stop`, `task_wait` (opt-in like folders and the terminal; needs the agent's `delegation` block, which gets defaults) |
+| `permissions` | `agents_list`, `agent_get_permissions`, `permission_levels_help`, `agent_set_level`, `agent_set_tool_groups`, `agent_add_rule`, `agent_remove_rule`, `agent_reset_rules` (operator; opt-in; same user's other agents, never yourself; each change needs the user's approval once, is audited, never "always"; not in dreams, tasks or workers; see `references/permissions.md`) |
 
 ## Dream-only tools
 
@@ -78,5 +87,5 @@ A dream writes only to `mind_palace` (needs `memory_edit`) and its own files (ne
 - After a successful write, the changed file is reindexed in the background once the reply ends.
 - Read-only sources and folders return an error that names the source; write to `mind_palace` or an editable folder instead.
 - `edit`, `folder_edit` and `skill_manage` patch require the old text to appear exactly once; add context if it does not.
-- In a disposable chat `memory_edit` tools, `memory`, `skill_manage`, `soul_edit`, the folder write tools, the whole `terminal` group and the `delegate` tools are not offered. Read tools, web and MCP stay.
+- In a disposable chat `memory_edit` tools, `memory`, `skill_manage`, `soul_edit`, the folder write tools, the whole `terminal` group, the `delegate` tools and the `permissions` tools are not offered. Read tools, web and MCP stay.
 - Most tool errors come back as text starting with `error:`; read it and fix the call instead of repeating it.

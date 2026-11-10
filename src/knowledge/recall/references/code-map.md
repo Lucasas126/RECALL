@@ -20,7 +20,7 @@ Paths are relative to the repository root. In Docker the same tree sits under `/
 | `src/agent/profile.py` | reads SOUL, memories, skills, questions; builds the system-prompt blocks |
 | `src/agent/default_soul.md` | template SOUL.md given to new agents |
 | `src/agent/default_soul.py` | loads that template |
-| `src/agent/templates.py` | agent templates for `agent create --from-template` (`default`, `guide`; guide SOUL in `src/agent/guide_soul.md`) |
+| `src/agent/templates.py` | agent templates for `agent create --from-template` (`default`, `guide`, `permission-manager`; SOULs in `src/agent/*_soul.md`) |
 | `src/agent/tools.py` | `build_tools`: assembles tools from groups, `allow`/`deny`, disposable rules |
 | `src/agent/tool_groups.py` | tool-group catalog and which tools each group holds |
 | `src/agent/tooling.py` | the `@tool` decorator and schema generation |

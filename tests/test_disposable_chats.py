@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 import test_service_steering as steering
 from auth_helpers import login
 from src.agent.agent import Agent
-from src.agent.tool_groups import DISPOSABLE_BLOCKED_TOOLS
+from src.agent.tool_groups import DISPOSABLE_BLOCKED_TOOLS, TOOL_GROUP_TOOLS
 from src.config.models import AgentTerminalBackend, AgentTerminalConfig, ModelsConfig, ResolvedAgent, SshBackendConfig
 from src.config.preferences import UserPreferences
 from src.core.review import ReviewQueue
@@ -173,7 +173,8 @@ class DisposableToolTests(unittest.TestCase):
         self.assertEqual(
             DISPOSABLE_BLOCKED_TOOLS,
             WRITE_TOOLS | {"folder_write", "folder_append", "folder_edit", "folder_move", "folder_delete"}
-            | TERMINAL_TOOLS | {"task_start", "task_list", "task_result", "task_steer", "task_send", "task_stop", "task_wait"},  # a disposable chat cannot launch tasks either
+            | TERMINAL_TOOLS | {"task_start", "task_list", "task_result", "task_steer", "task_send", "task_stop", "task_wait"}  # a disposable chat cannot launch tasks either
+            | set(TOOL_GROUP_TOOLS["permissions"]),  # nor change anyone's permissions
         )
 
     def test_a_disposable_chat_never_builds_the_terminal_tools(self) -> None:
