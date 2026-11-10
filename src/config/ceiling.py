@@ -25,6 +25,7 @@ GROUP_MIN_LEVEL: dict[str, Level] = {
     "folders_edit": SERVICE_MIN_LEVEL["folders_edit"],
     "delegate": SERVICE_MIN_LEVEL["delegate"],
     "permissions": SERVICE_MIN_LEVEL["permissions"],
+    "agents": SERVICE_MIN_LEVEL["agents"],
     "terminal": SERVICE_MIN_LEVEL["terminal_ssh"],
 }
 
@@ -86,6 +87,11 @@ def delegation_targets_allowed(level: Level) -> bool:
 def permissions_allowed(level: Level) -> bool:
     """Viewing and adjusting levels, tool groups and approval rules of the same user's agents (the `permissions` group)."""
     return group_allowed(level, "permissions")
+
+
+def agents_allowed(level: Level) -> bool:
+    """Creating, editing, renaming and deleting the same user's agents (the `agents` group)."""
+    return group_allowed(level, "agents")
 
 
 def workers_allowed(level: Level) -> bool:
@@ -191,6 +197,7 @@ class DreamCapabilities:
     limited_delegate: bool = False  # planned (read-only workers), not built in this step
     handoff: bool = False       # never: no tasks for other agents
     permissions: bool = False   # never
+    agents: bool = False        # never: no creating, editing or deleting agents
 
 
 def dream_capabilities(level: Level) -> DreamCapabilities:
@@ -247,6 +254,7 @@ class Capabilities:
     delegation_workers: bool
     delegation_targets: bool
     permissions: bool
+    agents: bool
     dream: DreamCapabilities
 
 
@@ -260,5 +268,6 @@ def capabilities(level: Level) -> Capabilities:
         delegation_workers=workers_allowed(level),
         delegation_targets=delegation_targets_allowed(level),
         permissions=permissions_allowed(level),
+        agents=agents_allowed(level),
         dream=dream_capabilities(level),
     )

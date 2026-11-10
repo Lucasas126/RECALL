@@ -30,6 +30,7 @@ SERVICE_TEXT = {
     "terminal_ssh": "use a terminal on an ssh backend without root (tool group terminal; always asks)",
     "delegation_targets": "hand tasks to the user's other agents (delegation.targets)",
     "permissions": "view and adjust the levels, tool groups and approval rules of the SAME user's agents, itself included within its own level (tool group permissions; every change needs the user's approval; its own level only lower)",
+    "agents": "list, create, edit, rename and delete the SAME user's agents, never their level, tool groups or approval rules (tool group agents; every change needs the user's approval)",
     "terminal_local": "use the `local` terminal backend (a shell on the RECALL host)",
     "terminal_root": "use an ssh backend whose user is root",
 }
@@ -136,12 +137,16 @@ def levels_help(capability: str = "") -> str:
         "denied. Hardline commands and protected paths are always refused.",
         "- Allowing everything on a real machine (a blanket allow rule, default allow or approvals off) needs the level admin.",
         "- The `local` backend and root ssh users are admin only; unprivileged ssh backends start at operator.",
-        "- Unattended runs (dreams, scheduled tasks) deny whatever would ask; they never change permissions.",
+        "- Unattended runs (dreams, scheduled tasks) deny whatever would ask; they never change permissions or agents.",
         "- An agent with the `permissions` group changes tool groups and approval rules of agents of its own user (itself "
         "included, never beyond its own level) and every change shows the user a card to approve once or deny. "
         "It sets the level of other agents up to its own level and the user's maximum, and may only lower its own (then it loses "
         "the group). The user can always change any level (Agents tab > level) up to their maximum level; only an administrator "
         "changes the maximum.",
+        "- An agent with the `agents` group lists, creates, edits, renames and deletes agents of its own user, every change on a card "
+        "to approve once or deny. A new agent gets at most the creator's level and the user's maximum; an agent above its own level "
+        "is read-only for it; it never renames or deletes itself, and never changes levels, tool groups or rules (the `permissions` "
+        "group does). Terminal backends, users and provider keys stay with the administrator.",
         "Recommend the lowest level that does the job.",
     ]
     return "\n".join(lines)

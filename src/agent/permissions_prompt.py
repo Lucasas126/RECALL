@@ -21,7 +21,8 @@ _CAN: dict[Level, str] = {
     Level.COLLABORATOR: "edit user folders, use MCP servers and run web-only workers (some actions ask the user first)",
     Level.OPERATOR: (
         "use terminal backends (asking the user), hand tasks to the user's other agents and, with the permissions tools, "
-        "adjust the level, tool groups and rules of the user's agents (yours: only lower; every change needs approval)"
+        "adjust levels, tool groups and rules of the user's agents (yours: only lower) and, with the agents tools, create, "
+        "edit, rename and delete them (every change needs approval)"
     ),
     Level.ADMIN: "all of it, including the local or root terminal, other users' data and the admin CLI (with approval)",
 }
@@ -36,7 +37,7 @@ _CANNOT: dict[Level, str] = {
 _DREAM = (
     "This is an unattended dream session: nobody can answer approvals, so anything that would ask is denied. "
     "Read as far as your level allows and write only your own files (mind palace, SOUL, memory, USER, skills); "
-    "no folder edits, terminal commands, task handoff or permission changes."
+    "no folder edits, terminal commands, task handoff, permission or agent changes."
 )
 
 

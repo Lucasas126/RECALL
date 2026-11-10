@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable
 
+from src.agent.toolsets.agents import build_agent_tools
 from src.agent.toolsets.delegate import build_delegate_tools
 from src.agent.toolsets.editing import build_edit_tools
 from src.agent.toolsets.memory import build_memory_tools
@@ -30,6 +31,7 @@ _ORDER = (
     "task_start", "task_list", "task_result", "task_steer", "task_send", "task_stop", "task_wait",
     "agents_list", "agent_get_permissions", "permission_levels_help",
     "agent_set_level", "agent_set_tool_groups", "agent_add_rule", "agent_remove_rule", "agent_reset_rules",
+    "agent_list", "agent_get", "agent_templates", "agent_create", "agent_update", "agent_rename", "agent_delete",
 )
 
 TOOL_ORDER = _ORDER  # every built-in tool name; MCP tools must not reuse one
@@ -86,6 +88,8 @@ def build_tools(
         base_tools.extend(build_delegate_tools(restrict_config(agent.config)))
     if "permissions" in selected:  # not in a disposable chat (workers and tasks): DISPOSABLE_BLOCKED_TOOLS
         base_tools.extend(build_permission_tools(restrict_config(agent.config)))
+    if "agents" in selected:  # same: DISPOSABLE_BLOCKED_TOOLS
+        base_tools.extend(build_agent_tools(restrict_config(agent.config)))
     tools_by_name = {
         func.tool_spec["function"]["name"]: func
         for func in base_tools

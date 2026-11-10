@@ -35,7 +35,7 @@ class BlockTests(unittest.TestCase):
         for level in Level:
             for dream in (False, True):
                 text = permissions_block(level, Level.ADMIN, dream=dream)
-                self.assertLessEqual(len(text.split()), 170)
+                self.assertLessEqual(len(text.split()), 180)
                 self.assertEqual(text, permissions_block(level, Level.ADMIN, dream=dream))
                 self.assertFalse(re.search(r"\d{4}-\d{2}-\d{2}", text))
 

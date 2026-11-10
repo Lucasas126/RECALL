@@ -19,7 +19,7 @@ GROUP_FIRST_LEVEL = {
     "memory_read": L.READER, "folders_read": L.READER,
     "memory_edit": L.ASSISTANT, "self": L.ASSISTANT, "web": L.ASSISTANT,
     "folders_edit": L.COLLABORATOR, "delegate": L.COLLABORATOR,
-    "terminal": L.OPERATOR, "permissions": L.OPERATOR,
+    "terminal": L.OPERATOR, "permissions": L.OPERATOR, "agents": L.OPERATOR,
 }
 SSH = {"type": "ssh", "host": "box.example", "key_file": "/k", "known_hosts_file": "/h"}
 BACKENDS = {
