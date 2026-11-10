@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import time
 import unittest
 from unittest.mock import Mock
 
@@ -9,6 +11,22 @@ from src.service.chat import ChatService
 from src.service.dream import dream_notification, summary_block
 
 _LAST = {"id": "20261103-040000-ab12", "status": "completed", "started_at": "2026-11-03T04:00:00+01:00"}
+
+
+def setUpModule() -> None:
+    """The fixtures are written in UTC+1: pin the process zone so the local-time rendering does not depend on the host."""
+    global _OLD_TZ
+    _OLD_TZ = os.environ.get("TZ")
+    os.environ["TZ"] = "CET-1"  # POSIX form, no tz database needed
+    time.tzset()
+
+
+def tearDownModule() -> None:
+    if _OLD_TZ is None:
+        os.environ.pop("TZ", None)
+    else:
+        os.environ["TZ"] = _OLD_TZ
+    time.tzset()
 
 
 def _status(**over) -> dict:
