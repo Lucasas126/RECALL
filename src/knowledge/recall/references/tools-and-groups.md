@@ -48,7 +48,7 @@ Addresses are `source:path`, for example `mind_palace:notes/pets.md`.
 | `agents_list` | permissions | the user's agents: levels (effective, required, declared), groups, learned rules |
 | `agent_get_permissions` | permissions | one agent: levels, user max, groups, backends with kind, rules per layer |
 | `permission_levels_help` | permissions | what each level allows; the level a capability needs |
-| `agent_set_level` | permissions | another agent's level: at most yours and the user's max, at least what it needs |
+| `agent_set_level` | permissions | a level: at most yours and the user's max, at least what it needs; yours only lower |
 | `agent_set_tool_groups` | permissions | replace another agent's groups; its level must allow each |
 | `agent_add_rule` | permissions | add an approval rule; a blanket allow on a real machine needs admin |
 | `agent_remove_rule` | permissions | remove a rule by index |
@@ -68,7 +68,7 @@ Addresses are `source:path`, for example `mind_palace:notes/pets.md`.
 | `folders_edit` | the read tools plus `folder_write`, `folder_append`, `folder_edit`, `folder_move`, `folder_delete` |
 | `terminal` | `terminal`, `sandbox_read`, `sandbox_write`, `sandbox_patch`, `sandbox_search` (they take an optional `backend`) |
 | `delegate` | `task_start`, `task_list`, `task_result`, `task_steer`, `task_send`, `task_stop`, `task_wait` (opt-in like folders and the terminal; needs the agent's `delegation` block, which gets defaults) |
-| `permissions` | `agents_list`, `agent_get_permissions`, `permission_levels_help`, `agent_set_level`, `agent_set_tool_groups`, `agent_add_rule`, `agent_remove_rule`, `agent_reset_rules` (operator; opt-in; same user's other agents, never yourself; each change needs the user's approval once, is audited, never "always"; not in dreams, tasks or workers; see `references/permissions.md`) |
+| `permissions` | `agents_list`, `agent_get_permissions`, `permission_levels_help`, `agent_set_level`, `agent_set_tool_groups`, `agent_add_rule`, `agent_remove_rule`, `agent_reset_rules` (operator; opt-in; same user's agents, yours too (own level only lower); each change needs the user's approval once, is audited, never "always"; not in dreams, tasks or workers; see `references/permissions.md`) |
 
 ## Dream-only tools
 

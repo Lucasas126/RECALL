@@ -677,7 +677,7 @@ _SPANISH = {
     "Delegate subtasks": "Delegar subtareas",
     "Hand a self-contained task to a short-lived worker in a hidden chat and get its result back.": "Encargar una tarea autocontenida a un trabajador efímero en un chat oculto y recibir su resultado.",
     "Manage permissions": "Gestionar permisos",
-    "View and change the levels, tool groups and approval rules of your other agents, each change with your approval.": "Ver y cambiar los niveles, los grupos de herramientas y las reglas de aprobación de tus otros agentes, cada cambio con tu aprobación.",
+    "View and change the levels, tool groups and approval rules of your agents (yours too: groups and rules within your level, your level only lower), each change with your approval.": "Ver y cambiar los niveles, los grupos de herramientas y las reglas de aprobación de tus agentes (también los tuyos: grupos y reglas dentro de tu nivel, tu nivel solo a la baja), cada cambio con tu aprobación.",
     "Terminal sandbox": "Terminal en entorno aislado",
     "Run commands and edit files in a sandbox, with your approval.": "Ejecutar comandos y editar archivos en un entorno aislado, con tu aprobación.",
     "agent '{agent_id}' uses the terminal tool group but has no terminal.backends": "El agente '{agent_id}' usa el grupo de herramientas terminal pero no tiene terminal.backends",

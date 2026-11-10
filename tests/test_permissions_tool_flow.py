@@ -12,7 +12,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).parent))
 os.environ.setdefault("RECALL_SESSION_SECRET", "x")
 
-from permissions_tool_helpers import OPS, PermissionsFixture, Run
+from permissions_tool_helpers import BOT_GROUPS, MORE_GROUPS, OPS, PermissionsFixture, Run
 
 from src.config.levels import Level
 from src.terminal.audit import audit_path
@@ -71,12 +71,12 @@ class Reads(PermissionsFixture):
 class Changes(PermissionsFixture):
     def test_the_card_names_caller_target_and_the_diff(self) -> None:
         run = Run(self.service)
-        self.call("agent_set_level", run, agent_id="bot", level="collaborator")
+        self.call("agent_set_tool_groups", run, agent_id="bot", groups=MORE_GROUPS)
         card = run.cards[0]
-        self.assertEqual(card["tool"], "agent_set_level")
+        self.assertEqual(card["tool"], "agent_set_tool_groups")
         self.assertEqual(card["options"], ["once"])
         self.assertEqual((card["agent_id"], card["chat_id"]), ("boss", "chat1"))
-        for expected in ("Agent 'Boss' [boss]", "agent 'Bot' [bot]", "before: assistant", "after:  collaborator"):
+        for expected in ("Agent 'Boss' [boss]", "agent 'Bot' [bot]", "before: memory_read, memory_edit", "after:  memory_read, memory_edit, web"):
             self.assertIn(expected, card["command"])
         self.assertIn("always allow", card["reason"])
 
@@ -108,7 +108,7 @@ class Changes(PermissionsFixture):
     def test_nothing_to_change_asks_nobody(self) -> None:
         run = Run(self.service)
         for name, args in (
-            ("agent_set_level", {"agent_id": "bot", "level": "assistant"}),
+            ("agent_set_tool_groups", {"agent_id": "bot", "groups": BOT_GROUPS}),
             ("agent_set_tool_groups", {"agent_id": "bot", "groups": ["memory_edit", "memory_read"]}),
             ("agent_reset_rules", {"agent_id": "ops"}),
         ):
@@ -123,20 +123,20 @@ class Changes(PermissionsFixture):
 
     def test_the_other_settings_of_the_agent_survive_a_change(self) -> None:
         self.write_agent("bot", "id: bot\nname: Bot\ndescription: keeps me\nlevel: assistant\nchat_config:\n  tool_groups: [memory_read]\n  reasoning: false\nfolders: []\n")
-        self.call("agent_set_level", Run(self.service), agent_id="bot", level="collaborator")
+        self.call("agent_set_tool_groups", Run(self.service), agent_id="bot", groups=MORE_GROUPS)
         stored = self.stored("bot")
-        self.assertEqual((stored["description"], stored["chat_config"]["reasoning"], stored["level"]), ("keeps me", False, "collaborator"))
+        self.assertEqual((stored["description"], stored["chat_config"]["reasoning"], stored["level"]), ("keeps me", False, "assistant"))
 
     def test_the_next_reply_of_the_target_sees_the_change(self) -> None:
         before = self.service._agents.fingerprint("user-a", "bot")
-        self.call("agent_set_level", Run(self.service), agent_id="bot", level="collaborator")
+        self.call("agent_set_tool_groups", Run(self.service), agent_id="bot", groups=MORE_GROUPS)
         self.assertNotEqual(self.service._agents.fingerprint("user-a", "bot"), before)  # the service rebuilds on a changed file
 
     def test_the_target_must_be_valid_after_the_change(self) -> None:
         # lowering the level of an undeclared agent is a declaration; a level that the store refuses is reported, nothing written
         before = self.read("user-a/agents/ops.yaml")
         with patch("src.config.agents.check_agent_level", side_effect=ValueError("boom")):
-            result = self.call("agent_set_level", Run(self.service), agent_id="ops", level="collaborator")
+            result = self.call("agent_set_tool_groups", Run(self.service), agent_id="ops", groups=MORE_GROUPS)
         self.assertIn("error:", result)
         self.assertEqual(self.read("user-a/agents/ops.yaml"), before)
 
@@ -144,14 +144,14 @@ class Changes(PermissionsFixture):
 class Audit(PermissionsFixture):
     def test_an_approved_change_is_audited_for_target_and_caller(self) -> None:
         run = Run(self.service)
-        self.call("agent_set_level", run, agent_id="bot", level="collaborator")
+        self.call("agent_set_tool_groups", run, agent_id="bot", groups=MORE_GROUPS)
         for owner in ("bot", "boss"):
             (line,) = self.audit_events(owner)
             with self.subTest(file=owner):
                 self.assertEqual(
                     {key: line[key] for key in ("event", "actor", "actor_kind", "user", "target", "tool", "field", "before", "after", "decision", "applied")},
                     {"event": "permission_change", "actor": "boss", "actor_kind": "agent", "user": "user-a", "target": "bot",
-                     "tool": "agent_set_level", "field": "level", "before": "assistant", "after": "collaborator", "decision": "approved", "applied": True},
+                     "tool": "agent_set_tool_groups", "field": "tool_groups", "before": ["memory_read", "memory_edit"], "after": ["memory_read", "memory_edit", "web"], "decision": "approved", "applied": True},
                 )
                 self.assertEqual(line["approval_id"], run.cards[0]["id"])
                 self.assertEqual(line["chat"], "chat1")
@@ -159,26 +159,26 @@ class Audit(PermissionsFixture):
         self.assertEqual(self.audit_events("boss")[0]["agent"], "boss")
 
     def test_a_denied_change_is_audited_and_not_applied(self) -> None:
-        self.call("agent_set_level", Run(self.service, answers=[("deny", "once")]), agent_id="bot", level="collaborator")
+        self.call("agent_set_tool_groups", Run(self.service, answers=[("deny", "once")]), agent_id="bot", groups=MORE_GROUPS)
         (line,) = self.audit_events("bot")
-        self.assertEqual((line["decision"], line["reason"], line["after"]), ("denied", "denied by user", "collaborator"))
+        self.assertEqual((line["decision"], line["reason"], line["after"]), ("denied", "denied by user", MORE_GROUPS))
         self.assertNotIn("applied", line)
 
     def test_a_timeout_is_audited_as_denied(self) -> None:
         self.service._approvals.timeout_seconds = 0.3
-        self.call("agent_set_level", Run(self.service, silent=True), agent_id="bot", level="collaborator")
+        self.call("agent_set_tool_groups", Run(self.service, silent=True), agent_id="bot", groups=MORE_GROUPS)
         self.assertEqual(self.audit_events("bot")[0]["reason"], "timed out")
 
     def test_a_refused_attempt_is_audited_in_the_callers_file_only(self) -> None:
         run = Run(self.service)
-        self.call("agent_set_level", run, agent_id="bot", level="admin")
+        self.call("agent_set_tool_groups", run, agent_id="bot", groups=["memory_read", "terminal"])
         self.assertEqual(self.audit_events("bot"), [])
         (line,) = self.audit_events("boss")
-        self.assertEqual((line["decision"], line["target"], line["field"]), ("refused", "bot", "level"))
-        self.assertIn("maximum level", line["reason"])
+        self.assertEqual((line["decision"], line["target"], line["field"]), ("refused", "bot", "tool_groups"))
+        self.assertIn("not allowed at the level", line["reason"])
 
     def test_an_id_that_is_no_agent_never_creates_a_folder(self) -> None:
-        self.call("agent_set_level", Run(self.service), agent_id="stranger", level="reader")
+        self.call("agent_set_tool_groups", Run(self.service), agent_id="stranger", groups=["memory_read"])
         self.assertFalse(audit_path(self.data_dir, "user-a", "stranger").parent.exists())
         self.assertFalse(audit_path(self.data_dir, "user-b", "stranger").parent.exists())
 
@@ -191,10 +191,10 @@ class Audit(PermissionsFixture):
     def test_without_a_writable_audit_trail_nothing_is_asked_or_changed(self) -> None:
         run = Run(self.service)
         with patch("src.service.agent_permissions.audit_writable", return_value=False):
-            result = self.call("agent_set_level", run, agent_id="bot", level="collaborator")
+            result = self.call("agent_set_tool_groups", run, agent_id="bot", groups=MORE_GROUPS)
         self.assertIn("audit trail", result)
         self.assertEqual(run.cards, [])
-        self.assertEqual(self.stored("bot")["level"], "assistant")
+        self.assertEqual(self.stored("bot")["chat_config"]["tool_groups"], BOT_GROUPS)
 
 
 class Races(PermissionsFixture):
@@ -204,13 +204,13 @@ class Races(PermissionsFixture):
 
         def tamper(kind, data):
             if kind == "approval":  # the user (or another process) edits the agent while the card is open
-                self.write_agent("bot", "id: bot\nname: Bot\nlevel: reader\nchat_config:\n  tool_groups: [memory_read]\n")
+                self.write_agent("bot", "id: bot\nname: Bot\nlevel: assistant\nchat_config:\n  tool_groups: [memory_read]\n")
             emit(kind, data)
 
         run.emit = tamper  # type: ignore[method-assign]
-        result = self.call("agent_set_level", run, agent_id="bot", level="collaborator")
+        result = self.call("agent_set_tool_groups", run, agent_id="bot", groups=MORE_GROUPS)
         self.assertIn("changed while the approval was pending", result)
-        self.assertEqual(self.stored("bot")["level"], "reader")
+        self.assertEqual(self.stored("bot")["chat_config"]["tool_groups"], ["memory_read"])
         (line,) = self.audit_events("bot")
         self.assertEqual((line["decision"], line["applied"]), ("approved", False))
 
@@ -220,13 +220,13 @@ class Races(PermissionsFixture):
 
         def lower(kind, data):
             if kind == "approval":
-                self.write_user(self.read("user-a/user.yaml").replace("max_level: operator", "max_level: collaborator"))
+                self.write_user(self.read("user-a/user.yaml").replace("max_level: operator", "max_level: reader"))
             emit(kind, data)
 
         run.emit = lower  # type: ignore[method-assign]
-        result = self.call("agent_set_level", run, agent_id="bot", level="operator")
+        result = self.call("agent_set_tool_groups", run, agent_id="bot", groups=MORE_GROUPS)
         self.assertIn("error:", result)
-        self.assertEqual(self.stored("bot")["level"], "assistant")
+        self.assertEqual(self.stored("bot")["chat_config"]["tool_groups"], BOT_GROUPS)
 
 
 class ServicePath(PermissionsFixture):
@@ -238,7 +238,7 @@ class ServicePath(PermissionsFixture):
         outcome = {}
 
         def asker():
-            outcome["result"] = self.call("agent_set_level", run, agent_id="bot", level="collaborator")
+            outcome["result"] = self.call("agent_set_tool_groups", run, agent_id="bot", groups=MORE_GROUPS)
 
         thread = threading.Thread(target=asker)
         thread.start()
