@@ -68,7 +68,7 @@ class TelegramApprovalTests(unittest.IsolatedAsyncioTestCase):
                 query, update = self.query(f"ap:{DATA['id']}:{choice}")
                 await approval_callback(update, self.context)
                 self.service.resolve_approval.assert_called_once_with(
-                    "test-user", "agent-a", "chat-1", DATA["id"], decision)
+                    "test-user", "agent-a", "chat-1", DATA["id"], decision, "once")
                 query.answer.assert_awaited_once()
                 self.assertNotIn(DATA["id"], self.state.approvals)
                 edited = self.bot.edit_message_text.await_args

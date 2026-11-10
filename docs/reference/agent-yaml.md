@@ -86,7 +86,7 @@ terminal tools not built. `terminal.backend`, `workdir` and `approvals` at the t
 [terminal guide](../user-guide/terminal.md).
 
 <a id="approval_rules"></a>`approval_rules` (optional) is the agent layer of the [approval rules](../user-guide/terminal.md#approval-rules): `default` (`allow`, `ask` or `deny`)
-and `rules`, a list of `{verdict, tool, id, command, path, backend, backend_kind, dangerous, reason}`; unknown keys are rejected. It adds to the
+and `rules`, a list of `{verdict, tool, id, command, path, backend, backend_kind, dangerous, exact, reason}`; unknown keys are rejected. `exact: true` makes `command` / `path` match literally; the rules appended by *Always for this agent* on an approval card are exact `allow` rules with `reason: approved always for this agent` (list or reset them in the agent form, the [API](api.md#learned-approval-rules) or `python -m src.admin agent rules`). Saving the agent from the web form keeps this block. It adds to the
 installation and user lists; deny beats ask beats allow. The backend `approvals` key is a shorthand that only counts when the file sets it (the Agents tab
 always writes it); `off`, a `default: allow` or a rule that allows everything on a `machine` or `local` backend needs `level: admin` (a `sandbox` backend
 only needs operator), else the agent does not load.

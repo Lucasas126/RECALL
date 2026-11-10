@@ -66,8 +66,8 @@ They replace the fixed per-backend modes `manual | smart | off`.
 - **Matching:** commands (existing parser), path globs, MCP tools, web domains and the backend kind (sandbox or real machine).
 - **When an `ask` rule matches** the user chooses *approve once*, *approve for this session*, *approve always for this agent*
   (adds a narrow rule to that agent) or *deny*.
-- **"Always" rules are as narrow as possible** (the exact command or its prefix), never a wildcard. A blanket allow on a real
-  machine can only be set by an admin.
+- **"Always" rules are as narrow as possible** (the exact command, or the exact path of a file operation), never a prefix or a
+  wildcard. A blanket allow on a real machine can only be set by an admin.
 - **Unattended runs** (dreams, scheduled tasks) deny whatever would ask.
 - **Equivalence with today:** `manual` = ask always; `smart` = ask only the dangerous list; `off` = allow all except the floor.
 
@@ -110,6 +110,38 @@ Not routed through the engine yet (backlog): destructive folder operations (`fol
 user folders) and non-read-only MCP tools. Today they never ask; routing them needs per-call plumbing and cards for actions with
 no command or backend.
 
+
+### Implemented (step 4): approvals with memory
+
+Code: `src/terminal/rules.py` (`rules_for_action`, `rule_for_action`, `offered_scopes`, `action_signature`), `src/terminal/approvals.py`
+(`ApprovalBroker.answer`, session grants), `TerminalSession.decide`, `src/config/agents.py` (`AgentStore.add_approval_rules`,
+`remove_approval_rule`, `clear_approval_rules`), `ChatService.resolve_approval` and `learn_approval_rules`, the web card and the
+Telegram buttons.
+
+- **Four answers.** The card (web and Telegram) offers *Approve once*, *Always in this session*, *Always for this agent* and *Deny*.
+  `session` is in memory only: it is keyed by chat id and the exact action (tool kind, backend and the full command or path), is
+  shared by nobody else and ends with the process or when the chat is deleted. `agent` appends a narrow `allow` rule to the
+  agent file's `approval_rules`, through `AgentStore` (the user's lock, full validation and `check_agent_level` again).
+- **The rule is exact.** A terminal command gets one rule per segment (`command_units`), each with `exact: true` (the text must
+  equal the segment, no word prefix, no glob) and the backend's name; a file operation gets its exact path, its tool kind
+  (`file_read` / `file_write`) and the backend. Identical rules are never added twice. A command that looks like it holds a
+  secret, or whose segment is longer than a rule may be, gets no `agent` option.
+- **When "always" is offered.** Never for an action the policy assesses as `dangerous`; never when the verdict is not a plain `ask`
+  (a `deny` is never asked); `agent` only when appending the rule would really allow the action (an `ask` rule of any layer would
+  still win, so only `session` is offered then); and only on a plain chat run: a subagent task asks in its parent's chat and gets
+  `once`. The fixed floor is checked before the rules, so no appended rule can lift it.
+- **Guardrail.** If saving fails (the agent would no longer satisfy the blanket-allow guardrail, the file cannot be written, the
+  audit trail is not writable...), the action is still approved **once** and the answer carries `error`; nothing is written.
+- **Live pickup.** The running agent's rule set is updated at once, so the next call of the same reply is not asked again; other
+  chats of the agent rebuild from the file before their next reply.
+- **Audit.** Every approval record in `terminal_audit.jsonl` has `scope` (`once`, `session`, `agent`, or `deny` for a refusal; an
+  action allowed by a session grant is `decision: approved:session`). Writing or removing an agent rule is its own line:
+  `event: approval_rule`, `action: add|remove`, `actor: user` (`admin` from the CLI), `user`, `agent`, `rule`, and `index` / `via: reset` / `chat` where they apply.
+- **Reset.** The agent's rules can be listed, removed one by one or all at once from the web API, the agent form and
+  `python -m src.admin agent rules`; the layer `default` stays.
+- **Saving the agent form keeps the rules.** A save that does not send `approval_rules` keeps the stored list.
+
+Not in this step: the `permissions` tool (step 5), rules for folder operations and MCP calls.
 
 ## Dream mode
 

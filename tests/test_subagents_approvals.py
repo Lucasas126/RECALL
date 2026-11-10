@@ -350,7 +350,7 @@ class EndToEndApprovalTests(TerminalGrantFixture):
 
         with self.assertRaises(ApprovalForbidden):
             self.service.resolve_approval("user-two", "agent-one", self.chat, pending["id"], "approve")
-        self.assertEqual(self.service.resolve_approval("user-one", "agent-one", self.chat, pending["id"], "approve"), {"status": "approved"})
+        self.assertEqual(self.service.resolve_approval("user-one", "agent-one", self.chat, pending["id"], "approve"), {"status": "approved", "scope": "once"})
         live.done.wait(8)
         record = self.record(live.task_id)
         self.assertEqual(record["status"], "done")

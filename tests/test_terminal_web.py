@@ -84,14 +84,14 @@ class ApprovalApiTests(steering.SteeringFixture):
     def test_approve_resumes_the_reply_and_the_stream_carries_both_events(self) -> None:
         holder, thread, pending = self.ask()
         answer = self.client.post(f"{self.base}/approvals/{pending['id']}", json={"decision": "approve"})
-        self.assertEqual((answer.status_code, answer.json()), (200, {"status": "approved"}))
+        self.assertEqual((answer.status_code, answer.json()), (200, {"status": "approved", "scope": "once"}))
         thread.join(5)
         events = _events(holder["response"])
         kinds = [e["event"] for e in events]
         self.assertLess(kinds.index("approval"), kinds.index("approval_resolved"))
         self.assertEqual(events[kinds.index("approval")]["data"]["id"], pending["id"])
         self.assertEqual(events[kinds.index("approval_resolved")]["data"],
-                         {"id": pending["id"], "decision": "approved", "reason": "approved"})
+                         {"id": pending["id"], "decision": "approved", "reason": "approved", "scope": "once"})
         self.assertIn("outcome: approved", [e["data"] for e in events if e["event"] == "text"][-1])
         self.assertEqual(kinds[-1], "done")
         self.assertEqual(self.client.get(f"{self.base}/approvals").json(), [])
@@ -99,7 +99,7 @@ class ApprovalApiTests(steering.SteeringFixture):
     def test_deny(self) -> None:
         holder, thread, pending = self.ask()
         answer = self.client.post(f"{self.base}/approvals/{pending['id']}", json={"decision": "deny"})
-        self.assertEqual((answer.status_code, answer.json()), (200, {"status": "denied"}))
+        self.assertEqual((answer.status_code, answer.json()), (200, {"status": "denied", "scope": "deny"}))
         thread.join(5)
         texts = [e["data"] for e in _events(holder["response"]) if e["event"] == "text"]
         self.assertIn("outcome: denied (denied by user)", texts[-1])
@@ -107,8 +107,8 @@ class ApprovalApiTests(steering.SteeringFixture):
     def test_answering_twice_is_safe(self) -> None:
         holder, thread, pending = self.ask()
         url = f"{self.base}/approvals/{pending['id']}"
-        self.assertEqual(self.client.post(url, json={"decision": "approve"}).json(), {"status": "approved"})
-        self.assertEqual(self.client.post(url, json={"decision": "approve"}).json(), {"status": "approved"})
+        self.assertEqual(self.client.post(url, json={"decision": "approve"}).json(), {"status": "approved", "scope": "once"})
+        self.assertEqual(self.client.post(url, json={"decision": "approve"}).json(), {"status": "approved", "scope": "once"})
         thread.join(5)
 
     def test_unknown_approval_is_404(self) -> None:
