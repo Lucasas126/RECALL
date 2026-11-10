@@ -58,16 +58,18 @@ The web **Agents** tab configures these groups for each agent:
   Needs the group in `tool_groups`; the `delegation` block is optional. Limit errors name the limit hit. See the [delegation guide](../user-guide/delegation.md).
 
 <a id="permissions"></a>
-- `permissions` (level `operator`): view and change the levels, tool groups and approval rules of the **same user's other agents**. Results are
+- `permissions` (level `operator`): view and change the levels, tool groups and approval rules of the **same user's agents**, the caller included within its own level. Results are
   JSON or `error: ...`; names and rule texts are data. Reads: `agents_list()` (per agent: `id`, `name`, effective `level`, `required_level`,
-  `declared_level` or `null`, `tool_groups`, `learned_rules`), `agent_get_permissions(agent_id)` (adds the user's `max_level`, terminal
+  `declared_level` or `null`, `tool_groups`, `learned_rules`, `is_you`; plus `how_to_change_level`), `agent_get_permissions(agent_id)` (adds the user's `max_level`, terminal
   backends with their `kind`, and the approval rules of the installation, user and agent layers; agent rules come with their index) and
   `permission_levels_help(capability="")` (every level and what it allows, built from the code; or the level one capability needs).
   Changes: `agent_set_level(agent_id, level)` (at most the user's `max_level` and the caller's own level, at least what the target
-  needs), `agent_set_tool_groups(agent_id, groups)` (the complete new list; each group must be allowed by the target's level and a
+  needs; on itself an agent can only lower its level, after removing the groups that need the higher one, and then loses the group),
+  `agent_set_tool_groups(agent_id, groups)` (the complete new list; each group must be allowed by the target's level and a
   group added by the caller's), `agent_add_rule(agent_id, rule)`, `agent_remove_rule(agent_id, index)` and `agent_reset_rules(agent_id)`
   (the agent layer only; a blanket allow on a machine or local backend needs `admin` for the target and for the caller). An agent
-  cannot change itself or another user's agents. Every change shows the user a card (caller, target, before -> after) that offers only
+  can change itself but never raise its level or lift a ceiling (`agent_get_permissions` returns `how_to_change_level`), and cannot touch another user's agents. Every change shows the user a card
+  (caller, target, before -> after; a self-change is marked) that offers only
   *Approve* and *Deny*; it is never remembered, is audited (`permission_change` in `terminal_audit.jsonl`) and applied through the same
   validation as the web form. Not available in dreams, scheduled tasks or workers. See [permissions](../architecture/permissions.md#implemented-step-5-the-permissions-tool-group).
 

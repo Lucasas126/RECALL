@@ -153,12 +153,22 @@ Code: `src/agent/toolsets/permissions.py` (the eight tools and the card), `src/s
 - **Tools.** Reads: `agents_list` (id, name, effective, required and declared level, groups, number of learned rules),
   `agent_get_permissions(agent_id)` (also the user's `max_level`, terminal backends with kind, approval rules per layer) and
   `permission_levels_help(capability="")` (text built from `ceiling.py`/`levels.py`). Changes: `agent_set_level`, `agent_set_tool_groups`,
-  `agent_add_rule`, `agent_remove_rule`, `agent_reset_rules`. Results are JSON (names and rule texts are data) or `error: ...`.
+  `agent_add_rule`, `agent_remove_rule`, `agent_reset_rules`. `agent_get_permissions` and `agents_list` return `how_to_change_level`
+  (ask the user: Agents tab > level, limited by their maximum level). Results are JSON (names and rule texts are data) or `error: ...`.
 - **Scope.** The user is the caller's own (no user argument) and the target must be in that user's `agents`; an id of another user,
-  a path-like id or an unknown id gives the same refusal. A change never targets the caller itself (level, groups or rules).
+  a path-like id or an unknown id gives the same refusal. The target may be the caller itself (see *Self-change*). A caller whose
+  stored level fell below operator, or who lost the group, is refused.
 - **Level.** `agent_set_level` needs level <= the user's `max_level`, <= the caller's effective level (the lower of the running level,
-  so a worker's, and the stored one) and >= what the target's configuration requires. A caller whose stored level fell below operator,
-  or who lost the group, is refused.
+  so a worker's, and the stored one) and >= what the target's configuration requires. The user (web form, admin CLI) can always
+  change any level up to `max_level`; only an administrator changes `max_level`.
+- **Self-change.** All five change tools may target the caller. Groups and rules: the same checks with the caller as target (kept and
+  added groups allowed by its effective level; the step-3 guardrail, no blanket allow on a `machine`/`local` backend below admin;
+  an undeclared agent is not raised through a group). Level: only lowered or kept, never raised (target level <= the caller's
+  effective level, the lower of the running and the stored one), and not below what its configuration needs: the message tells it to
+  remove the groups that need the higher level first with `agent_set_tool_groups` (the plan uses the stored configuration, so
+  dropping `permissions` and then setting the level lower works in one reply). Below operator the caller no longer holds the
+  group (validation `required <= level`), so it cannot raise itself again: only the user or another operator agent can. The
+  card says it is a self-change and offers once/deny only; the audit has one line (`actor` equals `target`).
 - **Groups.** Every group must be allowed by the target's current level (so an undeclared agent is never raised implicitly), a group
   that is added must also be allowed by the caller's level, and `terminal` needs the target's `terminal` block.
 - **Rules.** The rule is validated like the API validates it (unknown keys, `default` and the reason reserved for learned rules are
@@ -173,14 +183,14 @@ Code: `src/agent/toolsets/permissions.py` (the eight tools and the card), `src/s
 - **Audit.** One line per attempt in `terminal_audit.jsonl` of the target and of the caller: `event: permission_change`, `actor`
   (caller id), `actor_kind: agent`, `user`, `agent` (file owner), `target`, `tool`, `field`, `action`, `before`, `after`,
   `decision` (`approved`, `denied`, or `refused` for an attempt the rules blocked before anyone was asked; that one only goes to the
-  caller's file), `reason`, `approval_id`, `chat`, `applied`, and `rule` / `index` / `rules` for rules. Rule commands are redacted.
+  caller's file; a self-change writes one line, because target and caller are the same file), `reason`, `approval_id`, `chat`, `applied`, and `rule` / `index` / `rules` for rules. Rule commands are redacted.
 - **Running targets.** The file changes at once and the target's other chats rebuild before their next reply (as for rules learned
   from a card); a reply already running keeps its old configuration until it ends.
 - **Template.** `agent create --from-template permission-manager`: level `operator`, groups `memory_read`, `memory_edit`, `self`,
   `permissions` (no terminal, no web), a short SOUL. It fails with a clear message for a user whose `max_level` is below operator.
 
-Decisions: a mutation on the caller itself is refused for every field (an agent adding rules or groups to itself is the same
-escalation as raising its level); removing an `ask` or `deny` rule, which loosens the target, is allowed with a warning on the card.
+Decisions: a self-change is allowed because it can only stay inside the level the user gave (the human still approves each
+one) and a level can only go down; removing an `ask` or `deny` rule, which loosens the target, is allowed with a warning on the card.
 
 ## Dream mode
 

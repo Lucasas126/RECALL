@@ -85,9 +85,9 @@ whole installation; run a dedicated container (or a separate RECALL deployment) 
 isolated; restrict the container's egress; keep backups of `.config/`. Values stored in `secrets.env` are masked in terminal
 output as a safety net, not as a guarantee.
 
-**Agents that manage permissions.** The `permissions` tool group (level `operator`) lets an agent change the levels, tool groups and approval
-rules of the same user's other agents. It cannot touch itself, another user's agents, a level above its own or the user's `max_level`, or a
-blanket allow on a real machine below `admin`. Every change shows the user a card (caller, target, before -> after) with only *Approve* and
+**Agents that manage permissions.** The `permissions` tool group (level `operator`) lets an agent change the level, tool groups and approval
+rules of the same user's agents, itself included but only within its own level (it can lower its own level, never raise it). It cannot touch
+another user's agents, give a level above its own or the user's `max_level`, add what its level forbids, or write a blanket allow on a real machine below `admin`. Every change shows the user a card (caller, target, before -> after) with only *Approve* and
 *Deny*: nothing is remembered, and a dream, a scheduled task or a worker cannot use it. Each attempt, approved or not, is audited in
 `terminal_audit.jsonl` (`event: permission_change`). Give the group only to an agent whose SOUL you trust, read the diff on each card, and
 remember that a terminal on a real machine can still reach the config folder: the group is the supported, audited way to change permissions, not the only
