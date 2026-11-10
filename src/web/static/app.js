@@ -509,7 +509,6 @@ function translateInterface() {
     ["agent-terminal-no-backends", "No terminal backends are configured. Add one under terminal_backends in your user configuration; see docs/user-guide/terminal.md."],
     ["agent-terminal-timeout-label", "Command timeout (seconds)"],
     ["agent-level-legend", "Permission level"], ["agent-level-label", "Level"],
-    ["agent-level-hint", "The level is a ceiling over what the agent may use: tools, MCP, terminal and delegation. Choose the lowest level that does the job. Only an administrator changes your maximum level."],
     ["agent-rules-label", "Approval rules"],
     ["agent-rules-hint", "Rules of this agent for commands and file operations. The strictest verdict wins: deny beats ask, ask beats allow. Hardline commands and protected paths are always refused."],
     ["agent-rules-default-label", "When no rule matches"], ["agent-rules-default-inherit", "Follow the user and installation defaults"],
@@ -1190,10 +1189,17 @@ function updateLevelUi() {
     select.value = catalog.levels[target].name;
   }
   const advice = levelAdvice(catalog, select.value, choices, max);
-  $("agent-level-description").textContent = levelDescriptionText(catalog, select.value, translatedText);
-  $("agent-level-required").textContent = tr("Required by the current choices: {level} ({service})", {
-    level: levelTitle(catalog, advice.required.level), service: levelReasonText(advice.required.reason, toolGroupName),
-  });
+  $("agent-level-description").replaceChildren(...levelDescriptionItems(catalog, select.value, translatedText).map((item) => {
+    const line = Object.assign(document.createElement("li"), { textContent: item.text });
+    if (item.detail) line.title = item.detail;
+    return line;
+  }));
+  $("agent-level-info").title = [
+    tr("The level is a ceiling over what the agent may use: tools, MCP, terminal and delegation. Choose the lowest level that does the job. Only an administrator changes your maximum level."),
+    tr("Required by the current choices: {level} ({service})", {
+      level: levelTitle(catalog, advice.required.level), service: levelReasonText(advice.required.reason, toolGroupName),
+    }),
+  ].join("\n\n");
   $("agent-level-message").textContent = levelMessage(catalog, advice, select.value, max, toolGroupName);
   $("agent-level").classList.toggle("warning", advice.problem !== null);
   const badge = $("agent-form-level");
@@ -5122,7 +5128,23 @@ function levelOptions(catalog, maxName) {
 // One line for a level, from the texts of its services (translate: the same function for every part).
 function levelDescriptionText(catalog, name, translate) {
   const found = (catalog?.levels ?? []).find((level) => level.name === name);
-  return found ? found.parts.map(translate).join("; ") : "";
+  return found ? sentenceCase(found.parts.map(translate).join("; ")) : "";
+}
+
+function sentenceCase(text) {
+  const chars = [...String(text ?? "")];
+  return chars.length ? chars[0].toUpperCase() + chars.slice(1).join("") : "";
+}
+
+// The items of a level's description: the short text (capitalised) and, apart, the technical detail that the service text
+// carries in parentheses (tool group names, when it asks), which the UI shows as a tooltip instead of in the line.
+function levelDescriptionItems(catalog, name, translate) {
+  const found = (catalog?.levels ?? []).find((level) => level.name === name);
+  return (found?.parts ?? []).map((part) => {
+    const text = String(translate(part));
+    const match = text.match(/^([^(]*?)\s*\(([^)]*)\)\s*$/);
+    return match ? { text: sentenceCase(match[1]), detail: sentenceCase(match[2]) } : { text: sentenceCase(text), detail: "" };
+  });
 }
 
 // Badges for the Tools tab: the tool groups that need more than the selected level, and whether the user's maximum

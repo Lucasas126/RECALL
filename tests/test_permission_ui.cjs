@@ -8,7 +8,7 @@ const vm = require("node:vm");
 const source = readFileSync(path.join(__dirname, "..", "src", "web", "static", "app.js"), "utf8");
 const take = (name) => source.match(new RegExp(`function ${name}\\([\\s\\S]*?\\r?\\n\\}\\r?\\n`))[0];
 const names = [
-  "levelNumber", "levelTitle", "requiredLevelFor", "levelAdvice", "levelOptions", "levelDescriptionText", "toolGroupBadges",
+  "levelNumber", "levelTitle", "requiredLevelFor", "levelAdvice", "levelOptions", "levelDescriptionText", "levelDescriptionItems", "sentenceCase", "toolGroupBadges",
   "levelReasonText", "levelMessage", "levelPayload", "isLevelErrorCode", "isRuleError", "splitApprovalRules",
   "buildApprovalRule", "approvalRuleFields", "approvalRulesBody", "agentsAboveCeiling", "isAdministrator",
 ];
@@ -117,6 +117,21 @@ test("groups that need more than the selected level get a badge, and are marked 
   assert.deepEqual(badges.terminal, { level: "operator", overMax: true });
   assert.deepEqual(Object.keys(plain(f.toolGroupBadges(catalog, "admin", "admin"))), []);
   assert.deepEqual(plain(f.toolGroupBadges(null, "admin", "admin")), {});
+});
+
+test("description items start with a capital and move the parenthesis to a detail", () => {
+  const levels = { levels: [{ name: "x", parts: [
+    "read the agent's own memory (tool group memory_read)", "search the web (tool group web; asks)", "use the `local` backend",
+  ] }] };
+  const items = plain(f.levelDescriptionItems(levels, "x", (part) => part));
+  assert.deepEqual(items, [
+    { text: "Read the agent's own memory", detail: "Tool group memory_read" },
+    { text: "Search the web", detail: "Tool group web; asks" },
+    { text: "Use the `local` backend", detail: "" },
+  ]);
+  assert.deepEqual(plain(f.levelDescriptionItems(levels, "nope", (part) => part)), []);
+  assert.equal(f.sentenceCase("élan"), "Élan");
+  assert.equal(f.sentenceCase(""), "");
 });
 
 test("a description joins the translated texts of the level's services", () => {
