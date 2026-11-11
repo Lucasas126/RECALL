@@ -4213,6 +4213,15 @@ function taskPanelNeedsPolling(response) {
 }
 // ---- end task panel helpers
 
+// Pure: what the pill shows for the records of one chat. `previous` = running count of the last check, same chat.
+function taskIndicatorState(records, agentId, chatId, previous = 0) {
+  const own = [...records].filter((task) => task?.parent?.agent_id === agentId && task?.parent?.chat_id === chatId);
+  const running = own.filter((task) => !taskIsFinal(task.status));
+  if (running.length) return { show: "running", count: running.length, firstId: running[0].id };
+  if (previous > 0 && own.length) return { show: "done", count: 0, firstId: own[own.length - 1].id };
+  return { show: "none", count: 0, firstId: null };
+}
+
 // Keep polling while a task of the chat runs or its result is still on the way to the parent.
 function tasksNeedPolling(response) {
   const tasks = response?.tasks ?? [];
@@ -4458,6 +4467,60 @@ function refreshTaskCards() {
     if (!card.isConnected) taskCards.delete(card);
     else refreshTaskCard(card);
   }
+  updateTaskIndicator();
+}
+
+// ---- task indicator: a header pill says how many tasks of the open chat still run, then "finished" for a while.
+const taskIndicator = { key: null, running: 0, doneTimer: null };
+
+// Wide screens show the sentence; phones show only the short form (count or check), the sentence goes to the tooltip.
+function setTaskIndicatorText(pill, text, short) {
+  $("chat-tasks-indicator-text").textContent = text;
+  pill.dataset.short = short;
+  pill.title = text;
+  pill.setAttribute("aria-label", text);
+}
+
+function updateTaskIndicator() {
+  const pill = $("chat-tasks-indicator");
+  if (!pill) return;
+  const key = chatKey(state.agentId, state.chatId);
+  if (taskIndicator.key !== key) {
+    clearTimeout(taskIndicator.doneTimer);
+    taskIndicator.doneTimer = null;
+    taskIndicator.key = key;
+    taskIndicator.running = 0;
+    pill.hidden = true;
+  }
+  if (taskListed !== key) return;
+  const view = taskIndicatorState(taskRecords.values(), state.agentId, state.chatId, taskIndicator.running);
+  taskIndicator.running = view.count;
+  pill._taskId = view.firstId;
+  if (view.show === "running") {
+    clearTimeout(taskIndicator.doneTimer);
+    taskIndicator.doneTimer = null;
+    pill.className = "running";
+    setTaskIndicatorText(pill, view.count === 1 ? tr("1 task running") : tr("{count} tasks running", { count: view.count }), String(view.count));
+    pill.hidden = false;
+  } else if (view.show === "done") {
+    pill.className = "done";
+    setTaskIndicatorText(pill, tr("Tasks finished"), "✓");
+    pill.hidden = false;
+    clearTimeout(taskIndicator.doneTimer);
+    taskIndicator.doneTimer = setTimeout(() => { pill.hidden = true; }, 15000);
+  } else if (!taskIndicator.doneTimer) {
+    pill.hidden = true;
+  }
+}
+
+// Clicking the pill brings the task's card into view (it may be far up in the chat).
+function scrollToTaskCard(taskId) {
+  const cards = [...taskCards].filter((card) => card.isConnected);
+  const card = cards.find((one) => one._taskId === taskId) ?? cards[cards.length - 1];
+  if (!card) return false;
+  if (card.tagName === "DETAILS") card.open = true;
+  card.scrollIntoView({ behavior: "smooth", block: "center" });
+  return true;
 }
 
 function showTaskError(box, err) {
@@ -4860,6 +4923,9 @@ $("tasks-open").addEventListener("click", () => {
   taskPanelRefresh();
 });
 $("tasks-close").addEventListener("click", () => $("tasks-dialog").close());
+$("chat-tasks-indicator").addEventListener("click", () => {
+  if (!scrollToTaskCard($("chat-tasks-indicator")._taskId)) $("tasks-open").click();
+});
 $("tasks-dialog").addEventListener("close", () => clearTimeout(taskPanel.timer));
 $("tasks-filter").addEventListener("click", (event) => {
   const button = event.target.closest("button[data-filter]");
@@ -5942,8 +6008,13 @@ async function dispatchMessage(content, attachments, edit = null) {
   }
 }
 
+// Touch screens have no Shift key: there Enter writes a new line and the Send button sends.
+const touchKeyboard = window.matchMedia("(pointer: coarse)");
+function enterSends(event, touch = touchKeyboard.matches) {
+  return event.key === "Enter" && !event.shiftKey && !event.isComposing && !touch;
+}
 $("input").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) {
+  if (enterSends(e)) {
     e.preventDefault();
     $("composer").requestSubmit();
   }
