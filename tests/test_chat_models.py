@@ -249,6 +249,7 @@ class ChatModelServiceTests(ModelFixture):
 
     def test_active_or_queued_agent_cannot_change_model(self) -> None:
         started, release = self._gate("Original")
+        queued_started, queued_release = self._gate("Queued")  # held, so the second chat is still busy when it is checked
         original = self.service.send("user-one", "agent-one", self.chat, "Original")
         self.assertTrue(started.wait(2))
         try:
@@ -261,6 +262,7 @@ class ChatModelServiceTests(ModelFixture):
                 self.service.set_chat_model("user-one", "agent-one", other, "vendor/alpha")
         finally:
             release.set()
+            queued_release.set()
         list(original)
         list(queued)
         self.assertIsNone(self.sources[("user-one", "agent-one")].model_selection(self.chat))
