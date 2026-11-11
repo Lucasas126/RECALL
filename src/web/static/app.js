@@ -5943,7 +5943,7 @@ async function dispatchMessage(content, attachments, edit = null) {
 }
 
 $("input").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) {
+  if (enterSends(e)) {
     e.preventDefault();
     $("composer").requestSubmit();
   }
@@ -6008,6 +6008,11 @@ async function readEvents(res, request) {
 }
 
 // What to do once a followed reply's stream ended: "stop" (nothing to redraw), "reload" (show the saved chat)
+// Touch screens have no Shift key: there Enter writes a new line and the Send button sends.
+const touchKeyboard = window.matchMedia("(pointer: coarse)");
+function enterSends(event, touch = touchKeyboard.matches) {
+  return event.key === "Enter" && !event.shiftKey && !event.isComposing && !touch;
+}
 // or "follow" (a new message steered the reply and another run started).
 function afterFollow({ outcome, current, generating, active, attempt }) {
   if (!current || generating || outcome === "failed" || outcome === "aborted") return "stop";
