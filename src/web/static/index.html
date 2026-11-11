@@ -265,6 +265,15 @@
                 </div>
                 <div class="setting-row">
                   <div class="setting-main">
+                    <label for="agent-max-hops" id="agent-max-hops-label">Tool rounds per turn</label>
+                    <p id="agent-max-hops-hint" class="model-note">How many tool round-trips the agent may do before it must answer. Empty uses the application value.</p>
+                  </div>
+                  <div class="setting-control"><input id="agent-max-hops" type="text" inputmode="numeric" autocomplete="off" data-number data-unit="rounds"><button type="button" class="icon-btn setting-reset">↺</button></div>
+                  <p class="setting-default model-note"></p>
+                  <p class="setting-error error" role="alert"></p>
+                </div>
+                <div class="setting-row">
+                  <div class="setting-main">
                     <label for="agent-retained" id="agent-retained-label">Messages kept in context</label>
                     <p id="agent-retained-hint" class="model-note">Older messages are left out of the prompt. Empty keeps all messages.</p>
                   </div>

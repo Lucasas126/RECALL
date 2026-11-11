@@ -46,6 +46,19 @@ logger = get_logger("agent")
 
 # appended to the context on the final tool hop to force a direct answer
 _FINAL_NUDGE = "Stop calling tools. Answer the user now using what you already have."
+# rounds left (this one included) at which the model is warned that the tool budget is about to run out
+_HOPS_WARNING_AT = 2
+
+
+def _hops_warning(hop: int, limit: int) -> str | None:
+    """System note for the model when `_HOPS_WARNING_AT` tool rounds remain in the turn, else None."""
+    left = limit - hop
+    if left != _HOPS_WARNING_AT or limit <= _HOPS_WARNING_AT:
+        return None
+    return (
+        f"Tool budget: {left} tool rounds left in this turn (this one included, {hop} used of {limit}). "
+        "After that you must answer without tools. Finish what matters now and say what is still pending."
+    )
 # max characters of a tool result shown to channels and stored with the turn
 _ACTION_RESULT_CHARS = 500
 _INTERRUPTED_MARKER = "[Response interrupted by user.]"
@@ -583,15 +596,18 @@ class Agent:
                 while not self._assoc_job.wait(0.05):
                     cancellation.raise_if_cancelled()
                 yield from self._take_assoc_result()
-        for hop in range(AGENT_MAX_TOOL_HOPS + 1):
+        max_hops = self.config.max_tool_hops or AGENT_MAX_TOOL_HOPS
+        for hop in range(max_hops + 1):
             cancellation.raise_if_cancelled()
-            is_last = hop == AGENT_MAX_TOOL_HOPS
+            is_last = hop == max_hops
             tools = None if is_last else (self._tool_specs or None)
             while True:  # runs again when a memory hit pauses the call
                 yield from self._take_assoc_result()
                 context = self._context()
                 if is_last:
                     context = context + [{"role": "system", "content": _FINAL_NUDGE}]
+                elif warning := _hops_warning(hop, max_hops):
+                    context = context + [{"role": "system", "content": warning}]
                 reasoning, reply, api_usage, tool_calls = "", "", None, None
                 job = None if self._assoc_taken else self._assoc_job
                 call_token = CancellationToken() if job is not None else cancellation
@@ -740,12 +756,15 @@ class Agent:
             for _ in self._take_assoc_result():
                 pass
             self._close_assoc_job()
-        for hop in range(AGENT_MAX_TOOL_HOPS + 1):
-            is_last = hop == AGENT_MAX_TOOL_HOPS
+        max_hops = self.config.max_tool_hops or AGENT_MAX_TOOL_HOPS
+        for hop in range(max_hops + 1):
+            is_last = hop == max_hops
             tools = None if is_last else (self._tool_specs or None)
             context = self._context()
             if is_last:
                 context = context + [{"role": "system", "content": _FINAL_NUDGE}]
+            elif warning := _hops_warning(hop, max_hops):
+                context = context + [{"role": "system", "content": warning}]
             model_started_at = perf_counter()
             result = self.provider.invoke(
                 context, self.config.models.chat,

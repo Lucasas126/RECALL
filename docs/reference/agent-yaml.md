@@ -27,6 +27,7 @@ chat_config:
   associative_execution: parallel    # parallel | sequential
   keep_reasoning_in_memory: true     # store the thinking in context/history
   recall_knowledge: true             # the built-in, read-only `recall` skill (how RECALL works); false hides it from this agent
+  max_tool_hops: 40                   # optional, 1-100: tool round-trips per turn (empty = settings.yaml agent.max_tool_hops)
   conversation_messages_retained: 20 # at most N messages kept in context; cuts go below N (see prompt caching)
   tools: true                       # enable the selected tool groups
   tool_groups: [memory_read, memory_edit, self]  # memory_read, memory_edit, web, self, folders_read, folders_edit, terminal, delegate, permissions, agents

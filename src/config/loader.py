@@ -144,6 +144,7 @@ def load_agent(user_id: str, agent_id: Optional[str] = None, *, check_agent_mode
         reasoning_effort=agent.chat_config.reasoning_effort,
         reasoning_tokens=agent.chat_config.reasoning_tokens,
         keep_reasoning_in_memory=agent.chat_config.keep_reasoning_in_memory,
+        max_tool_hops=agent.chat_config.max_tool_hops,
         conversation_messages_retained=agent.chat_config.conversation_messages_retained,
         tools=agent.chat_config.tools,
         tool_groups=selected_tool_groups,

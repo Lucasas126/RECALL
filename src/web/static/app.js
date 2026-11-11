@@ -270,6 +270,7 @@ function unitLabel(unit) {
     case "minutes": return tr("minutes");
     case "seconds": return tr("seconds");
     case "messages": return tr("messages");
+    case "rounds": return tr("rounds");
     default: return "";
   }
 }
@@ -581,6 +582,8 @@ function translateInterface() {
     ["agent-delegation-targets-label", "Agents it may hand tasks to"],
     ["agent-delegation-targets-hint", "Without any, it can only use fresh workers. An agent that can write its own memory keeps what it learns from the task."],
     ["agent-delegation-no-agents", "You have no other agents."],
+    ["agent-max-hops-label", "Tool rounds per turn"],
+    ["agent-max-hops-hint", "How many tool round-trips the agent may do before it must answer. Empty uses the application value."],
     ["agent-retained-label", "Messages kept in context"],
     ["agent-retained-hint", "Older messages are left out of the prompt. Empty keeps all messages."], ["agent-save", "Save agent"], ["agent-delete", "Delete agent"],
     ["agent-tab-basic", "Basic"], ["agent-advanced-summary", "Advanced"], ["agent-tab-tools", "Tools"],
@@ -1315,6 +1318,7 @@ function fillAgentForm(agent) {
   $("agent-tokens-enabled").checked = config.reasoning_tokens != null;
   $("agent-reasoning-tokens").disabled = config.reasoning_tokens == null;
   setNumberValue($("agent-reasoning-tokens"), config.reasoning_tokens);
+  setNumberValue($("agent-max-hops"), config.max_tool_hops);
   setNumberValue($("agent-retained"), config.conversation_messages_retained);
   renderAgentMcp(config.mcp ?? {});
   renderFolders(agent.folders ?? []);
@@ -2135,6 +2139,7 @@ function agentFormBody() {
       reasoning_tokens: $("agent-tokens-enabled").checked ? optionalNumber("agent-reasoning-tokens") : null,
       keep_reasoning_in_memory: $("agent-keep-reasoning").checked,
       recall_knowledge: $("agent-recall-knowledge").checked,
+      max_tool_hops: optionalNumber("agent-max-hops"),
       conversation_messages_retained: optionalNumber("agent-retained"),
       tools: $("agent-tools").checked,
       tool_groups: [...document.querySelectorAll('input[name="agent-tool-group"]:checked')].map((input) => input.value),
@@ -7125,6 +7130,7 @@ selectRow("agent-associative", chatDefault("associative_memory"), () => {
   $("agent-associative-execution").disabled = $("agent-associative").value === "off";
 });
 selectRow("agent-associative-execution", chatDefault("associative_execution"));
+numberRow("agent-max-hops", () => agentDefaultSpec("chat_config.max_tool_hops"), () => tr("Application value"));
 numberRow("agent-retained", () => agentDefaultSpec("chat_config.conversation_messages_retained"), () => "");
 checkboxRow("agent-tools", chatDefault("tools"));
 numberRow("agent-terminal-timeout", () => agentDefaultSpec("terminal.timeout_seconds"), () => "");

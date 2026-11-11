@@ -34,7 +34,7 @@ def agent_defaults() -> dict[str, dict[str, dict[str, Any]]]:
     return {
         "chat_config": _specs(ChatConfig, (
             "stream", "has_memory", "reasoning", "reasoning_effort", "reasoning_tokens", "keep_reasoning_in_memory",
-            "conversation_messages_retained", "tools", "associative_memory", "associative_execution",
+            "max_tool_hops", "conversation_messages_retained", "tools", "associative_memory", "associative_execution",
             "model", "recall_knowledge",
         )),
         "dream": _specs(DreamConfig, (
