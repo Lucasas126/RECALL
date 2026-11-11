@@ -15,7 +15,7 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
 
 const agents = [{ id: "planner", name: "Planner" }, { id: "scout", name: "Scout" }, { id: "atlas", name: "" }];
 const saved = {
-  enabled: false, allowed_groups: [], max_parallel: 2, timeout_seconds: 120, max_tokens: 50000,
+  enabled: false, allowed_groups: [], max_parallel: 2, timeout_seconds: 120, max_tokens: 50000, default_model: null,
   targets: [{ agent: "scout", remember: true }, { agent: "gone", remember: false }],
 };
 
@@ -48,8 +48,14 @@ test("the form fields round-trip the block: limits, groups, targets and the memo
 test("untouched defaults send nulls for the limits and no targets", () => {
   const body = plain(f.buildDelegationConfig(null, true, { enabled: true, allowedGroups: ["web"], targets: [] }));
   assert.deepEqual(body, {
-    enabled: true, allowed_groups: ["web"], max_parallel: null, timeout_seconds: null, max_tokens: null, targets: [],
+    enabled: true, allowed_groups: ["web"], max_parallel: null, timeout_seconds: null, max_tokens: null, default_model: null, targets: [],
   });
+});
+
+test("the worker model is trimmed and an empty field sends null", () => {
+  const send = (defaultModel) => plain(f.buildDelegationConfig(null, true, { enabled: true, allowedGroups: [], targets: [], defaultModel })).default_model;
+  assert.equal(send("  openrouter:vendor/m  "), "openrouter:vendor/m");
+  assert.equal(send("  "), null);
 });
 
 test("an unchecked target is dropped and its memory flag never survives alone", () => {

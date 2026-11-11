@@ -605,7 +605,7 @@ function translateInterface() {
     ["dream-schedule-hint", "Scheduled sessions are skipped while no chat is pending. You can always start one by hand, from the Dream sessions tab or with /dream start in a chat."],
     ["dream-model-legend", "Model and limits"], ["dream-model-label", "Model"], ["dream-model-browse", "Browse"],
     ["dream-model-hint", "Empty uses the agent's default chat model, else yours."],
-    ["agent-model-label", "Default model"], ["agent-model-browse", "Browse"],
+    ["agent-model-label", "Default model"], ["agent-model-browse", "Browse"], ["agent-delegation-model-browse", "Browse"],
     ["agent-model-hint", "Empty follows your default model. A model chosen inside a chat still takes precedence."],
     ["dream-effort-label", "Reasoning effort"], ["dream-effort-none", "No reasoning request"],
     ["dream-max-steps-label", "Maximum steps"], ["dream-max-steps-hint", "Model calls per session."],
@@ -643,6 +643,7 @@ function translateInterface() {
   refreshRows();
   $("dream-model").placeholder = tr("Your chat model");
   $("agent-model").placeholder = tr("Your default model");
+  $("agent-delegation-model").placeholder = tr("The model of the chat");
   for (const [id, text] of [
     ["settings-open", "Settings"], ["settings-close", "Close"], ["tasks-open", "Tasks"], ["tasks-close", "Close"], ["assoc-close", "Close"],
     ["logout", "Log out"], ["jump-latest", "Jump to latest"], ["theme-toggle", "Switch theme"],
@@ -2643,6 +2644,7 @@ function currentModelReference() {
   switch (state.modelTarget) {
     case "dream-llm": return $("dream-model").value.trim() || state.preferences?.default_llm_model;
     case "agent-llm": return $("agent-model").value.trim() || state.preferences?.default_llm_model;
+    case "agent-worker-llm": return $("agent-delegation-model").value.trim() || undefined;
     case "default-llm": return state.settingsModelDraft?.default_llm_model;
     case "default-stt": return state.settingsModelDraft?.default_stt_model;
     default: return state.model?.id;
@@ -3153,12 +3155,12 @@ function updateModelControls() {
   const zdrApplies = state.modelProvider === "openrouter" || state.modelProvider === ANY_PROVIDER;
   $("model-zdr-label").hidden = !zdrApplies;
   $("model-zdr").disabled = state.modelBusy || state.modelLoading || state.modelTarget !== "chat-llm";
-  const fieldTarget = state.modelTarget === "dream-llm" || state.modelTarget === "agent-llm";
+  const fieldTarget = state.modelTarget === "dream-llm" || state.modelTarget === "agent-llm" || state.modelTarget === "agent-worker-llm";
   $("model-inherit").hidden = state.modelTarget.startsWith("default-");
   $("model-inherit").disabled = fieldTarget ? state.modelBusy : (!state.chatId || state.busy || state.modelBusy);
   // in a chat the entry falls back to the agent's default when it has one; elsewhere it empties the field
   $("model-inherit").textContent = tr(state.modelTarget === "chat-llm" && state.agentDefaultModel
-    ? "Use agent default" : "Use user default");
+    ? "Use agent default" : state.modelTarget === "agent-worker-llm" ? "Use chat model" : "Use user default");
   renderSettingsModels();
   $("model-zdr-warning").hidden = $("model-zdr").checked || !zdrApplies || !state.user?.require_zdr;
   renderProviderTabs();
@@ -3304,6 +3306,7 @@ function renderModelList() {
     let selected = state.model?.id;
     if (state.modelTarget === "dream-llm") selected = $("dream-model").value.trim();
     else if (state.modelTarget === "agent-llm") selected = $("agent-model").value.trim();
+    else if (state.modelTarget === "agent-worker-llm") selected = $("agent-delegation-model").value.trim();
     else if (state.modelTarget.startsWith("default-")) {
       selected = state.settingsModelDraft?.[stt ? "default_stt_model" : "default_llm_model"];
     }
@@ -3451,6 +3454,13 @@ async function selectModel(modelId, provider = state.modelProvider) {
     $("model-dialog").close();
     return;
   }
+  if (target === "agent-worker-llm") {
+    // only fills the agent form's worker model field; saving the agent stores it
+    $("agent-delegation-model").value = modelId ?? "";
+    refreshRows($("agent-form"));
+    $("model-dialog").close();
+    return;
+  }
   if (defaultSelection) {
     if (!state.settingsOriginal || state.settingsBusy || modelId === null) return;
     state.settingsModelDraft[stt ? "default_stt_model" : "default_llm_model"] = modelId;
@@ -3494,7 +3504,7 @@ function openModelPicker(target) {
   if (state.modelBusy || !state.user) return;
   if (target === "dream-llm") {
     if (!state.dream?.agentId) return;
-  } else if (target === "agent-llm") {
+  } else if (target === "agent-llm" || target === "agent-worker-llm") {
     if ($("agent-editor").hidden || state.agentForm.busy) return;
   } else if (defaultSelection ? (!state.settingsOriginal || state.settingsBusy) : (!state.chatId || state.busy)) return;
   const previousStt = state.modelTarget.endsWith("-stt");
@@ -3518,6 +3528,7 @@ function openModelPicker(target) {
   let subtitle = "Choose a model for this chat.";
   if (target === "dream-llm") subtitle = "Choose the model for this agent's dreams. Use user default leaves the field empty.";
   else if (target === "agent-llm") subtitle = "Choose the default model for this agent. Use user default clears the field.";
+  else if (target === "agent-worker-llm") subtitle = "Choose the default model of this agent's workers. Use chat model clears the field.";
   else if (defaultSelection) {
     subtitle = stt ? "Choose the user's default STT model. This does not set a chat override." : "Choose the user's default LLM model. This does not set a chat override.";
   }
@@ -7061,6 +7072,7 @@ $("dream-prompt-reset").addEventListener("click", () => {
 });
 $("dream-model-browse").addEventListener("click", () => openModelPicker("dream-llm"));
 $("agent-model-browse").addEventListener("click", () => openModelPicker("agent-llm"));
+$("agent-delegation-model-browse").addEventListener("click", () => openModelPicker("agent-worker-llm"));
 $("dream-form").addEventListener("submit", saveDreamSettings);
 $("dream-start").addEventListener("click", startDream);
 $("dream-cancel").addEventListener("click", cancelDream);
@@ -7114,6 +7126,10 @@ const dreamDefault = (name) => () => agentDefault(`dream.${name}`);
 registerRow("agent-model", {
   getDefault: chatDefault("model"), describe: () => tr("your default model"),
   read: () => $("agent-model").value.trim() || null, write: (value) => { $("agent-model").value = value ?? ""; },
+});
+registerRow("agent-delegation-model", {
+  getDefault: () => agentDefault("delegation.default_model"), describe: () => tr("the model of the chat"),
+  read: () => $("agent-delegation-model").value.trim() || null, write: (value) => { $("agent-delegation-model").value = value ?? ""; },
 });
 selectRow("agent-effort", chatDefault("reasoning_effort"));
 checkboxRow("agent-reasoning", chatDefault("reasoning"));
