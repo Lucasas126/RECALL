@@ -11,6 +11,7 @@ from src.core.sources.conversations import ConversationsSource
 from src.core.sources.dream import DreamStateSource
 from src.core.sources.folders import FolderSource, folder_path_problem
 from src.core.sources.mind_palace import MindPalaceSource
+from src.core.sources.recall_docs import RECALL_DOCS, RecallDocsSource
 from src.utils.logger import get_logger
 
 logger = get_logger("sources")
@@ -28,11 +29,14 @@ class SourceRegistry:
     def for_agent(
         cls, user_id: str, agent_id: str, *, folders: Sequence[FolderConfig] = (),
         folders_readable: bool = False, folders_writable: bool = False, data_dir: Path | None = None,
+        recall_docs: bool = False,
     ) -> "SourceRegistry":
         """Build an agent's sources; each of `folders` becomes a source named after it.
 
         The folders are always registered (so indexed ones feed the index); the tools can read them only
         when `folders_readable` and write them only when `folders_writable` and the folder is not read-only.
+        `recall_docs` (the agent's `recall_knowledge` flag) registers the built-in manual as the read-only,
+        indexed source `recall_docs`; without it the index drops the manual's chunks on the next reconcile.
         """
         base = (data_dir or DATA_DIR) / user_id / agent_id
         sources: dict[str, Source] = {
@@ -41,6 +45,8 @@ class SourceRegistry:
             "agent": AgentFilesSource(base),
             "dream": DreamStateSource(base / "dream"),
         }
+        if recall_docs:
+            sources[RECALL_DOCS] = RecallDocsSource()
         unavailable: set[str] = set()
         for folder in folders:
             if folder.name in sources:
@@ -127,6 +133,9 @@ class SourceRegistry:
 
     def dream_state(self) -> DreamStateSource:
         return self.get("dream")
+
+    def recall_docs(self) -> RecallDocsSource:
+        return self.get(RECALL_DOCS)
 
     def folders(self) -> list[FolderSource]:
         """The user folders exposed to this agent, in configuration order."""

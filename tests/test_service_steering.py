@@ -83,7 +83,7 @@ class SteeringFixture(unittest.TestCase):
             password_hash=TEST_PASSWORD_HASH, agents=["agent-one", "agent-two"],
         )
 
-    def _registry(self, user: str, agent: str) -> Mock:
+    def _registry(self, user: str, agent: str, **_options) -> Mock:
         registry = Mock()
         registry.conversations.return_value = self.sources[(user, agent)]
         return registry

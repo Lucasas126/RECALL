@@ -327,21 +327,21 @@ class FolderTests(AgentFilesFixture):
         self.assertIn("folders", str(legacy.exception))
 
     def test_chat_and_dream_folder_options(self) -> None:
-        self.assertEqual(chat_folder_options(_config(tool_groups=["folders_edit"])), {})
+        self.assertEqual(chat_folder_options(_config(tool_groups=["folders_edit"])), {"recall_docs": True})
         self.assertEqual(
             chat_folder_options(_config(folders=self.folders, tool_groups=["memory_read"])),
-            {"folders": self.folders, "folders_readable": False, "folders_writable": False},
+            {"recall_docs": True, "folders": self.folders, "folders_readable": False, "folders_writable": False},
         )
         self.assertEqual(
             chat_folder_options(_config(folders=self.folders, tool_groups=["folders_read"])),
-            {"folders": self.folders, "folders_readable": True, "folders_writable": False},
+            {"recall_docs": True, "folders": self.folders, "folders_readable": True, "folders_writable": False},
         )
         self.assertEqual(
             chat_folder_options(_config(folders=self.folders, tool_groups=["folders_edit"]))["folders_writable"], True,
         )
         self.assertFalse(chat_folder_options(_config(folders=self.folders, tool_groups=["folders_edit"], tools=False))["folders_readable"])
         dream = dream_folder_options(_config(folders=self.folders, dream=DreamConfig(tools=["folders"]), tool_groups=["folders_read"]))
-        self.assertEqual(dream, {"folders": self.folders, "folders_readable": True, "folders_writable": False})
+        self.assertEqual(dream, {"recall_docs": True, "folders": self.folders, "folders_readable": True, "folders_writable": False})
         self.assertFalse(dream_folder_options(_config(folders=self.folders, dream=DreamConfig(tools=["web"])))["folders_readable"])
 
     def test_tool_group_renames(self) -> None:

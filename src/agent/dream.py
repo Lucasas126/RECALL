@@ -109,9 +109,10 @@ class _ToolHost:
 def dream_folder_options(config: ResolvedAgent) -> dict:
     """Registry options for a dream: folders are never writable, and readable only with the `folders` dream tool
     when the agent also holds a folder read group in its chats."""
+    docs = {"recall_docs": config.recall_knowledge}
     if not config.folders:
-        return {}
-    return {"folders": config.folders, "folders_readable": _folders_allowed(config), "folders_writable": False}
+        return docs
+    return {**docs, "folders": config.folders, "folders_readable": _folders_allowed(config), "folders_writable": False}
 
 
 def _folders_allowed(config: ResolvedAgent) -> bool:

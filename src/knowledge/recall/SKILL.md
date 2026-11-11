@@ -12,6 +12,7 @@ RECALL is a Python framework for per-user, per-agent assistants with memory and 
 - Your own files live in `data/<user_id>/<agent_id>/`: `SOUL.md`, `memories/`, `skills/`, `mind_palace/`, `conversations/`, `dream/`, `.index/`.
 - Your settings live in `.config/<user_id>/agents/<agent_id>.yaml`; the user's in `.config/<user_id>/user.yaml`; framework defaults in the root `settings.yaml`.
 - Your system prompt is SOUL, memories, skills index and open questions, built when a chat starts and kept for that chat.
+- This manual is also in your associative memory: search it with `query_memory` (source `recall_docs`) and read pages with `read` as `recall_docs:references/<page>.md`. It is read-only.
 - This skill is built in: it ships with the code, so it always matches the running version. It is read-only for you.
 
 ## How to use this skill
