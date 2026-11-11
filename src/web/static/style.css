@@ -910,7 +910,7 @@ select.warning { border-color: var(--warn); color: var(--warn); }
 
 /* Resizable sidebar */
 #app { grid-template-columns: var(--sidebar-w, 300px) minmax(0, 1fr); }
-aside { position: relative; }
+@media (min-width: 801px) { aside { position: relative; } }  /* phones keep the fixed drawer from the narrow-screen rules */
 #sidebar-resizer { position: absolute; top: 0; right: 0; bottom: 0; width: 6px; cursor: col-resize; touch-action: none; z-index: 2; }
 #sidebar-resizer:hover, #sidebar-resizer.dragging { background: var(--accent); opacity: .5; }
 html.resizing-sidebar, html.resizing-sidebar * { cursor: col-resize !important; user-select: none !important; }
