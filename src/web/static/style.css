@@ -317,7 +317,7 @@ main { position: relative; isolation: isolate; container: main / inline-size; di
 .body th, .body td { border: 1px solid var(--line); padding: 4px 10px; }
 .body hr { border: none; border-top: 1px solid var(--line); }
 :root { --tool-block-max: 240px; }
-details.thinking { color: var(--muted); margin-bottom: 6px; min-width: 0; }
+details.thinking { color: var(--muted); margin-bottom: 6px; min-width: 0; font-size: var(--thinking-size, .85em); line-height: 1.45; }
 details.thinking > summary { cursor: pointer; display: flex; gap: 6px; align-items: baseline; min-width: 0; white-space: nowrap; overflow: hidden; }
 details.thinking > summary::-webkit-details-marker { display: none; }
 details.thinking > summary::before { content: "\25B8"; font-style: normal; flex: none; }
