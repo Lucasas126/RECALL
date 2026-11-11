@@ -147,6 +147,21 @@ class WebSteeringTests(steering.SteeringFixture):
     def _last_message(self) -> dict:
         return self.client.get(f"/api/agents/agent-one/chats/{self.chat}").json()["messages"][-1]
 
+    def test_get_chat_returns_the_injected_fragments(self) -> None:
+        from src.agent.associative import RecallResult
+
+        self.associative_memory = True
+        self._slow_model()
+        fragment = {"address": "notes:cat.md", "label": "Cat", "score": 0.81, "excerpt": "The cat is called Misu."}
+        result = RecallResult("[associative memory] remembered detail", 1, [fragment], "cat name")
+        with steering.patch("src.agent.agent.associative.recall", return_value=result):
+            response = self.client.post(self.messages_url, json={"content": "Question"})
+        done = [e["data"] for e in _events(response) if e["event"] == "memory" and e["data"].get("state") == "done"]
+        self.assertEqual(done, [{"state": "done", "matches": 1, "fragments": [fragment], "query": "cat name"}])
+        message = self._last_message()
+        self.assertEqual(message["associative_fragments"], [fragment])
+        self.assertEqual(message["associative_query"], "cat name")
+
     def test_search_without_matches_is_sent_and_persisted(self) -> None:
         self.associative_memory = True
         self._slow_model()

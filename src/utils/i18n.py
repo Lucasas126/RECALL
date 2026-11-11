@@ -379,6 +379,8 @@ _SPANISH = {
     "Associative memory: {count} matches": "Memoria asociativa: {count} coincidencias",
     "Associative memory: no matches": "Memoria asociativa: sin coincidencias",
     "Associative memory: skipped": "Memoria asociativa: descartada",
+    "Search query: {query}": "Consulta de búsqueda: {query}",
+    "score {score}": "puntuación {score}",
     "Reasoning effort": "Esfuerzo de razonamiento",
     "Default": "Por defecto",
     "Reasoning tokens": "Tokens de razonamiento",

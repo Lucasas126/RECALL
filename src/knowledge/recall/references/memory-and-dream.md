@@ -27,6 +27,7 @@ Before each reply RECALL searches your vector index and may add the best fragmen
 - The index covers the mind palace, `agent:skills/`, conversations and folders with `indexed: true`. It does not cover SOUL or the memory files (already in the prompt). The current chat is never suggested back.
 - The index is updated in the background: after each reply, at chat and dream start (a stat-only scan), and for user folders on an interval. If the embeddings model or chunking changes it is rebuilt automatically.
 - If the search fails, the turn continues without it and the web shows "skipped".
+- The web indicator expands to list the injected fragments (address, heading, score, short excerpt) and, with no matches, the small model's query. Turns keep them as `associative_fragments` (address/label/score/excerpt only, never full chunks) and `associative_query`.
 
 ## Dream sessions
 

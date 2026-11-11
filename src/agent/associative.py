@@ -36,8 +36,29 @@ _SYSTEM_PROMPT = (
 )
 
 _FRAGMENT_LIMIT = 400
+# excerpt length of the fragments shown to the user and kept in the saved turn
+_EXCERPT_LIMIT = _FRAGMENT_LIMIT  # the user sees as much of each fragment as the model got
 # longest message searched as is in `question_only` mode
 _QUESTION_LIMIT = 1000
+
+
+class RecallResult(tuple):
+    """`(suggestion, count)` plus the structured `fragments` and the proposed `query` (None when none was proposed).
+
+    Each fragment is `{"address", "label", "score", "excerpt"}`: never a full chunk, so it can be persisted.
+    """
+
+    fragments: list[dict]
+    query: Optional[str]
+
+    def __new__(
+        cls, suggestion: Optional[str], count: int,
+        fragments: list[dict] | None = None, query: Optional[str] = None,
+    ) -> "RecallResult":
+        result = super().__new__(cls, (suggestion, count))
+        result.fragments = list(fragments or [])
+        result.query = query
+        return result
 
 
 def max_matches(agent: "Agent") -> int:
@@ -48,22 +69,24 @@ def max_matches(agent: "Agent") -> int:
 def recall(
     agent: "Agent", user_input: str, cancellation: CancellationToken | None = None,
     history: list[dict] | None = None, chat_id: str | None = None,
-) -> tuple[Optional[str], int]:
+) -> RecallResult:
     """Return a transient hint block and the number of matching memory fragments.
 
+    The result also carries the structured hits (`fragments`) and, in `llm` mode, the proposed `query`.
     Chunks of `chat_id` (the chat being answered, already in the context) are never suggested.
     """
     started_at = perf_counter()
     if agent.config.associative_memory == "question_only":
         query = user_input.strip()[:_QUESTION_LIMIT] or None
+        proposed = None  # the user's own message: not worth repeating
     else:
-        query = _propose_query(agent, user_input, cancellation, history)
+        query = proposed = _propose_query(agent, user_input, cancellation, history)
     proposed_at = perf_counter()
     if cancellation is not None:
         cancellation.raise_if_cancelled()
     if not query:
         logger.info("no lookup needed (query proposal %.0f ms)", (proposed_at - started_at) * 1000)
-        return None, 0
+        return RecallResult(None, 0)
     limit = max_matches(agent)
     found = agent.query_memory(query, limit, exclude_chat=chat_id)
     logger.info(
@@ -75,14 +98,25 @@ def recall(
         cancellation.raise_if_cancelled()
     if not hits:
         logger.debug("query=%r -> no hits above threshold %.2f", query, ASSOC.score_threshold)
-        return None, 0
+        return RecallResult(None, 0, query=proposed)
     logger.info("query=%r -> %d hit(s)", query, len(hits))
     lines = "\n".join(f"- [{_label(h)}] {_fragment(h.get('body', h['document']))}" for h in hits)
     suggestion = (
         "[associative memory] possibly-relevant fragments from your own memory "
         "(hints only — verify with your tools before relying on them):\n" + lines
     )
-    return suggestion, len(hits)
+    return RecallResult(suggestion, len(hits), [_hit_view(h) for h in hits], proposed)
+
+
+def _hit_view(hit: dict) -> dict:
+    """What the user sees of a hit: its address, heading path or chat title, score and a short excerpt."""
+    score = hit.get("score")
+    return {
+        "address": hit["address"],
+        "label": hit.get("context") or None,
+        "score": round(float(score), 4) if score is not None else None,
+        "excerpt": _fragment(hit.get("body", hit["document"]), _EXCERPT_LIMIT),
+    }
 
 
 def _label(hit: dict) -> str:
@@ -104,7 +138,7 @@ class RecallJob:
         self._lock = threading.Lock()
         self._waker: CancellationToken | None = None
         self._cut_ok: threading.Event | None = None
-        self._result: tuple[Optional[str], int] = (None, 0)
+        self._result: tuple[Optional[str], int] = RecallResult(None, 0)
         self.failed = False  # the lookup raised, as opposed to finding nothing
         self.started_at = perf_counter()
         self.finished_at: float | None = None
