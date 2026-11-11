@@ -580,7 +580,8 @@ class VectorIndex:
             store.set_meta("folders_reconciled_at_epoch", None)
 
     def _purge_stale_folders(self) -> None:
-        """Drop the chunks of folders no longer configured, no longer indexed, or refused as unsafe.
+        """Drop the chunks of folders no longer configured, no longer indexed, or refused as unsafe, and of any
+        other source no longer registered (e.g. `recall_docs` once `recall_knowledge` is off).
 
         A configured folder that is only missing for now (unmounted drive) keeps its chunks.
         """
@@ -591,7 +592,7 @@ class VectorIndex:
             if not stale or store.identity != self.identity:
                 return
             for name in stale:
-                logger.info("dropping the indexed chunks of folder %r: it is no longer an indexed folder", name)
+                logger.info("dropping the indexed chunks of source %r: it is no longer an indexed source", name)
                 store.collection.delete(where={"source": name})
                 store.forget_source(name)
             store.bump()

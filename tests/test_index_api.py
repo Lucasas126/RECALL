@@ -15,6 +15,7 @@ from src.config.loader import load_agent
 from src.config.models import IndexConfig, ModelsConfig, ResolvedAgent
 from src.core.index import VectorIndex, close_index
 from src.core.sources.registry import SourceRegistry
+from src.core.sources.recall_docs import RecallDocsSource
 from src.service.chat import ChatService
 from src.service.dream import DreamDependencies, DreamManager
 from src.web.app import create_app
@@ -71,12 +72,13 @@ class IndexApiTests(unittest.TestCase):
         status = self.client.get(f"{self.base}/index")
         self.assertEqual(status.status_code, 200, status.text)
         self.assertEqual(status.json()["chunks"], 0)
-        self.assertEqual(set(status.json()["sources"]), {"mind_palace", "conversations", "agent", "notes"})
+        self.assertEqual(set(status.json()["sources"]), {"mind_palace", "conversations", "agent", "notes", "recall_docs"})
         queued = self.client.post(f"{self.base}/index/reindex")
         self.assertEqual(queued.status_code, 202, queued.text)
         self.assertTrue(VectorIndex(self.index_path, SourceRegistry.for_agent("user-a", "aria"), self.embeddings, "x").wait(20))
         done = self.client.get(f"{self.base}/index").json()
-        self.assertEqual(done["files"], 2)  # mind_palace:pets.md and notes:Plan.md
+        # mind_palace:pets.md, notes:Plan.md and the built-in manual (recall_docs)
+        self.assertEqual(done["files"], 2 + len(RecallDocsSource().index_scan({"md"})))
         self.assertGreaterEqual(done["chunks"], 2)
         self.assertIsNotNone(done["folders_reconciled_at"])
         self.assertFalse(done["busy"])

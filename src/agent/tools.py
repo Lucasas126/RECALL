@@ -39,10 +39,12 @@ TOOL_ORDER = _ORDER  # every built-in tool name; MCP tools must not reuse one
 
 def chat_folder_options(config: ResolvedAgent) -> dict:
     """Registry options for a chat: every folder is registered; the folder tool groups decide access."""
+    docs = {"recall_docs": config.recall_knowledge}
     if not config.folders:
-        return {}
+        return docs
     groups = set(config.tool_groups or ()) if config.tools else set()
     return {
+        **docs,
         "folders": config.folders,
         "folders_readable": bool(groups & {"folders_read", "folders_edit"}),
         "folders_writable": "folders_edit" in groups,
