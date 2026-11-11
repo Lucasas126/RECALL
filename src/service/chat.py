@@ -1216,6 +1216,7 @@ class ChatService:
                     k: t[k] for k in (
                         "role", "content", "ts", "reasoning", "actions", "timeline", "interrupted",
                         "associative_matches", "associative_skipped", "usage", "usage_report",
+                        "associative_fragments", "associative_query",
                         "source", "task_ids",  # a wake turn: a subagent result, not written by the user
                         "task_brief", "task_message",  # a worker chat's first message / follow-up, structured for the UI
                     )

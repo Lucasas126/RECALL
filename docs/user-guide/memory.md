@@ -54,9 +54,9 @@ should not use the chat's own model:
 
 ```yaml
 associative_memory:
-  context_messages: 6
+  context_messages: 8
   top_n: 3
-  score_threshold: 0.35
+  score_threshold: 0.45
   query_model: openai/gpt-4o-mini
   api_key: OPENROUTER_API_KEY
   # zdr: true   # optional override of the user's require_zdr
@@ -71,11 +71,14 @@ Set `query_model: null` to propose the query with each chat's own provider, mode
 ZDR flag instead (the only option for Ollama-only setups); `question_only` uses
 neither. If the env var is unset or the query request fails, the error is logged, the
 turn continues without associative memory and the indicator shows "skipped".
-`context_messages` (0-100) is how many recent messages the query model sees,
+`context_messages` (0-100) is how many recent messages the query model sees (as a quoted transcript, each
+message cut to 600 characters, so the small model judges the conversation instead of continuing it),
 `top_n` (1-20) the application default for the maximum fragments injected per turn, and
-`score_threshold` (0-1, default 0.35) the minimum similarity. 0.35 was picked by measuring on a small
-test vault: unrelated questions injected something in 9 of 16 cases at 0.25 but 3 of 16 at 0.35 with the same
-recall, while 0.45 already dropped many correct hits; re-measure when the embeddings model changes. Each user can override the maximum in the web
+`score_threshold` (0-1, shipped 0.45) the minimum similarity. On a small English test vault 0.35 was the best
+cut (0.45 dropped correct hits), but on a real agent memory that is mostly about one subject everything
+in-domain scores 0.44-0.60, so the tail below 0.45 was almost all noise; re-measure when the embeddings model
+changes. The query model answers NONE for greetings, confirmations ("ok, go ahead"), mid-task follow-ups and
+general knowledge, and a proposal that is not a short keyword query (prose, markdown, a command) is dropped. Each user can override the maximum in the web
 Settings (`associative_max_matches` in their `preferences.json`, integer 1-20; empty or absent follows
 `top_n`); a change applies from the next message. `score_threshold` is application-only and cannot be
 set per user.

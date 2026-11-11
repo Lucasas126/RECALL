@@ -98,6 +98,41 @@ class ParallelRecallTests(unittest.TestCase):
         self.assertEqual(turns[-1]["associative_matches"], 1)
         self.assertIn("associative memory (parallel):", self.agent.last_latency_report)
 
+    def test_event_and_turn_carry_the_injected_fragments(self) -> None:
+        written = threading.Event()
+        fragment = {"address": "notes:cat.md", "label": "Cat", "score": 0.83, "excerpt": "the cat is called Misu"}
+
+        def first_call(cancellation):
+            yield "content", "Partial."
+            written.set()
+            yield from self._wait_for_cancel(cancellation)
+
+        def recall(agent, user_input, cancellation, history=None, chat_id=None):
+            self.assertTrue(written.wait(3))
+            return associative.RecallResult(HINT, 1, [fragment], "cat name")
+
+        self._model(first_call)
+        with patch("src.agent.agent.associative.recall", side_effect=recall):
+            events = list(self.agent.invoke("What is my cat called?"))
+
+        self.assertIn(("memory", {"state": "done", "matches": 1, "fragments": [fragment], "query": "cat name"}), events)
+        last = self.conversations.load(self.agent.chat_id)[-1]
+        self.assertEqual(last["associative_fragments"], [fragment])
+        self.assertEqual(last["associative_query"], "cat name")
+
+    def test_no_match_turn_keeps_the_query_only(self) -> None:
+        def reply(*args, **kwargs):
+            yield "content", "Hi"
+            yield {"usage": {"prompt_tokens": 10, "completion_tokens": 5}}
+
+        self.provider.invoke.side_effect = reply
+        with patch("src.agent.agent.associative.recall", return_value=associative.RecallResult(None, 0, query="pets")):
+            list(self.agent.invoke("hello"))
+        last = self.conversations.load(self.agent.chat_id)[-1]
+        self.assertEqual(last["associative_matches"], 0)
+        self.assertEqual(last["associative_query"], "pets")
+        self.assertNotIn("associative_fragments", last)
+
     def test_hit_mid_sentence_waits_for_the_end_of_the_sentence(self) -> None:
         written = threading.Event()
         found = threading.Event()

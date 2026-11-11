@@ -211,6 +211,36 @@ class IndexTests(IndexFixture):
         self.assertTrue(line.startswith("- [mind_palace:pets.md > Pets] Luna."))
         self.assertLessEqual(len(line), len("- [mind_palace:pets.md > Pets] ") + 400)
 
+    def test_recall_returns_structured_hits(self) -> None:
+        hits = [
+            {"address": "mind_palace:pets.md", "context": "Pets", "body": "Luna. " * 100, "document": "", "score": 0.9},
+            {"address": "notes:misc.md", "context": "", "document": "Short note.", "score": 0.8},
+        ]
+        agent = SimpleNamespace(
+            config=SimpleNamespace(associative_memory="question_only"),
+            query_memory=lambda query, top_k, *, exclude_chat=None: hits,
+        )
+        result = associative.recall(agent, "my cat")
+        hint, count = result
+        self.assertEqual(count, 2)
+        self.assertIsNone(result.query)  # the user's own message is not a proposed query
+        pets, misc = result.fragments
+        self.assertEqual((pets["address"], pets["label"], pets["score"]), ("mind_palace:pets.md", "Pets", 0.9))
+        self.assertTrue(pets["excerpt"].startswith("Luna."))
+        self.assertLessEqual(len(pets["excerpt"]), associative._FRAGMENT_LIMIT)
+        self.assertEqual(misc, {"address": "notes:misc.md", "label": None, "score": 0.8, "excerpt": "Short note."})
+        self.assertIn("- [mind_palace:pets.md > Pets] Luna.", hint)
+
+    def test_recall_keeps_the_proposed_query_without_hits(self) -> None:
+        agent = SimpleNamespace(
+            config=SimpleNamespace(associative_memory="llm"),
+            query_memory=lambda query, top_k, *, exclude_chat=None: [],
+        )
+        with patch("src.agent.associative._propose_query", return_value="cat name"):
+            result = associative.recall(agent, "what is my cat called?")
+        self.assertEqual(tuple(result), (None, 0))
+        self.assertEqual((result.fragments, result.query), ([], "cat name"))
+
     def test_unchanged_files_are_never_read(self) -> None:
         self.index.sync()
         self.provider.reset()

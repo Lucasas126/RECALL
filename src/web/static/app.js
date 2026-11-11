@@ -66,6 +66,49 @@ function renderThemeToggle() {
 }
 matchMedia("(prefers-color-scheme: light)").addEventListener("change", renderThemeToggle);
 
+// The associative-memory dialog: the search query and the injected fragments (source, score, excerpt), all as
+// text nodes. Returns null when there is nothing to show beyond the indicator's own text.
+function memoryDetails(fragments, query) {
+  const hits = Array.isArray(fragments) ? fragments : [];
+  if (!hits.length && !query) return null;
+  const body = document.createDocumentFragment();
+  if (query) {
+    body.append(Object.assign(document.createElement("p"), {
+      className: "memory-query", textContent: tr("Search query: {query}", { query }),
+    }));
+  }
+  if (hits.length) {
+    const list = document.createElement("ol");
+    list.className = "memory-fragments";
+    for (const hit of hits) {
+      const item = document.createElement("li");
+      const source = document.createElement("div");
+      source.className = "memory-fragment-source";
+      source.textContent = hit.label ? `${hit.address} > ${hit.label}` : String(hit.address ?? "");
+      if (typeof hit.score === "number") {
+        source.append(Object.assign(document.createElement("span"), {
+          className: "memory-fragment-score", textContent: ` · ${tr("score {score}", { score: hit.score.toFixed(2) })}`,
+        }));
+      }
+      const excerpt = markdown(hit.excerpt ?? "");  // sanitized, like any message body
+      excerpt.classList.add("memory-fragment-excerpt");
+      item.append(source, excerpt);
+      list.append(item);
+    }
+    body.append(list);
+  }
+  return body;
+}
+
+function openMemoryDialog(summary, fragments, query) {
+  const body = memoryDetails(fragments, query);
+  if (!body) return;
+  $("assoc-title").textContent = summary;
+  $("assoc-body").replaceChildren(body);
+  const dialog = $("assoc-dialog");
+  if (!dialog.open) dialog.showModal();
+}
+
 function tr(template, values = {}) {
   const text = state.preferences?.language === "es" ? state.translations[template] : template;
   if (typeof text !== "string") throw new Error(`Missing translation: ${template}`);
@@ -596,7 +639,7 @@ function translateInterface() {
   $("dream-model").placeholder = tr("Your chat model");
   $("agent-model").placeholder = tr("Your default model");
   for (const [id, text] of [
-    ["settings-open", "Settings"], ["settings-close", "Close"], ["tasks-open", "Tasks"], ["tasks-close", "Close"],
+    ["settings-open", "Settings"], ["settings-close", "Close"], ["tasks-open", "Tasks"], ["tasks-close", "Close"], ["assoc-close", "Close"],
     ["logout", "Log out"], ["jump-latest", "Jump to latest"], ["theme-toggle", "Switch theme"],
   ]) {
     $(id).title = tr(text);
@@ -3602,7 +3645,12 @@ function renderMessages(messages) {
     const view = addMessage(m.role, container);
     if (m.role === "user" && m.index != null) setEditable(view.el, m.index);
     if (m.associative_skipped) view.memory({ state: "skipped" });
-    else if (m.associative_matches != null) view.memory({ state: "done", matches: m.associative_matches });
+    else if (m.associative_matches != null) {
+      view.memory({
+        state: "done", matches: m.associative_matches,
+        fragments: m.associative_fragments, query: m.associative_query,
+      });
+    }
     if (m.role === "assistant") {
       for (const step of historySteps(m)) {
         if (step.type === "reasoning") view.thinking(step.text);
@@ -4923,6 +4971,7 @@ $("tasks-open").addEventListener("click", () => {
   taskPanelRefresh();
 });
 $("tasks-close").addEventListener("click", () => $("tasks-dialog").close());
+$("assoc-close").addEventListener("click", () => $("assoc-dialog").close());
 $("chat-tasks-indicator").addEventListener("click", () => {
   if (!scrollToTaskCard($("chat-tasks-indicator")._taskId)) $("tasks-open").click();
 });
@@ -5616,7 +5665,7 @@ function addMessage(role, parent = state.view ?? $("messages")) {
       note.textContent = text;
       el.insertBefore(note, body);
     },
-    memory({ state, matches = 0 }) {
+    memory({ state, matches = 0, fragments = null, query = null }) {
       if (!memoryIndicator) {
         memoryIndicator = document.createElement("div");
         memoryIndicator.setAttribute("role", "status");
@@ -5625,11 +5674,21 @@ function addMessage(role, parent = state.view ?? $("messages")) {
       const outcome = state === "done" ? (matches > 0 ? "found" : "none") : state;
       memoryIndicator.className = `memory-indicator ${outcome}`;
       memoryIndicator.dataset.state = state;
-      if (outcome === "searching") memoryIndicator.textContent = tr("Associative memory: searching");
-      else if (outcome === "skipped") memoryIndicator.textContent = tr("Associative memory: skipped");
-      else if (outcome === "none") memoryIndicator.textContent = tr("Associative memory: no matches");
-      else if (matches === 1) memoryIndicator.textContent = tr("Associative memory: {count} match", { count: matches });
-      else memoryIndicator.textContent = tr("Associative memory: {count} matches", { count: matches });
+      let summary;
+      if (outcome === "searching") summary = tr("Associative memory: searching");
+      else if (outcome === "skipped") summary = tr("Associative memory: skipped");
+      else if (outcome === "none") summary = tr("Associative memory: no matches");
+      else if (matches === 1) summary = tr("Associative memory: {count} match", { count: matches });
+      else summary = tr("Associative memory: {count} matches", { count: matches });
+      const shown = outcome === "found" ? fragments : null;
+      const hasDetails = Boolean((Array.isArray(shown) && shown.length) || query);
+      memoryIndicator.classList.toggle("expandable", hasDetails);
+      if (hasDetails) {
+        const button = Object.assign(document.createElement("button"), { type: "button", textContent: summary });
+        button.setAttribute("aria-haspopup", "dialog");
+        button.addEventListener("click", () => openMemoryDialog(summary, shown, query));
+        memoryIndicator.replaceChildren(button);
+      } else memoryIndicator.textContent = summary;
     },
     settleMemory() {
       // a search still running when the reply ends, fails or is interrupted was not used

@@ -298,6 +298,8 @@ class Agent:
         # transient associative-memory hint, injected into the context of the current turn only
         self._assoc_suggestion: Optional[str] = None
         self._assoc_match_count = 0
+        self._assoc_fragments: list[dict] = []  # structured hits shown to the user, see associative.RecallResult
+        self._assoc_query: Optional[str] = None
         self._assoc_job: Optional[associative.RecallJob] = None
         self._assoc_taken = False  # the job's outcome was already used (or found empty) this turn
         # how the search ended: "found", "none" (nothing relevant) or "skipped" (failed, late or interrupted)
@@ -455,6 +457,8 @@ class Agent:
             self._truncated = False
         self._assoc_suggestion = None
         self._assoc_match_count = 0
+        self._assoc_fragments: list[dict] = []  # structured hits shown to the user, see associative.RecallResult
+        self._assoc_query: Optional[str] = None
         self._assoc_job = None
         self._assoc_taken = False
         self._assoc_outcome = None
@@ -684,7 +688,11 @@ class Agent:
         if job is None or self._assoc_taken or not job.ready():
             return
         self._assoc_taken = True
-        suggestion, count = job.result()
+        result = job.result()
+        suggestion, count = result
+        if not job.failed:
+            self._assoc_query = getattr(result, "query", None)
+            self._assoc_fragments = list(getattr(result, "fragments", None) or []) if suggestion else []
         waited = ((job.finished_at or perf_counter()) - job.started_at) * 1000
         if job.failed:
             self._assoc_outcome = "skipped"
@@ -703,7 +711,12 @@ class Agent:
             return {"state": "skipped"}
         if self._assoc_outcome is None:
             return None
-        return {"state": "done", "matches": self._assoc_match_count}
+        event = {"state": "done", "matches": self._assoc_match_count}
+        if self._assoc_fragments:
+            event["fragments"] = self._assoc_fragments
+        if self._assoc_query:
+            event["query"] = self._assoc_query
+        return event
 
     def _close_assoc_job(self) -> None:
         """Stop the recall job if it is still running and remember how long it ran."""
@@ -714,6 +727,7 @@ class Agent:
         if not self._assoc_taken:
             if job.ready() and not job.failed and not job.result()[0]:
                 self._assoc_outcome = "none"
+                self._assoc_query = getattr(job.result(), "query", None)
             else:
                 self._assoc_outcome = "skipped"  # failed, late or interrupted: its result was never used
                 logger.info("associative recall not used: %s", "still running" if not job.ready() else "arrived too late")
@@ -877,6 +891,8 @@ class Agent:
             "timeline": self._timeline.build(len(self.last_actions)),
             "associative_matches": self._assoc_match_count if self._assoc_outcome in ("found", "none") else None,
             "associative_skipped": True if self._assoc_outcome == "skipped" else None,
+            "associative_fragments": (self._assoc_fragments or None) if self._assoc_outcome == "found" else None,
+            "associative_query": self._assoc_query if self._assoc_outcome in ("found", "none") else None,
             "usage_report": usage_report or self.last_usage or None,
         }
         if interrupted:
