@@ -19,7 +19,7 @@ index:
   folders_reconcile_minutes: 10  # minimum time between background scans of the agents' user folders
 
 agent:
-  max_tool_hops: 5          # max tool round-trips before forcing a final answer
+  max_tool_hops: 25         # max tool round-trips before forcing a final answer (5 cut coding work short)
 
 memory_limits:
   soul_chars: 15000         # maximum characters of an agent's SOUL.md (1000-100000)
