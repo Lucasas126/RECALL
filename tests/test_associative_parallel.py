@@ -215,8 +215,10 @@ class ParallelRecallTests(unittest.TestCase):
         self.assertIn(("reasoning", "I should look."), events)
         self.assertEqual([e[1]["name"] for e in events if e[0] == "tool"], ["echo"])
         self.assertEqual(len(self.contexts), 2)  # the finished call was kept: no restart before the tool ran
-        self.assertEqual(self.contexts[1][-1]["role"], "system")  # the hint reaches the next hop
-        self.assertTrue(self.contexts[1][-1]["content"].startswith(HINT))
+        hints = [i for i, m in enumerate(self.contexts[1]) if m["role"] == "system" and m["content"].startswith(HINT)]
+        self.assertEqual(len(hints), 1)  # the hint reaches the next hop, once, right after the user message
+        self.assertEqual(self.contexts[1][hints[0] - 1]["role"], "user")
+        self.assertEqual(self.contexts[1][-1]["role"], "tool")
         self.assertEqual(self.agent.last_reply, "Continuation")
         timeline = self.conversations.load(self.agent.chat_id)[-1]["timeline"]
         self.assertEqual([s["type"] for s in timeline], ["reasoning", "tool", "text"])
