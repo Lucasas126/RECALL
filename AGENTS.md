@@ -28,6 +28,8 @@
 - Install/sync project dependencies with `uv sync`. For the configured CLI, set `USER_ID` and `AGENT_ID` in `.env`, then run `uv run python cli.py` (continues the agent's most recent chat). For the web UI run `uv run python web.py` (host/port in `settings.yaml`).
 - The project is in initial development with no production deployment. After implementing a feature, always restart both the web and Telegram services so the changes take effect; no additional restart confirmation is required. Identify and stop only their specific process IDs, preserve their launch configuration, and verify that both services are running and responsive afterward. Report restart or readiness failures explicitly. Documentation-only and instruction-only changes do not require a restart.
 - Automated tests in `tests/` use the standard-library `unittest` framework. For Python changes, run the relevant tests with `uv run python -m unittest discover -s tests -p "test_<area>.py"` (replace the pattern with the affected test files), and run `uv run python -m compileall src tests cli.py main.py web.py run_telegram.py`. Exercise relevant behavior manually when it requires configured providers or data; compilation alone does not validate behavior.
+- Web UI tests are Node tests: before a push, run every `tests/*.cjs` with `node --test` (ignore `tests/test_model_sorting.cjs`, which already fails), and `node --check src/web/static/app.js` after editing it.
+- Each page in `src/knowledge/recall/references/` is limited to 8192 bytes; `tests/test_recall_knowledge.py` enforces it. Trim existing text rather than exceeding it.
 
 ## More specific guidance
 
