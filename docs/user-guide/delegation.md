@@ -50,7 +50,7 @@ without the group.
 - **No inherited persona.** The agent writes the worker's system prompt through `instructions`; the worker does not get the agent's SOUL, memory,
   skills, files or MCP services, and it cannot ask you questions. It has the terminal only if the agent grants it backends (see
   [terminal and approvals](#terminal-and-approvals)).
-- **Same provider and model as the chat that launched it**, unless the agent names another model (checked like a chat's own model choice,
+- **Same provider and model as the chat that launched it**, unless the agent names another model, or its `delegation.default_model` (Default worker model in the Delegation block) is set (checked like a chat's own model choice,
   including the zero-data-retention rule). Reasoning effort follows the launching chat too.
 - **Tools only by grant.** By default none. The agent may grant `web` (web search), and only if it has the group itself and `delegation.allowed_groups`
   allows it. Memory, folders, MCP and `delegate` can never be granted, and the terminal only through `backends`, so a worker cannot do more than its parent and cannot launch tasks (depth 1).
@@ -124,7 +124,7 @@ only lower them.
 | running tasks per chat / per user | 3 / 4 |
 | launches in one turn | 5 |
 | wall clock per task | 600 s (10 min) |
-| input + output tokens per task | 200 000 |
+| input + output tokens per task (summed over every model call, `task_send` follow-ups restart the count) | 200 000 |
 | result text returned to the agent | 8000 characters (the full text stays in the hidden chat) |
 | follow-ups per task (`task_send`) | 5 |
 | `task_wait` | 120 s at most |

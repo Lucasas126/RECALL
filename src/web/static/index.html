@@ -387,6 +387,14 @@
                 <p class="setting-default model-note"></p>
                 <p class="setting-error error" role="alert"></p>
               </div>
+              <div class="setting-row wide">
+                <div class="setting-main">
+                  <label for="agent-delegation-model" id="agent-delegation-model-label">Default worker model</label>
+                  <p id="agent-delegation-model-hint" class="model-note">Model of fresh workers when the agent names none. Empty uses the model of the chat.</p>
+                </div>
+                <div class="setting-control"><input id="agent-delegation-model" maxlength="256" placeholder="provider:model" autocomplete="off"><button type="button" class="icon-btn setting-reset">↺</button></div>
+                <p class="setting-default model-note"></p>
+              </div>
               <div class="setting-row">
                 <div class="setting-main">
                   <span id="agent-delegation-targets-label">Agents it may hand tasks to</span>

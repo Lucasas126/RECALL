@@ -913,6 +913,8 @@ _SPANISH = {
     "tool group '{name}'": "el grupo de herramientas '{name}'",
     "MCP servers": "los servidores MCP",
     "terminal backend '{name}'": "el backend de terminal '{name}'",
+    "Default worker model": "Modelo por defecto de los workers",
+    "Model of fresh workers when the agent names none. Empty uses the model of the chat.": "Modelo de los workers nuevos cuando el agente no indica ninguno. Vacío usa el modelo del chat.",
     "delegation to other agents": "la delegación en otros agentes",
     "no service": "ningún servicio",
     "{service} needs the level {needed}, above your maximum level {max}. Remove {service} or ask an administrator to raise your maximum.": "{service} necesita el nivel {needed}, por encima de tu nivel máximo {max}. Quita {service} o pide a un administrador que suba tu máximo.",

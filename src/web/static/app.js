@@ -580,6 +580,8 @@ function translateInterface() {
     ["agent-delegation-parallel-hint", "Can only lower the application's limit. Empty uses the application's limit."],
     ["agent-delegation-timeout-label", "Time limit per task"], ["agent-delegation-tokens-label", "Token limit per task"],
     ["agent-delegation-targets-label", "Agents it may hand tasks to"],
+    ["agent-delegation-model-label", "Default worker model"],
+    ["agent-delegation-model-hint", "Model of fresh workers when the agent names none. Empty uses the model of the chat."],
     ["agent-delegation-targets-hint", "Without any, it can only use fresh workers. An agent that can write its own memory keeps what it learns from the task."],
     ["agent-delegation-no-agents", "You have no other agents."],
     ["agent-max-hops-label", "Tool rounds per turn"],
@@ -1658,6 +1660,7 @@ function renderDelegationBlock(agent) {
   setNumberValue($("agent-delegation-parallel"), saved?.max_parallel ?? null);
   setNumberValue($("agent-delegation-timeout"), saved?.timeout_seconds ?? null);
   setNumberValue($("agent-delegation-tokens"), saved?.max_tokens ?? null);
+  $("agent-delegation-model").value = saved?.default_model ?? "";
   renderDelegationTargets(delegationTargetRows(state.agentConfigs, state.agentForm.originalId, saved));
   $("agent-delegation-error").textContent = "";
   updateDelegationBlock();
@@ -2128,7 +2131,8 @@ function agentFormBody() {
     delegation: buildDelegationConfig(saved?.delegation, delegationGroupChecked(), {
       enabled: $("agent-delegation-enabled").checked, allowedGroups: readDelegationGroups(),
       maxParallel: numberValue("agent-delegation-parallel"), timeout: numberValue("agent-delegation-timeout"),
-      maxTokens: numberValue("agent-delegation-tokens"), targets: readDelegationTargetFields(),
+      maxTokens: numberValue("agent-delegation-tokens"), defaultModel: $("agent-delegation-model").value,
+      targets: readDelegationTargetFields(),
     }),
     chat_config: {
       model: $("agent-model").value.trim() || null,  // null follows the user's default model
@@ -4180,6 +4184,7 @@ function taskCardState(record, action, nowMs, listed = false) {
     result: record?.result ?? record?.result_preview ?? "",
     error: record?.error ?? (launchFailed ? String(taskResultJson(action)?.error ?? action?.result ?? "") : ""),
     reason: record?.reason ?? "",
+    model: record?.model ?? "",
   };
 }
 
@@ -4503,7 +4508,7 @@ function refreshTaskCard(card) {
   parts.target.textContent = view.ephemeral ? tr("ephemeral") : view.target;
   parts.badge.className = `task-badge ${view.awaitingApproval ? "awaiting_approval" : view.status}`;
   parts.badge.textContent = view.elapsed ? `${tr(view.statusLabel)} · ${view.elapsed}` : tr(view.statusLabel);
-  parts.tokens.textContent = view.tokens ? tr("{count} tokens", { count: view.tokens }) : "";
+  parts.tokens.textContent = [view.model, view.tokens ? tr("{count} tokens", { count: view.tokens }) : ""].filter(Boolean).join(" · ");
   parts.activity.textContent = view.activity ? tr(view.activity[0], view.activity[1]) : "";
   parts.activity.hidden = !view.activity;
   const text = view.result || view.error || (view.running || view.status === "starting" ? "" : tr("No result"));
@@ -5552,6 +5557,7 @@ function buildDelegationConfig(saved, groupChecked, fields) {
     max_parallel: fields.maxParallel ?? null,
     timeout_seconds: fields.timeout ?? null,
     max_tokens: fields.maxTokens ?? null,
+    default_model: (fields.defaultModel ?? "").trim() || null,
     targets: (fields.targets ?? []).filter((row) => row.allowed).map((row) => ({ agent: row.id, remember: Boolean(row.remember) })),
   };
 }

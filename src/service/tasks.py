@@ -750,7 +750,8 @@ class TaskManager:
             self._finish(live, "failed", reason="launch_error", error=str(exc)[:300])
             raise TaskError(str(exc)) if not isinstance(exc, TaskError) else exc
         live.chat_id = chat_id
-        self.store.update(user_id, task_id, lambda r: r["child"].__setitem__("chat_id", chat_id))
+        used = self._model_of(parent.user_id, child_agent, chat_id)
+        self.store.update(user_id, task_id, lambda r: (r["child"].__setitem__("chat_id", chat_id), r.__setitem__("model", used)))
         with self._guard:
             self._live[(user_id, task_id)] = live
         text = f"Task {task_id}\n\nGoal:\n{goal}" + (f"\n\nContext:\n{context}" if context else "")
@@ -1007,6 +1008,13 @@ class TaskManager:
                 f"limit reached: {limits.max_parallel_per_user} running task(s) for this user; "
                 "wait for one to finish (task_wait), then launch again"
             )
+
+    def _model_of(self, user_id: str, agent_id: str, chat_id: str) -> str | None:
+        """The model a task chat runs on (the effective one), or None when it cannot be read."""
+        try:
+            return self._service.get_chat_models(user_id, agent_id, chat_id)["model"]["id"]
+        except Exception:
+            return None
 
     def _create_child_chat(
         self, parent: RunContext, task_id: str, groups: list[str], instructions: str, model: str,
@@ -1511,7 +1519,8 @@ class TaskManager:
         lines = []
         for r in mine[-40:]:
             unread = r["status"] in FINAL_STATES and r.get("result") and r.get("wake", {}).get("state") not in ("consumed", "delivered", "orphaned")
-            lines.append(f"{r['id']} {r['status']}{' unread' if unread else ''} {_age(r['created_at'])} {r['title']}")
+            model = f" [{r['model']}]" if r.get("model") else ""
+            lines.append(f"{r['id']} {r['status']}{' unread' if unread else ''} {_age(r['created_at'])}{model} {r['title']}")
         return "\n".join(lines)
 
     def result(self, parent: RunContext, task_id: str, full: bool = False) -> dict:
@@ -1882,6 +1891,8 @@ class TaskManager:
             out["truncated"] = result.get("truncated", False)
         usage = record.get("usage") or {}
         out["tokens"] = (usage.get("in") or 0) + (usage.get("out") or 0)
+        if record.get("model"):
+            out["model"] = record["model"]
         if record.get("reason") == "rate_limit":
             out["hint"] = "the provider's plan limit was reached; new tasks are blocked for a while: do not retry, do the work yourself or tell the user"
         elif record.get("reason") in ("timeout", "token_limit"):
@@ -1922,7 +1933,7 @@ class TaskManager:
                 "kind": target.get("kind", "ephemeral"), "agent_id": target.get("agent_id"),
                 "name": target.get("name"), "remember": bool(target.get("remember")),
             },
-            "status": record.get("status"), "reason": record.get("reason"),
+            "status": record.get("status"), "reason": record.get("reason"), "model": record.get("model"),
             "started_at": started, "ended_at": ended, "elapsed_s": elapsed,
             "usage": {"in": usage.get("in") or 0, "out": usage.get("out") or 0},
             "parent": dict(record.get("parent") or {}),

@@ -398,6 +398,24 @@ class WakeTests(AsyncFixture):
         self.assertIn("owner_lost", self.wakes()[0]["content"])
 
 
+class WorkerModelTests(AsyncFixture):
+    def test_record_keeps_the_model_the_worker_ran_on(self) -> None:
+        live = self.start()
+        self.assertTrue(live.done.wait(5))
+        model = self.record(live.task_id).get("model")
+        self.assertTrue(model)
+        self.assertIn(f"[{model}]", self.manager.list_for(self.parent()))
+        self.assertEqual(self.manager.result(self.parent(), live.task_id)["model"], model)
+
+    def test_default_model_is_validated(self) -> None:
+        from pydantic import ValidationError
+        from src.config.models import AgentDelegationConfig
+        self.assertEqual(AgentDelegationConfig(default_model="openrouter:vendor/x").default_model, "openrouter:vendor/x")
+        self.assertIsNone(AgentDelegationConfig().default_model)
+        with self.assertRaises(ValidationError):
+            AgentDelegationConfig(default_model="openrouter:")
+
+
 class FollowUpTests(AsyncFixture):
     def finished(self, **overrides):
         live = self.launch(**overrides)

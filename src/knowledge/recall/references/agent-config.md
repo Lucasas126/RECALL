@@ -60,14 +60,14 @@ MCP entry fields: `tools` (list; omitted means all of the server's tools), `read
 | Field | Meaning (default) |
 | --- | --- |
 | `dream.enabled` | run the schedule (false); manual sessions work anyway |
-| `dream.every_hours` | every N hours (1-720); not together with `daily_at` |
+| `dream.every_hours` | every N hours (1-720); not with `daily_at` |
 | `dream.daily_at` | local `HH:MM` once a day |
 | `dream.model` | empty uses the chat model the agent resolves to |
 | `dream.reasoning_effort` | medium |
 | `dream.max_steps` | model calls per session (60) |
-| `dream.max_tokens` | input + output per session (500000) |
+| `dream.max_tokens` | in + out per session (500000) |
 | `dream.max_minutes` | wall-clock limit, 1-120 (5) |
-| `dream.tools` | extra read groups for dreams: `folders` (default; needs a folder read group), `web` (opt-in) |
+| `dream.tools` | extra read groups: `folders` (default; needs a folder read group), `web` (opt-in) |
 | `dream.prompt` | empty uses the built-in prompt |
 | `dream.notify_telegram` | notify when done (false) |
 
@@ -99,8 +99,9 @@ MCP entry fields: `tools` (list; omitted means all of the server's tools), `read
 | `delegation.allowed_groups` | groups a task may be given: only `web` (web) |
 | `delegation.max_parallel` | running tasks per chat, 1-10; can only lower `settings.yaml` (3) |
 | `delegation.timeout_seconds` | per task, 10-3600; can only lower it (600) |
-| `delegation.max_tokens` | input + output per task; can only lower it (200000) |
-| `delegation.targets` | other agents of the same user it may hand tasks to: `{agent, remember}`; see `references/delegation-targets.md` (empty) |
+| `delegation.max_tokens` | in + out per task; only lowers it (200000) |
+| `delegation.default_model` | model of fresh workers (the chat's) |
+| `delegation.targets` | other agents it may hand tasks to: `{agent, remember}`; see `references/delegation-targets.md` |
 
 ## User yaml (`.config/<user_id>/user.yaml`; set by the admin, mostly not in the UI)
 

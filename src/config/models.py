@@ -524,6 +524,14 @@ class AgentDelegationConfig(BaseModel):
     max_parallel: Optional[int] = Field(default=None, ge=1, le=10, strict=True)  # per parent chat; None = application's
     timeout_seconds: Optional[int] = Field(default=None, ge=10, le=3600, strict=True)
     max_tokens: Optional[int] = Field(default=None, ge=1_000, le=5_000_000, strict=True)
+    # the model of fresh workers when task_start gets none (`<provider>:<model>` or a bare id of the main provider);
+    # None = the model of the chat that launches the task
+    default_model: Optional[str] = Field(default=None, strict=True, min_length=1, max_length=256)
+
+    @field_validator("default_model")
+    @classmethod
+    def _valid_default_model(cls, value: Optional[str]) -> Optional[str]:
+        return None if value is None else validate_reference(value)
 
     @field_validator("targets")
     @classmethod
