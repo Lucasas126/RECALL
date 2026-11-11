@@ -991,8 +991,12 @@ class Agent:
         if self._partial:
             ctx = ctx + [{"role": "assistant", "content": self._partial.rstrip()}]
         if self._assoc_suggestion:
-            hint = f"{self._assoc_suggestion}\n\n{_HIT_CUT_NOTE}" if self._partial else self._assoc_suggestion
-            ctx = ctx + [{"role": "system", "content": hint}]
+            if self._partial:  # the continuation after a pause: the hint closes the context, with the cut note
+                return ctx + [{"role": "system", "content": f"{self._assoc_suggestion}\n\n{_HIT_CUT_NOTE}"}]
+            # once, right after this turn's user message: later tool rounds do not repeat it
+            at = next((i for i in range(len(ctx) - 1, -1, -1) if ctx[i].get("role") == "user"), None)
+            hint = {"role": "system", "content": self._assoc_suggestion}
+            ctx = ctx + [hint] if at is None else ctx[: at + 1] + [hint] + ctx[at + 1 :]
         return ctx
 
     def _ensure_max_context(self) -> None:
