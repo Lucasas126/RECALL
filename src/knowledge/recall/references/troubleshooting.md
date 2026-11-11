@@ -75,3 +75,7 @@ The `memory` tool refuses a write that would exceed the limit and lists the curr
 ## The answer after a tool call is not streamed
 
 With Claude Sonnet 5.5 (and often Opus), the text written right after a tool result arrives in one block when it is finished: the provider sends it that way (a known upstream behaviour, not RECALL). Thinking and the first answer of a turn still stream; Haiku streams after tools too. Nothing to fix on our side.
+
+## The turn was cut after many tool calls
+
+A turn may do at most `agent.max_tool_hops` tool round-trips (`settings.yaml`, 25). Two rounds before the cut the model gets a system note with how many are left; after the last one it gets "Stop calling tools. Answer the user now using what you already have." and must answer without tools. An agent can override the limit with `chat_config.max_tool_hops` (1-100, empty = the application value; Agents tab, "Tool rounds per turn"). Raise it for long coding or research agents; do not raise it to hide a loop.

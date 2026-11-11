@@ -524,6 +524,14 @@ class AgentDelegationConfig(BaseModel):
     max_parallel: Optional[int] = Field(default=None, ge=1, le=10, strict=True)  # per parent chat; None = application's
     timeout_seconds: Optional[int] = Field(default=None, ge=10, le=3600, strict=True)
     max_tokens: Optional[int] = Field(default=None, ge=1_000, le=5_000_000, strict=True)
+    # the model of fresh workers when task_start gets none (`<provider>:<model>` or a bare id of the main provider);
+    # None = the model of the chat that launches the task
+    default_model: Optional[str] = Field(default=None, strict=True, min_length=1, max_length=256)
+
+    @field_validator("default_model")
+    @classmethod
+    def _valid_default_model(cls, value: Optional[str]) -> Optional[str]:
+        return None if value is None else validate_reference(value)
 
     @field_validator("targets")
     @classmethod
@@ -590,6 +598,10 @@ class UserConfig(BaseModel):
         return self.openrouter
 
 
+# upper bound of the per-agent tool round-trip override
+MAX_TOOL_HOPS_LIMIT = 100
+
+
 class ChatConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -600,6 +612,8 @@ class ChatConfig(BaseModel):
     reasoning_effort: Optional[str] = "medium"
     reasoning_tokens: Optional[int] = Field(default=None, ge=1)
     keep_reasoning_in_memory: bool = True
+    # tool round-trips per turn for this agent (None = `agent.max_tool_hops` from settings.yaml)
+    max_tool_hops: Optional[int] = Field(default=None, ge=1, le=MAX_TOOL_HOPS_LIMIT)
     # last N conversation messages kept in context (None = all); system prompt is always kept
     conversation_messages_retained: Optional[int] = Field(default=30, ge=1)
     # let the model call tools (memory recall, source read/write/list)
@@ -780,6 +794,7 @@ class ResolvedAgent(BaseModel):
     reasoning_effort: Optional[str] = None
     reasoning_tokens: Optional[int] = Field(default=None, ge=1)
     keep_reasoning_in_memory: bool = True
+    max_tool_hops: Optional[int] = Field(default=None, ge=1, le=MAX_TOOL_HOPS_LIMIT)
     conversation_messages_retained: Optional[int] = None
     tools: bool = True
     tool_groups: list[str] | None = None

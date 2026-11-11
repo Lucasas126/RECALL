@@ -188,7 +188,7 @@ def build_delegate_tools(config: ResolvedAgent) -> list[Callable[..., str]]:
         instructions: Annotated[str, "the worker's system prompt: role, method, output format"] = "",
         tools: Annotated[Optional[list[str]], "tool groups to grant the worker; none by default"] = None,
         backends: Annotated[Optional[list[str]], "terminal backends to grant the worker (it then gets the terminal tools); every command it runs needs the user's approval; none by default"] = None,
-        model: Annotated[str, "model for the worker; empty = the model of this chat"] = "",
+        model: Annotated[str, "model for the worker; empty = the agent's default worker model, else the model of this chat"] = "",
         timeout_s: Annotated[int, "seconds before the task is stopped; 0 = the default limit"] = 0,
         wait: Annotated[bool, "block until the worker ends and return its result; default: return the id at once"] = False,
         wake: Annotated[bool, "tell this chat when it ends; false = fire-and-forget (read it with task_result)"] = True,
@@ -200,7 +200,7 @@ def build_delegate_tools(config: ResolvedAgent) -> list[Callable[..., str]]:
             return "error: delegation is not available in this run"
         values = dict(
             limits=limits, grantable=grantable, goal=goal, context=context, instructions=instructions,
-            groups=list(tools or []), model=model, timeout_s=timeout_s,
+            groups=list(tools or []), model=(model or "").strip() or delegation.default_model or "", timeout_s=timeout_s,
             backends=list(backends or []), grantable_backends=list(grantable_backends),
             agent=agent, targets=targets, parent_name=config.name, launcher_level=level,
         )

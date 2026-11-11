@@ -27,6 +27,7 @@ chat_config:
   associative_execution: parallel    # parallel | sequential
   keep_reasoning_in_memory: true     # store the thinking in context/history
   recall_knowledge: true             # the built-in, read-only `recall` skill (how RECALL works); false hides it from this agent
+  max_tool_hops: 40                   # optional, 1-100: tool round-trips per turn (empty = settings.yaml agent.max_tool_hops)
   conversation_messages_retained: 20 # at most N messages kept in context; cuts go below N (see prompt caching)
   tools: true                       # enable the selected tool groups
   tool_groups: [memory_read, memory_edit, self]  # memory_read, memory_edit, web, self, folders_read, folders_edit, terminal, delegate, permissions, agents
@@ -73,6 +74,7 @@ delegation:                          # the `delegate` tool group (see the delega
   max_parallel: null                 # running tasks per chat, 1-10; can only lower settings.yaml subagents.max_parallel_per_parent (3)
   timeout_seconds: null              # wall clock per task, 10-3600; can only lower subagents.timeout_seconds (600)
   max_tokens: null                   # input + output tokens per task, 1000-5000000; can only lower subagents.max_tokens (200000)
+  default_model: null                # model of fresh workers when task_start names none (`provider:model`); null = the model of the launching chat
   targets: []                        # other agents of this user a task may be handed to: [{agent: scout, remember: false}]; empty = fresh workers only
 ```
 

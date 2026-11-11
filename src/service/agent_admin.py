@@ -57,7 +57,7 @@ USER_ONLY_HINT = "that setting gives access to tools or files, so only the user 
 _CHAT_SETTINGS = {
     "enabled": "tools", "has_memory": "has_memory", "stream": "stream", "reasoning": "reasoning",
     "reasoning_effort": "reasoning_effort", "reasoning_tokens": "reasoning_tokens",
-    "keep_reasoning_in_memory": "keep_reasoning_in_memory",
+    "keep_reasoning_in_memory": "keep_reasoning_in_memory", "max_tool_hops": "max_tool_hops",
     "conversation_messages_retained": "conversation_messages_retained",
     "associative_memory": "associative_memory", "associative_execution": "associative_execution",
     "recall_knowledge": "recall_knowledge",

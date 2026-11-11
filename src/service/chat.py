@@ -322,6 +322,7 @@ class _MessageRun:
     meta: Optional[dict] = None  # persisted on the user turn (source, task_ids)
     blocks: Optional[list[str]] = None  # a wake turn's task blocks: later results merge into a queued wake
     frame: Optional[Callable[[list[str]], str]] = None  # composes `text` from `blocks`
+    block_runs: Optional[list[list[str]]] = None  # the task runs each block of `blocks` reports (to drop a block already read)
     generation_id: str = field(default_factory=lambda: uuid4().hex)
     cancellation: CancellationToken = field(default_factory=CancellationToken)
     events: _RunFeed = field(default_factory=_RunFeed)
@@ -1731,6 +1732,7 @@ class ChatService:
     def send_system(
         self, user_id: str, agent_id: str, chat_id: str, text: str, *, source: str, meta: Optional[dict] = None,
         steer: bool = False, frame: Optional[Callable[[list[str]], str]] = None,
+        parts: Optional[list[tuple[str, list[str]]]] = None,
     ) -> None:
         """Write a system-originated turn (a subagent task result) into a chat and schedule a generation for it.
 
@@ -1739,7 +1741,9 @@ class ChatService:
         the run queues behind the chat's active reply and never cancels it. With a `frame`, `text` is one block and
         the turn is `frame(blocks)`: a block that arrives while an earlier wake is still queued is merged into it
         (one generation for several results), and a block whose task ids are already queued is dropped.
-        Raises UnknownChat when the chat does not exist (any more). Returns at once; follow the reply with `follow`.
+        `parts` (with a frame) gives several (block, task runs) pairs queued together, so a later read of one result can
+        drop just its block. Raises UnknownChat when the chat does not exist (any more). Returns at once; follow the
+        reply with `follow`.
         """
         conversations = self._conversations(user_id, agent_id)
         slot = self._slot(user_id, agent_id)
@@ -1751,28 +1755,64 @@ class ChatService:
                 exists = False
             if not exists:
                 raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id)
-            if frame is not None:
-                ids = list(meta.get("task_runs") or [])  # "<task id>:<follow-up number>": one delivery per run of a task
-                for queued in (*slot.pending.get(chat_id, ()), slot.active.get(chat_id)):
-                    if queued is None or queued.source != source or queued.meta is None:
-                        continue
-                    if ids and all(run_id in (queued.meta.get("task_runs") or []) for run_id in ids):
-                        return  # already queued or generating: delivery is idempotent
-                for queued in slot.pending.get(chat_id, ()):
-                    if (
-                        queued.source == source and queued.blocks is not None and queued.meta is not None
-                        and not queued.cancellation.is_cancelled()
-                    ):
-                        queued.blocks.append(text)
-                        queued.text = frame(queued.blocks)
-                        for key in ("task_ids", "task_runs"):
-                            queued.meta[key] = [*(queued.meta.get(key) or []), *(meta.get(key) or [])]
-                        return
-            run = _MessageRun(
-                chat_id, frame([text]) if frame else text, [], None, source=source, meta=meta,
-                blocks=[text] if frame else None, frame=frame,
-            )
-            self._enqueue(user_id, agent_id, slot, chat_id, run, steer=steer)
+            for part, part_runs in parts if parts is not None else [(text, list(meta.get("task_runs") or []))]:
+                self._queue_system(user_id, agent_id, slot, chat_id, part, part_runs, source, meta, steer, frame)
+
+    def _queue_system(
+        self, user_id: str, agent_id: str, slot: _AgentSlot, chat_id: str, text: str, runs: list[str], source: str,
+        meta: dict, steer: bool, frame: Optional[Callable[[list[str]], str]],
+    ) -> None:
+        """Queue one block of a system turn (the caller holds `slot.state`): merge it into a queued wake or start one."""
+        if frame is not None:
+            for queued in (*slot.pending.get(chat_id, ()), slot.active.get(chat_id)):  # "<task id>:<follow-up number>"
+                if queued is None or queued.source != source or queued.meta is None:
+                    continue
+                if runs and all(run_id in (queued.meta.get("task_runs") or []) for run_id in runs):
+                    return  # already queued or generating: delivery is idempotent
+            for queued in slot.pending.get(chat_id, ()):
+                if (
+                    queued.source == source and queued.blocks is not None and queued.meta is not None
+                    and not queued.cancellation.is_cancelled()
+                ):
+                    queued.blocks.append(text)
+                    (queued.block_runs if queued.block_runs is not None else []).append(list(runs))
+                    queued.text = frame(queued.blocks)
+                    queued.meta["task_runs"] = [*(queued.meta.get("task_runs") or []), *runs]
+                    queued.meta["task_ids"] = [*(queued.meta.get("task_ids") or []), *(i.rsplit(":", 1)[0] for i in runs)]
+                    return
+        own = dict(meta, task_runs=list(runs), task_ids=[r.rsplit(":", 1)[0] for r in runs]) if frame else meta
+        run = _MessageRun(
+            chat_id, frame([text]) if frame else text, [], None, source=source, meta=own,
+            blocks=[text] if frame else None, frame=frame, block_runs=[list(runs)] if frame else None,
+        )
+        self._enqueue(user_id, agent_id, slot, chat_id, run, steer=steer)
+
+    def drop_queued_task_runs(self, user_id: str, agent_id: str, chat_id: str, run_ids: list[str]) -> None:
+        """Remove task runs from the chat's QUEUED wake turn (the parent read them with task_result meanwhile).
+
+        A block that reports only those runs goes away; a wake left with no block is cancelled and dropped. A wake that
+        is already generating or written stays as it is.
+        """
+        drop = set(run_ids)
+        slot = self._slot(user_id, agent_id)
+        with slot.state:
+            pending = slot.pending.get(chat_id)
+            for queued in list(pending or ()):
+                if queued.source != "task" or queued.blocks is None or queued.block_runs is None or queued.meta is None or queued.frame is None:
+                    continue
+                keep = [i for i, runs in enumerate(queued.block_runs) if not runs or not set(runs) <= drop]
+                if len(keep) == len(queued.blocks):
+                    continue
+                if not keep:
+                    queued.cancellation.cancel()
+                    queued.events.put(None)
+                    pending.remove(queued)
+                    continue
+                queued.blocks = [queued.blocks[i] for i in keep]
+                queued.block_runs = [queued.block_runs[i] for i in keep]
+                queued.text = queued.frame(queued.blocks)
+                queued.meta["task_runs"] = [r for runs in queued.block_runs for r in runs]
+                queued.meta["task_ids"] = [r.rsplit(":", 1)[0] for r in queued.meta["task_runs"]]
 
     def _enqueue(
         self, user_id: str, agent_id: str, slot: _AgentSlot, chat_id: str, run: _MessageRun, *, steer: bool = True,

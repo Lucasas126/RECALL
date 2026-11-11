@@ -20,7 +20,7 @@ Unknown keys are rejected in the agent yaml and most blocks (not in `chat_config
 | --- | --- |
 | `id` | `[A-Za-z0-9_-]{1,64}`, names the data folder |
 | `name` | 1-100 chars; the DISPLAY NAME in the web UI and Telegram, separate from the SOUL: when renaming update both (`soul_edit`, `agent set --set name="New"`). The `id` normally stays |
-| `description` | 0-500 chars; shown in the agent list and read by the Telegram orchestrator |
+| `description` | 0-500 chars; shown in the agent list, read by the Telegram orchestrator |
 | `chat_config` | block below |
 | `dream` | block below |
 | `folders` | up to 20 user folders |
@@ -32,7 +32,7 @@ Unknown keys are rejected in the agent yaml and most blocks (not in `chat_config
 
 ### `chat_config` (Agents tab: Basic, Basic > Advanced and Tools)
 
-Basic holds Identity (name, description, personality) and Model and reasoning (`model`, `reasoning_effort`, `reasoning`, `keep_reasoning_in_memory`, `reasoning_tokens`); the collapsed Advanced section holds `stream`, `has_memory`, `recall_knowledge`, `associative_memory`, `associative_execution` and `conversation_messages_retained`. Rows show their default (from `GET /api/agents/defaults`) and a reset button.
+Basic holds Identity and Model and reasoning (`model`, `reasoning_effort`, `reasoning`, `keep_reasoning_in_memory`, `reasoning_tokens`); Advanced holds `stream`, `has_memory`, `recall_knowledge`, `associative_memory`, `associative_execution`, `max_tool_hops` and `conversation_messages_retained`. Rows show their default and a reset button.
 
 | Field | Meaning (default) |
 | --- | --- |
@@ -42,6 +42,7 @@ Basic holds Identity (name, description, personality) and Model and reasoning (`
 | `reasoning_effort` | minimal, low, medium, high, xhigh, max (medium) |
 | `reasoning_tokens` | optional reasoning budget |
 | `keep_reasoning_in_memory` | store thinking in history (true) |
+| `max_tool_hops` | tool rounds per turn, 1-100; empty = settings value (25) |
 | `conversation_messages_retained` | last N messages in context (30); empty keeps all |
 | `tools` | allow tools at all (true) |
 | `tool_groups` | list of groups; omitted means `memory_read`, `memory_edit`, `web`, `self` |
@@ -59,14 +60,14 @@ MCP entry fields: `tools` (list; omitted means all of the server's tools), `read
 | Field | Meaning (default) |
 | --- | --- |
 | `dream.enabled` | run the schedule (false); manual sessions work anyway |
-| `dream.every_hours` | every N hours (1-720); not together with `daily_at` |
+| `dream.every_hours` | every N hours (1-720); not with `daily_at` |
 | `dream.daily_at` | local `HH:MM` once a day |
 | `dream.model` | empty uses the chat model the agent resolves to |
 | `dream.reasoning_effort` | medium |
 | `dream.max_steps` | model calls per session (60) |
-| `dream.max_tokens` | input + output per session (500000) |
+| `dream.max_tokens` | in + out per session (500000) |
 | `dream.max_minutes` | wall-clock limit, 1-120 (5) |
-| `dream.tools` | extra read groups for dreams: `folders` (default; needs a folder read group), `web` (opt-in) |
+| `dream.tools` | extra read groups: `folders` (default; needs a folder read group), `web` (opt-in) |
 | `dream.prompt` | empty uses the built-in prompt |
 | `dream.notify_telegram` | notify when done (false) |
 
@@ -98,8 +99,9 @@ MCP entry fields: `tools` (list; omitted means all of the server's tools), `read
 | `delegation.allowed_groups` | groups a task may be given: only `web` (web) |
 | `delegation.max_parallel` | running tasks per chat, 1-10; can only lower `settings.yaml` (3) |
 | `delegation.timeout_seconds` | per task, 10-3600; can only lower it (600) |
-| `delegation.max_tokens` | input + output per task; can only lower it (200000) |
-| `delegation.targets` | other agents of the same user it may hand tasks to: `{agent, remember}`; see `references/delegation-targets.md` (empty) |
+| `delegation.max_tokens` | in + out per task; only lowers it (200000) |
+| `delegation.default_model` | model of fresh workers (the chat's) |
+| `delegation.targets` | other agents it may hand tasks to: `{agent, remember}`; see `references/delegation-targets.md` |
 
 ## User yaml (`.config/<user_id>/user.yaml`; set by the admin, mostly not in the UI)
 
