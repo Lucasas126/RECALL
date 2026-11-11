@@ -933,3 +933,17 @@ html.resizing-sidebar #app { transition: none; }
 .users-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .user-admin { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
 #agent-level-message:empty { display: none; }
+
+/* Background tasks of the open chat: header pill (running count, then "finished" for a while) */
+#chat-tasks-indicator { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 2px 10px; border: 1px solid var(--accent); border-radius: 999px; background: transparent; color: var(--accent); font-size: var(--s-1); font-weight: 500; white-space: nowrap; cursor: pointer; }
+#chat-tasks-indicator[hidden] { display: none; }
+#chat-tasks-indicator.done { border-color: var(--ok); color: var(--ok); }
+#chat-tasks-indicator .task-ind-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+#chat-tasks-indicator.running .task-ind-dot { animation: memory-pulse 1.2s ease-in-out infinite; }
+#chat-tasks-indicator:not([hidden]) + #chat-make-disposable { margin-left: 0; }
+@media (max-width: 800px) {
+  #chat-tasks-indicator { padding: 2px 9px; min-height: 30px; }
+  #chat-tasks-indicator #chat-tasks-indicator-text { display: none; }
+  #chat-tasks-indicator::after { content: attr(data-short); font-variant-numeric: tabular-nums; }
+}
+@media (prefers-reduced-motion: reduce) { #chat-tasks-indicator .task-ind-dot { animation: none !important; } }
