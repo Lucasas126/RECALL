@@ -151,6 +151,39 @@ class WakeTests(AsyncFixture):
         self.assertEqual(len(wakes), 1, "two results that arrived while busy are one wake turn")
         self.assertEqual(sorted(wakes[0]["task_ids"]), sorted([a.task_id, b.task_id]))
 
+    def test_a_result_read_while_its_wake_is_queued_does_not_wake_the_chat(self) -> None:
+        self.parent_gate = threading.Event()
+        events = self._send("question")
+        self.assertTrue(self.parent_started.wait(3))
+        live = self.start()
+        self.assertTrue(live.done.wait(5))
+        sleep(self.manager.wake_debounce + 0.4)  # the wake is queued behind the reply the parent is still writing
+        self.assertEqual(self.record(live.task_id)["wake"]["state"], "delivered")
+        self.manager.result(self.parent(), live.task_id)  # the parent reads it meanwhile
+        self.parent_gate.set()
+        list(events)
+        self.assertTrue(until(self.idle))
+        sleep(0.5)
+        self.assertEqual(self.wakes(), [], "a result the parent already read must not wake it again")
+
+    def test_reading_one_result_keeps_the_other_in_the_queued_wake(self) -> None:
+        self.parent_gate = threading.Event()
+        events = self._send("question")
+        self.assertTrue(self.parent_started.wait(3))
+        a = self.start(goal="find A")
+        self.assertTrue(a.done.wait(5))
+        b = self.start(goal="find B")
+        self.assertTrue(b.done.wait(5))
+        sleep(self.manager.wake_debounce + 0.4)
+        self.manager.result(self.parent(), a.task_id)
+        self.parent_gate.set()
+        list(events)
+        self.assertTrue(until(lambda: self.settled(1)))
+        wakes = self.wakes()
+        self.assertEqual(len(wakes), 1)
+        self.assertEqual(wakes[0]["task_ids"], [b.task_id])
+        self.assertNotIn("find A", wakes[0]["content"])
+
     def test_a_user_message_steers_a_queued_wake_and_still_sees_the_result(self) -> None:
         self.parent_gate = threading.Event()
         first = self._send("first")

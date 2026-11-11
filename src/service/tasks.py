@@ -1532,12 +1532,21 @@ class TaskManager:
         return out
 
     def consume(self, user_id: str, task_id: str) -> None:
-        """Mark a finished task's result as read by the parent: it gets no wake."""
+        """Mark a finished task's result as read by the parent: it gets no wake, and a wake already queued behind the
+        parent's current reply loses it (else the parent would be told again about a result it just read)."""
+        queued: list[dict] = []
+
         def change(record: dict) -> bool | None:
-            if record.get("wake", {}).get("state") not in ("pending", "held", "none"):
+            state = record.get("wake", {}).get("state")
+            if state == "delivered":  # the wake may still be queued behind the reply that is reading the result
+                queued.append(record)
+            if state not in ("pending", "held", "none"):
                 return False
             record["wake"] = {"state": "consumed"}
         self.store.update(user_id, task_id, change, final_ok=True)
+        if queued:
+            parent = queued[0]["parent"]
+            self._service.drop_queued_task_runs(user_id, parent["agent_id"], parent["chat_id"], [_run_id(queued[0])])
 
     def wait(self, parent: RunContext, ids: list[str], timeout_s: int = 60) -> dict:
         """Block until every task ended or the timeout (max 120 s); a steering message of the user ends the wait.
@@ -1832,8 +1841,9 @@ class TaskManager:
         ids = [record["id"] for record in claimed]
         try:
             self._service.send_system(
-                user_id, agent_id, chat_id, "\n\n".join(wake_block(record) for record in claimed), source="task",
+                user_id, agent_id, chat_id, "", source="task",
                 meta={"task_ids": ids, "task_runs": [_run_id(record) for record in claimed]}, steer=False, frame=wake_frame,
+                parts=[(wake_block(record), [_run_id(record)]) for record in claimed],
             )
         except UnknownChat:
             self._set_wake(user_id, agent_id, chat_id, ("claimed",), "orphaned", ids)
