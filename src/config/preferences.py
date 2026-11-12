@@ -29,6 +29,8 @@ class UserPreferences(BaseModel):
     agent_id: Annotated[str, Field(strict=True, pattern=r"^[A-Za-z0-9_-]{1,64}$")] | None = None
     default_llm_model: Annotated[str, Field(strict=True, min_length=1, max_length=256)] | None = None
     default_stt_model: Annotated[str, Field(strict=True, min_length=1, max_length=256)] | None = None
+    # spoken language for voice transcription ("es", "es-ES"); None follows user.yaml `models.stt_language`, then settings.yaml
+    stt_language: Annotated[str, Field(strict=True, pattern=r"^[a-z]{2}(?:-[A-Z]{2})?$")] | None = None
     # most associative-memory fragments injected per turn; None follows settings.yaml `associative_memory.top_n`
     associative_max_matches: Annotated[int, Field(strict=True, ge=ASSOCIATIVE_MAX_MATCHES_BOUNDS[0], le=ASSOCIATIVE_MAX_MATCHES_BOUNDS[1])] | None = None
     # days of inactivity after which a disposable chat is deleted; None means the default (30)

@@ -841,6 +841,7 @@ class ChatService:
                 "theme": "system",
                 "default_llm_model": user.models.chat,
                 "default_stt_model": user.models.stt,
+                "stt_language": user.models.stt_language or SPEECH_TO_TEXT.language,
                 "associative_max_matches": {
                     "default": ASSOC.top_n,
                     "min": ASSOCIATIVE_MAX_MATCHES_BOUNDS[0], "max": ASSOCIATIVE_MAX_MATCHES_BOUNDS[1],
@@ -906,6 +907,7 @@ class ChatService:
             "agent_id": agent_id,
             "default_llm_model": resolved.default_llm_model or user.models.chat,
             "default_stt_model": resolved.default_stt_model or user.models.stt,
+            "stt_language": resolved.stt_language or user.models.stt_language or SPEECH_TO_TEXT.language,
         })
 
     def provider_status(self, user_id: str, capability: CatalogCapability = "chat") -> dict:

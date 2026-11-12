@@ -134,14 +134,14 @@ function renderVersion() {
 // The sections of the user settings dialog and the preferences each one holds (`connections` has none).
 const SETTINGS_SECTIONS = {
   general: ["show_thinking", "language", "default_agent_id"],
-  models: ["default_llm_model", "default_stt_model"],
+  models: ["default_llm_model", "default_stt_model", "stt_language"],
   chats: ["associative_max_matches", "disposable_retention_days"],
   telegram: ["orchestrator", "core_agent_id"],
   connections: [],
 };
 // Saving null for these means "follow the default"; the others always hold a value.
 const NULLABLE_PREFERENCES = new Set([
-  "default_llm_model", "default_stt_model", "associative_max_matches", "disposable_retention_days",
+  "default_llm_model", "default_stt_model", "stt_language", "associative_max_matches", "disposable_retention_days",
   "orchestrator", "core_agent_id", "default_agent_id",
 ]);
 
@@ -525,6 +525,9 @@ function translateInterface() {
     ["settings-llm-label", "Default LLM model"], ["settings-stt-label", "Default STT model"],
     ["settings-llm-hint", "Used by chats that have no model of their own and by agents that do not set one."],
     ["settings-stt-hint", "Transcribes voice messages to text."],
+    ["settings-stt-language-label", "Voice message language"],
+    ["settings-stt-language-hint", "The language you speak in voice messages. Auto-detect can misread short clips."],
+    ["settings-stt-language-auto", "Auto-detect"],
     ["settings-tab-general-text", "General"], ["settings-tab-models-text", "Models"],
     ["settings-tab-chats-text", "Chats & memory"], ["settings-tab-telegram-text", "Telegram"],
     ["settings-tab-connections-text", "Connections"],
@@ -2373,6 +2376,7 @@ function settingsOriginalValues() {
   return {
     show_thinking: saved.show_thinking, language: saved.language,
     default_llm_model: saved.default_llm_model, default_stt_model: saved.default_stt_model,
+    stt_language: saved.stt_language ?? null,
     associative_max_matches: saved.associative_max_matches ?? prefDefault("associative_max_matches"),
     disposable_retention_days: saved.disposable_retention_days ?? prefDefault("disposable_retention_days"),
     orchestrator: saved.orchestrator ?? saved.orchestrator_default ?? false,
@@ -2389,6 +2393,7 @@ function settingsCurrentValues() {
   return {
     show_thinking: $("settings-thinking").checked, language: $("settings-language").value,
     default_llm_model: state.settingsModelDraft.default_llm_model, default_stt_model: state.settingsModelDraft.default_stt_model,
+    stt_language: $("settings-stt-language").value || null,
     associative_max_matches: number("settings-assoc-max", "associative_max_matches"),
     disposable_retention_days: number("settings-disposable-days", "disposable_retention_days"),
     orchestrator: $("settings-orchestrator").checked, core_agent_id: $("settings-core-agent").value || null,
@@ -2458,10 +2463,26 @@ function fillSettings() {
   const defaultAgent = $("settings-default-agent");
   defaultAgent.replaceChildren(new Option(tr("First agent in the list"), ""), ...(state.user?.agents ?? []).map((a) => new Option(a.name, a.id)));
   defaultAgent.value = state.preferences.default_agent_id ?? "";
+  fillSttLanguage(state.preferences.stt_language ?? null);
   $("settings-theme").value = localStorage.getItem("theme") ?? "system";
   $("settings-avatar-error").textContent = "";
   renderUserAvatarField();
   renderSettingsModels();
+}
+
+// The language list is fixed (ISO-639-1); a region code or other value already configured is added so it still shows.
+function fillSttLanguage(value) {
+  const select = $("settings-stt-language");
+  const known = new Set([...select.options].filter((option) => !option.dataset.extra).map((option) => option.value));
+  for (const option of [...select.options]) if (option.dataset.extra) option.remove();
+  for (const extra of [prefDefault("stt_language"), value]) {
+    if (extra && !known.has(extra) && ![...select.options].some((option) => option.value === extra)) {
+      const option = new Option(extra, extra);
+      option.dataset.extra = "1";
+      select.add(option);
+    }
+  }
+  select.value = value ?? "";
 }
 
 function renderSettingsModels() {
@@ -7075,6 +7096,10 @@ registerRow("settings-theme", {
 registerRow("settings-language", {
   getDefault: () => prefDefault("language"), describe: (value) => optionText("settings-language", value),
   read: () => $("settings-language").value || undefined, write: (value) => { $("settings-language").value = value; },
+});
+registerRow("settings-stt-language", {
+  getDefault: () => prefDefault("stt_language") ?? null, describe: (value) => (value ? optionText("settings-stt-language", value) : tr("Auto-detect")),
+  read: () => $("settings-stt-language").value || null, write: (value) => { fillSttLanguage(value); },
 });
 for (const [id, key] of [["settings-llm", "default_llm_model"], ["settings-stt", "default_stt_model"]]) {
   registerRow(id, {
