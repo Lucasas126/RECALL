@@ -264,7 +264,7 @@ subagents:
   max_parallel_per_user: 4       # 1-20; tasks running at once for one user
   max_launches_per_turn: 5       # 1-50; task_start calls in one parent turn
   timeout_seconds: 600           # 10-3600; wall clock of one task
-  max_tokens: 200000             # 1000-5000000; input + output tokens of one task (counted after each model call)
+  max_tokens: 0                  # 0 = no cap per task; 1000-5000000 = input + output tokens of one task (counted after each model call)
   result_max_chars: 8000         # 500-100000; longest result text handed back to the parent
   rate_limit_cooldown_seconds: 300  # 60-86400; after a provider rate limit (429) no task starts for this long
   max_followups: 5               # 0-50; task_send follow-ups per task
