@@ -1537,7 +1537,7 @@ class ChatService:
         """The user's tasks, optionally those launched from one parent chat, plus whether that chat is about to get a wake.
 
         `status` is `running` or `finished` (anything else: all); `limit` keeps the newest N. A list across chats is
-        labelled with the parent agent and chat names and carries today's token budget (`budget`: used, limit).
+        labelled with the parent agent and chat names.
         """
         if agent_id is not None:
             self._owned_agent(user_id, agent_id)
@@ -1545,7 +1545,6 @@ class ChatService:
         out: dict = {"tasks": tasks}
         if agent_id is None or chat_id is None:
             self._label_tasks(user_id, tasks)
-            out["budget"] = self._tasks.budget(user_id)
         if agent_id is not None and chat_id is not None:
             out["active"] = self.chat_active(user_id, agent_id, chat_id)
             out["pending_wake"] = self._tasks.pending_wake(user_id, agent_id, chat_id)

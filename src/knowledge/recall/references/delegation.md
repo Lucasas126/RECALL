@@ -35,14 +35,14 @@ Do not poll: after `task_start` keep helping the user and let the result arrive.
 
 | Limit | Default | Where it is set |
 | --- | --- | --- |
-| running tasks per chat / per user | 3 / 4 | `settings.yaml` `subagents:`; your `delegation.max_parallel` can only lower the first |
+| running tasks per chat / per user | 5 / 10 | `settings.yaml` `subagents:`; your `delegation.max_parallel` can only lower the first |
 | launches in one turn | 5 | `settings.yaml` |
 | wall clock per task | 600 s | `subagents.timeout_seconds`; `delegation.timeout_seconds` can only lower it |
-| input + output tokens per task | no cap | `subagents.max_tokens` (0 = none); `delegation.max_tokens` and `task_start(max_tokens=...)` can only lower it; the daily budget always applies |
+| input + output tokens per task | no cap | `subagents.max_tokens` (0 = none); `delegation.max_tokens` and `task_start(max_tokens=...)` can only lower it |
 | result text | 8000 chars | `subagents.result_max_chars`; the full text stays in the worker's hidden chat |
 | depth | 1 | fixed: a worker cannot launch tasks |
 
-A limit error names the limit and what to do (for example `error: limit reached: 3 running task(s) in this chat; wait for one to finish (task_wait), then launch again`). Do not loop on it.
+A limit error names the limit and what to do (for example `error: limit reached: 5 running task(s) in this chat; wait for one to finish (task_wait), then launch again`). Do not loop on it.
 
 **Provider limits.** If the provider answers with a plan or rate limit (the Claude subscription has a 5-hour window shared with the user's own chats), the task ends `failed` with reason `rate_limit`, and new tasks are refused for a few minutes (`subagents.rate_limit_cooldown_seconds`). Nothing is retried. Do not try again soon: do the work yourself or tell the user.
 

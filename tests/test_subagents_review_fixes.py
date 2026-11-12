@@ -157,45 +157,6 @@ class ApprovalCapTests(unittest.TestCase):
         self.assertAlmostEqual(live.active_seconds(), 45, delta=1)
 
 
-class DailyBudgetTests(base.AsyncFixture):
-    def budget(self, limit: int):
-        patcher = patch.object(tasks_module, "SUBAGENTS", SimpleNamespace(daily_token_budget=limit))
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
-    def test_the_check_runs_inside_the_store_lock_of_the_launch(self) -> None:
-        calls: list[bool] = []
-        original = self.manager.check_budget
-
-        def spy(user_id: str, *, locked: bool = False) -> None:
-            calls.append(locked)
-            original(user_id, locked=locked)
-
-        with patch.object(self.manager, "check_budget", side_effect=spy):
-            live = self.launch(wake=False)
-        self.assertIn(True, calls)
-        self.assertTrue(live.done.wait(5))
-
-    def test_a_spent_budget_refuses_the_launch(self) -> None:
-        live = self.launch(wake=False)
-        self.assertTrue(live.done.wait(5))  # uses 15 tokens
-        self.budget(10)
-        with self.assertRaises(TaskError) as caught:
-            self.launch(wake=False)
-        self.assertIn("daily task budget", str(caught.exception))
-
-    def test_crossing_the_budget_stops_every_running_task_of_the_user(self) -> None:
-        self.child_behavior = "slow"
-        first, second = self.launch(wake=False), self.launch(wake=False)
-        self.assertTrue(base.until(lambda: self.manager.usage_hook(USER, first.task_id) is not None))
-        self.budget(20)
-        self.manager.usage_hook(USER, first.task_id)(15, 10)  # 25 tokens today >= 20
-        for live in (first, second):
-            self.assertTrue(live.done.wait(10))
-            record = self.record(live.task_id)
-            self.assertEqual((record["status"], record["reason"]), ("timed_out", "daily_budget"))
-
-
 class RateLimitDetectionTests(unittest.TestCase):
     def test_a_number_that_merely_contains_429_is_not_a_rate_limit(self) -> None:
         self.assertFalse(is_rate_limit(RuntimeError("request id 4290aa failed")))

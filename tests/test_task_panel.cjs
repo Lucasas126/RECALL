@@ -9,7 +9,7 @@ const source = readFileSync(path.join(__dirname, "..", "src", "web", "static", "
 const code = source.slice(source.indexOf("// ---- task cards: pure helpers"), source.indexOf("// ---- end task cards"));
 const context = vm.createContext({});
 vm.runInContext(
-  `${code}\nObject.assign(this, { formatTokenCount, taskPanelFilter, taskPanelSort, taskBudgetState, taskPanelRow, taskPanelNeedsPolling });`,
+  `${code}\nObject.assign(this, { formatTokenCount, taskPanelFilter, taskPanelSort, taskPanelRow, taskPanelNeedsPolling });`,
   context,
 );
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -46,13 +46,6 @@ test("the list is newest first and stable", () => {
   const same = context.taskPanelSort([{ id: "a" }, { id: "b" }, { id: "c" }]);
   assert.deepEqual(same.map((t) => t.id), ["c", "b", "a"], "no times: the later in the (oldest first) list is the newer");
   assert.deepEqual(plain(context.taskPanelSort(null)), []);
-});
-
-test("today's usage line", () => {
-  assert.deepEqual(plain(context.taskBudgetState({ used: 250_000, limit: 1_000_000 })), { used: "250k", limit: "1M", over: false, percent: 25 });
-  assert.deepEqual(plain(context.taskBudgetState({ used: 1_000_000, limit: 1_000_000 })), { used: "1M", limit: "1M", over: true, percent: 100 });
-  assert.deepEqual(plain(context.taskBudgetState({ used: 5000, limit: 0 })), { used: "5k", limit: null, over: false, percent: 0 });
-  assert.deepEqual(plain(context.taskBudgetState(undefined)), { used: "0", limit: null, over: false, percent: 0 });
 });
 
 test("a row names the target, the parent agent and chat, and offers the actions", () => {

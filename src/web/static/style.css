@@ -401,8 +401,6 @@ details.msg.task-wake { align-self: flex-start; padding: 6px 12px; border-style:
 #tasks-dialog { color: var(--text); background: var(--bg); border: 1px solid var(--line-strong); border-radius: 14px; width: min(780px, calc(100vw - 32px)); height: min(640px, 85vh); padding: 16px; }
 #tasks-dialog[open] { display: flex; flex-direction: column; gap: 10px; }
 #tasks-dialog::backdrop { background: var(--backdrop); }
-.tasks-budget { margin: 0; color: var(--muted); font-size: .9em; }
-.tasks-budget.over { color: var(--danger); font-weight: 600; }
 .tasks-filter { display: flex; gap: 6px; flex-wrap: wrap; }
 .tasks-filter button { padding: 3px 12px; border-radius: 999px; font: inherit; font-size: .9em; }
 .tasks-filter button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }

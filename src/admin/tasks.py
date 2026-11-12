@@ -5,7 +5,7 @@
 
 The task runs WITHOUT a parent run, as one of the user's agents (or, with `--instructions`, as an ephemeral worker on
 that agent's model): manual and dangerous terminal actions are denied because nobody can answer, `smart` non-dangerous
-ones are allowed, protected paths are always refused. The usual limits and the daily token budget apply. It prints the
+ones are allowed, protected paths are always refused. The usual limits apply. It prints the
 task id; with `--wait` it blocks until the task ends and prints the result. The task executes inside this command's
 process, so without `--wait` it stops when the command exits (a scheduler running in a service process will not have
 that restriction). With `--notify AGENT:CHAT` the result is delivered to that chat as a wake, as for a normal task;

@@ -16,7 +16,7 @@ merged with `--no-ff` into `main`, with tests and docs in the same commit. Order
 - Touches `src/service/agent_admin.py` (`PLAIN_SETTINGS`, `_PERMISSION_KEYS`, `_ACCESS_KEYS`, the self-change check), `src/agent/toolsets/agents.py` (docstring), `docs/architecture/permissions.md` and tests.
 
 ### 3. optional token cap per task (done)
-- Default: no cap per task (`subagents.max_tokens` stops being a default of 200k; `0`/absent = unlimited). The per-user daily budget stays.
+- Default: no cap per task (`subagents.max_tokens` stops being a default of 200k; `0`/absent = unlimited). The per-user daily budget was removed (design decision, 2026-11-12): only time and parallelism limit tasks.
 - `task_start(max_tokens=...)` lets the agent set a cap for one task; `agent.delegation.max_tokens` and the application setting stay as upper bounds when set.
 - Changes: `TaskLimits.max_tokens` becomes optional, the checks in `src/service/tasks.py` (~1189 and ~1211), the notice text `DELEGATE_NOTICE`, the task record `limits`, docs (delegation guide, settings reference).
 

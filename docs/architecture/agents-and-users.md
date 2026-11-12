@@ -88,7 +88,7 @@ The `delegate` tool group (phases 1 and 2a of the [subagents design](../project/
   `steer`, `send`) that take an `owner` (agent id, chat id) the tools fill from `RunContext`, so a task is only reachable from the chat that launched it. A UI passes `owner=None` after its
   own user check. `steer` reuses `ChatService.send` on the worker chat: the unfinished reply is interrupted and kept, the correction is appended, and the driver thread follows the continuation's
   feed, so the task only ends when the corrected reply ends. `send` (task_send) is another `ChatService.send` into the same persisted worker chat (full context) with a new run lock, a fresh
-  timeout and token budget (`base_in/base_out` keep the earlier usage in the record), at most `subagents.max_followups` per task.
+  timeout and token cap (`base_in/base_out` keep the earlier usage in the record), at most `subagents.max_followups` per task.
 - **Wake.** When a task with `wake.state = pending` ends, `TaskManager._schedule_wake` starts a ~1.5 s debounce timer (`subagents.wake_debounce_seconds`) per parent chat. The flush
   (`_deliver`) claims every unread result of the chat atomically under the store lock (`pending -> claimed`, so two flushes or two processes never deliver the same result), builds one
   text (`wake_frame`/`wake_block`: header `[RECALL task result, not written by the user]`, one `<task_result untrusted="true">` block per task, an instruction to answer the user's latest request first)

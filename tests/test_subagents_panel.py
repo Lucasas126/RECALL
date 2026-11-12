@@ -1,4 +1,4 @@
-"""Phases 6 and 7 of the subagents design: the task panel's API, the daily token budget and unattended launches."""
+"""Phases 6 and 7 of the subagents design: the task panel's API and unattended launches."""
 
 from __future__ import annotations
 
@@ -18,12 +18,9 @@ from test_subagents_agents import AgentTargetFixture
 from src.admin.users import main as admin_main
 from src.agent.toolsets.delegate import TaskError
 from src.config.models import AgentTerminalBackend, AgentTerminalConfig
-from src.config.settings import SUBAGENTS
 from src.web.app import create_app
 
 USER, AGENT = base.USER, base.AGENT
-BUDGET = "daily_token_budget"
-USED = 15  # tokens one scripted worker run records (10 in + 5 out)
 
 
 class PanelApiTests(base.AsyncFixture):
@@ -51,12 +48,10 @@ class PanelApiTests(base.AsyncFixture):
             self.assertTrue(task["parent"]["agent_name"])
             self.assertIn("title", task["parent"])
             self.assertFalse(task["unattended"])
-        self.assertEqual(data["budget"], {"used": 2 * USED, "limit": SUBAGENTS.daily_token_budget})
-        # filtered by chat: the old behaviour, plus the wake flags and no panel extras
+        # filtered by chat: only that chat's tasks, plus the wake flags
         mine = self.client.get("/api/tasks", params={"agent": AGENT, "chat": other}).json()
         self.assertEqual([t["id"] for t in mine["tasks"]], [second.task_id])
         self.assertIn("pending_wake", mine)
-        self.assertNotIn("budget", mine)
 
     def test_status_filter_and_limit(self) -> None:
         self.child_behavior = "slow"
@@ -83,76 +78,6 @@ class PanelApiTests(base.AsyncFixture):
         self.assertEqual(self.manager.list_view("someone-else"), [])
         self.assertEqual(self.service.list_tasks("someone-else")["tasks"], [])
 
-    def test_the_budget_is_unlimited_when_zero(self) -> None:
-        with patch.object(SUBAGENTS, BUDGET, 0):
-            self.assertEqual(self.client.get("/api/tasks").json()["budget"], {"used": 0, "limit": 0})
-
-
-class DailyBudgetTests(base.AsyncFixture):
-    def finish(self, live) -> dict:
-        self.assertTrue(base.until(lambda: live.done.is_set()))
-        return self.record(live.task_id)
-
-    def test_usage_is_counted_per_local_day_from_the_records(self) -> None:
-        self.child_behavior = "ok"
-        record = self.finish(self.launch(wake=False))
-        self.assertEqual(record["daily"], {self.today(): USED})
-        self.assertEqual(self.manager.tokens_today(USER), USED)
-        self.assertEqual(self.manager.budget(USER), {"used": USED, "limit": SUBAGENTS.daily_token_budget})
-
-    def today(self) -> str:
-        from src.service.tasks import _today
-
-        return _today()
-
-    def test_task_start_is_refused_once_the_budget_is_spent_and_nothing_starts(self) -> None:
-        self.child_behavior = "ok"
-        self.finish(self.launch(wake=False))
-        with patch.object(SUBAGENTS, BUDGET, USED):
-            for call in (lambda: self.launch(wake=False), lambda: self.run_task(), lambda: self.manager.start(self.parent(), **self.values())):
-                with self.assertRaises(TaskError) as caught:
-                    call()
-                self.assertEqual(
-                    str(caught.exception), f"daily task budget reached ({USED}/{USED} tokens today); it resets at midnight",
-                )
-        self.assertEqual(len(self.manager.store.list(USER)), 1, "no record, no chat for a refused launch")
-
-    def values(self) -> dict:
-        return dict(limits=LIMITS, grantable=["web"], goal="find X", context="", instructions="", groups=[], model="", timeout_s=0)
-
-    def test_task_send_is_refused_too(self) -> None:
-        self.child_behavior = "ok"
-        record = self.finish(self.launch(wake=False))
-        with patch.object(SUBAGENTS, BUDGET, USED):
-            with self.assertRaises(TaskError) as caught:
-                self.manager.send(USER, record["id"], "more", limits=LIMITS)
-        self.assertIn("daily task budget reached", str(caught.exception))
-        again = self.record(record["id"])
-        self.assertEqual((again["status"], again["followups"]), ("done", 0))
-
-    def test_follow_ups_count_toward_the_day(self) -> None:
-        self.child_behavior = "ok"
-        record = self.finish(self.launch(wake=False))
-        self.manager.send(USER, record["id"], "more", limits=LIMITS)
-        self.assertTrue(base.until(lambda: self.record(record["id"])["status"] == "done" and self.record(record["id"])["followups"] == 1 and not self.manager._live))
-        self.assertEqual(self.manager.tokens_today(USER), 2 * USED)
-
-    def test_it_resets_at_midnight(self) -> None:
-        self.child_behavior = "ok"
-        self.finish(self.launch(wake=False))
-        with patch.object(SUBAGENTS, BUDGET, USED):
-            with self.assertRaises(TaskError):
-                self.launch(wake=False)
-            with patch("src.service.tasks._today", return_value="2099-01-01"):
-                self.assertEqual(self.manager.tokens_today(USER), 0)
-                self.finish(self.launch(wake=False))  # a new local day: allowed again
-                self.assertEqual(self.manager.tokens_today(USER), USED)
-
-    def test_zero_means_unlimited(self) -> None:
-        self.child_behavior = "ok"
-        self.finish(self.launch(wake=False))
-        with patch.object(SUBAGENTS, BUDGET, 0):
-            self.finish(self.launch(wake=False))
 
 
 class UnattendedTests(AgentTargetFixture):
@@ -224,7 +149,7 @@ class UnattendedTests(AgentTargetFixture):
             self.unattended(timeout_s=10_000)
         self.assertIn("timeout_s", str(caught.exception))
         self.target_hold = True
-        live = [self.unattended(goal=f"job {i}") for i in range(3)]  # per-parent limit of 3 (the parent is the agent itself)
+        live = [self.unattended(goal=f"job {i}") for i in range(5)]  # per-parent limit of 5 (the parent is the agent itself)
         with self.assertRaises(TaskError) as caught:
             self.unattended(goal="one too many")
         self.assertIn("limit reached", str(caught.exception))
@@ -243,12 +168,8 @@ class UnattendedTests(AgentTargetFixture):
             self.manager.launch_unattended("user-one", "agent-two", "x", notify_chat=("nobody", self.chat))
         self.assertEqual(self.manager.store.list("user-one"), [])
 
-    def test_the_daily_budget_and_the_rate_limit_cooldown_apply(self) -> None:
+    def test_the_rate_limit_cooldown_applies(self) -> None:
         self.finish(self.unattended())
-        with patch.object(SUBAGENTS, BUDGET, USED):
-            with self.assertRaises(TaskError) as caught:
-                self.unattended()
-        self.assertIn("daily task budget reached", str(caught.exception))
         self.manager.store.block_launches("user-one", 300)
         with self.assertRaises(TaskError) as caught:
             self.unattended()

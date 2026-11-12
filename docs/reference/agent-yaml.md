@@ -71,7 +71,7 @@ avatar_style: circle                 # optional: circle (default, the picture cr
 delegation:                          # the `delegate` tool group (see the delegation guide); optional, defaults apply when the group is selected
   enabled: true                      # false removes `task_start` without removing the group
   allowed_groups: [web]              # groups a task may be granted; only `web` is grantable (never memory, folders, terminal, mcp, delegate)
-  max_parallel: null                 # running tasks per chat, 1-10; can only lower settings.yaml subagents.max_parallel_per_parent (3)
+  max_parallel: null                 # running tasks per chat, 1-10; can only lower settings.yaml subagents.max_parallel_per_parent (5)
   timeout_seconds: null              # wall clock per task, 10-3600; can only lower subagents.timeout_seconds (600)
   max_tokens: null                   # input + output tokens per task, 1000-5000000; can only lower subagents.max_tokens (default: no cap)
   default_model: null                # model of fresh workers when task_start names none (`provider:model`); null = the model of the launching chat
