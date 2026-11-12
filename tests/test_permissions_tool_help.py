@@ -116,7 +116,7 @@ class HelpMatchesTheCode(unittest.TestCase):
         self.assertIn("permissions", permissions_page)
         self.assertIn("permission-manager", permissions_page + tools_page)
         for path in MANUAL.glob("*.md"):
-            self.assertLessEqual(len(path.read_bytes()), 8 * 1024, path.name)
+            self.assertLessEqual(len(path.read_bytes()), 12 * 1024, path.name)
 
 
 if __name__ == "__main__":

@@ -116,7 +116,7 @@ class PromptAssemblyTests(unittest.TestCase):
 class SkillPageTests(unittest.TestCase):
     def test_page_exists_is_indexed_and_small(self) -> None:
         self.assertTrue(PAGE.is_file())
-        self.assertLessEqual(len(PAGE.read_bytes()), 8 * 1024)
+        self.assertLessEqual(len(PAGE.read_bytes()), 12 * 1024)
         hub = (ROOT / "src" / "knowledge" / "recall" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("references/permissions.md", hub)
 

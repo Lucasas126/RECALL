@@ -144,24 +144,21 @@ def build_agent_tools(config: ResolvedAgent) -> list[Callable[..., str]]:
 
     @tool
     def agent_update(
-        agent_id: Annotated[str, "id of one of the user's agents (yours: only description and soul)"],
+        agent_id: Annotated[str, "id of one of the user's agents (yours included)"],
         name: Annotated[str, "new display name"] = None,  # type: ignore[assignment]
         description: Annotated[str, "new description"] = None,  # type: ignore[assignment]
         model: Annotated[str, "new default chat model; empty clears it (follows the user's default)"] = None,  # type: ignore[assignment]
         soul: Annotated[str, "the complete new SOUL text"] = None,  # type: ignore[assignment]
-        settings: Annotated[dict, "other plain settings: " + ", ".join(PLAIN_SETTINGS)] = None,  # type: ignore[assignment]
-        level: Annotated[str, "NOT accepted here (refused with a pointer): use agent_set_level of the permissions tools"] = None,  # type: ignore[assignment]
-        tool_groups: Annotated[list[str], "NOT accepted here: use agent_set_tool_groups of the permissions tools"] = None,  # type: ignore[assignment]
-        approval_rules: Annotated[dict, "NOT accepted here: use the approval rule tools of the permissions tools"] = None,  # type: ignore[assignment]
+        settings: Annotated[dict, "any other key of the agent's configuration by its yaml name, e.g. {\"reasoning_effort\": \"low\", \"max_tool_hops\": 50}; "
+                            "keys: " + ", ".join(PLAIN_SETTINGS) + "; or {\"chat_config\": {...}} merged into chat_config"] = None,  # type: ignore[assignment]
     ) -> str:
-        """Change an agent's name, description, default model, SOUL or plain settings (never its level, tool groups or
-        approval rules: use the permissions tools). You cannot change an agent whose level is above yours; of yourself only
-        the description and SOUL. The user must approve the change on a card."""
-        refused = {key: value for key, value in (
-            ("level", level), ("tool_groups", tool_groups), ("approval_rules", approval_rules)) if value is not None}
-        merged = {**(settings if isinstance(settings, dict) else {}), **refused} if refused else settings
+        """Change an agent's name, description, default model, SOUL or any other configuration key (level, tool groups,
+        approval rules, terminal, delegation, MCP, folders...), yourself included. Every change shows the user an approval
+        card with before and after. Fixed limits, refused without a card: nobody gets a level above yours or the user's
+        maximum, you never raise your own level, an agent above your level is read-only for you, the id changes only
+        with agent_rename, and terminal backends, users and keys are the administrator's. Propose first, never retry a denial."""
         return change("agent_update", agent_id, lambda port: port.plan_update(
-            config.user_id, config.id, caller_level, agent_id, name, description, model, soul, merged))
+            config.user_id, config.id, caller_level, agent_id, name, description, model, soul, settings))
 
     @tool
     def agent_rename(

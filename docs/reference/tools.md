@@ -82,9 +82,9 @@ The web **Agents** tab configures these groups for each agent:
   caller's and the user's `max_level`; what the template gives must be covered by the caller's level), `agent_update(agent_id, name, description, model, soul, settings)`
   (`settings` takes the plain form settings `enabled`, `has_memory`, `stream`, `reasoning`, `reasoning_effort`, `reasoning_tokens`, `keep_reasoning_in_memory`,
   `conversation_messages_retained`, `associative_memory`, `associative_execution`, `recall_knowledge`, `avatar_style`, `dream_enabled`; `level`, tool groups and approval
-  rules are refused with a pointer to the `permissions` tools, `terminal`, `mcp`, `folders` and `delegation` are the user's), `agent_rename(agent_id, new_id)` (moves the data
+  rules and the other configuration keys are accepted when they stay within the caller's level and the user's maximum; every change goes through a card), `agent_rename(agent_id, new_id)` (moves the data
   folder, the picture, the preferences and delegation targets like the web) and `agent_delete(agent_id)` (the configuration goes, the data folder stays). An agent above
-  the caller's level is read-only for it; the caller changes only its own description and SOUL and never renames or deletes itself; the user's last agent is never deleted.
+  the caller's level is read-only for it; the caller may change its own settings with a card but never raises its own level, and never renames or deletes itself; the user's last agent is never deleted.
   Every change shows the user a card (caller, target, summary or diff) that offers only *Approve* and *Deny*; it is never remembered, is audited (`permission_change` in
   `terminal_audit.jsonl`) and applied through the same code as the web form. Not available in dreams, scheduled tasks or workers. See
   [permissions](../architecture/permissions.md#implemented-step-8-the-agents-tool-group).

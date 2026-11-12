@@ -57,7 +57,7 @@ Addresses are `source:path`, e.g. `mind_palace:notes/pets.md`.
 | `agent_get` | agents | one agent's configuration (never keys) and its SOUL |
 | `agent_templates` | agents | the templates, what each sets, and whether you may use it |
 | `agent_create` | agents | new agent from a template; level default lowest, at most yours and the user's max |
-| `agent_update` | agents | name, description, model, SOUL, plain settings, not level, groups or rules; yourself: description and SOUL only |
+| `agent_update` | agents | name, description, model, SOUL and any config key (also yourself) with a card; never above your level or the user's max, never your own level up |
 | `agent_rename` | agents | new id; data and picture move; never yourself |
 | `agent_delete` | agents | remove the configuration (data stays); never yourself or the last agent |
 

@@ -337,21 +337,30 @@ class HigherLevelAgents(AgentsFixture):
 class SelfProtection(AgentsFixture):
     def test_no_self_delete_no_self_rename_no_self_demotion_by_this_tool(self) -> None:
         before = self.files_of("user-a")
-        for name, args in (("agent_delete", {}), ("agent_rename", {"new_id": "me"}), ("agent_update", {"name": "New"}),
-                           ("agent_update", {"settings": {"level": "reader"}}), ("agent_update", {"settings": {"enabled": False}}),
-                           ("agent_update", {"model": "ollama:x"})):
+        for name, args in (("agent_delete", {}), ("agent_rename", {"new_id": "me"}),
+                           ("agent_update", {"settings": {"level": "admin"}}),  # raising itself, also above the user's maximum
+                           ("agent_update", {"settings": {"level": "assistant"}}),  # would drop below what its groups need
+                           ("agent_update", {"settings": {"id": "other"}})):
             run = self.run_of()
             with self.subTest(tool=name, args=args):
                 self.assertTrue(self.call(name, run, agent_id="chief", **args).startswith("error:"))
                 self.assertEqual(run.cards, [])
         self.assertEqual(before, self.files_of("user-a"))
 
+    def test_a_self_update_of_any_setting_is_allowed_after_approval_but_never_raises_the_level(self) -> None:
+        run = self.run_of()
+        data = json.loads(self.call("agent_update", run, agent_id="chief", name="Boss", settings={"reasoning_effort": "low", "level": "operator"}))
+        self.assertEqual((data["status"], data["self_change"]), ("applied", True))
+        config = load_agent_config("user-a", "chief")
+        self.assertEqual((config.name, config.chat_config.reasoning_effort, config.level), ("Boss", "low", Level.OPERATOR))
+        self.assertIn("reasoning_effort: medium -> low", run.cards[0]["command"])
+
     def test_a_self_update_of_description_and_soul_is_allowed_after_approval(self) -> None:
         self.service.update_soul("user-a", "chief", "old soul")
         run = self.run_of()
         data = json.loads(self.call("agent_update", run, agent_id="chief", description="I help", soul="new soul"))
         self.assertEqual((data["status"], data["self_change"]), ("applied", True))
-        self.assertIn("ITS OWN description or SOUL", run.cards[0]["command"])
+        self.assertIn("asks to change ITSELF", run.cards[0]["command"])
         self.assertEqual(load_agent_config("user-a", "chief").description, "I help")
         self.assertEqual(load_agent_config("user-a", "chief").level, Level.OPERATOR)  # untouched
         self.assertEqual(SourceRegistry.for_agent("user-a", "chief", data_dir=self.data_dir).agent_files().soul(), "new soul")
@@ -471,34 +480,28 @@ class UpdateChecks(AgentsFixture):
         self.assertEqual(config.level, Level.ASSISTANT)  # permission fields are untouched
         self.assertEqual(SourceRegistry.for_agent("user-a", "bot", data_dir=self.data_dir).agent_files().soul(), "a soul")
 
-    def test_permission_fields_are_rejected_with_a_pointer_to_the_permissions_tools(self) -> None:
+    def test_permission_fields_apply_after_a_card_within_the_callers_bounds(self) -> None:
+        data = self.ok("agent_update", self.run_of(), agent_id="bot", settings={"level": "operator", "groups": ["memory_read", "web"]})
+        config = load_agent_config("user-a", "bot")
+        self.assertEqual((config.level, config.chat_config.tool_groups), (Level.OPERATOR, ["memory_read", "web"]))
+        self.assertEqual(data["before"]["level"], "assistant")
+        self.ok("agent_update", self.run_of(), agent_id="bot", settings={"approval_rules": {"rules": [{"verdict": "deny", "command": "rm *"}]}})
+        self.assertEqual(len(load_agent_config("user-a", "bot").approval_rules.rules), 1)
+        self.ok("agent_update", self.run_of(), agent_id="bot", settings={"chat_config": {"reasoning_effort": "low", "max_tool_hops": 7}})
+        self.assertEqual(load_agent_config("user-a", "bot").chat_config.max_tool_hops, 7)
+
+    def test_what_exceeds_the_caller_or_the_user_is_refused_without_a_card(self) -> None:
         before = self.files_of("user-a")
-        for settings in ({"level": "operator"}, {"tool_groups": ["web"]}, {"groups": ["web"]}, {"approval_rules": {"rules": []}},
-                         {"allow": ["x"]}, {"deny": ["x"]}):
+        for settings in ({"level": "admin"}, {"id": "x"}, {"bogus": 1}, {"chat_config": "x"}):
             run = self.run_of()
             with self.subTest(settings=settings):
-                text = self.call("agent_update", run, agent_id="bot", settings=settings)
-                self.assertTrue(text.startswith("error:"), text)
-                self.assertIn("permissions tools", text)
-                self.assertIn("agent_set_level", text)
-                self.assertEqual(run.cards, [])
-        for args in ({"level": "admin"}, {"tool_groups": ["web"]}, {"approval_rules": {"default": "allow"}}):  # as top-level arguments
-            run = self.run_of()
-            with self.subTest(args=args):
-                text = self.call("agent_update", run, agent_id="bot", **args)
-                self.assertIn("permissions tools", text)
+                self.assertTrue(self.call("agent_update", run, agent_id="bot", settings=settings).startswith("error:"))
                 self.assertEqual(run.cards, [])
         self.assertEqual(before, self.files_of("user-a"))
 
-    def test_access_blocks_are_the_users_and_unknown_settings_are_refused(self) -> None:
-        for settings, expected in (({"terminal": {}}, "only the user"), ({"mcp": {}}, "only the user"), ({"folders": []}, "only the user"),
-                                   ({"delegation": {}}, "only the user"), ({"id": "x"}, "only the user"), ({"bogus": 1}, "unknown setting")):
-            with self.subTest(settings=settings):
-                self.assertIn(expected, self.call("agent_update", self.run_of(), agent_id="bot", settings=settings))
-
     def test_invalid_values_and_sizes_are_refused(self) -> None:
         for args in ({"name": ""}, {"name": "n" * 101}, {"description": "d" * 501}, {"soul": ""}, {"soul": "s" * 100000},
-                     {"settings": {"reasoning_tokens": "many"}}, {"settings": "x"}):
+                     {"settings": {"reasoning_tokens": "many"}}, {"settings": "x"}, {"settings": {"level": "nonsense"}}):
             run = self.run_of()
             with self.subTest(args={key: str(value)[:15] for key, value in args.items()}):
                 self.assertTrue(self.call("agent_update", run, agent_id="bot", **args).startswith("error:"))

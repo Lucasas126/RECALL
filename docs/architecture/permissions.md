@@ -213,14 +213,17 @@ admin CLI the guide used.
   configuration needs. What the template gives the agent (groups, terminal backends, MCP) must be allowed by the CALLER's level, and a
   template with a minimum level (`guide`, `permission-manager`) needs both the user's maximum and the caller to reach it. The agent can
   get `agents` or `permissions` only through a template whose level allows it, and the card says so; the human approves each creation.
-- **Update.** Name, description, default model, SOUL and the plain settings of the form (`enabled`, `has_memory`, `stream`,
-  `reasoning`, `reasoning_effort`, `reasoning_tokens`, `keep_reasoning_in_memory`, `conversation_messages_retained`,
-  `associative_memory`, `associative_execution`, `recall_knowledge`, `avatar_style`, `dream_enabled`). `level`, tool groups and approval
-  rules (and `allow`/`deny`) are refused with a pointer to the `permissions` tools; `terminal`, `mcp`, `folders`, `delegation` and `id` are
-  refused as the user's (they grant access to machines, servers or files). The level and the rules of the target are kept as stored.
+- **Update.** Name, description, default model, SOUL and any other key of the agent's configuration by its yaml name (the chat
+  settings such as `reasoning_effort` or `max_tool_hops`, and `tool_groups`, `allow`, `deny`, `level`, `approval_rules`, `terminal`,
+  `delegation`, `mcp`, `folders`, `dream`, `avatar_style`; aliases `groups`, `rules`, `enabled`, `dream_enabled`; or a `chat_config`
+  object merged in). The approval card is the control and shows before and after of every key that changes. Limits the service
+  enforces without a card, again under the store's lock when the change is written: the result never needs more than the caller's
+  level (an agent grants at most what it holds), never exceeds the user's `max_level`, keeps the blanket-allow guardrail (also at the
+  caller's level), and an agent never raises its own level. `id` changes only with `agent_rename`; terminal backends, users and keys
+  are not agent configuration and stay the administrator's.
 - **Higher agents.** An agent whose effective level is above the caller's can be read but not updated, renamed or deleted.
-- **Self.** The caller can change only its own description and SOUL (`agent_update`, written with `AgentStore.modify` because its own
-  slot is busy running this reply); it can never rename or delete itself, and the user's last agent is never deleted. The user (Agents tab)
+- **Self.** The caller can change any of its own settings with a card (`agent_update`, written with `AgentStore.modify` because its own
+  slot is busy running this reply) but never raises its own level; it can never rename or delete itself, and the user's last agent is never deleted. The user (Agents tab)
   does those. This is the decision for the guide: it cannot rename itself, so the user does it (or the guide's SOUL says so).
 - **Rename and delete.** Exactly the web semantics: a rename moves the data folder, the profile picture, the preferences and the
   delegation targets of the other agents; a delete removes the configuration and keeps the data folder. An agent with an active or
