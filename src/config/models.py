@@ -212,7 +212,7 @@ class IndexConfig(BaseModel):
 
 
 class SpeechToTextConfig(BaseModel):
-    """OpenRouter speech-to-text settings."""
+    """OpenRouter speech-to-text settings (instance defaults; the user's `models.stt_language` wins)."""
 
     zdr: Optional[bool] = Field(default=None, strict=True)  # None follows the user's require_zdr
     language: Optional[str] = Field(default=None, pattern=r"^[a-z]{2}(?:-[A-Z]{2})?$")
@@ -337,6 +337,9 @@ class ModelsConfig(BaseModel):
     chat: str = Field(default="openai/gpt-4o-mini", strict=True, min_length=1, max_length=256)
     stt: str = Field(default="openai/whisper-large-v3-turbo", strict=True, min_length=1, max_length=256)
     embeddings: str = Field(default="openai/text-embedding-3-small", strict=True, min_length=1, max_length=256)
+    # Spoken language for transcription (ISO-639-1, optionally with a region); None falls back to
+    # `speech_to_text.language` in settings.yaml, then to the provider's auto-detection.
+    stt_language: Optional[str] = Field(default=None, strict=True, pattern=r"^[a-z]{2}(?:-[A-Z]{2})?$")
 
     @field_validator("chat")
     @classmethod

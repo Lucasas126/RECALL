@@ -1994,7 +1994,9 @@ class ChatService:
             return text, attachments
         self._require_chat(self._conversations(user_id, agent_id), chat_id)
         resolved = load_agent(user_id, agent_id, check_agent_model=False)
-        transcription_model = user_models(self._user(user_id), self._preferences).stt
+        models = user_models(self._user(user_id), self._preferences)
+        transcription_model = models.stt
+        language = models.stt_language or SPEECH_TO_TEXT.language  # user > settings.yaml > auto-detect
         if provider_of(transcription_model, resolved.provider_name) != OPENROUTER:
             raise InputError("audio messages require an OpenRouter speech-to-text model")
         api_key = resolved.api_key if resolved.provider_name == OPENROUTER else get_secret(resolved.openrouter.api_key).strip()
@@ -2016,7 +2018,7 @@ class ChatService:
                 encoded,
                 attachment["format"],
                 model=transcription_model,
-                language=SPEECH_TO_TEXT.language,
+                language=language,
                 zdr=zdr_required(resolved.require_zdr, SPEECH_TO_TEXT.zdr),
             )
             if transcript:

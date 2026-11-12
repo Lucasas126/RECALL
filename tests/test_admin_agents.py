@@ -149,6 +149,21 @@ class AgentCliTests(AdminFixture):
         self.assertIn("rename", err)
         self.assertEqual(self.read("user-a/agents/bot.yaml"), before)
 
+    def test_user_set_stt_language_is_validated_and_removable(self) -> None:
+        code, out, _ = self.run_cli(["user", "set", "--user", "user-a", "--set", "models.stt_language=es"])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(load_user("user-a").models.stt_language, "es")
+        before = self.read("user-a/user.yaml")
+        for value in ("ES", "spa", "es_ES", "''"):
+            with self.subTest(value=value):
+                code, _, err = self.run_cli(["user", "set", "--user", "user-a", "--set", f"models.stt_language={value}"])
+                self.assertEqual(code, 1)
+                self.assertTrue(err.startswith("error:"), err)
+        self.assertEqual(self.read("user-a/user.yaml"), before)
+        code, out, _ = self.run_cli(["user", "set", "--user", "user-a", "--set", "models.stt_language=null"])
+        self.assertEqual(code, 0, out)
+        self.assertIsNone(load_user("user-a").models.stt_language)
+
     def test_set_model_goes_through_the_service_model_check(self) -> None:
         code, out, _ = self.run_cli(["agent", "set", "--user", "user-a", "--agent", "bot", "--set", "chat_config.model=ollama:llama3"])
         self.assertEqual(code, 0, out)

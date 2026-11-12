@@ -114,7 +114,7 @@ MCP entry fields: `tools` (list; omitted means all of the server's tools), `read
 | `provider` | main provider: `name` (`openrouter` or `ollama`) and `api_key` (NAME of the env var) |
 | `embeddings_provider` | optional; falls back to `provider` |
 | `agents` | the user's agent ids |
-| `models` | defaults `chat`, `stt`, `embeddings` |
+| `models` | defaults `chat`, `stt`, `embeddings`; `stt_language` (optional spoken language for transcription, e.g. `es`; beats `speech_to_text.language`) |
 | `openrouter`, `ollama`, `claude_subscription` | provider options |
 | `terminal_backends` | named machines agents may use |
 | `approval_rules` | user layer of approval rules (`{default, rules}`) |
