@@ -9,10 +9,11 @@ merged with `--no-ff` into `main`, with tests and docs in the same commit. Order
 - Raise the per-page limit of `src/knowledge/recall/references/` from 8192 to 12288 bytes (`tests/test_recall_knowledge.py` lines 91 and 259, `AGENTS.md`).
 - Docs: nothing else. Do not pad pages; the limit is a ceiling, not a target. Splitting by topic still comes first.
 
-### 2. `agent_update` accepts execution settings for the caller itself
-- Today an agent may change only its description and SOUL; `max_tool_hops` and similar settings are refused.
-- Allow a short list of harmless plain settings on itself (`max_tool_hops`, `max_steps`-like limits, `stream`, `reasoning*`, `conversation_messages_retained`), never level, tool groups, approval rules, backends or `delegation`. The user still approves on a card.
-- Touches `src/service/agent_admin.py` (`PLAIN_SETTINGS`, the self-change check), `src/agent/toolsets/agents.py` (docstring), the permissions doc and tests.
+### 2. `agent_update` accepts any setting, always with an approval card
+- Today an agent may change only its description and SOUL (of itself); level, tool groups, rules, backends and `delegation` are refused and sent to other tools.
+- Change (decided 2026-11-12): `agent_update` accepts any configuration key, also for the calling agent itself, and every change shows the user an approval card with before and after. The card is the control, not the key list.
+- Hard caps stay in the service, not in the tool: a level never above the caller's or the user's maximum, a level is lowered but not raised by the agent itself, the fixed safety floor, and no secrets or credentials. Backends and users remain admin-only.
+- Touches `src/service/agent_admin.py` (`PLAIN_SETTINGS`, `_PERMISSION_KEYS`, `_ACCESS_KEYS`, the self-change check), `src/agent/toolsets/agents.py` (docstring), `docs/architecture/permissions.md` and tests.
 
 ### 3. optional token cap per task
 - Default: no cap per task (`subagents.max_tokens` stops being a default of 200k; `0`/absent = unlimited). The per-user daily budget stays.
@@ -24,7 +25,7 @@ Proposal, to confirm before coding:
 - `task_start(inherit=true)` for an ephemeral worker: it gets the parent's tool groups except `delegate`, `agents`, `permissions` and `self` (the worker never changes configuration or launches tasks), the parent's model unless `model` is set, and the parent's terminal backends **with the parent's own approval rules** instead of the forced `manual` mode.
 - Unchanged on purpose: depth 1, the level of the worker is never above the parent's, dangerous and protected actions stay denied for unattended runs, memory of the parent is not copied (the parent passes what matters in `context`).
 - Existing agents (`agent=`) keep their own SOUL, groups and backends, as today.
-- Default of `inherit`: false in the first release, so behaviour does not change silently; revisit after use.
+- Default of `inherit`: **true** (decided 2026-11-12). It must be explained in the `task_start` docstring, in `DELEGATE_NOTICE` and in the shipped skill/knowledge page, so an agent knows when to pass `inherit=false` (a worker that reads untrusted pages, or a cheap read-only job).
 - Risk to document: a worker that reads untrusted web pages now holds the parent's terminal rights. Dangerous-command denial and the audit log are the mitigation.
 
 ### 5. background processes (the large step)
@@ -46,6 +47,13 @@ Mechanics:
 
 ### 6. `dev` suite run
 Once step 5 lands, the full test suite (~150 s) runs with `process_start` instead of relying on the 600 s timeout; update `AGENTS.md`.
+
+### 7. natural-language summaries on approval cards
+- A small model writes one or two plain sentences saying what a command or action does, shown on the approval card next to the raw command (the raw command always stays visible and is what is approved).
+- Model: a new application-wide setting in `settings.yaml` (not per user or agent), like the model that titles chats; default set, empty = no summary. Reuse the title-model plumbing and provider rules (no forced ZDR labels).
+- Safety: the summary is advisory and untrusted (it can be wrong or be steered by the command text); label it as such, give the model only the command, backend and short context, cap its time (card must not wait on it) and tokens, and never use it to auto-approve.
+- Changes: settings model and defaults, a summarizer in the approval path (`src/terminal/approvals.py`), card UI in `app.js`, docs, tests with a fake provider.
+- Not started; order after step 5 unless User A moves it.
 
 ## parked (backlog, not in this plan)
 - Dedupe of associative hints across turns (judged unnecessary after the 0.3.3 changes).
