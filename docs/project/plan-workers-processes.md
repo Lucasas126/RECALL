@@ -54,4 +54,4 @@ Once step 5 lands, the full test suite (~150 s) runs with `process_start` instea
 - Passing files or skills to a fresh worker (today: paste into `context`).
 
 ## done in this run
-- `subagents` default tool rounds per turn: 25 -> 50 (`4ee0502`).
+- Default tool rounds per turn (`max_tool_hops`): 25 -> 50 (`4ee0502`).
