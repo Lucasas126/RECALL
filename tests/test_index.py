@@ -185,6 +185,15 @@ class IndexTests(IndexFixture):
         self.index.sync()
         self.assertEqual(self.provider.texts, [])
 
+    def test_query_can_be_narrowed_to_one_source_or_one_chat(self) -> None:
+        self.index.sync()
+        only = self.index.query("grey cat Luna", 10, only_source="conversations")
+        self.assertTrue(only)
+        self.assertTrue(all(hit["address"].startswith("conversations:") for hit in only))
+        one = self.index.query("grey cat Luna", 10, only_chat=self.chat_b)
+        self.assertEqual({hit["address"] for hit in one}, {f"conversations:{self.chat_b}.jsonl"})
+        self.assertEqual(self.index.query("grey cat Luna", 10, only_source="no_such_source"), [])
+
     def test_current_chat_is_excluded_from_results(self) -> None:
         self.index.sync()
         hits = self.index.query("grey cat Luna", 10)

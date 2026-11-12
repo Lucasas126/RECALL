@@ -14,6 +14,7 @@ Addresses are `source:path`, e.g. `mind_palace:notes/pets.md`.
 | `read` | memory_read | reads one `source:path`, optional line range |
 | `list_tags` | memory_read | tags of markdown notes with counts |
 | `find_notes_by_tag` | memory_read | notes with any (default) or all of the tags |
+| `session_search` | memory_read | search inside past conversations, this one included; meaning by default, exact text if the query is in double quotes |
 | `write` | memory_edit | create or overwrite `source:path` |
 | `append` | memory_edit | append to a file (created if missing) |
 | `edit` | memory_edit | replace one unique fragment |
@@ -72,7 +73,7 @@ Addresses are `source:path`, e.g. `mind_palace:notes/pets.md`.
 
 | Group | Tools |
 | --- | --- |
-| `memory_read` | `query_memory`, `search`, `list_memories`, `read`, `list_tags`, `find_notes_by_tag` |
+| `memory_read` | `query_memory`, `search`, `list_memories`, `read`, `list_tags`, `find_notes_by_tag`, `session_search` |
 | `memory_edit` | `write`, `append`, `edit`, `move`, `delete` |
 | `web` | `web_search`, `web_retrieve` |
 | `self` | `memory`, `skill_view`, `skill_manage`, `soul_edit` |

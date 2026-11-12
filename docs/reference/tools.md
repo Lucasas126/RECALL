@@ -17,7 +17,7 @@ review-queue tools of dream sessions. Shared source checks are in `common.py`.
 The web **Agents** tab configures these groups for each agent:
 
 - `memory_read`: `query_memory`, `search` (optional `path` prefix or glob such as `skills/github/` or `mind_palace/**/*.md`, `offset` and `limit` up to 200; the result gives the total and the next offset), `list_memories`, `read`, `list_tags`,
-  and `find_notes_by_tag`.
+  `find_notes_by_tag` and `session_search` (searches inside your conversations, the current one included: meaning-based by default, exact text when the whole query is in double quotes; optional `limit`, `chat`, `include_current`).
 - `memory_edit`: `write`, `append`, `edit`, `move`, and `delete`.
 - `web`: `web_search` and `web_retrieve`.
 - `self`: `memory` (add/patch/remove entries of `MEMORY.md` or `USER.md`, single
@@ -166,6 +166,13 @@ list_tags
 - agent description: lists the tags used across your notes (mind palace and obsidian), so you can navigate by topic. your own mind palace follows an obsidian-like structure, so you should tag your notes.
 - background behaviour: scans the frontmatter and inline #tags of the notes in the available sources, or a single source if given, and aggregates them.
 - return: the list of tags, each with how many notes use it.
+
+
+session_search
+- parameters: query (str; the whole query in double quotes means exact text), limit (int, default 5, max 20), chat (str, optional: a chat id or "current"), include_current (bool, default true)
+- agent description: searches inside past conversations with the user, this one included.
+- background behaviour: without quotes it queries the semantic index restricted to the conversations source (the newest exchange of a chat is indexed after the reply); with quotes it scans the user and assistant messages of every chat on disk, newest first, with no indexing delay. Disposable and task chats are never searched.
+- return: one entry per match with the chat address, date and role or score, and a short excerpt.
 
 
 find_notes_by_tag

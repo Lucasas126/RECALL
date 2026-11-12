@@ -8,6 +8,7 @@ from src.agent.toolsets.editing import build_edit_tools
 from src.agent.toolsets.memory import build_memory_tools
 from src.agent.toolsets.permissions import build_permission_tools
 from src.agent.toolsets.self_files import build_self_tools
+from src.agent.toolsets.sessions import build_session_tools
 from src.agent.toolsets.tags import build_tag_tools
 from src.agent.toolsets.folders import build_folder_tools
 from src.agent.toolsets.terminal import build_terminal_tools
@@ -22,7 +23,7 @@ if TYPE_CHECKING:
 
 _ORDER = (
     "query_memory", "search", "list_memories", "list_tags", "find_notes_by_tag",
-    "read", "write", "append", "edit", "move", "delete",
+    "session_search", "read", "write", "append", "edit", "move", "delete",
     "memory", "skill_view", "skill_manage", "soul_edit",
     "folder_list", "folder_read", "folder_search",
     "folder_write", "folder_append", "folder_edit", "folder_move", "folder_delete",
@@ -73,7 +74,7 @@ def build_tools(
     selected = [group for group in validate_tool_groups(tool_groups or []) if group_allowed(level, group)]
     base_tools = []
     if "memory_read" in selected:
-        base_tools.extend((*build_memory_tools(agent), *build_tag_tools(agent)))
+        base_tools.extend((*build_memory_tools(agent), *build_tag_tools(agent), *build_session_tools(agent)))
     if "memory_edit" in selected:
         base_tools.extend(build_edit_tools(agent))
     if "self" in selected or skill_view:

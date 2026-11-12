@@ -26,6 +26,7 @@ Paths are relative to the repository root. In Docker the same tree sits under `/
 | `src/agent/tooling.py` | the `@tool` decorator and schema generation |
 | `src/agent/toolsets/memory.py` | `query_memory`, `search`, `list_memories`, `read` |
 | `src/agent/toolsets/tags.py` | `list_tags`, `find_notes_by_tag` |
+| `src/agent/toolsets/sessions.py` | `session_search` |
 | `src/agent/toolsets/editing.py` | `write`, `append`, `edit`, `move`, `delete` |
 | `src/agent/toolsets/self_files.py` | `memory`, `skill_view`, `skill_manage`, `soul_edit` |
 | `src/agent/toolsets/folders.py` | the `folder_*` tools |

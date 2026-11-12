@@ -480,8 +480,13 @@ class VectorIndex:
 
     # ------------------------------------------------------------------ query
 
-    def query(self, query: str, top_k: int = 5, *, exclude_chat: str | None = None) -> list[dict]:
-        """The `top_k` most similar chunks as {address, context, document, body, score}; never syncs."""
+    def query(
+        self, query: str, top_k: int = 5, *, exclude_chat: str | None = None, only_source: str | None = None,
+        only_chat: str | None = None,
+    ) -> list[dict]:
+        """The `top_k` most similar chunks as {address, context, document, body, score}; never syncs.
+
+        `only_source` / `only_chat` narrow the search to one source or one chat's chunks."""
         with self._store.session() as store:
             if store.identity != self.identity or not store.count():
                 return []
@@ -490,10 +495,13 @@ class VectorIndex:
             count = store.count()
             if store.identity != self.identity or not count:
                 return []
+            where = self._query_filter(exclude_chat, only_source, only_chat)
+            if not where:  # the requested source is not visible: nothing to find
+                return []
             res = store.collection.query(
                 query_embeddings=[vector],
                 n_results=min(top_k, count),
-                where=self._query_filter(exclude_chat),
+                where=where,
                 include=["documents", "distances", "metadatas"],
             )
         out: list[dict] = []
@@ -508,7 +516,7 @@ class VectorIndex:
             })
         return out
 
-    def _query_filter(self, exclude_chat: str | None) -> dict:
+    def _query_filter(self, exclude_chat: str | None, only_source: str | None = None, only_chat: str | None = None) -> dict:
         """Chunks the caller may see: own sources, and folders that are readable (and indexed) right now."""
         readable = [
             source.name for source in self._registry.indexed_sources()
@@ -516,10 +524,15 @@ class VectorIndex:
         ]
         own = [name for name in self._registry.source_names() if name not in {f.name for f in self._registry.folders()}]
         allowed = sorted({*readable, *own})
-        by_source: dict = {"source": {"$in": allowed}}
-        if not exclude_chat:
-            return by_source
-        return {"$and": [by_source, {"chat": {"$ne": exclude_chat}}]}
+        if only_source and only_source not in allowed:
+            return {}
+        by_source: dict = {"source": {"$in": [only_source] if only_source else allowed}}
+        clauses = [by_source]
+        if exclude_chat:
+            clauses.append({"chat": {"$ne": exclude_chat}})
+        if only_chat:
+            clauses.append({"chat": {"$eq": only_chat}})
+        return clauses[0] if len(clauses) == 1 else {"$and": clauses}
 
     # ------------------------------------------------------------------ status
 
