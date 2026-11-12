@@ -40,6 +40,7 @@ The web **Agents** tab configures these groups for each agent:
   with the agent's allowed backends; default `terminal.default_backend`) and need the agent's `terminal` block and
   backends in the user's `terminal_backends`. Every call goes through the approval policy and is audited; output is
   stripped, redacted and truncated. See the [terminal guide](../user-guide/terminal.md).
+  Background processes: `process_start(command, backend, workdir, notify_on_complete=true)` returns an id at once; `process_list`, `process_read(id, tail)` (state, exit code, last lines, at most 500), `process_wait(id, timeout_s)` (at most 120 s) and `process_stop(id)` follow it. `process_start` goes through the same approval, protected-path scan and audit as `terminal`; the other four only touch the agent's own processes. See [background processes](../user-guide/terminal.md#background-processes).
 
 <a id="delegate"></a>
 - `delegate`: seven tools, all returning compact JSON (or `error: ...` text), only for the chat that launched the task.

@@ -28,6 +28,7 @@ _ORDER = (
     "folder_write", "folder_append", "folder_edit", "folder_move", "folder_delete",
     "web_search", "web_retrieve",
     "terminal", "sandbox_read", "sandbox_write", "sandbox_patch", "sandbox_search",
+    "process_start", "process_list", "process_read", "process_wait", "process_stop",
     "task_start", "task_list", "task_result", "task_steer", "task_send", "task_stop", "task_wait",
     "agents_list", "agent_get_permissions", "permission_levels_help",
     "agent_set_level", "agent_set_tool_groups", "agent_add_rule", "agent_remove_rule", "agent_reset_rules",

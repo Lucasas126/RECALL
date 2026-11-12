@@ -22,7 +22,10 @@ from src.providers.provider import LLMProvider
 from src.utils.i18n import InputError
 from src.web.app import create_app
 
-TERMINAL_TOOLS = {"terminal", "sandbox_read", "sandbox_write", "sandbox_patch", "sandbox_search"}
+TERMINAL_TOOLS = {
+    "terminal", "sandbox_read", "sandbox_write", "sandbox_patch", "sandbox_search",
+    "process_start", "process_list", "process_read", "process_wait", "process_stop",
+}
 WRITE_TOOLS = {"write", "append", "edit", "move", "delete", "memory", "skill_manage", "soul_edit"}
 
 

@@ -5,6 +5,7 @@ from typing import Annotated, Callable
 from src.agent.tooling import tool
 from src.config.models import ResolvedAgent
 from src.config.settings import APPROVAL_RULES, DATA_DIR, TERMINAL
+from src.agent.toolsets.processes import build_process_tools
 from src.terminal import files
 from src.terminal.audit import audit_path
 from src.terminal.backends import Backend, build_backend
@@ -110,8 +111,8 @@ def build_terminal_tools(
         workdir: Annotated[str | None, "working directory on the backend (default: the backend's workdir)"] = None,
         backend: Annotated[str | None, BACKEND_HELP] = None,
     ) -> str:
-        """Run a shell command on a backend and wait for it (foreground only: background jobs and a process
-        tool come later, so a command that must keep running will be killed at the timeout).
+        """Run a shell command on a backend and wait for it. A command that takes longer than the timeout is killed:
+        start those with `process_start` and follow them with `process_read` / `process_wait`.
         The user approves actions according to the agent's approval mode; some commands are blocked outright.
         If a command is denied or times out waiting for approval, do NOT retry it or rephrase it to get around
         the refusal: explain what you wanted to do and let the user decide. Each call starts a fresh shell.
@@ -192,9 +193,12 @@ def build_terminal_tools(
         session, error = pick(backend)
         return error or _search(session, pattern, path, glob, files)
 
-    tools = [terminal, sandbox_read, sandbox_write, sandbox_patch, sandbox_search]
+    tools = [terminal, sandbox_read, sandbox_write, sandbox_patch, sandbox_search,
+             *build_process_tools(sessions, default, DATA_DIR, agent_id=config.id, user_id=config.user_id)]
     for func in tools:  # the schema lists the allowed names; a single backend needs no parameter at all
         properties = func.tool_spec["function"]["parameters"]["properties"]
+        if "backend" not in properties:  # process_list/read/wait/stop address a process id, not a backend
+            continue
         if len(names) == 1:
             properties.pop("backend", None)
         else:

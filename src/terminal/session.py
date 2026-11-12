@@ -230,15 +230,14 @@ class TerminalSession:
         return ""
 
     # ------------------------------------------------------------------ execution
-    def run(
-        self, tool: str, display: str, command: str, *, cwd: str | None = None, timeout: int | float | None = None,
-        stdin: bytes | str | None = None, assessment: Assessment | None = None, preapproved: bool = False,
-        detail: str = "", path: str = "",
-    ) -> tuple[Result | None, str | None]:
-        """Authorize and execute; returns (result, None) or (None, denial text for the model).
+    def authorize(
+        self, tool: str, display: str, command: str, *, cwd: str | None = None, assessment: Assessment | None = None,
+        preapproved: bool = False, detail: str = "", path: str = "",
+    ) -> tuple[tuple[str, Ruling, Assessment, str] | None, str | None]:
+        """The checks before anything runs: validation, the fixed floor, the approval rules and the audit file.
 
-        `detail` is extra text for the approval card only (a preview of what a file tool will write); it is not audited.
-        `path` is the resolved target of a file tool, for the `path` match of the approval rules.
+        Returns ((cwd, ruling, assessment, decision), None) when the action may run, else (None, text for the model).
+        Refusals are audited here; the caller audits the run itself.
         """
         cwd = cwd or self.workdir
         if "\x00" in command or "\x00" in display:
@@ -266,6 +265,24 @@ class TerminalSession:
         if not audit_writable(self.audit_file):  # fail closed: nothing runs that cannot be recorded
             logger.error("terminal %s/%s not run: the audit file is not writable", self.agent_id, self.name)
             return None, AUDIT_FAILED
+        return (cwd, ruling, verdict, decision), None
+
+    def run(
+        self, tool: str, display: str, command: str, *, cwd: str | None = None, timeout: int | float | None = None,
+        stdin: bytes | str | None = None, assessment: Assessment | None = None, preapproved: bool = False,
+        detail: str = "", path: str = "",
+    ) -> tuple[Result | None, str | None]:
+        """Authorize and execute; returns (result, None) or (None, denial text for the model).
+
+        `detail` is extra text for the approval card only (a preview of what a file tool will write); it is not audited.
+        `path` is the resolved target of a file tool, for the `path` match of the approval rules.
+        """
+        allowed, denial = self.authorize(
+            tool, display, command, cwd=cwd, assessment=assessment, preapproved=preapproved, detail=detail, path=path,
+        )
+        if denial is not None:
+            return None, denial
+        cwd, ruling, verdict, decision = allowed
         started = time.monotonic()
         result = self.backend.run(command, cwd, self.timeout_for(timeout), stdin)
         elapsed = time.monotonic() - started

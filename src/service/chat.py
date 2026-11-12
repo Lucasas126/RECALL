@@ -68,7 +68,10 @@ from src.agent.toolsets.delegate import TaskError
 from src.service.agent_admin import AgentAdmin
 from src.service.agent_permissions import AgentPermissions
 from src.service.tasks import TaskManager
+from src.agent.toolsets.processes import process_registry, process_wake_block, process_wake_frame
 from src.terminal.approvals import ApprovalBroker, ApprovalNotFound
+from src.terminal.output import clean, redact
+from src.terminal.processes import ProcessError
 from src.terminal.audit import audit_path, audit_writable, write_rule_audit
 from src.terminal.rules import LEARNED_REASON, ApprovalRule
 from src.terminal.context import RunContext, run_context
@@ -388,6 +391,7 @@ class ChatService:
         self._last_cleanup = 0.0
         self._approvals = ApprovalBroker(TERMINAL.approval_timeout_seconds)
         self._tasks = TaskManager(self, DATA_DIR, origins)  # subagent tasks launched by the `delegate` tools
+        process_registry(DATA_DIR).subscribe_finish(self._wake_for_process)  # background terminal processes
 
     @staticmethod
     def _build_index(config: ResolvedAgent, sources: SourceRegistry) -> VectorIndex:
@@ -536,6 +540,22 @@ class ChatService:
             self._cleanup_thread = None
         self._dream.stop()
         self._mcp.close()
+
+    def _wake_for_process(self, record: dict) -> None:
+        """A background process ended: tell its chat (a wake turn), unless the agent itself stopped it or asked for silence."""
+        if not record.get("notify") or record.get("state") == "stopped" or not record.get("chat_id"):
+            return
+        registry = process_registry(DATA_DIR)
+        try:
+            output = registry.read(record["user"], record["id"], 20)["output"]
+            block = process_wake_block(registry.get(record["user"], record["id"]), clean(redact(output), 4000)[0])
+            self.send_system(
+                record["user"], record["agent"], record["chat_id"], block, source="process", frame=process_wake_frame,
+            )
+        except (UnknownChat, ProcessError, ValueError):
+            pass  # the chat or the record is gone: nobody to tell
+        except Exception:
+            logger.exception("process wake failed")
 
     def start_task_poller(self) -> None:
         """Recover tasks now, then poll: commands queued by the other process for tasks run here (1 s), results to
