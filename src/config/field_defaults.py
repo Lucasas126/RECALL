@@ -10,7 +10,7 @@ from typing import Any
 from pydantic import BaseModel
 from pydantic_core import PydanticUndefined
 
-from src.config.models import AgentDelegationConfig, AgentTerminalConfig, ChatConfig, DreamConfig
+from src.config.models import AgentDelegationConfig, AgentTerminalConfig, ChatConfig, CompactionConfig, DreamConfig
 
 
 def field_spec(model: type[BaseModel], name: str) -> dict[str, Any]:
@@ -34,13 +34,14 @@ def agent_defaults() -> dict[str, dict[str, dict[str, Any]]]:
     return {
         "chat_config": _specs(ChatConfig, (
             "stream", "has_memory", "reasoning", "reasoning_effort", "reasoning_tokens", "keep_reasoning_in_memory",
-            "max_tool_hops", "conversation_messages_retained", "tools", "associative_memory", "associative_execution",
+            "max_tool_hops", "tools", "associative_memory", "associative_execution",
             "model", "recall_knowledge",
         )),
         "dream": _specs(DreamConfig, (
             "enabled", "every_hours", "daily_at", "model", "reasoning_effort", "max_steps", "max_tokens",
             "max_minutes", "notify_telegram",
         )),
+        "compaction": _specs(CompactionConfig, ("enabled", "mode", "trigger", "keep_recent", "model")),
         "terminal": _specs(AgentTerminalConfig, ("timeout_seconds", "max_output_chars")),
         "delegation": _specs(AgentDelegationConfig, ("enabled", "max_parallel", "timeout_seconds", "max_tokens")),
     }

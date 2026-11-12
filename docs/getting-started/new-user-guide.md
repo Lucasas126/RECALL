@@ -115,8 +115,8 @@ See [Telegram](../user-guide/telegram.md).
 ## 9. Privacy basics
 
 By default RECALL uses any route your provider offers. If you want only **zero data retention** (ZDR) routes at OpenRouter, ask
-the administrator to set `require_zdr: true` in your `user.yaml`; models without ZDR then disappear from the picker. The
-Claude route and Ollama cloud models are not ZDR. Search (Tavily) and external services (MCP) receive what the agent sends them.
+the administrator to set `require_zdr: true` in your `user.yaml`; models without ZDR then disappear from the picker. ZDR is an OpenRouter filter: it does not apply to the Claude subscription route (its privacy is set in your Anthropic
+account), and Ollama cloud models are not ZDR. Search (Tavily) and external services (MCP) receive what the agent sends them.
 Do not put secrets in chats. See [security notes](../deployment/security.md).
 
 ## 10. When something goes wrong

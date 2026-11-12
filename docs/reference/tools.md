@@ -82,7 +82,7 @@ The web **Agents** tab configures these groups for each agent:
   `agent_create(agent_id, name, description="", template="", model="", level="", soul="")` (the level defaults to the lowest that covers the template and is at most the
   caller's and the user's `max_level`; what the template gives must be covered by the caller's level), `agent_update(agent_id, name, description, model, soul, settings)`
   (`settings` takes the plain form settings `enabled`, `has_memory`, `stream`, `reasoning`, `reasoning_effort`, `reasoning_tokens`, `keep_reasoning_in_memory`,
-  `conversation_messages_retained`, `associative_memory`, `associative_execution`, `recall_knowledge`, `avatar_style`, `dream_enabled`; `level`, tool groups and approval
+  `compaction`, `associative_memory`, `associative_execution`, `recall_knowledge`, `avatar_style`, `dream_enabled`; `level`, tool groups and approval
   rules and the other configuration keys are accepted when they stay within the caller's level and the user's maximum; every change goes through a card), `agent_rename(agent_id, new_id)` (moves the data
   folder, the picture, the preferences and delegation targets like the web) and `agent_delete(agent_id)` (the configuration goes, the data folder stays). An agent above
   the caller's level is read-only for it; the caller may change its own settings with a card but never raises its own level, and never renames or deletes itself; the user's last agent is never deleted.

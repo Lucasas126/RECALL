@@ -6,7 +6,7 @@ One file per agent: `.config/<user_id>/agents/<agent_id>.yaml`. The agent's pers
 [models and providers](../user-guide/models-and-providers.md)); unknown keys are rejected.
 
 Defaults when a key is omitted: `stream: true`, `has_memory: true`, `reasoning: true`, `reasoning_effort: medium`,
-`conversation_messages_retained: 30`, `tools: true`, `associative_memory: llm`, `associative_execution: parallel`,
+`compaction.enabled: true`, `tools: true`, `associative_memory: llm`, `associative_execution: parallel`,
 `dream.enabled: false`, `recall_knowledge: true`. The values in the example below are illustrative.
 
 ## agent file
@@ -28,7 +28,12 @@ chat_config:
   keep_reasoning_in_memory: true     # store the thinking in context/history
   recall_knowledge: true             # the built-in, read-only `recall` skill (how RECALL works); false hides it from this agent
   max_tool_hops: 40                   # optional, 1-100: tool round-trips per turn (empty = settings.yaml agent.max_tool_hops)
-  conversation_messages_retained: 20 # at most N messages kept in context; cuts go below N (see prompt caching)
+  compaction:                        # summarise the older context of long chats (see memory: context compaction)
+    enabled: true
+    mode: percent                    # percent (of the model's context window) | tokens
+    trigger: 50                      # compact when the context reaches this
+    keep_recent: 20                  # recent tail kept verbatim; smaller than trigger
+    model: claude_subscription:haiku # summary model; null = the chat's own model
   tools: true                       # enable the selected tool groups
   tool_groups: [memory_read, memory_edit, self]  # memory_read, memory_edit, web, self, folders_read, folders_edit, terminal, delegate, permissions, agents
   mcp:                               # MCP servers enabled for this agent (see mcp.md)

@@ -65,7 +65,6 @@ claude_subscription:
 prompt_cache:
   enabled: true                     # mark Claude prompts on OpenRouter with cache breakpoints (see docs/reference/settings-yaml.md)
   anthropic_providers: [Amazon Bedrock]  # preferred OpenRouter routes for Claude; other routes stay as fallback
-  trim_slack_percent: 25            # when history passes conversation_messages_retained, cut this much extra; 0 trims one message at a time
 
 tavily:
   api_key: TAVILY_API_KEY   # shared env var NAME, never the secret; unset = no web access
@@ -76,8 +75,8 @@ associative_memory:
   context_messages: 8       # recent messages the memory subagent sees (each cut to 600 chars)
   top_n: 3                  # default maximum fragments injected per turn; each user can choose their own in Settings
   score_threshold: 0.45     # minimum similarity for a fragment to be injected (application-wide, not per user)
-  query_model: openai/gpt-4o-mini  # small OpenRouter model that proposes the search query; null uses each chat's own model
-  api_key: OPENROUTER_API_KEY      # shared env var NAME for the OpenRouter key, never the secret
+  query_model: claude_subscription:haiku  # small model that proposes the search query (the user's Claude subscription); null uses each chat's own model
+  api_key: OPENROUTER_API_KEY      # shared env var NAME for the OpenRouter key when query_model is an OpenRouter model, never the secret
   # zdr: false                     # optional override of the user's require_zdr (user.yaml) for query requests; unset follows it
 
 # Telegram orchestrator (see docs/user-guide/telegram.md): when a Telegram message starts a NEW chat, a fast "decision
@@ -94,8 +93,8 @@ orchestrator:
   uncertain_grace_seconds: 20     # wait before answering with the core/preferred agent when unsure
 
 chat_naming:
-  model: openai/gpt-4o-mini    # small OpenRouter model that names chats
-  api_key: OPENROUTER_API_KEY  # shared env var NAME for the OpenRouter key, never the secret
+  model: claude_subscription:haiku  # small model that names chats (the user's Claude subscription)
+  api_key: OPENROUTER_API_KEY  # shared env var NAME for the OpenRouter key when model is an OpenRouter model, never the secret
   # zdr: false                 # optional override of the user's require_zdr (user.yaml) for naming requests; unset follows it
   min_messages: 5              # chats shorter than this keep the first-message title
 

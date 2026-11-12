@@ -176,9 +176,8 @@ or actions. Interrupted requests do not emit `usage` or a successful final
 `text` event when `stream=False`. Worker failures are raised to the iterator's
 consumer; a later request can still run.
 
-A steering continuation retains the active turn even with `has_memory: false`
-or a small `conversation_messages_retained`; ordinary later turns still follow
-those settings. The agent's `continuation=True` option is for such uninterrupted
+A steering continuation retains the active turn even with `has_memory: false`;
+ordinary later turns still follow that setting. The agent's `continuation=True` option is for such uninterrupted
 same-chat scheduling, not for resuming arbitrary older chats. Committing a final
 answer and accepting cancellation are mutually exclusive: a message arriving
 after commit starts a normal turn, not an interruption of an already saved reply.

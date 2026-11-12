@@ -25,7 +25,7 @@ from src.config.levels_help import levels_catalog
 from src.config.errors import describe_config_error
 from src.config.levels import Level, backend_min_level, check_agent_level, effective_agent_level, parse_level
 from src.config.favorites import ModelFavorites
-from src.config.loader import agent_default_model, load_agent, load_agent_config, load_user, user_models
+from src.config.loader import load_agent, load_agent_config, load_user, user_models
 from src.config.model_refs import CLAUDE_SUBSCRIPTION, OPENROUTER, PROVIDERS, is_claude_subscription, model_name, provider_of
 from src.config.models import (
     AgentConfig, DreamConfig, FolderConfig, ReasoningEffort, ResolvedAgent, UserConfig,
@@ -37,7 +37,7 @@ from src.config.preferences import (
 )
 from src.config.field_defaults import agent_defaults
 from src.config.secrets import fingerprint as secrets_fingerprint, get_secret
-from src.config.zdr import chat_zdr, ensure_zdr_compatible, zdr_required
+from src.config.zdr import chat_zdr, zdr_required
 from src.config.settings import (
     ASSOC, CHAT_NAMING, CONFIG_DIR, DATA_DIR, MCP, ORCHESTRATOR, PDF, SPEECH_TO_TEXT, TAVILY, TELEGRAM_ALLOWED_USERS_ENV,
     TERMINAL, VIDEO_DECOMPOSITION, WEB_PUBLIC_URL, memory_limits,
@@ -83,6 +83,11 @@ from src.utils.i18n import InputError, UserMessageError, error_message, message
 from src.web.auth import verify_password
 
 logger = get_logger("service")
+def _thousands(value: int) -> str:
+    return f"{value:,}".replace(",", ".")
+
+
+_COMPACT_RE = re.compile(r"^/compact(?:@\w+)?(?:\s+(?P<arg>.*?))?\s*$", re.IGNORECASE | re.DOTALL)
 
 _ROUTING_INSTRUCTIONS = (
     "Which agent is best suited to answer this user message? Choose the one whose topic matches best."
@@ -325,6 +330,7 @@ class _MessageRun:
     meta: Optional[dict] = None  # persisted on the user turn (source, task_ids)
     blocks: Optional[list[str]] = None  # a wake turn's task blocks: later results merge into a queued wake
     frame: Optional[Callable[[list[str]], str]] = None  # composes `text` from `blocks`
+    compact: Optional[str] = None  # a `/compact` run: its instructions ("" for none); not a reply
     block_runs: Optional[list[list[str]]] = None  # the task runs each block of `blocks` reports (to drop a block already read)
     generation_id: str = field(default_factory=lambda: uuid4().hex)
     cancellation: CancellationToken = field(default_factory=CancellationToken)
@@ -660,7 +666,7 @@ class ChatService:
         return avatar, content
 
     def _check_agent_model(self, user: UserConfig, config: AgentConfig, current: str | None) -> AgentConfig:
-        """Validate a new or changed agent default model (provider usable, model offered, ZDR policy).
+        """Validate a new or changed agent default model (provider usable, model offered under the user's ZDR policy).
 
         An unchanged value is kept as it is, so a model retired since it was chosen never blocks saving the
         agent's other settings. Returns the config with the model in its canonical form.
@@ -668,7 +674,6 @@ class ChatService:
         model = config.chat_config.model
         if model is None or model == current:
             return config
-        agent_default_model(user, config)
         canonical = self._check_model(user, model, "chat")
         return config.model_copy(update={"chat_config": config.chat_config.model_copy(update={"model": canonical})})
 
@@ -1240,12 +1245,13 @@ class ChatService:
                         "associative_fragments", "associative_query",
                         "source", "task_ids",  # a wake turn: a subagent result, not written by the user
                         "task_brief", "task_message",  # a worker chat's first message / follow-up, structured for the UI
+                        "tokens_before", "tokens_after", "manual",  # a compaction turn: the divider shows the reduction
                     )
                     if t.get(k) is not None
                 },
             }
             for position, t in enumerate(turns)
-            if t.get("role") in ("user", "assistant")
+            if t.get("role") in ("user", "assistant", "compaction")
         ]
         return {
             "chat": {
@@ -1366,7 +1372,8 @@ class ChatService:
         if model_id is not None:
             model_id = self._check_model(user, model_id, "chat", zdr=zdr)
             effective = chat_zdr(user.require_zdr, model_id, zdr)
-            stored = None if effective == user.require_zdr else effective
+            # ZDR never applies to a Claude subscription model, so its selection carries no flag
+            stored = None if is_claude_subscription(model_id) or effective == user.require_zdr else effective
         slot = self._slot(user_id, agent_id)
         with slot.state:
             if self._chat_busy(slot, chat_id):
@@ -1382,7 +1389,7 @@ class ChatService:
                 # an effort the new model does not support would be sent to it; drop it
                 if self._reasoning_effort_override(conversations, chat_id) is not None:
                     effective = model_id or user_models(
-                        self._user(user_id), self._preferences, self._agent_config(user_id, agent_id), check=False,
+                        self._user(user_id), self._preferences, self._agent_config(user_id, agent_id),
                     ).chat
                     if self._reasoning_effort_supported(self._user(user_id), effective) is False:
                         conversations.set_reasoning_effort(chat_id, None)
@@ -1923,7 +1930,7 @@ class ChatService:
             selection = conversations.model_selection(chat_id)
         except (FileNotFoundError, ValueError) as exc:
             raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
-        resolved = load_agent(user_id, agent_id, check_agent_model=False)
+        resolved = load_agent(user_id, agent_id)
         chat_model = selection.id if selection else resolved.models.chat  # the agent's default, else the user's
         supported = model_provider(resolved, chat_model).supported_modalities(chat_model)
         if "video" in supported or "image" not in supported:
@@ -1993,7 +2000,7 @@ class ChatService:
         if not audio:
             return text, attachments
         self._require_chat(self._conversations(user_id, agent_id), chat_id)
-        resolved = load_agent(user_id, agent_id, check_agent_model=False)
+        resolved = load_agent(user_id, agent_id)
         transcription_model = user_models(self._user(user_id), self._preferences).stt
         if provider_of(transcription_model, resolved.provider_name) != OPENROUTER:
             raise InputError("audio messages require an OpenRouter speech-to-text model")
@@ -2088,6 +2095,17 @@ class ChatService:
                     return
                 run = pending.popleft()
                 slot.active[chat_id] = run
+            if run.compact is not None:
+                try:
+                    text = self._manual_compaction(user_id, agent_id, slot, run)
+                    run.events.put(ChatEvent("text", text=text, generation_id=run.generation_id))
+                except Exception as e:
+                    run.events.put(e)
+                finally:
+                    run.events.put(None)
+                    with slot.state:
+                        slot.active.pop(chat_id, None)
+                continue
             context = RunContext(
                 user_id, agent_id, chat_id, self._approvals,
                 lambda kind, data, run=run: run.events.put(ChatEvent(kind, data=data, generation_id=run.generation_id)),
@@ -2108,6 +2126,19 @@ class ChatService:
                 run.events.put(None)
                 with slot.state:
                     slot.active.pop(chat_id, None)
+            self._compact_after_reply(slot, chat_id)
+
+    @staticmethod
+    def _compact_after_reply(slot: _AgentSlot, chat_id: str) -> None:
+        """Compact the chat once its reply is delivered, so nobody waits for it; queued messages run after it."""
+        agent = slot.agents.get(chat_id)
+        if agent is None or not callable(getattr(agent, "compaction_due", None)):
+            return
+        try:
+            if agent.compaction_due() is True:
+                agent.compact()
+        except Exception:  # the next turn retries, and cuts the oldest messages if the context nears the window
+            logger.exception("compaction after the reply failed for chat %s", chat_id)
 
     def _run(
         self, user_id: str, agent_id: str, slot: _AgentSlot, run: _MessageRun,
@@ -2138,10 +2169,8 @@ class ChatService:
                 ),
             )
         else:
-            # the agent's default model is checked (ZDR policy) only for a chat that does not choose its own
-            inherits = self._conversations(user_id, agent_id).model_selection(run.chat_id) is None
             agent.refresh_user_models(
-                user_models(self._user(user_id), self._preferences, self._agent_config(user_id, agent_id), check=inherits),
+                user_models(self._user(user_id), self._preferences, self._agent_config(user_id, agent_id)),
                 self._preferences.get(user_id).associative_max_matches,
             )
         agent.config.language = self.language(user_id)
@@ -2199,13 +2228,12 @@ class ChatService:
         ]
         try:
             user = self._user(user_id)
-            zdr = zdr_required(user.require_zdr, CHAT_NAMING.zdr)
-            if is_claude_subscription(CHAT_NAMING.model):
-                ensure_zdr_compatible(CHAT_NAMING.model, zdr, "chat_naming")
+            if is_claude_subscription(CHAT_NAMING.model):  # ZDR is an OpenRouter filter; it never applies here
                 # runs with the requesting user's own Claude login, never another user's
                 provider = claude_subscription_provider(user.claude_subscription, user_id=user.id, purpose="chat_naming.model")
-                reply = provider.invoke(messages, CHAT_NAMING.model, stream=False, zdr=zdr)
+                reply = provider.invoke(messages, CHAT_NAMING.model, stream=False)
             else:
+                zdr = zdr_required(user.require_zdr, CHAT_NAMING.zdr)
                 api_key = get_secret(CHAT_NAMING.api_key).strip()
                 if not api_key:
                     logger.warning("chat naming skipped: env var %s is not set", CHAT_NAMING.api_key)
@@ -2214,10 +2242,64 @@ class ChatService:
                     messages, model=CHAT_NAMING.model, api_key=api_key, zdr=zdr,
                 )
             title = conversations.set_generated_title(chat_id, reply["response"] or "")
+        except InputError as e:  # e.g. no Claude login of this user's own: an expected setup gap, not a crash
+            logger.warning("chat naming skipped for %s/%s/%s: %s", user_id, agent_id, chat_id, e)
+            return
         except Exception:
             logger.exception("chat naming failed for %s/%s/%s; keeping the first-message title", user_id, agent_id, chat_id)
             return
         logger.info("named chat %s/%s/%s: %s", user_id, agent_id, chat_id, title)
+
+    # ------------------------------------------------------------------ manual compaction
+
+    def compact_command(self, user_id: str, agent_id: str, chat_id: str, text: str) -> str | None:
+        """Answer `/compact [instructions]` for the chat; None when `text` is not that command.
+
+        Runs the compaction now, whatever the trigger, with the optional instructions as a focus for the notes.
+        It runs on the chat's worker like a reply, so messages sent meanwhile wait behind it (and do not cancel it).
+        Refused while the chat has an active or queued reply; the answer is not stored and never reaches the model.
+        """
+        match = _COMPACT_RE.match(text.strip())
+        if match is None:
+            return None
+        self._owned_agent(user_id, agent_id)
+        conversations = self._conversations(user_id, agent_id)
+        self._require_chat(conversations, chat_id)
+        if conversations.is_task_chat(chat_id):
+            raise InputError("this is an internal task chat: steer the task instead")
+        run = _MessageRun(chat_id, "", [], False, compact=(match.group("arg") or "").strip())
+        run.cancellation.finish()  # a message sent meanwhile queues behind the compaction instead of steering it
+        slot = self._slot(user_id, agent_id)
+        with slot.state:
+            if self._chat_busy(slot, chat_id):
+                raise AgentBusy("wait for this chat's active and queued replies before compacting it")
+            events = self._events(run, run.events.subscribe())
+            self._enqueue(user_id, agent_id, slot, chat_id, run, steer=False)
+        return "".join(event.text or "" for event in events if event.kind == "text")
+
+    def _manual_compaction(self, user_id: str, agent_id: str, slot: _AgentSlot, run: _MessageRun) -> str:
+        """Run a `/compact` on the chat's worker and word the outcome for the user."""
+        language = self.language(user_id)
+        with slot.state:
+            fingerprint = self._runtime_fingerprint(user_id, agent_id)
+            agent = slot.agents.get(run.chat_id)
+            if agent is None or slot.fingerprints.get(run.chat_id) != fingerprint:
+                agent = self._agent_factory(user_id, agent_id, run.chat_id)
+                slot.agents[run.chat_id] = agent
+                slot.fingerprints[run.chat_id] = fingerprint
+        if not agent.config.has_memory:
+            return message(language, "This agent keeps no conversation history, so there is nothing to compact.")
+        try:
+            result = agent.compact(manual=True, instructions=run.compact or "")
+        except Exception as exc:
+            logger.exception("manual compaction failed for %s/%s/%s", user_id, agent_id, run.chat_id)
+            return message(language, "Compaction failed: {error}", error=str(exc)[:300])
+        if result is None:
+            return message(language, "Nothing to compact yet: the chat is still short.")
+        return message(
+            language, "Context compacted: {before} → {after} tokens.",
+            before=_thousands(result.tokens_before), after=_thousands(result.tokens_after),
+        )
 
     # ------------------------------------------------------------------ dream mode and own files
 
@@ -2476,7 +2558,7 @@ class ChatService:
 
     def _agent_index(self, user_id: str, agent_id: str) -> VectorIndex:
         self._owned_agent(user_id, agent_id)
-        config = load_agent(user_id, agent_id, check_agent_model=False)
+        config = load_agent(user_id, agent_id)
         sources = SourceRegistry.for_agent(config.user_id, config.id, **chat_folder_options(config))
         return self._index_factory(config, sources)
 

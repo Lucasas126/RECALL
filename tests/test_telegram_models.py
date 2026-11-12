@@ -44,15 +44,16 @@ class TelegramZdrTextTests(unittest.IsolatedAsyncioTestCase):
         def line(session, provider, zdr, model_id="x", require_zdr=True):
             return _zdr_line(session, {"provider": provider, "id": model_id, "zdr": zdr, "require_zdr": require_zdr})
 
-        self.assertEqual(line(english, "claude_subscription", False), "Not ZDR (Claude subscription, experimental)")
-        self.assertEqual(line(spanish, "claude_subscription", False), "Sin ZDR (suscripción de Claude, experimental)")
+        # ZDR is an OpenRouter filter: a Claude subscription model gets no ZDR line at all
+        self.assertEqual(line(english, "claude_subscription", False), "")
+        self.assertEqual(line(spanish, "claude_subscription", False), "")
         self.assertEqual(line(english, "ollama", True, "llama3:8b"), "ZDR: not applicable (local Ollama model)")
         self.assertEqual(line(spanish, "ollama", True, "ollama:glm-4.7:cloud"), "Sin ZDR (modelo en la nube de Ollama)")
         self.assertEqual(line(english, "openrouter", True), "ZDR: enabled")
         self.assertEqual(line(spanish, "openrouter", False), "ZDR: desactivado")
         claude = {"id": "claude_subscription:opus", "name": "Claude Opus 5.5 (Claude subscription, experimental)",
                   "pricing": {"prompt": None, "completion": None}, "provider": "claude_subscription"}
-        self.assertIn("no ZDR", _llm_label(claude, 1, None, set(), True))
+        self.assertNotIn("ZDR", _llm_label(claude, 1, None, set(), True))
         self.assertNotIn("$", _llm_label(claude, 1, None, set(), True))
 
     def test_no_zdr_wording_when_it_is_not_required(self) -> None:
@@ -68,7 +69,7 @@ class TelegramZdrTextTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("🧪", label)
         self.assertNotIn("ZDR", label)
 
-    def test_selecting_a_claude_model_reports_not_zdr(self) -> None:
+    def test_selecting_a_claude_model_under_zdr_adds_no_zdr_line(self) -> None:
         service = Mock()
         service.set_chat_model.return_value = {
             "provider": "claude_subscription", "id": "claude_subscription:opus", "zdr": False, "require_zdr": True,
@@ -77,9 +78,8 @@ class TelegramZdrTextTests(unittest.IsolatedAsyncioTestCase):
         panel = _Panel(token="t", chat_id=1, view="chat_llm", agent_id="a", target_chat="c",
                        items=[{"id": "claude_subscription:opus", "name": "Opus"}])
         text = _apply_panel_action(service, session, panel, "pick:0")
-        self.assertIn("Sin ZDR (suscripción de Claude, experimental)", text)
         self.assertIn("Claude · claude_subscription:opus", text)
-        self.assertNotIn("ZDR: activado", text)
+        self.assertNotIn("ZDR", text)
 
     def test_selecting_a_model_without_zdr_adds_no_zdr_line(self) -> None:
         service = Mock()
@@ -105,7 +105,7 @@ class TelegramZdrTextTests(unittest.IsolatedAsyncioTestCase):
         await show_model(update, context)
         self.assertEqual(reply.await_args.args[0], "Current chat model:\nOpenRouter · vendor/model\nUser default")
 
-    async def test_current_model_command_reports_not_zdr(self) -> None:
+    async def test_current_model_command_has_no_zdr_line_for_claude(self) -> None:
         service = Mock()
         service.get_chat.return_value = {"model": {"provider": "claude_subscription", "id": "claude_subscription:sonnet",
                                                    "zdr": False, "require_zdr": True},
@@ -116,8 +116,7 @@ class TelegramZdrTextTests(unittest.IsolatedAsyncioTestCase):
                                  effective_message=SimpleNamespace(reply_text=reply))
         context = SimpleNamespace(application=SimpleNamespace(bot_data={"state": state}), user_data={}, args=[])
         await show_model(update, context)
-        self.assertIn("Not ZDR (Claude subscription, experimental)", reply.await_args.args[0])
-        self.assertNotIn("ZDR: enabled", reply.await_args.args[0])
+        self.assertNotIn("ZDR", reply.await_args.args[0])
 
 
 class TelegramFavoritePickerTests(unittest.IsolatedAsyncioTestCase):
@@ -180,7 +179,7 @@ class TelegramFavoritePickerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("OpenRouter · Claude Haiku" in label for label in labels))
         self.assertTrue(any("Claude · Claude Haiku" in label and "plan" in label and "ZDR" not in label for label in labels))
 
-    async def test_claude_favorites_say_no_zdr_when_the_user_requires_it(self) -> None:
+    async def test_claude_favorites_carry_no_zdr_wording_when_the_user_requires_it(self) -> None:
         self.service.require_zdr.return_value = True
         self.service.list_favorite_models.return_value = ["claude_subscription:haiku"]
         self.service.list_models.return_value = [
@@ -189,7 +188,8 @@ class TelegramFavoritePickerTests(unittest.IsolatedAsyncioTestCase):
         ]
         await select_model(self.update, self.context)
         keyboard = self.update.effective_message.reply_text.await_args.kwargs["reply_markup"].inline_keyboard
-        self.assertIn("plan, no ZDR", keyboard[1][0].text)
+        self.assertIn("plan", keyboard[1][0].text)
+        self.assertNotIn("ZDR", keyboard[1][0].text)
 
     async def test_no_favorites_explains_how_to_add_them(self) -> None:
         self.service.list_favorite_models.return_value = []

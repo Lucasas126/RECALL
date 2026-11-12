@@ -7,7 +7,6 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstr
 
 from src.agent.tool_groups import validate_tool_groups
 from src.config.levels import LevelField
-from src.config.zdr import ensure_zdr_compatible
 from src.terminal.rules import ApprovalRuleList
 from src.config.model_refs import (
     CAPABILITIES, CLAUDE_SUBSCRIPTION, MAIN_PROVIDERS, OPENROUTER, prefix_of, validate_reference,
@@ -128,15 +127,16 @@ class ChatNamingConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    model: str = Field(default="openai/gpt-4o-mini", strict=True, min_length=1, max_length=256)
+    model: str = Field(default="claude_subscription:haiku", strict=True, min_length=1, max_length=256)
     api_key: str = Field(default="OPENROUTER_API_KEY", pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
-    zdr: Optional[bool] = Field(default=None, strict=True)  # None follows the user's require_zdr
+    zdr: Optional[bool] = Field(default=None, strict=True)  # OpenRouter only; None follows the user's require_zdr
     min_messages: int = Field(default=5, ge=1, le=1000, strict=True)
 
-    @model_validator(mode="after")
-    def _claude_subscription_needs_no_zdr(self) -> "ChatNamingConfig":
-        _check_model_zdr(self.model, self.zdr, "chat_naming")
-        return self
+    @field_validator("model")
+    @classmethod
+    def _valid_model(cls, value: str) -> str:
+        validate_reference(value)
+        return value
 
 
 class PromptCacheConfig(BaseModel):
@@ -148,7 +148,6 @@ class PromptCacheConfig(BaseModel):
     anthropic_providers: list[Annotated[str, StringConstraints(min_length=1, max_length=64)]] = Field(
         default_factory=lambda: ["Amazon Bedrock"], max_length=10,
     )
-    trim_slack_percent: int = Field(default=25, ge=0, le=90, strict=True)
 
 
 class AssociativeMemoryConfig(BaseModel):
@@ -159,14 +158,16 @@ class AssociativeMemoryConfig(BaseModel):
     context_messages: int = Field(default=8, ge=0, le=100, strict=True)
     top_n: int = Field(default=3, ge=1, le=20, strict=True)
     score_threshold: float = Field(default=0.45, ge=0, le=1)
-    query_model: Optional[str] = Field(default=None, strict=True, min_length=1, max_length=256)
+    query_model: Optional[str] = Field(default="claude_subscription:haiku", strict=True, min_length=1, max_length=256)
     api_key: str = Field(default="OPENROUTER_API_KEY", pattern=_ENV_NAME)
-    zdr: Optional[bool] = Field(default=None, strict=True)  # None follows the user's require_zdr
+    zdr: Optional[bool] = Field(default=None, strict=True)  # OpenRouter only; None follows the user's require_zdr
 
-    @model_validator(mode="after")
-    def _claude_subscription_needs_no_zdr(self) -> "AssociativeMemoryConfig":
-        _check_model_zdr(self.query_model, self.zdr, "associative_memory")
-        return self
+    @field_validator("query_model")
+    @classmethod
+    def _valid_query_model(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None:
+            validate_reference(value)
+        return value
 
 
 class OrchestratorConfig(BaseModel):
@@ -180,7 +181,7 @@ class OrchestratorConfig(BaseModel):
     enabled: bool = Field(default=False, strict=True)
     model: str = Field(default="typesafe/jev-1.14", strict=True, min_length=1, max_length=256)
     api_key: str = Field(default="OPENROUTER_API_KEY", pattern=_ENV_NAME)
-    zdr: Optional[bool] = Field(default=None, strict=True)  # None follows the user's require_zdr
+    zdr: Optional[bool] = Field(default=None, strict=True)  # OpenRouter only; None follows the user's require_zdr
     min_confidence: float = Field(default=0.6, ge=0, le=1, allow_inf_nan=False)
     timeout_seconds: float = Field(default=4, ge=1, le=30, allow_inf_nan=False)
     grace_seconds: float = Field(default=8, ge=0, le=600, allow_inf_nan=False)
@@ -214,7 +215,7 @@ class IndexConfig(BaseModel):
 class SpeechToTextConfig(BaseModel):
     """OpenRouter speech-to-text settings."""
 
-    zdr: Optional[bool] = Field(default=None, strict=True)  # None follows the user's require_zdr
+    zdr: Optional[bool] = Field(default=None, strict=True)  # OpenRouter only; None follows the user's require_zdr
     language: Optional[str] = Field(default=None, pattern=r"^[a-z]{2}(?:-[A-Z]{2})?$")
 
 
@@ -238,13 +239,6 @@ class PdfConfig(BaseModel):
     ocr_dpi: int = Field(default=300, ge=72, le=600, strict=True)
     ocr_languages: str = Field(default="eng+spa", min_length=1, max_length=64, pattern=r"^[A-Za-z_]+(\+[A-Za-z_]+)*$")
     tesseract_cmd: str | None = Field(default=None, min_length=1, max_length=512)
-
-
-def _check_model_zdr(model: Optional[str], zdr: Optional[bool], section: str) -> None:
-    """Validate the model reference; an explicit `zdr: true` cannot go with a Claude subscription model."""
-    if model is not None:
-        validate_reference(model)
-    ensure_zdr_compatible(model, zdr, section)
 
 
 class ProviderConfig(BaseModel):
@@ -609,6 +603,38 @@ class UserConfig(BaseModel):
 MAX_TOOL_HOPS_LIMIT = 100
 
 
+class CompactionConfig(BaseModel):
+    """An agent's context compaction: when the context passes `trigger`, a small model summarises the older part.
+
+    `mode` picks the unit of `trigger` and `keep_recent`: `percent` of the chat model's context window, or `tokens`.
+    The system prompt is always kept whole; `keep_recent` is the recent tail kept verbatim.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(default=True, strict=True)
+    mode: Literal["percent", "tokens"] = "percent"
+    trigger: int = Field(default=50, ge=1, le=10_000_000, strict=True)
+    keep_recent: int = Field(default=20, ge=0, le=10_000_000, strict=True)
+    # the summary model (`<provider>:<model>` or a bare id of the main provider); None = the chat's own model
+    model: Optional[str] = Field(default="claude_subscription:haiku", strict=True, min_length=1, max_length=256)
+
+    @field_validator("model")
+    @classmethod
+    def _valid_model_reference(cls, value: Optional[str]) -> Optional[str]:
+        return None if value is None else validate_reference(value)
+
+    @model_validator(mode="after")
+    def _sane_bounds(self) -> "CompactionConfig":
+        if self.mode == "percent" and (self.trigger > 95 or self.keep_recent > 90):
+            raise ValueError("compaction in percent mode: trigger must be at most 95 and keep_recent at most 90")
+        if self.mode == "tokens" and self.trigger < 1_000:
+            raise ValueError("compaction in tokens mode: trigger must be at least 1000 tokens")
+        if self.keep_recent >= self.trigger:
+            raise ValueError("compaction.keep_recent must be smaller than compaction.trigger")
+        return self
+
+
 class ChatConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -621,8 +647,8 @@ class ChatConfig(BaseModel):
     keep_reasoning_in_memory: bool = True
     # tool round-trips per turn for this agent (None = `agent.max_tool_hops` from settings.yaml)
     max_tool_hops: Optional[int] = Field(default=None, ge=1, le=MAX_TOOL_HOPS_LIMIT)
-    # last N conversation messages kept in context (None = all); system prompt is always kept
-    conversation_messages_retained: Optional[int] = Field(default=30, ge=1)
+    # summarise the older part of a long chat with a small model (see CompactionConfig)
+    compaction: CompactionConfig = Field(default_factory=CompactionConfig)
     # let the model call tools (memory recall, source read/write/list)
     tools: bool = True
     tool_groups: list[str] | None = None
@@ -802,7 +828,7 @@ class ResolvedAgent(BaseModel):
     reasoning_tokens: Optional[int] = Field(default=None, ge=1)
     keep_reasoning_in_memory: bool = True
     max_tool_hops: Optional[int] = Field(default=None, ge=1, le=MAX_TOOL_HOPS_LIMIT)
-    conversation_messages_retained: Optional[int] = None
+    compaction: CompactionConfig = Field(default_factory=CompactionConfig)
     tools: bool = True
     tool_groups: list[str] | None = None
     allow: list[str] | None = None

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Optional
 from src.config.model_refs import is_claude_subscription
 from src.config.secrets import get_secret
 from src.config.settings import ASSOC
-from src.config.zdr import ensure_zdr_compatible, zdr_required
+from src.config.zdr import zdr_required
 from src.core.chunking import excerpt
 from src.providers.cancellation import CancellationToken, GenerationCancelled
 from src.providers.openrouter import OpenRouterProvider
@@ -219,10 +219,9 @@ def _query_model(agent: "Agent") -> tuple[LLMProvider, str, bool]:
     """The provider, model and ZDR flag for query proposal: the configured small model, else the chat's own."""
     if ASSOC.query_model is None:
         return agent.provider, agent.config.models.chat, agent.zdr_required
+    if is_claude_subscription(ASSOC.query_model):  # ZDR is an OpenRouter filter; it never applies here
+        return agent.claude_provider("associative_memory.query_model"), ASSOC.query_model, False
     zdr = zdr_required(agent.config.require_zdr, ASSOC.zdr)
-    if is_claude_subscription(ASSOC.query_model):
-        ensure_zdr_compatible(ASSOC.query_model, zdr, "associative_memory")
-        return agent.claude_provider("associative_memory.query_model"), ASSOC.query_model, zdr
     api_key = get_secret(ASSOC.api_key).strip()
     if not api_key:
         raise RuntimeError(f"associative query model needs the env var {ASSOC.api_key} to be set")

@@ -296,42 +296,31 @@ class ClaudeSubscriptionConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "cannot be the main provider"):
             UserConfig(max_level="admin", id="u", name="U", provider={"name": "openrouter"}, embeddings_provider={"name": "claude_subscription"}, agents=[])
 
-    def test_framework_models_need_no_zdr_setting_unless_zdr_is_forced_on(self) -> None:
+    def test_zdr_never_applies_to_claude_subscription_helper_models(self) -> None:
         self.assertEqual(ChatNamingConfig(model="claude_subscription:haiku").model, "claude_subscription:haiku")
         self.assertIsNone(AssociativeMemoryConfig(query_model="claude_subscription:haiku").zdr)
-        self.assertEqual(ChatNamingConfig(model="claude_subscription:haiku", zdr=False).zdr, False)
-        with self.assertRaisesRegex(ValidationError, "set chat_naming.zdr: false"):
-            ChatNamingConfig(model="claude_subscription:haiku", zdr=True)
-        with self.assertRaisesRegex(ValidationError, "set associative_memory.zdr: false"):
-            AssociativeMemoryConfig(query_model="claude_subscription:haiku", zdr=True)
+        # an explicit zdr only filters OpenRouter models; it is accepted and ignored for Claude
+        self.assertTrue(ChatNamingConfig(model="claude_subscription:haiku", zdr=True).zdr)
+        self.assertTrue(AssociativeMemoryConfig(query_model="claude_subscription:haiku", zdr=True).zdr)
+        with self.assertRaises(ValidationError):
+            ChatNamingConfig(model="claude_subscription:")
 
-    def test_a_required_user_policy_rejects_claude_where_it_is_inherited(self) -> None:
+    def test_a_required_user_policy_does_not_block_a_claude_query_model(self) -> None:
         from src.agent import associative
         agent = Mock()
-        query = AssociativeMemoryConfig(query_model="claude_subscription:haiku")
-        with patch.object(associative, "ASSOC", query):
-            agent.config.require_zdr = True
-            with self.assertRaisesRegex(ValueError, "set associative_memory.zdr: false"):
-                associative._query_model(agent)
-            agent.config.require_zdr = False
-            self.assertEqual(associative._query_model(agent)[2], False)
-        with patch.object(associative, "ASSOC", AssociativeMemoryConfig(query_model="claude_subscription:haiku", zdr=False)):
-            agent.config.require_zdr = True
-            self.assertEqual(associative._query_model(agent)[2], False)
+        agent.claude_provider.return_value = "claude-provider"
+        for require_zdr, own in ((True, None), (True, True), (False, None)):
+            with self.subTest(require_zdr=require_zdr, zdr=own), \
+                    patch.object(associative, "ASSOC", AssociativeMemoryConfig(query_model="claude_subscription:haiku", zdr=own)):
+                agent.config.require_zdr = require_zdr
+                self.assertEqual(associative._query_model(agent), ("claude-provider", "claude_subscription:haiku", False))
 
-    def test_loading_a_zdr_user_refuses_a_claude_helper_model_that_inherits_the_policy(self) -> None:
+    def test_a_zdr_user_loads_with_claude_helper_models(self) -> None:
         import src.config.loader as loader
-        data = {"id": "u", "name": "U", "max_level": "admin", "provider": {"name": "openrouter"}, "agents": ["a"]}
-        naming = ChatNamingConfig(model="claude_subscription:haiku")
-        for require_zdr, naming_config, fails in ((True, naming, True), (False, naming, False),
-                                                  (True, ChatNamingConfig(model="claude_subscription:haiku", zdr=False), False),
-                                                  (True, ChatNamingConfig(), False)):
-            with self.subTest(require_zdr=require_zdr, zdr=naming_config.zdr),                     patch.object(loader, "_load_yaml", return_value={**data, "require_zdr": require_zdr}),                     patch.object(loader, "CHAT_NAMING", naming_config):
-                if fails:
-                    with self.assertRaisesRegex(ValueError, "set chat_naming.zdr: false"):
-                        loader.load_user("u")
-                else:
-                    self.assertEqual(loader.load_user("u").require_zdr, require_zdr)
+        data = {"id": "u", "name": "U", "max_level": "admin", "provider": {"name": "openrouter"}, "agents": ["a"],
+                "require_zdr": True}
+        with patch.object(loader, "_load_yaml", return_value=data):
+            self.assertTrue(loader.load_user("u").require_zdr)
 
     def test_user_policy_defaults_to_off(self) -> None:
         self.assertFalse(UserConfig(max_level="admin", id="u", name="U", provider={"name": "openrouter"}, agents=[]).require_zdr)
@@ -415,22 +404,23 @@ class ClaudeSubscriptionWiringTests(unittest.TestCase):
         self.assertEqual(provider.invoke.call_args.args[1], "claude_subscription:haiku")
         conversations.set_generated_title.assert_called_once_with("c", "A title")
 
-    def test_chat_naming_with_claude_is_refused_while_the_user_requires_zdr(self) -> None:
+    def test_chat_naming_with_claude_runs_while_the_user_requires_zdr(self) -> None:
         import src.service.chat as chat
         service = ChatService(agent_factory=Mock(), dream=Mock())
         conversations = Mock()
         conversations.generated_title.return_value = None
-        user = UserConfig(max_level="admin", id="u", name="U", provider={"name": "openrouter"}, agents=["a"], require_zdr=True)
+        provider = Mock()
+        provider.invoke.return_value = {"response": "A title"}
+        user = UserConfig(max_level="admin", id="u", name="U", provider={"name": "openrouter"}, agents=["a"],
+                          require_zdr=True, claude_subscription={"claude_config_dir": "/login"})
         naming = ChatNamingConfig(model="claude_subscription:haiku", min_messages=1)
         with patch.object(service, "_conversations", return_value=conversations), \
                 patch.object(service, "_load", return_value=[{"role": "user", "content": "hi"}]), \
                 patch.object(service, "_user", return_value=user), patch.object(chat, "CHAT_NAMING", naming), \
-                patch.object(chat, "claude_subscription_provider") as factory, \
-                self.assertLogs("recall.service", level="ERROR") as logs:
+                patch.object(chat, "claude_subscription_provider", return_value=provider):
             service._name_chat("u", "a", "c")
-        factory.assert_not_called()
-        conversations.set_generated_title.assert_not_called()
-        self.assertIn("cannot be used while zero data retention is required", "\n".join(logs.output))
+        self.assertNotIn("zdr", provider.invoke.call_args.kwargs)
+        conversations.set_generated_title.assert_called_once_with("c", "A title")
 
 
 class ClaudeSubscriptionCatalogWebTests(unittest.TestCase):

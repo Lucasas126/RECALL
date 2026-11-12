@@ -11,8 +11,8 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 import test_chat_models as models_tests
-from src.config.agents import AgentModelError, AgentStore
-from src.config.loader import agent_default_model, user_models
+from src.config.agents import AgentStore
+from src.config.loader import user_models
 from src.config.models import AgentConfig, UserConfig
 from src.config.preferences import UserPreferences
 from src.service.chat import AgentBusy
@@ -98,17 +98,11 @@ class DefaultModelResolutionTests(unittest.TestCase):
         self.assertEqual(user_models(user, self._preferences("vendor/saved"), _agent("vendor/agent")).chat, "vendor/agent")
         self.assertEqual(user_models(user, self._preferences("vendor/saved")).chat, "vendor/saved")
 
-    def test_claude_subscription_agent_default_is_refused_while_zdr_is_required(self) -> None:
+    def test_claude_subscription_agent_default_works_while_zdr_is_required(self) -> None:
         agent = _agent("claude_subscription:sonnet")
-        self.assertEqual(agent_default_model(self._user(False), agent), "claude_subscription:sonnet")
-        with self.assertRaises(AgentModelError) as raised:
-            user_models(self._user(True), self._preferences(), agent)
-        self.assertIn("zero data retention", str(raised.exception))
-        self.assertIn("Elige otro modelo", error_message("es", raised.exception))
-        # read-only views skip the check instead of failing
-        self.assertEqual(user_models(self._user(True), self._preferences(), agent, check=False).chat,
-                         "claude_subscription:sonnet")
-
+        for require_zdr in (False, True):
+            self.assertEqual(user_models(self._user(require_zdr), self._preferences(), agent).chat,
+                             "claude_subscription:sonnet")
 
 class AgentDefaultModelServiceTests(models_tests.ModelFixture):
     require_zdr = False
@@ -180,18 +174,16 @@ class AgentDefaultModelServiceTests(models_tests.ModelFixture):
         self.agent_models["agent-one"] = None
         self.assertEqual(self.send(), "vendor/default")
 
-    def test_unusable_agent_default_fails_the_reply_cleanly_and_not_the_read(self) -> None:
+    def test_a_claude_agent_default_replies_while_the_user_requires_zdr(self) -> None:
         self.service._user = Mock(return_value=self._user("user-one"))
         self.service._user.return_value.require_zdr = True
         self.agent_models["agent-one"] = "claude_subscription:sonnet"
-        info = self.models()  # reading the chat's models never fails
-        self.assertEqual((info["model"]["id"], info["model_source"]), ("claude_subscription:sonnet", "agent"))
-        with self.assertRaises(AgentModelError) as raised:
-            list(self.service.send("user-one", "agent-one", self.chat, "Question"))
-        self.assertIn("agent-one", str(raised.exception))
-        # a chat selection still works, and the user can fall back
-        self.service.set_chat_model("user-one", "agent-one", self.chat, "vendor/alpha")
-        self.assertEqual(self.send(), "vendor/alpha")
+        info = self.models()
+        self.assertEqual((info["model"]["id"], info["model_source"], info["model"]["zdr"]),
+                         ("claude_subscription:sonnet", "agent", False))
+        user = self.service._user.return_value
+        resolved = user_models(user, self.service._preferences, _agent("claude_subscription:sonnet"))
+        self.assertEqual(resolved.chat, "claude_subscription:sonnet")  # no policy error on the reply path
 
     def test_saving_a_default_validates_provider_model_and_policy(self) -> None:
         user = self._user("user-one")
@@ -204,8 +196,6 @@ class AgentDefaultModelServiceTests(models_tests.ModelFixture):
         self.assertEqual(unchanged.chat_config.model, "vendor/missing")
         self.assertIsNone(self.service._check_agent_model(user, _agent(), "vendor/alpha").chat_config.model)
         user.require_zdr = True
-        with self.assertRaises(AgentModelError):
-            self.service._check_agent_model(user, _agent("claude_subscription:sonnet"), None)
         with self.assertRaises(ValueError):  # no ZDR route under the user's policy
             self.service._check_agent_model(user, _agent("vendor/retaining"), None)
 

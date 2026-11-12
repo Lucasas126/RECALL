@@ -161,16 +161,12 @@ Rules:
   each request runs with the **requesting user's** Claude settings and login. When
   Claude Code is not installed or not logged in, the associative search is skipped
   for that turn (indicator "skipped") and the chat keeps its title; both are logged.
-- These two settings need no ZDR setting to use a `claude_subscription:` model.
-  Zero data retention is optional and off by default (`require_zdr` in `user.yaml`,
-  see [config](../reference/user-yaml.md#zero-data-retention-is-a-user-policy)); the privacy of the
-  Anthropic account (for example opting out of training) is managed in that account.
-  Only when ZDR is required does a subscription model conflict: `settings.yaml`
-  fails to load with `chat_naming.zdr: true` or `associative_memory.zdr: true` and a
-  subscription model, and a user with `require_zdr: true` fails to load with a clear
-  error naming the setting to change (`zdr: false`) while those features use one.
-  A chat that selects a subscription model stores no `zdr` flag, or `zdr: false`
-  while the user requires ZDR.
+- ZDR does not apply to subscription models. Zero data retention (`require_zdr` in
+  `user.yaml`, see [config](../reference/user-yaml.md#zero-data-retention-is-a-user-policy)) and the
+  `zdr` settings of `chat_naming` and `associative_memory` are an OpenRouter routing filter;
+  a `claude_subscription:` model is used the same way with or without them. Its privacy
+  (for example opting out of training) is managed in the Anthropic account. A chat that
+  selects a subscription model stores no `zdr` flag.
 - `claude_subscription` cannot be the main `provider` or `embeddings_provider`, and
   `models.embeddings`/`models.stt` reject `claude_subscription:` references: Claude
   Code has no embeddings or speech-to-text, so those stay on OpenRouter (or Ollama
@@ -179,9 +175,7 @@ Rules:
   **Claude subscription** tab (also listed, tagged, in the **Any** tab), labelled *experimental*; the ZDR checkbox
   only applies to OpenRouter rows. They have no per-token price; they count
   against the plan limits. Telegram (no provider tabs; its list merges the
-  available providers) shows them with 🧪. A user who requires ZDR also sees
-  *not ZDR* labels (and Telegram reports "Not ZDR (Claude subscription,
-  experimental)" instead of "ZDR: enabled"); otherwise there is no ZDR wording.
+  available providers) shows them with 🧪. They never carry ZDR wording.
 
 ## privacy and telemetry
 

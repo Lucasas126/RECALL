@@ -155,50 +155,5 @@ class PromptCacheRequestTests(unittest.TestCase):
         self.assertEqual(post.call_args.args[1]["provider"], {"zdr": True})
 
 
-class TrimContextTests(unittest.TestCase):
-    def _agent(self, retained: int, count: int) -> SimpleNamespace:
-        history = [{"role": "user" if i % 2 == 0 else "assistant", "content": f"m{i}"} for i in range(count)]
-        return SimpleNamespace(
-            config=SimpleNamespace(conversation_messages_retained=retained),
-            messages=[{"role": "system", "content": "persona"}, *history],
-            _truncated=False,
-        )
-
-    def test_cut_goes_below_the_limit_so_the_prefix_stays_stable_until_it_fills_again(self) -> None:
-        agent = self._agent(retained=20, count=21)
-        Agent._trim_context(agent)
-        self.assertEqual(len(agent.messages) - 1, 15)  # 20 - 25%
-        self.assertEqual(agent.messages[1]["content"], "m6")
-        self.assertTrue(agent._truncated)
-        first_kept = agent.messages[1]
-        for i in range(5):  # the window refills without moving its start
-            agent.messages.append({"role": "user", "content": f"new{i}"})
-            Agent._trim_context(agent)
-            self.assertIs(agent.messages[1], first_kept)
-
-    def test_within_the_limit_nothing_is_cut(self) -> None:
-        agent = self._agent(retained=20, count=20)
-        Agent._trim_context(agent)
-        self.assertEqual(len(agent.messages) - 1, 20)
-        self.assertFalse(agent._truncated)
-
-    def test_zero_slack_keeps_the_exact_window(self) -> None:
-        agent = self._agent(retained=20, count=21)
-        with patch("src.agent.agent.PROMPT_CACHE", PromptCacheConfig(trim_slack_percent=0)):
-            Agent._trim_context(agent)
-        self.assertEqual(len(agent.messages) - 1, 20)
-
-    def test_tiny_windows_are_not_reduced_below_one_message(self) -> None:
-        agent = self._agent(retained=1, count=2)
-        Agent._trim_context(agent)
-        self.assertEqual([m["content"] for m in agent.messages[1:]], ["m1"])
-
-    def test_orphan_tool_result_is_still_dropped_after_a_cut(self) -> None:
-        agent = self._agent(retained=4, count=5)
-        agent.messages[-3] = {"role": "tool", "tool_call_id": "call_1", "content": "result"}
-        Agent._trim_context(agent)
-        self.assertNotEqual(agent.messages[1]["role"], "tool")
-
-
 if __name__ == "__main__":
     unittest.main()

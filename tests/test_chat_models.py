@@ -162,7 +162,6 @@ class ModelFixture(steering.SteeringFixture):
             models=ModelsConfig(chat="vendor/default"), provider_name="openrouter", api_key="",
             embeddings_provider_name="openrouter", embeddings_api_key="", reasoning_effort="medium",
             tools=False, associative_memory=self.associative_memory, has_memory=self.memory,
-            conversation_messages_retained=self.retained,
         )
         instance = Agent(config, self.providers[(user, agent)], chat_id)
         self.agents[(user, agent)] = instance
@@ -458,11 +457,11 @@ class ChatModelWithoutZdrTests(ModelFixture):
 
 
 class ChatModelWithRequiredZdrTests(ModelFixture):
-    def test_claude_subscription_chat_is_stored_as_not_zdr(self) -> None:
+    def test_claude_subscription_chat_stores_no_zdr_flag(self) -> None:
         isolate_providers(self, claude=CLAUDE_LOGGED_IN)
         model = self.service.set_chat_model("user-one", "agent-one", self.chat, "claude_subscription:sonnet")
-        self.assertEqual(model["zdr"], False)
-        self.assertIs(self.sources[("user-one", "agent-one")].model_selection(self.chat).zdr, False)
+        self.assertEqual(model["zdr"], False)  # ZDR never applies to it
+        self.assertIsNone(self.sources[("user-one", "agent-one")].model_selection(self.chat).zdr)
 
     def test_opting_out_stores_the_exception_and_following_the_setting_stores_nothing(self) -> None:
         self.service.set_chat_model("user-one", "agent-one", self.chat, "vendor/alpha")

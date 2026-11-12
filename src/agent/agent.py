@@ -9,10 +9,11 @@ from typing import Callable, Iterator, Optional, Union
 
 import src.providers.openrouter  # noqa: F401  (registers the openrouter provider)
 import src.providers.ollama  # noqa: F401  (registers the ollama provider)
-from src.config.model_refs import CLAUDE_SUBSCRIPTION, prefix_of, provider_of
+from src.config.model_refs import CLAUDE_SUBSCRIPTION, is_claude_subscription, prefix_of, provider_of
 from src.providers.routing import provider_for
 from src.agent import usage
 from src.agent import associative
+from src.agent import compaction
 from src.agent.permissions_prompt import block_for
 from src.agent.profile import AgentProfile, load_profile, system_prompt
 from src.agent.tool_groups import DISPOSABLE_BLOCKED_TOOLS, TOOL_GROUP_TOOLS
@@ -25,7 +26,7 @@ from src.agent.toolsets.mcp import build_mcp_tools
 from src.config.ceiling import refusal as level_refusal, restrict_config, tool_allowed
 from src.config.loader import load_agent
 from src.config.models import ModelsConfig, ResolvedAgent
-from src.config.settings import AGENT_MAX_TOOL_HOPS, PROMPT_CACHE, TAVILY
+from src.config.settings import AGENT_MAX_TOOL_HOPS, TAVILY
 from src.config.zdr import chat_zdr
 from src.core.index import VectorIndex
 from src.core.sources.conversations import ChatTask
@@ -310,8 +311,10 @@ class Agent:
         self.messages: list[dict] = [
             {"role": "system", "content": self._system_prompt()}
         ]
-        # whether older turns were dropped from the in-context window
+        # whether older turns were dropped from the in-context window (safety net when compaction fails)
         self._truncated = False
+        # the latest compaction summary of this chat (my notes on the part that left the context)
+        self._summary: Optional[str] = None
         self._tool_counter = 0  # fallback tool call ids when the provider gives none
         # transient associative-memory hint, injected into the context of the current turn only
         self._assoc_suggestion: Optional[str] = None
@@ -363,8 +366,7 @@ class Agent:
         cls, user_id: str, agent_id: Optional[str] = None, chat_id: Optional[str] = None,
         mcp: McpManager | None = None,
     ) -> "Agent":
-        # an agent default the ZDR policy forbids is checked per chat by the service, where a chat's own model wins
-        config = load_agent(user_id, agent_id, check_agent_model=False)
+        config = load_agent(user_id, agent_id)
         provider = main_provider(config)
         sources = SourceRegistry.for_agent(config.user_id, config.id, **chat_folder_options(config))
         profile = load_profile(sources, recall_knowledge=config.recall_knowledge)
@@ -502,8 +504,6 @@ class Agent:
         except GenerationCancelled:
             self.messages.append({"role": "user", "content": self._stamped(user_content, ts)})
             self._log_turn("user", user_content, ts=ts, **(meta or {}))
-            if not continuation:
-                self._trim_context()
             self._remember_interrupted("", "")
             raise
         if self._associative_enabled():
@@ -515,7 +515,7 @@ class Agent:
         self.messages.append({"role": "user", "content": self._stamped(user_content, ts)})
         self._log_turn("user", user_content, ts=ts, **(meta or {}))  # `meta`: source/task_ids of a wake turn
         if not continuation:
-            self._trim_context()
+            self._guard_context()
         self._refresh_mcp_tools()
         if stream:
             return self._stream(cancellation)
@@ -950,14 +950,14 @@ class Agent:
     # ------------------------------------------------------------------ context window
 
     def _load_recent_context(self) -> None:
-        """Seed the context with the last N turns of the active chat (all of them when N is unset)."""
+        """Seed the context with the active chat: the latest compaction summary and the turns after it."""
         if not self.config.has_memory:
             return
         history = self.sources.conversations().load(self.chat_id)
-        n = self.config.conversation_messages_retained
-        truncated = bool(n) and len(history) > n
-        if n:
-            history = history[-n:]
+        found = compaction.last_compaction(history)
+        if found is not None:
+            self._summary = found[1]["content"]
+            history = history[found[1]["covers_until"]:]
         for t in history:
             if t.get("role") not in ("user", "assistant"):
                 continue
@@ -965,39 +965,121 @@ class Agent:
             if t["role"] == "user" and t.get("ts"):
                 content = self._stamped(content, t["ts"])
             self.messages.append({"role": t["role"], "content": content})
-        # seed the context input size from the most recent persisted usage
+        # seed the context input size from the most recent persisted usage (or the latest compaction)
         for t in reversed(history):
+            if t.get("role") == compaction.COMPACTION_ROLE:
+                if isinstance(t.get("tokens_after"), int):
+                    self._ctx_input_tokens = t["tokens_after"]
+                break
             u = t.get("usage")
             if u and u.get("in") is not None:
                 if t.get("model", self._default_chat_model) == self.config.models.chat:
                     self._ctx_input_tokens = u["in"]
                 break
-        self._truncated = truncated
 
-    def _trim_context(self) -> None:
-        """Keep at most the last N messages (system prompt aside), flagging that older ones were cut.
+    # ------------------------------------------------------------------ compaction
 
-        A cut moves the start of the history, which invalidates the provider's prompt cache for all of it, so
-        each cut goes `trim_slack_percent` below N and the next ones wait until the window fills up again.
+    def _context_tokens(self) -> int:
+        """Tokens the context weighs now: the last real input plus what came after it, else a chars/4 estimate."""
+        if self._ctx_input_tokens is not None:
+            last = self.messages[-1] if len(self.messages) > 1 else None
+            tail = compaction.message_chars(last) // 4 if last and last.get("role") != "tool" else 0
+            return self._ctx_input_tokens + tail
+        chars = sum(compaction.message_chars(m) for m in self._context())
+        chars += len(json.dumps(self._tool_specs)) if self._tool_specs else 0
+        return chars // 4
+
+    def _compaction_model(self) -> tuple[LLMProvider, str, bool]:
+        """The summary model: `compaction.model`, else the chat's own; ZDR applies only to OpenRouter models."""
+        model = self.config.compaction.model
+        if model is None or model == self.config.models.chat:
+            return self.provider, self.config.models.chat, self.zdr_required
+        zdr = self.zdr_required and not is_claude_subscription(model)
+        return self.provider_named(provider_of(model, self.config.provider_name), "compaction.model"), model, zdr
+
+    def compaction_due(self) -> bool:
+        """Whether the context passed this agent's compaction trigger."""
+        if not self.config.has_memory or not self.config.compaction.enabled or len(self.messages) < 3:
+            return False
+        self._ensure_max_context()
+        trigger, _ = compaction.thresholds(self.config.compaction, self._max_context or 0)
+        return trigger is not None and self._context_tokens() >= trigger
+
+    def compact(self, *, manual: bool = False, instructions: str = "") -> Optional[compaction.CompactionResult]:
+        """Summarise the older part of the context with the summary model; None when there is nothing to do.
+
+        The system prompt and a recent tail stay as they are; the summary (merged with the previous one) replaces
+        the rest and a `compaction` turn records it in the chat. Raises when the summary model fails.
         """
-        n = self.config.conversation_messages_retained
-        if not n:
+        if not self.config.has_memory or (not manual and not self.compaction_due()):
+            return None
+        self._ensure_max_context()
+        _, keep = compaction.thresholds(self.config.compaction, self._max_context or 0)
+        total = self._context_tokens()
+        extra = len(compaction.summary_message(self._summary)["content"]) if self._summary else 0
+        extra += len(json.dumps(self._tool_specs)) if self._tool_specs else 0
+        cut = compaction.split(self.messages, total, keep, force=manual, extra_chars=extra)
+        if cut is None:
+            return None
+        older, tail = self.messages[1:cut.start], self.messages[cut.start:]
+        provider, model, zdr = self._compaction_model()
+        text = compaction.transcript(older, self._summary, instructions)
+        try:
+            summary = compaction.summarise(provider, model, text, zdr=zdr)
+        except Exception:
+            logger.warning("compaction summary failed once for chat %s; retrying", self.chat_id, exc_info=True)
+            summary = compaction.summarise(provider, model, text, zdr=zdr)
+        previous = len(compaction.summary_message(self._summary)["content"]) // 4 if self._summary else 0
+        after = max(0, total - cut.summarised_tokens - previous) + len(compaction.summary_message(summary)["content"]) // 4
+        result = compaction.CompactionResult(summary, total, after, model, manual)
+        users_in_tail = sum(1 for m in tail if m.get("role") == "user")
+        history = self.sources.conversations().load(self.chat_id)
+        covers = compaction.covers_until(history, users_in_tail)
+        self.messages = [self.messages[0], *tail]
+        self._summary = summary
+        self._truncated = False
+        self._ctx_input_tokens = after
+        self._prev_breakdown = None
+        self._log_turn(compaction.COMPACTION_ROLE, summary, **compaction.record(result, covers))
+        logger.info(
+            "compacted chat %s/%s/%s: %d -> %d tokens with %s%s", self.config.user_id, self.config.id,
+            self.chat_id, total, after, model, " (manual)" if manual else "",
+        )
+        return result
+
+    def _guard_context(self) -> None:
+        """Before a model call: compact when due, and cut the oldest messages when the context nears the window.
+
+        The cut is the safety net for a summary model that fails: the chat keeps working, with a cutoff marker.
+        """
+        if not self.config.has_memory:
             return
-        rest = self.messages[1:]
-        if len(rest) > n:
-            keep = max(1, n - n * PROMPT_CACHE.trim_slack_percent // 100)
-            kept = rest[-keep:]
-            # never start on an orphan tool result (its assistant tool_calls would be gone)
-            while kept and kept[0].get("role") == "tool":
-                kept.pop(0)
-            self.messages = [self.messages[0]] + kept
+        if self.compaction_due():
+            try:
+                self.compact()
+                return
+            except Exception:
+                logger.exception("compaction failed for chat %s", self.chat_id)
+        self._ensure_max_context()
+        window = self._max_context or 0
+        if not window or self._context_tokens() < window * compaction.HARD_LIMIT_PERCENT // 100:
+            return
+        _, keep = compaction.thresholds(self.config.compaction, window)
+        cut = compaction.split(self.messages, self._context_tokens(), keep or window // 5, force=True)
+        if cut is not None:
+            self.messages = [self.messages[0], *self.messages[cut.start:]]
             self._truncated = True
+            self._ctx_input_tokens = None
+            logger.warning("context of chat %s cut at the hard limit (compaction unavailable)", self.chat_id)
 
     def _context(self) -> list[dict]:
-        """The messages actually sent to the model, with a cutoff marker if history was dropped."""
+        """The messages actually sent to the model: the compaction summary and a cutoff marker when they apply."""
         ctx = self.messages
+        head = [compaction.summary_message(self._summary)] if self._summary else []
         if self._truncated:
-            ctx = [self.messages[0], {"role": "system", "content": "[CUTOFF CONVERSATION]"}] + self.messages[1:]
+            head.append({"role": "system", "content": "[CUTOFF CONVERSATION]"})
+        if head:
+            ctx = [self.messages[0], *head, *self.messages[1:]]
         if self._partial:
             ctx = ctx + [{"role": "assistant", "content": self._partial.rstrip()}]
         if self._assoc_suggestion:
