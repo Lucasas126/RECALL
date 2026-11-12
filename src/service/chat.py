@@ -83,6 +83,11 @@ from src.utils.i18n import InputError, UserMessageError, error_message, message
 from src.web.auth import verify_password
 
 logger = get_logger("service")
+def _thousands(value: int) -> str:
+    return f"{value:,}".replace(",", ".")
+
+
+_COMPACT_RE = re.compile(r"^/compact(?:@\w+)?(?:\s+(?P<arg>.*?))?\s*$", re.IGNORECASE | re.DOTALL)
 
 _ROUTING_INSTRUCTIONS = (
     "Which agent is best suited to answer this user message? Choose the one whose topic matches best."
@@ -325,6 +330,7 @@ class _MessageRun:
     meta: Optional[dict] = None  # persisted on the user turn (source, task_ids)
     blocks: Optional[list[str]] = None  # a wake turn's task blocks: later results merge into a queued wake
     frame: Optional[Callable[[list[str]], str]] = None  # composes `text` from `blocks`
+    compact: Optional[str] = None  # a `/compact` run: its instructions ("" for none); not a reply
     block_runs: Optional[list[list[str]]] = None  # the task runs each block of `blocks` reports (to drop a block already read)
     generation_id: str = field(default_factory=lambda: uuid4().hex)
     cancellation: CancellationToken = field(default_factory=CancellationToken)
@@ -2089,6 +2095,17 @@ class ChatService:
                     return
                 run = pending.popleft()
                 slot.active[chat_id] = run
+            if run.compact is not None:
+                try:
+                    text = self._manual_compaction(user_id, agent_id, slot, run)
+                    run.events.put(ChatEvent("text", text=text, generation_id=run.generation_id))
+                except Exception as e:
+                    run.events.put(e)
+                finally:
+                    run.events.put(None)
+                    with slot.state:
+                        slot.active.pop(chat_id, None)
+                continue
             context = RunContext(
                 user_id, agent_id, chat_id, self._approvals,
                 lambda kind, data, run=run: run.events.put(ChatEvent(kind, data=data, generation_id=run.generation_id)),
@@ -2232,6 +2249,57 @@ class ChatService:
             logger.exception("chat naming failed for %s/%s/%s; keeping the first-message title", user_id, agent_id, chat_id)
             return
         logger.info("named chat %s/%s/%s: %s", user_id, agent_id, chat_id, title)
+
+    # ------------------------------------------------------------------ manual compaction
+
+    def compact_command(self, user_id: str, agent_id: str, chat_id: str, text: str) -> str | None:
+        """Answer `/compact [instructions]` for the chat; None when `text` is not that command.
+
+        Runs the compaction now, whatever the trigger, with the optional instructions as a focus for the notes.
+        It runs on the chat's worker like a reply, so messages sent meanwhile wait behind it (and do not cancel it).
+        Refused while the chat has an active or queued reply; the answer is not stored and never reaches the model.
+        """
+        match = _COMPACT_RE.match(text.strip())
+        if match is None:
+            return None
+        self._owned_agent(user_id, agent_id)
+        conversations = self._conversations(user_id, agent_id)
+        self._require_chat(conversations, chat_id)
+        if conversations.is_task_chat(chat_id):
+            raise InputError("this is an internal task chat: steer the task instead")
+        run = _MessageRun(chat_id, "", [], False, compact=(match.group("arg") or "").strip())
+        run.cancellation.finish()  # a message sent meanwhile queues behind the compaction instead of steering it
+        slot = self._slot(user_id, agent_id)
+        with slot.state:
+            if self._chat_busy(slot, chat_id):
+                raise AgentBusy("wait for this chat's active and queued replies before compacting it")
+            events = self._events(run, run.events.subscribe())
+            self._enqueue(user_id, agent_id, slot, chat_id, run, steer=False)
+        return "".join(event.text or "" for event in events if event.kind == "text")
+
+    def _manual_compaction(self, user_id: str, agent_id: str, slot: _AgentSlot, run: _MessageRun) -> str:
+        """Run a `/compact` on the chat's worker and word the outcome for the user."""
+        language = self.language(user_id)
+        with slot.state:
+            fingerprint = self._runtime_fingerprint(user_id, agent_id)
+            agent = slot.agents.get(run.chat_id)
+            if agent is None or slot.fingerprints.get(run.chat_id) != fingerprint:
+                agent = self._agent_factory(user_id, agent_id, run.chat_id)
+                slot.agents[run.chat_id] = agent
+                slot.fingerprints[run.chat_id] = fingerprint
+        if not agent.config.has_memory:
+            return message(language, "This agent keeps no conversation history, so there is nothing to compact.")
+        try:
+            result = agent.compact(manual=True, instructions=run.compact or "")
+        except Exception as exc:
+            logger.exception("manual compaction failed for %s/%s/%s", user_id, agent_id, run.chat_id)
+            return message(language, "Compaction failed: {error}", error=str(exc)[:300])
+        if result is None:
+            return message(language, "Nothing to compact yet: the chat is still short.")
+        return message(
+            language, "Context compacted: {before} → {after} tokens.",
+            before=_thousands(result.tokens_before), after=_thousands(result.tokens_after),
+        )
 
     # ------------------------------------------------------------------ dream mode and own files
 

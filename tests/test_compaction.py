@@ -212,6 +212,61 @@ class CompactionServiceTests(steering.SteeringFixture):
         self.assertLess(tokens, self.window)  # the safety net cut the oldest messages
         self.assertIn("[CUTOFF CONVERSATION]", [m["content"] for m in self._context()])
 
+    def test_compact_command_summarises_now_with_the_focus(self) -> None:
+        self.compaction = CompactionConfig(model=None, mode="tokens", trigger=10_000_000, keep_recent=0)  # never automatic
+        for i in range(3):
+            self._say(f"m{i}")
+        self.assertEqual(self.summaries, [])
+        reply = self.service.compact_command("user-one", "agent-one", self.chat, "/compact keep the numbers")
+        self.assertRegex(reply, r"^Context compacted: [\d.]+ → [\d.]+ tokens\.$")
+        self.assertEqual(len(self.summaries), 1)
+        self.assertIn("keep the numbers", self.summaries[0][1]["content"])
+        last = [t for t in self._stored() if t["role"] == "compaction"][-1]
+        self.assertTrue(last.get("manual"))
+        self.assertFalse([t for t in self._stored() if "/compact" in str(t.get("content"))])  # never stored as a turn
+        self._say("after")
+        self.assertIn("[CONTEXT COMPACTED]", self._context()[1]["content"])
+
+    def test_compact_command_on_a_short_chat_does_nothing(self) -> None:
+        self._say("only")
+        reply = self.service.compact_command("user-one", "agent-one", self.chat, "/compact")
+        self.assertEqual(reply, "Nothing to compact yet: the chat is still short.")
+        self.assertEqual(self.summaries, [])
+
+    def test_other_text_is_not_the_compact_command(self) -> None:
+        self.assertIsNone(self.service.compact_command("user-one", "agent-one", self.chat, "/compacting things"))
+        self.assertIsNone(self.service.compact_command("user-one", "agent-one", self.chat, "compact please"))
+
+    def test_a_message_sent_during_compact_waits_and_does_not_cancel_it(self) -> None:
+        import threading
+        self.compaction = CompactionConfig(model=None, mode="tokens", trigger=10_000_000, keep_recent=0)
+        for i in range(3):
+            self._say(f"m{i}")
+        started, release = threading.Event(), threading.Event()
+        def slow(messages, model, *, stream=True, cancellation=None, **kwargs):
+            if not stream:
+                started.set()
+                release.wait(5)
+                self.summaries.append(copy.deepcopy(messages))
+                return {"response": "slow summary", "usage": None}
+            return self._stream(("user-one", "agent-one"), messages)
+        self.providers[("user-one", "agent-one")].invoke.side_effect = slow
+        result: list[str] = []
+        worker = threading.Thread(target=lambda: result.append(
+            self.service.compact_command("user-one", "agent-one", self.chat, "/compact")))
+        worker.start()
+        self.assertTrue(started.wait(5))
+        with self.assertRaises(Exception):  # a second /compact is refused while the first runs
+            self.service.compact_command("user-one", "agent-one", self.chat, "/compact")
+        events = self._send("during " + "q" * 100)  # queued behind the compaction
+        release.set()
+        worker.join(5)
+        list(events)
+        self._finish_workers()
+        self.assertTrue(result[0].startswith("Context compacted"))
+        self.assertIn("slow summary", self._context()[1]["content"])
+        self.assertEqual(self._stored()[-1]["role"], "assistant")
+
 
 if __name__ == "__main__":
     unittest.main()

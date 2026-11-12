@@ -272,6 +272,46 @@
                   <p class="setting-default model-note"></p>
                   <p class="setting-error error" role="alert"></p>
                 </div>
+                <div class="setting-row">
+                  <div class="setting-main">
+                    <label class="model-filter"><input id="agent-compaction-enabled" type="checkbox"> <span id="agent-compaction-enabled-label">Compact long chats</span></label>
+                    <p id="agent-compaction-enabled-hint" class="model-note">When the context grows past the trigger, a small model summarises the older part; the recent messages stay word for word. /compact does it on demand.</p>
+                  </div>
+                  <div class="setting-control"><button type="button" class="icon-btn setting-reset">↺</button></div>
+                  <p class="setting-default model-note"></p>
+                </div>
+                <div class="setting-row">
+                  <div class="setting-main">
+                    <label for="agent-compaction-mode" id="agent-compaction-mode-label">Compaction units</label>
+                  </div>
+                  <div class="setting-control"><select id="agent-compaction-mode"><option value="percent" id="agent-compaction-percent">Percent of the context window</option><option value="tokens" id="agent-compaction-tokens">Tokens</option></select><button type="button" class="icon-btn setting-reset">↺</button></div>
+                  <p class="setting-default model-note"></p>
+                </div>
+                <div class="setting-row">
+                  <div class="setting-main">
+                    <label for="agent-compaction-trigger" id="agent-compaction-trigger-label">Compact at</label>
+                  </div>
+                  <div class="setting-control"><input id="agent-compaction-trigger" type="text" inputmode="numeric" autocomplete="off" data-number data-unit="percent"><button type="button" class="icon-btn setting-reset">↺</button></div>
+                  <p class="setting-default model-note"></p>
+                  <p class="setting-error error" role="alert"></p>
+                </div>
+                <div class="setting-row">
+                  <div class="setting-main">
+                    <label for="agent-compaction-keep" id="agent-compaction-keep-label">Keep word for word</label>
+                    <p id="agent-compaction-keep-hint" class="model-note">The most recent part of the chat that is never summarised.</p>
+                  </div>
+                  <div class="setting-control"><input id="agent-compaction-keep" type="text" inputmode="numeric" autocomplete="off" data-number data-unit="percent"><button type="button" class="icon-btn setting-reset">↺</button></div>
+                  <p class="setting-default model-note"></p>
+                  <p class="setting-error error" role="alert"></p>
+                </div>
+                <div class="setting-row wide">
+                  <div class="setting-main">
+                    <label for="agent-compaction-model" id="agent-compaction-model-label">Summary model</label>
+                    <p id="agent-compaction-model-hint" class="model-note">Empty uses the chat's own model.</p>
+                  </div>
+                  <div class="setting-control"><input id="agent-compaction-model" maxlength="256" autocomplete="off"><button type="button" class="icon-btn setting-reset">↺</button></div>
+                  <p class="setting-default model-note"></p>
+                </div>
               </fieldset>
             </details>
           </div>

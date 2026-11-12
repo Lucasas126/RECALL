@@ -378,6 +378,8 @@ details.action pre { margin: 0; padding: 10px 12px; background: var(--code-bg); 
 .task-steer-input { flex: 1 1 auto; min-width: 0; padding: 4px 8px; font: inherit; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); }
 .task-error { margin-top: 6px; color: var(--danger); }
 details.msg.task-wake { align-self: flex-start; padding: 6px 12px; border-style: dashed; background: transparent; color: var(--muted); font-size: .9em; }
+.compaction-divider { display: flex; align-items: center; gap: 10px; margin: 14px 0; color: var(--muted); font-size: 12px; }
+.compaction-divider::before, .compaction-divider::after { content: ""; flex: 1; border-top: 1px dashed var(--line); }
 .task-wake > summary { cursor: pointer; display: flex; gap: 8px; min-width: 0; white-space: nowrap; overflow: hidden; }
 .task-wake-label { flex: none; font-weight: 600; color: var(--text); }
 .msg.task-brief { align-self: stretch; max-width: 100%; background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent); padding: 10px 14px; }

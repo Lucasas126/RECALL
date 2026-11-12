@@ -271,6 +271,7 @@ function unitLabel(unit) {
     case "seconds": return tr("seconds");
     case "messages": return tr("messages");
     case "rounds": return tr("rounds");
+    case "percent": return "%";
     default: return "";
   }
 }
@@ -585,6 +586,15 @@ function translateInterface() {
     ["agent-delegation-targets-hint", "Without any, it can only use fresh workers. An agent that can write its own memory keeps what it learns from the task."],
     ["agent-delegation-no-agents", "You have no other agents."],
     ["agent-max-hops-label", "Tool rounds per turn"],
+    ["agent-compaction-enabled-label", "Compact long chats"],
+    ["agent-compaction-enabled-hint", "When the context grows past the trigger, a small model summarises the older part; the recent messages stay word for word. /compact does it on demand."],
+    ["agent-compaction-mode-label", "Compaction units"],
+    ["agent-compaction-percent", "Percent of the context window"], ["agent-compaction-tokens", "Tokens"],
+    ["agent-compaction-trigger-label", "Compact at"],
+    ["agent-compaction-keep-label", "Keep word for word"],
+    ["agent-compaction-keep-hint", "The most recent part of the chat that is never summarised."],
+    ["agent-compaction-model-label", "Summary model"],
+    ["agent-compaction-model-hint", "Empty uses the chat's own model."],
     ["agent-max-hops-hint", "How many tool round-trips the agent may do before it must answer. Empty uses the application value."],
     ["agent-save", "Save agent"], ["agent-delete", "Delete agent"],
     ["agent-tab-basic", "Basic"], ["agent-advanced-summary", "Advanced"], ["agent-tab-tools", "Tools"],
@@ -1321,6 +1331,13 @@ function fillAgentForm(agent) {
   $("agent-reasoning-tokens").disabled = config.reasoning_tokens == null;
   setNumberValue($("agent-reasoning-tokens"), config.reasoning_tokens);
   setNumberValue($("agent-max-hops"), config.max_tool_hops);
+  const compactionConfig = config.compaction ?? {};
+  $("agent-compaction-enabled").checked = compactionConfig.enabled ?? true;
+  $("agent-compaction-mode").value = compactionConfig.mode ?? "percent";
+  setNumberValue($("agent-compaction-trigger"), compactionConfig.trigger ?? null);
+  setNumberValue($("agent-compaction-keep"), compactionConfig.keep_recent ?? null);
+  $("agent-compaction-model").value = compactionConfig.model ?? "";
+  syncCompactionUnits();
   renderAgentMcp(config.mcp ?? {});
   renderFolders(agent.folders ?? []);
   resetIndexStatus();
@@ -2143,6 +2160,7 @@ function agentFormBody() {
       keep_reasoning_in_memory: $("agent-keep-reasoning").checked,
       recall_knowledge: $("agent-recall-knowledge").checked,
       max_tool_hops: optionalNumber("agent-max-hops"),
+      compaction: compactionBody(),
       tools: $("agent-tools").checked,
       tool_groups: [...document.querySelectorAll('input[name="agent-tool-group"]:checked')].map((input) => input.value),
       mcp: agentMcpBody(),
@@ -2150,6 +2168,27 @@ function agentFormBody() {
       associative_execution: $("agent-associative-execution").value,
     },
   };
+}
+
+// the compaction block of the form; an empty number falls back to the default of the chosen units
+function compactionBody() {
+  const mode = $("agent-compaction-mode").value || "percent";
+  const fallback = mode === "percent" ? { trigger: 50, keep_recent: 20 } : { trigger: 100_000, keep_recent: 20_000 };
+  return {
+    enabled: $("agent-compaction-enabled").checked,
+    mode,
+    trigger: numberValue("agent-compaction-trigger") ?? fallback.trigger,
+    keep_recent: numberValue("agent-compaction-keep") ?? fallback.keep_recent,
+    model: $("agent-compaction-model").value.trim() || null,
+  };
+}
+
+function syncCompactionUnits() {
+  const unit = $("agent-compaction-mode").value === "tokens" ? "tokens" : "percent";
+  for (const id of ["agent-compaction-trigger", "agent-compaction-keep"]) $(id).dataset.unit = unit;
+  const off = !$("agent-compaction-enabled").checked;
+  for (const id of ["agent-compaction-mode", "agent-compaction-trigger", "agent-compaction-keep", "agent-compaction-model"]) $(id).disabled = off;
+  refreshNumberFields();
 }
 
 function setAgentBusy(busy) {
@@ -2191,6 +2230,8 @@ $("agent-form").addEventListener("invalid", (e) => {
   if (details) details.open = true;
 }, true);
 
+$("agent-compaction-enabled").addEventListener("change", syncCompactionUnits);
+$("agent-compaction-mode").addEventListener("change", syncCompactionUnits);
 $("agent-associative").addEventListener("change", () => {
   $("agent-associative-execution").disabled = $("agent-associative").value === "off";
 });
@@ -3659,6 +3700,10 @@ function renderMessages(messages) {
       container.append(wakeBubble(m));
       continue;
     }
+    if (m.role === "compaction") {  // the older messages above reach the model only as a summary; they stay visible
+      container.append(compactionDivider(m));
+      continue;
+    }
     const view = addMessage(m.role, container);
     if (m.role === "user" && m.index != null) setEditable(view.el, m.index);
     if (m.associative_skipped) view.memory({ state: "skipped" });
@@ -4676,6 +4721,18 @@ function wakeBubble(message) {
   const summary = element("summary", {}, element("span", { className: "task-wake-label", textContent: message.source === "process" ? tr("Process result") : tr("Task result") }));
   if (info.titles.length) summary.append(element("span", { className: "task-wake-titles", textContent: info.titles.join(" · ") }));
   node.append(summary, element("pre", { className: "task-wake-body", textContent: info.body || String(message.content ?? "") }));
+  return node;
+}
+
+// A compaction in the history: a thin divider; everything above it reaches the model only as a summary.
+function compactionDivider(message) {
+  const before = Number.isFinite(message.tokens_before) ? thousands(message.tokens_before) : "?";
+  const after = Number.isFinite(message.tokens_after) ? thousands(message.tokens_after) : "?";
+  const label = message.manual
+    ? tr("Context compacted with /compact: {before} → {after} tokens", { before, after })
+    : tr("Context compacted: {before} → {after} tokens", { before, after });
+  const node = element("div", { className: "compaction-divider", textContent: label });
+  node.setAttribute("role", "separator");
   return node;
 }
 
@@ -6016,8 +6073,8 @@ async function dispatchMessage(content, attachments, edit = null) {
   const userMessage = addMessage("user", state.view);
   userMessage.text(content);
   userMessage.attachments(edit ? edit.shown : attachments);
-  // /dream commands are answered by RECALL itself (not stored, not the model): shown as a system reply
-  const command = !edit && !attachments.length && DREAM_COMMAND.test(content);
+  // /dream and /compact are answered by RECALL itself (not stored, not the model): shown as a system reply
+  const command = !edit && !attachments.length && (DREAM_COMMAND.test(content) || COMPACT_COMMAND.test(content));
   const reply = addMessage(command ? "command" : "assistant", state.view);
   const request = {
     userId: state.user.id, agentId: state.agentId, chatId: state.chatId,
@@ -6265,6 +6322,7 @@ const DREAM_POLL_MS = 4000;
 const TRACE_RESULT_CHARS = 4000;
 // same grammar as the server's /dream parser: such messages are answered by RECALL, not the model
 const DREAM_COMMAND = /^\/dream(?:@\w+)?(?:\s[\s\S]*)?$/i;
+const COMPACT_COMMAND = /^\/compact(?:@\w+)?(?:\s[\s\S]*)?$/i;
 const numberFormat = new Intl.NumberFormat("en-US");
 
 function dreamUrl(suffix) {
@@ -7133,6 +7191,15 @@ selectRow("agent-associative", chatDefault("associative_memory"), () => {
 selectRow("agent-associative-execution", chatDefault("associative_execution"));
 numberRow("agent-max-hops", () => agentDefaultSpec("chat_config.max_tool_hops"), () => tr("Application value"));
 checkboxRow("agent-tools", chatDefault("tools"));
+const compactionDefault = (name) => () => agentDefault(`compaction.${name}`);
+checkboxRow("agent-compaction-enabled", compactionDefault("enabled"), syncCompactionUnits);
+selectRow("agent-compaction-mode", compactionDefault("mode"), syncCompactionUnits);
+numberRow("agent-compaction-trigger", () => agentDefaultSpec("compaction.trigger"), () => "");
+numberRow("agent-compaction-keep", () => agentDefaultSpec("compaction.keep_recent"), () => "");
+registerRow("agent-compaction-model", {
+  getDefault: compactionDefault("model"), describe: () => tr("the model of the chat"),
+  read: () => $("agent-compaction-model").value.trim() || null, write: (value) => { $("agent-compaction-model").value = value ?? ""; },
+});
 numberRow("agent-terminal-timeout", () => agentDefaultSpec("terminal.timeout_seconds"), () => "");
 // delegation block: limits can only lower the application's, so an empty value is the default
 checkboxRow("agent-delegation-enabled", () => agentDefault("delegation.enabled"));

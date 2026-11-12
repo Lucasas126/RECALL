@@ -1,6 +1,6 @@
 # Context compaction: plan
 
-Status: in progress (branch `feat/compaction`). Replaces the message-count trim (`conversation_messages_retained`).
+Status: implemented (branch `feat/compaction`), pending merge. Replaces the message-count trim (`conversation_messages_retained`).
 
 ## Goal
 

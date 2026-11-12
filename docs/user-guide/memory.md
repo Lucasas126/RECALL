@@ -231,10 +231,15 @@ index, so details can still be found with associative memory or the agent's memo
   for it. A turn that finds it due (for example after a long tool run) compacts first.
 - **What the model sees**: the system prompt, untouched; a system message that starts with `[CONTEXT COMPACTED]` with
   the notes; then the recent tail (`compaction.keep_recent`), verbatim, always starting at a user message.
+- **On demand**: `/compact` in the web chat or Telegram compacts the current chat now, whatever the trigger;
+  `/compact <focus>` tells the summary what to keep (for example `/compact keep the exact figures`). RECALL answers it
+  itself (it is not stored and never reaches the model) with the tokens before and after. It is refused while the chat
+  is replying; a message sent during a compaction waits for it.
 - **Settings** (per agent, `chat_config.compaction` in [agent.yaml](../reference/agent-yaml.md), web: Agents > Basic >
-  Advanced, coming with the form fields): `enabled` (true), `mode` (`percent` of the model's window, or `tokens`), `trigger` (50), `keep_recent` (20)
+  Advanced): `enabled` (true), `mode` (`percent` of the model's window, or `tokens`), `trigger` (50), `keep_recent` (20)
   and `model` (`claude_subscription:haiku`, the user's own Claude login; null uses the chat's own model).
 - **Stored**: a `compaction` turn in the chat's JSONL with the notes and the tokens before and after; a reloaded chat
-  starts from the latest one. The web shows it as a divider.
+  starts from the latest one. The web shows it as a divider with the tokens before and after (marked when it came from
+  `/compact`).
 - **If the summary model fails**: it is retried once on the next turn; meanwhile, when the context reaches 90 % of the
   window, the oldest messages are cut and the model sees a `[CUTOFF CONVERSATION]` marker, so the chat keeps working.

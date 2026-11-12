@@ -52,6 +52,11 @@ class CancellationToken:
             yield
             self._finished = True
 
+    def finish(self) -> None:
+        """Mark the generation committed without running it: cancelling it afterwards is a no-op."""
+        with self._lock:
+            self._finished = True
+
     def is_cancelled(self) -> bool:
         with self._lock:
             return self._cancelled

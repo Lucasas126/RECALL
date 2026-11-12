@@ -592,6 +592,8 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
             None if body.attachments or body.edit_index is not None
             else service.dream_command(user_id, agent_id, body.content)
         )
+        if command_reply is None and not body.attachments and body.edit_index is None:
+            command_reply = service.compact_command(user_id, agent_id, chat_id, body.content)
         if command_reply is not None:
             # commands are answered by RECALL itself: not sent to the model, not stored in the chat
             generation_id = uuid4().hex
