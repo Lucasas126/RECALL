@@ -22,7 +22,7 @@ One list of ideas and planned work, with what is already done kept separate. Imp
 - **Read access to docs and source for agents**: let an agent read `docs/` and the code to answer deeper questions. `docs/` is not in the Docker image today; remove it from `.dockerignore` first.
 - **Agent-proposed config edits with approval cards**: an agent proposes a change to its own yaml (a tool group, a limit) and the user approves or rejects it in a card, like terminal approvals, instead of editing files by hand.
 - **File tools v2** for every source: paginated reads with line numbers and text extraction for PDF/Office files; regex content search and glob file search; `patch` (unique find-and-replace with tolerant matching, returning a diff); a stale-write guard.
-- **Terminal follow-ups** (phase 1 is [done](#done)): a background `process` tool (start, poll, wait, kill); LLM-assisted smart approvals (a small model classifies borderline commands instead of the pattern lists); a per-chat "always allow" for a command or pattern; a Docker backend that creates a per-agent sandbox container itself.
+- **Terminal follow-ups** (phase 1 is [done](#done)): LLM-assisted smart approvals (a small model classifies borderline commands instead of the pattern lists); a per-chat "always allow" for a command or pattern; a Docker backend that creates a per-agent sandbox container itself.
 - **Terminal multi-backend follow-ups**: an agent may use several backends (sandbox, the user's own PC over Windows OpenSSH); still open: a Windows-native backend without Git Bash, a per-chat "always allow" per backend, wake-on-LAN/availability check before a PC call.
 - **Approval rules for folders and MCP**: route destructive folder operations (`folder_delete`, `folder_move`, memory delete/move on user folders) and non-read-only MCP tools through the [approval rules](../user-guide/terminal.md#approval-rules) with the tool kinds `folder_write` and `mcp_call` (default: folder writes allow except delete/move ask, MCP read-only allow, other MCP ask). Today they never ask. Needs the engine called from the folder and MCP handlers (they have no terminal session), approval cards for actions with no command or backend, and a decision for unattended contexts (Telegram, CLI) that now would deny. The engine's `Action` and `evaluate` are ready for it.
 - **Approvals form: inherit the layer defaults**: the Agents tab always writes the per-backend `approvals`, which pins the shorthand and hides the `default` of the user and installation rule lists; add an "inherit" choice.
@@ -65,9 +65,7 @@ Capability gaps an agent reported, in the order they block it; each line says wh
 1. **Search in old conversations**: a session-search tool over conversations with filters (date, chat, origin); recalling what was said and decided depends on it.
 2. **Scheduled jobs and proactive Telegram messages**: cron-like jobs with an unattended approval policy; reminders, recurring reports and any automation depend on it.
 3. **Ask the user with options**: clarify cards in web and Telegram; confirming choices without free-text round trips depends on it.
-4. **Subagents**: delegate work with budgets and backend rules; splitting long tasks and parallel research depend on it.
 5. **Messages between agents**: agent-to-agent hand-offs; the orchestrator follow-ups and delegation depend on it.
-6. **Background processes**: long-running commands with a process tool; builds, servers and watchers depend on it.
 7. **Browser**: driving a web page; sites that need clicks, logins or scripts depend on it.
 8. **Vision**: analysing images the agent did not receive in chat; screenshots and files on the backend depend on it.
 9. **Voice tools**: speech output and input as tools; spoken replies depend on it.
@@ -81,6 +79,7 @@ Skills imported from other agent systems:
 ## done
 
 - Terminal tool group, phase 1: `terminal`, `sandbox_read`, `sandbox_write`, `sandbox_patch` and `sandbox_search` against an SSH sandbox (or a local backend on trusted installs), foreground commands with timeouts, approvals (manual / smart / off) through the API and Telegram buttons, a hardline blocklist, redacted and truncated output, an audit file, unattended behaviour for dreams, and `python -m src.admin terminal-test` ([terminal guide](../user-guide/terminal.md)).
+- Subagents (`task_start` and friends, task panel, worker inheritance) and background processes (`process_start` and friends, completion wake), see the [delegation guide](../user-guide/delegation.md) and the [terminal guide](../user-guide/terminal.md#background-processes).
 - Telegram orchestrator: a decision model (OpenRouter Decisions API, alpha) picks the agent for a message that starts a new chat, with override buttons ([Telegram](../user-guide/telegram.md#telegram-orchestrator-automatic-agent-choice)).
 - Video input: models with image input but no video get sampled frames plus transcribed audio ([files and media](../user-guide/files-and-media.md#video-input)).
 - Message timestamps and `[AUDIO]` / `[VIDEO]` tags in the model context ([files and media](../user-guide/files-and-media.md#message-tags-and-timestamps)).
