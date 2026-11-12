@@ -4214,7 +4214,7 @@ function wakeBubbleState(message) {
   return { ids: Array.isArray(message?.task_ids) ? message.task_ids : titles.map((t) => t.id), titles: titles.map((t) => t.title), body: parts.join("\n\n").trim() };
 }
 
-// ---- task panel helpers: the list of all the user's tasks (cross-chat), its filter, budget line and rows
+// ---- task panel helpers: the list of all the user's tasks (cross-chat), its filter and rows
 // 950 -> "950", 12400 -> "12.4k", 1500000 -> "1.5M"
 function formatTokenCount(count) {
   const value = Number(count);
@@ -4237,13 +4237,6 @@ function taskPanelSort(tasks) {
   const stamp = (task) => Date.parse(task.created_at ?? task.started_at ?? "") || 0;
   return (Array.isArray(tasks) ? tasks : []).map((task, index) => ({ task, index }))
     .sort((a, b) => stamp(b.task) - stamp(a.task) || b.index - a.index).map((item) => item.task);
-}
-
-// Today's usage line: used and limit as short strings; limit null when unlimited; over = the budget is spent.
-function taskBudgetState(budget) {
-  const used = Math.max(0, Number(budget?.used) || 0);
-  const limit = Math.max(0, Number(budget?.limit) || 0);
-  return { used: formatTokenCount(used), limit: limit ? formatTokenCount(limit) : null, over: limit > 0 && used >= limit, percent: limit ? Math.min(100, Math.round((used / limit) * 100)) : 0 };
 }
 
 // What one row of the panel shows (the record is a `GET /api/tasks` entry, labelled with the parent's names).
@@ -4836,16 +4829,6 @@ $("task-dialog").addEventListener("close", stopTaskDialog);
 // ---- task panel (DOM): every task of the user across chats and agents, newest first
 const taskPanel = { filter: "all", tasks: [], rows: new Map(), timer: null, running: false, again: false, loaded: false };
 
-function renderTaskBudget(budget) {
-  const info = taskBudgetState(budget);
-  const box = $("tasks-budget");
-  box.textContent = info.limit === null
-    ? tr("Tasks today: {used} tokens (no daily limit)", { used: info.used })
-    : tr("Tasks today: {used} of {limit} tokens", { used: info.used, limit: info.limit });
-  box.classList.toggle("over", info.over);
-  box.title = info.over ? tr("Daily task budget reached; it resets at midnight") : "";
-}
-
 function taskPanelRowNode(id) {
   const badge = element("span", { className: "task-badge" });
   badge.setAttribute("role", "status");
@@ -4972,7 +4955,6 @@ async function taskPanelRefresh() {
     taskPanel.tasks = data.tasks;
     taskPanel.loaded = true;
     for (const task of data.tasks) taskRecords.set(task.id, task);
-    renderTaskBudget(data.budget);
     renderTaskPanel();
     $("tasks-error").hidden = true;
     keep = taskPanelNeedsPolling(data);

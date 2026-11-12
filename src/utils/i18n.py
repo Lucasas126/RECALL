@@ -821,8 +821,6 @@ _SPANISH = {
     "Filter tasks": "Filtrar tareas",
     "No tasks to show.": "No hay tareas que mostrar.",
     "Tasks today: {used} of {limit} tokens": "Tareas hoy: {used} de {limit} tokens",
-    "Tasks today: {used} tokens (no daily limit)": "Tareas hoy: {used} tokens (sin límite diario)",
-    "Daily task budget reached; it resets at midnight": "Límite diario de tareas alcanzado; se restablece a medianoche",
     "from {agent} · {chat}": "desde {agent} · {chat}",
     "(untitled chat)": "(chat sin título)",
     "no parent chat": "sin chat de origen",

@@ -260,8 +260,8 @@ stop the start-up. An agent's [`delegation` block](agent-yaml.md#delegation) can
 
 ```yaml
 subagents:
-  max_parallel_per_parent: 3     # 1-10; tasks running at once for one parent chat
-  max_parallel_per_user: 4       # 1-20; tasks running at once for one user
+  max_parallel_per_parent: 5     # 1-10; tasks running at once for one parent chat
+  max_parallel_per_user: 10      # 1-20; tasks running at once for one user
   max_launches_per_turn: 5       # 1-50; task_start calls in one parent turn
   timeout_seconds: 600           # 10-3600; wall clock of one task
   max_tokens: 0                  # 0 = no cap per task; 1000-5000000 = input + output tokens of one task (counted after each model call)
@@ -270,12 +270,7 @@ subagents:
   max_followups: 5               # 0-50; task_send follow-ups per task
   max_auto_wakes: 3              # 1-20; parent turns started by a task result in a row, without a user message in between (the rest are held)
   wake_debounce_seconds: 1.5     # 0-30; results ending within this window are delivered as one message
-  daily_token_budget: 1000000    # 0-1000000000; input + output tokens of all of a user's tasks per local day (0 = unlimited)
 ```
-
-`daily_token_budget` is counted per user from the tasks' recorded usage (every run, including `task_send` follow-ups, on the user's local day). Once the day's usage reaches it,
-`task_start` and `task_send` answer `error: daily task budget reached (<used>/<budget> tokens today); it resets at midnight` and nothing starts; running tasks are not cut.
-The task panel shows today's usage. Its default is also exposed in the agent form defaults (`field_defaults`, group `subagents`).
 
 A provider rate limit fails the task (reason `rate_limit`) and blocks launches for the cooldown; it is never retried. The same numbers are stated to the agent in
 the `task_start` description and its system prompt.

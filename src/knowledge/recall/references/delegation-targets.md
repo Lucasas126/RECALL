@@ -8,7 +8,7 @@ Besides fresh workers you can hand a task to another agent of the same user with
   appears when you have targets. Another user's agents can never be named.
 - Not yourself, and not an agent that is currently waiting on a task you are running (no `A -> B -> A` loops). Depth is 1: the
   target cannot launch tasks while working for you.
-- The usual limits apply (3 running tasks per chat, 4 per user, 10 minutes, the token budget).
+- The usual limits apply (5 running tasks per chat, 10 per user, 10 minutes).
 - A backend granted to a target must be set up the same for both agents (same workdir and approval mode), else it is refused naming the backend.
 
 ## How the target works

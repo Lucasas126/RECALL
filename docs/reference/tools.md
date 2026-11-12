@@ -51,7 +51,7 @@ The web **Agents** tab configures these groups for each agent:
   - `task_list(status="")`: one line per task of this chat, `id status [unread] age title`.
   - `task_result(id, full=false)`: the capped result, or with `full` the worker's whole final answer (up to 50 000 characters); status only while it runs. Marks the result consumed.
   - `task_steer(id, text)`: correct a *running* task; its reply is interrupted (partial kept) and continues with the correction.
-  - `task_send(id, text)`: continue a `done`, `timed_out` or `failed` task (not `owner_lost`, not `cancelled`) in its worker chat with its full context; fresh timeout and token budget, counts against the
+  - `task_send(id, text)`: continue a `done`, `timed_out` or `failed` task (not `owner_lost`, not `cancelled`) in its worker chat with its full context; fresh timeout and token cap, counts against the
     parallel limits, at most 5 follow-ups per task (`subagents.max_followups`), ends with a new wake.
   - `task_stop(id)`: stop a running task, partial result kept (no wake).
   - `task_wait(ids, timeout_s=60)`: block until every task ended or the timeout (**at most 120 s**; a user message steering the parent ends the wait). Returns `{done: [...], running: [ids]}`; results read here are consumed (no wake).

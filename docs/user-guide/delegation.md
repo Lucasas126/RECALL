@@ -27,7 +27,7 @@ as data from a worker, not something you wrote) and the agent gets a turn to rep
 - `task_wait(ids, timeout_s)`: block for results, **at most 120 s** (a message from you ends the wait). Use it only when the agent cannot go on without the result.
 - `task_steer(id, text)`: correct a **running** task. Its current reply is interrupted and kept, the correction is appended and it continues.
 - `task_send(id, text)`: talk to a task that has **finished** (`done`, `timed_out`, `failed`) and keep it working with its full context, instead of starting a new task. It counts
-  against the parallel limits, gets a fresh timeout and token budget, is limited to 5 follow-ups per task (`subagents.max_followups`) and ends with a new result message.
+  against the parallel limits, gets a fresh timeout and token cap, is limited to 5 follow-ups per task (`subagents.max_followups`) and ends with a new result message.
 - `task_stop(id)`, `task_list(status)`, `task_result(id, full)`.
 
 ## In the web app
@@ -35,7 +35,7 @@ as data from a worker, not something you wrote) and the agent gets a turn to rep
 - **Task card.** Each `task_start` step in a reply is a one-line card: the task title, `ephemeral` or the agent's name, and a status badge with the elapsed time (Running · 1m 05s, Done, Failed, Cancelled, Timed out). Open it to see the result. The card updates by itself (the page asks the server every ~3 seconds while a task of the open chat runs).
 - **Stop, Steer, Open chat.** *Stop* ends a running task and keeps its partial result. *Steer* opens a small field: what you type is sent into the running worker as a correction (its current reply is interrupted and kept, your text is appended and it continues), the same as the agent's `task_steer`. *Open chat* shows the worker's own conversation in a dialog marked as internal and read-only; it is never in your chat list. **Watching a task live:** while the task runs, the dialog shows the saved conversation and then the worker's current reply as it is written (thinking, tool steps with their running indicator, text), like a normal chat; it follows the bottom only while you stay near it, and when the reply ends (or a steer starts a new one) it refreshes from the saved chat and attaches again if the task still runs. A running task's card also shows one muted line with what the worker is doing now (*Thinking…*, *Running terminal: ls -la*, *Writing…*). The live view works only in the process that runs the task: for a task started from Telegram while you use the web, the dialog refreshes the saved chat every few seconds instead, and the card shows no activity line.
 - **Task result bubble.** When a task ends, the result that reaches the agent appears as a compact, collapsed "Task result" note listing the task titles, not as a message of yours. The agent's reply to it follows as a normal message and streams live if the chat is open, also after a reload.
-- **Tasks panel.** The *Tasks* button in the sidebar footer (next to the theme and settings buttons) opens a list of **all** your tasks across chats and agents, newest first, with the filters *All*, *Running* and *Finished*. Each row shows the status badge, the title, `ephemeral` or the agent's name, the elapsed time, the tokens used, and where it came from (*from <agent> · <chat title>*: click it to open that chat). *Stop*, *Steer* and *Open chat* work as on the card. While anything runs the panel refreshes every ~3 s. At the top it shows **today's task usage** against the daily budget (below).
+- **Tasks panel.** The *Tasks* button in the sidebar footer (next to the theme and settings buttons) opens a list of **all** your tasks across chats and agents, newest first, with the filters *All*, *Running* and *Finished*. Each row shows the status badge, the title, `ephemeral` or the agent's name, the elapsed time, the tokens used, and where it came from (*from <agent> · <chat title>*: click it to open that chat). *Stop*, *Steer* and *Open chat* work as on the card. While anything runs the panel refreshes every ~3 s.
 - Everything works in history after a reload, in both themes and on narrow screens. The same actions are available through the API ([subagent tasks](../reference/api.md#subagent-tasks)).
 
 ## Turning it on
@@ -121,7 +121,7 @@ only lower them.
 
 | Limit | Default |
 | --- | --- |
-| running tasks per chat / per user | 3 / 4 |
+| running tasks per chat / per user | 5 / 10 |
 | launches in one turn | 5 |
 | wall clock per task | 600 s (10 min) |
 | input + output tokens per task (summed over every model call, `task_send` follow-ups restart the count) | 200 000 |
@@ -132,10 +132,8 @@ only lower them.
 | depth | 1 |
 
 The agent is told the numbers in the `task_start` description and in a short notice in its system prompt, and a limit error says which limit was hit and what
-to do (`limit reached: 3 running task(s) in this chat; wait for one to finish (task_wait), then launch again`). A task that hits the wall clock or the token cap is
+to do (`limit reached: 5 running task(s) in this chat; wait for one to finish (task_wait), then launch again`). A task that hits the wall clock or the token cap is
 stopped and ends `timed_out` with its partial result; a user stopping the parent's reply cancels the task.
-
-**Daily budget.** All your tasks together (every run, `task_send` follow-ups included) may use `subagents.daily_token_budget` input + output tokens per local day, 1 000 000 by default (`0` = unlimited). Once it is spent, `task_start` and `task_send` answer `error: daily task budget reached (<used>/<budget> tokens today); it resets at midnight` and nothing starts; tasks already running are **stopped** as soon as the budget is crossed (status *timed out*, reason `daily_budget`, partial result kept), and the check and the launch are one atomic step, so parallel launches cannot overshoot it. The Tasks panel shows today's usage. The budget is per user (User A and User B count separately) and is counted from the task records, not from your own chats.
 
 **Unattended tasks (for scheduled jobs).** A task can also be started without any chat, by a program rather than by an agent: it runs with no one to approve anything, so manual and dangerous terminal actions are **denied**, `smart`-mode normal commands run, and protected paths are always refused. The same limits and the daily budget apply. Its result stays in the task record (visible in the Tasks panel, marked *scheduled*) or, when a target chat is given, arrives there as an ordinary task result. There is no scheduler, no screen to create jobs and no agent tool for this yet; the only entry point is the [admin CLI](admin-cli.md) (`python -m src.admin task run`), meant for testing.
 

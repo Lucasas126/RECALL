@@ -67,12 +67,6 @@ MAX_APPROVALS_PER_RUN = 10  # approval requests a worker may make in one run; mo
 MAX_PAUSE_FACTOR = 2  # a run's timeout is paused at most this many times the timeout while it awaits approvals
 TASK_KEEP_DAYS = 30  # final task records (and their hidden worker chats) older than this are pruned
 PRUNE_EVERY_SECONDS = 3600  # at most once per hour per user
-DAILY_KEEP_DAYS = 8  # days of per-day usage kept in a record (the budget only needs today)
-
-
-def _today() -> str:
-    """The user's local day (the server's local time zone), as `YYYY-MM-DD`."""
-    return datetime.now().astimezone().date().isoformat()
 
 
 def _now() -> str:
@@ -399,7 +393,7 @@ class _LiveTask:
     lock: NonBlockingFileLock
     parent_chat: str = ""
     parent_agent: str = ""  # the launching agent; `agent_id` above is the agent whose chat runs the worker (the target's)
-    base_in: int = 0  # tokens of earlier runs of this task (task_send): the budget below counts only this run
+    base_in: int = 0  # tokens of earlier runs of this task (task_send): the token cap counts only this run
     base_out: int = 0
     turn_floor: int = 0  # turns the worker chat had before this run: the answer is read after them
     feeds: deque = field(default_factory=deque)  # reply feeds of steering messages the driver still has to follow
@@ -549,36 +543,6 @@ class TaskManager:
         context.approval_gate = gate
         return context
 
-    # ------------------------------------------------------------------ daily token budget
-
-    def tokens_today(self, user_id: str) -> int:
-        """Input + output tokens all of the user's tasks used on the local day (every run, follow-ups included)."""
-        if not self.store.folder(user_id, create=False).is_dir():
-            return 0
-        with self.store.lock(user_id):
-            return self._tokens_unlocked(user_id)
-
-    def _tokens_unlocked(self, user_id: str) -> int:
-        """`tokens_today` for a caller that already holds the store lock."""
-        day = _today()
-        return sum(int((r.get("daily") or {}).get(day) or 0) for r in self.store.list(user_id))
-
-    def budget(self, user_id: str) -> dict:
-        """`{used, limit}` of today (`limit` 0 = unlimited)."""
-        return {"used": self.tokens_today(user_id), "limit": int(SUBAGENTS.daily_token_budget)}
-
-    def check_budget(self, user_id: str, *, locked: bool = False) -> None:
-        """Refuse to start any work once the day's token budget is spent (`subagents.daily_token_budget`, 0 = off).
-
-        `locked`: the caller holds the store lock (launches check and save the record in one critical section).
-        """
-        limit = int(SUBAGENTS.daily_token_budget)
-        if limit <= 0:
-            return
-        used = self._tokens_unlocked(user_id) if locked else self.tokens_today(user_id)
-        if used >= limit:
-            raise TaskError(f"daily task budget reached ({used}/{limit} tokens today); it resets at midnight")
-
     def awaiting_approval(self, user_id: str, task_id: str) -> int:
         """Approvals the worker of a task is waiting on right now (0 when none)."""
         broker = getattr(self._service, "_approvals", None)
@@ -707,7 +671,6 @@ class TaskManager:
                 "Do the work yourself or tell the user; do not retry"
             )
 
-        self.check_budget(user_id)
         task_id = secrets.token_hex(6)
         record = {
             "id": task_id, "user_id": user_id,
@@ -732,7 +695,6 @@ class TaskManager:
             self._check_capacity(user_id, record["parent"], limits)
             if target is not None:
                 self._check_target(parent, target)
-            self.check_budget(user_id, locked=True)  # checked and saved in one critical section: no launch race past the budget
             if not lock.acquire():
                 raise TaskError("task is still finishing; try again in a moment")
             self.store.save(record)
@@ -779,7 +741,7 @@ class TaskManager:
         written by the caller runs on that agent's model. The run is `unattended`: manual and dangerous terminal actions
         and dangerous terminal actions are denied; in `smart` mode non-dangerous commands run on their own, protected and
         hardline ones are always refused. The same
-        limits, the rate-limit cooldown and the daily token budget apply. With `notify_chat=(agent_id, chat_id)` the
+        limits and the rate-limit cooldown apply. With `notify_chat=(agent_id, chat_id)` the
         result is delivered there as a wake (the normal path); without it the result only stays in the record and the
         task panel. Raises TaskError when it cannot start.
         """
@@ -831,7 +793,6 @@ class TaskManager:
                 grant.append("terminal")
         if (until := self.store.blocked_until(user_id)) is not None:
             raise TaskError(f"rate limit: the provider's plan limit was reached; no new tasks until {until:%H:%M}")
-        self.check_budget(user_id)
 
         task_id = secrets.token_hex(6)
         wake = notify_chat is not None
@@ -852,7 +813,6 @@ class TaskManager:
         lock = self.store.run_lock(user_id, task_id)
         with self.store.lock(user_id):
             self._check_capacity(user_id, record["parent"], limits)
-            self.check_budget(user_id, locked=True)
             if not lock.acquire():
                 raise TaskError("task is still finishing; try again in a moment")
             self.store.save(record)
@@ -1093,7 +1053,7 @@ class TaskManager:
         answer = self._final_answer(live)
         if reason == "timeout":
             return self._finish(live, "timed_out", reason="timeout", text=answer or "".join(live.partial))
-        if reason in ("token_limit", "daily_budget"):
+        if reason == "token_limit":
             return self._finish(live, "timed_out", reason=reason, text=answer or "".join(live.partial))
         if reason is not None:  # stopped, parent_cancelled, shutdown
             return self._finish(live, "cancelled", reason=reason, text=answer or "".join(live.partial))
@@ -1177,30 +1137,15 @@ class TaskManager:
             live.tokens_in += tokens_in
             live.tokens_out += tokens_out
             usage = {"in": live.base_in + live.tokens_in, "out": live.base_out + live.tokens_out}
-            day = _today()
 
             def change(r: dict) -> None:
                 r["usage"] = usage
-                daily = dict(r.get("daily") or {})  # tokens per local day: the daily budget counts from here
-                daily[day] = int(daily.get(day) or 0) + int(tokens_in or 0) + int(tokens_out or 0)
-                r["daily"] = dict(sorted(daily.items())[-DAILY_KEEP_DAYS:])
 
             self.store.update(user_id, task_id, change)
             if live.limits.max_tokens and live.tokens_in + live.tokens_out >= live.limits.max_tokens:
                 self._request_stop(live, "token_limit")
-            self._enforce_budget(user_id)
 
         return record
-
-    def _enforce_budget(self, user_id: str) -> None:
-        """The day's token budget is spent: stop EVERY running task of the user (partial results are kept)."""
-        limit = int(SUBAGENTS.daily_token_budget)
-        if limit <= 0 or self.tokens_today(user_id) < limit:
-            return
-        with self._guard:
-            lives = [live for live in self._live.values() if live.user_id == user_id]
-        for live in lives:
-            self._request_stop(live, "daily_budget")
 
     def _watch(self, live: _LiveTask) -> None:
         """Wall-clock and token watchdog: asks the worker to stop, and ends the task itself if it will not."""
@@ -1215,7 +1160,6 @@ class TaskManager:
         if not live.done.is_set():  # the worker did not stop in time (a provider call that ignores cancellation)
             status, reason = {
                 "timeout": ("timed_out", "timeout"), "token_limit": ("timed_out", "token_limit"),
-                "daily_budget": ("timed_out", "daily_budget"),
             }.get(live.stop_reason or "", ("cancelled", live.stop_reason))
             self._finish(live, status, reason=reason, text="".join(live.partial))
 
@@ -1653,7 +1597,7 @@ class TaskManager:
     def send(self, user_id: str, task_id: str, text: str, *, limits: TaskLimits, owner: tuple[str, str] | None = None) -> dict:
         """Continue a finished (done, timed_out or failed) task in its persisted worker chat, with its full context.
 
-        The task runs again: it counts against the parallel limits, gets a fresh timeout and token budget (the
+        The task runs again: it counts against the parallel limits, gets a fresh timeout and token cap (the
         usage so far stays in the record), is capped at `max_followups`, and ends with a new wake.
         """
         text = (text or "").strip()
@@ -1672,7 +1616,6 @@ class TaskManager:
             raise TaskError(f"limit reached: {limits.max_followups} follow-ups for this task; start a new task with what you learned")
         if (until := self.store.blocked_until(user_id)) is not None:
             raise TaskError(f"rate limit: no new work until {until:%H:%M}; do not retry")
-        self.check_budget(user_id)
         agent_id, chat_id = record["child"]["agent_id"], record["child"]["chat_id"]
         if (record.get("target") or {}).get("remember"):  # its memory writes are only safe while that agent is otherwise idle
             held = self._agent_groups(user_id, record["parent"]["agent_id"])
@@ -1692,7 +1635,6 @@ class TaskManager:
         timeout_s = limits.timeout_seconds
         with self.store.lock(user_id):
             self._check_capacity(user_id, record["parent"], limits)
-            self.check_budget(user_id, locked=True)
             if not lock.acquire():
                 raise TaskError("task is still finishing; try again in a moment")
 
