@@ -1,6 +1,6 @@
 # design: asynchronous subagents and messages between agents
 
-Status: **phases 1-7 implemented**; later changes (2026-11-12): no daily token budget, no token cap per task unless `task_start(max_tokens)` sets one, parallel limits 5 per chat / 10 per user, `task_start(inherit)` for fresh workers, and background processes (see the [terminal guide](../user-guide/terminal.md#background-processes)); the tables below keep the original numbers (phase 6: web task panel over `GET /api/tasks` with polling, no SSE endpoint;  phase 7: `TaskManager.launch_unattended`, exposed only in the admin CLI `task run`). Phases 1, 2, 3, 4 (cross-process: commands inbox for stop/steer/send, wake claim by the origin's process, crash recovery in the poller, no approval relay) and 5 were implemented earlier (see the [delegation guide](../user-guide/delegation.md)); the rest here is design only. Every "today" statement was checked against the code on branch `docs/subagents-design`; every name marked *(new)* is a proposal, not an existing API. Backlog items served: "Subagents" and "Messages between agents" in [the backlog](backlog.md#from-the-planner-replica-report-2026-11-05) (items 4 and 5), and the foundation of items 2 (scheduled jobs / proactive Telegram) and the "agent-to-agent delegation" line of the orchestrator follow-ups.
+Status: **phases 1-7 implemented** (phase 6: web task panel over `GET /api/tasks` with polling, no SSE endpoint, per-user daily token budget `subagents.daily_token_budget`; phase 7: `TaskManager.launch_unattended`, exposed only in the admin CLI `task run`). Phases 1, 2, 3, 4 (cross-process: commands inbox for stop/steer/send, wake claim by the origin's process, crash recovery in the poller, no approval relay) and 5 were implemented earlier (see the [delegation guide](../user-guide/delegation.md)); the rest here is design only. Every "today" statement was checked against the code on branch `docs/subagents-design`; every name marked *(new)* is a proposal, not an existing API. Backlog items served: "Subagents" and "Messages between agents" in [the backlog](backlog.md#from-the-planner-replica-report-2026-11-05) (items 4 and 5), and the foundation of items 2 (scheduled jobs / proactive Telegram) and the "agent-to-agent delegation" line of the orchestrator follow-ups.
 
 ## 1. goals and non-goals
 
@@ -18,7 +18,7 @@ Non-goals
 
 - No cross-user delegation (User A and User B never reach each other's agents).
 - No durable generation queue and no automatic resume of a crashed child (the overview already states that scheduling is in-process; this design adds a durable *task record*, not a durable model run).
-- Not building scheduled jobs, proactive Telegram messages or clarify cards (background processes were added later) (see [section 13](#13-what-this-gives-to-scheduled-jobs)).
+- Not building scheduled jobs, proactive Telegram messages, background processes or clarify cards (see [section 13](#13-what-this-gives-to-scheduled-jobs)).
 - No new provider calls from the framework itself: all work is a normal agent reply.
 - No MCP tools for children in the first phases.
 
@@ -164,12 +164,12 @@ Application defaults in `settings.yaml` under a new `subagents:` block *(new, lo
 | limit | default | scope | enforced by |
 |---|---|---|---|
 | `max_depth` | 1 (a child cannot launch; may be raised to 2) | chain | sidecar `depth`; `delegate` blocked in child chats |
-| `max_parallel_per_parent` | 3 (now 5) | parent chat | manager, counted from the store |
-| `max_parallel_per_user` | 4 (now 10) | user (User A and User B separately) | manager; plus `queue_max` 5, then the tool errors |
+| `max_parallel_per_parent` | 3 | parent chat | manager, counted from the store |
+| `max_parallel_per_user` | 4 | user (User A and User B separately) | manager; plus `queue_max` 5, then the tool errors |
 | `max_launches_per_turn` | 5 | one parent turn | handler counter |
 | `max_auto_wakes` | 3 consecutive wake-started turns without a user message | parent chat | `meta` chain counter; after that the result is stored and the user is told, not the agent woken |
 | `timeout_seconds` | 600 (max 3600) | task | watchdog thread cancels the child's token → `timed_out`; excludes time awaiting approval |
-| `max_tokens` | 200 000 in+out (now no cap by default) | task | watchdog sums `usage {in,out}` that `_remember_reply` persists on each assistant turn; per-call granularity needs a small `Agent` usage callback (`_track_usage` already computes it) |
+| `max_tokens` | 200 000 in+out | task | watchdog sums `usage {in,out}` that `_remember_reply` persists on each assistant turn; per-call granularity needs a small `Agent` usage callback (`_track_usage` already computes it) |
 | per-turn steps | `agent.max_tool_hops` (settings, default 50) | child turn | existing `AGENT_MAX_TOOL_HOPS` |
 | `result_max_chars` | 8000 | wake and `task_result` | manager truncates, marks it, full text stays in the child chat |
 | cooldown on 429 | until the provider says, min 5 min | user + provider | see below |
@@ -245,7 +245,7 @@ Each phase ships and is tested alone. New test files follow the existing style (
 | 3 | **Approvals and terminal grants** | `RunContext` approval target, `task` and `interactive`; broker keyed by parent; attribution in cards; terminal grant with stricter-mode rule; split "excluded from learning" from "tools blocked"; unattended path; timer pause while awaiting | `src/terminal/approvals.py`, `src/terminal/context.py`, `src/terminal/session.py` (no policy change, plumbing only), `src/agent/tools.py`, `src/agent/agent.py`, `src/agent/tool_groups.py`, `src/web/static/app.js`, `src/telegram/bot.py` | broker tests with a child run; card shows in parent chat; deny on timeout; protected path denied on `local` in all modes; `interactive=False` denies manual; mode never exceeds parent |
 | 4 | **Cross-process** | origins served, commands inbox (stop/steer/send; no cross-channel approval relay, design decision),  poller, wake claim, notification queues; Telegram bot consumer | `src/service/tasks.py`, `src/service/chat.py`, `src/web/app.py`, `web.py`/`run_telegram.py` wiring, `src/telegram/bot.py` | two `ChatService` instances on one temporary data dir (as `test_config_pickup` does): stop/steer/approve from the non-executor, claim races, lock-based recovery |
 | 5 | **Agent-to-agent** | existing-agent targets (with per-target `remember: true`, see section 12), `delegation.targets` allowlist, chain/cycle refusal, provenance header, target's tool intersection, agent editor UI | `src/service/chat.py`, `src/service/tasks.py`, `src/config/models.py`, `src/web/static/app.js`, docs/reference | allowlist, cross-user target rejected, A→B→A refused, B's grants ∩ parent's |
-| 6 | **Polish and budgets** | task panel, `GET /api/tasks/events` SSE, Telegram `Stop` buttons everywhere | web and bot files | SSE replay, cap |
+| 6 | **Polish and budgets** | task panel, `GET /api/tasks/events` SSE, per-user daily cap hook, Telegram `Stop` buttons everywhere | web and bot files | SSE replay, cap |
 | 7 (optional) | **Unattended entry point** | `launch(..., unattended=True, trigger=...)` without a parent run; see section 13 | `src/service/tasks.py` | unattended policy table |
 
 ## 12. decisions of the owner (2026-11-05)
