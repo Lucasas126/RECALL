@@ -33,9 +33,10 @@ from src.agent import templates as agent_templates
 from src.config.agents import AgentConfigError, AgentStore
 from src.config.ceiling import agents_allowed, backend_allowed, group_allowed, mcp_allowed
 from src.config.levels import Level, effective_agent_level, parse_level, required_level_reason, selected_tool_groups
-from src.config.models import AgentConfig, UserConfig
+from src.config.models import AgentConfig, ChatConfig, UserConfig
 from src.config.settings import memory_limits
-from src.service.agent_permissions import PermissionRefused, clean_text
+from src.config.levels import check_approval_rules
+from src.service.agent_permissions import PermissionRefused, _check_self_change, clean_text
 from src.terminal.audit import audit_path, audit_writable, write_permission_audit
 from src.utils.avatars import USER_KEY
 from src.utils.i18n import UserMessageError
@@ -46,40 +47,41 @@ NAME_MAX = 100
 DESCRIPTION_MAX = 500
 MAX_DIFF_LINES = 24    # SOUL diff lines on a card
 MAX_DIFF_LINE_CHARS = 160
-PERMISSION_TOOLS_HINT = (
-    "level, tool groups and approval rules are changed with the permissions tools (agent_set_level, "
-    "agent_set_tool_groups, agent_add_rule, agent_remove_rule, agent_reset_rules) if you hold that group; otherwise ask "
-    "the user (Agents tab)"
-)
-USER_ONLY_HINT = "that setting gives access to tools or files, so only the user can change it (Agents tab)"
-
-# `agent_update(settings=...)`: plain settings, by the name the tool shows -> where they live in the agent's config
-_CHAT_SETTINGS = {
-    "enabled": "tools", "has_memory": "has_memory", "stream": "stream", "reasoning": "reasoning",
-    "reasoning_effort": "reasoning_effort", "reasoning_tokens": "reasoning_tokens",
-    "keep_reasoning_in_memory": "keep_reasoning_in_memory", "max_tool_hops": "max_tool_hops",
-    "conversation_messages_retained": "conversation_messages_retained",
-    "associative_memory": "associative_memory", "associative_execution": "associative_execution",
-    "recall_knowledge": "recall_knowledge",
-}
-PLAIN_SETTINGS = (*_CHAT_SETTINGS, "avatar_style", "dream_enabled")
-_PERMISSION_KEYS = {"level", "tool_groups", "groups", "approval_rules", "rules", "allow", "deny"}
-_ACCESS_KEYS = {"terminal", "mcp", "folders", "delegation", "id", "chat_config", "dream", "tools"}
+# `agent_update(settings=...)`: any key of the agent's configuration, by its name in the yaml. Flat names of the chat
+# settings (`reasoning_effort`, `max_tool_hops`, `tool_groups`, `mcp`...) are accepted next to the top-level fields
+# (`level`, `approval_rules`, `terminal`, `delegation`, `folders`, `dream`, `avatar_style`) and a `chat_config` object.
+# The approval card is the control; the limits below are enforced by the service, not by the key list.
+_TOP_FIELDS = tuple(name for name in AgentConfig.model_fields if name not in ("id", "name", "description", "chat_config"))
+_CHAT_FIELDS = tuple(ChatConfig.model_fields)
+_ALIASES = {"groups": "tool_groups", "rules": "approval_rules", "enabled": "tools", "dream_enabled": "dream.enabled"}
+PLAIN_SETTINGS = (*_CHAT_FIELDS, *_TOP_FIELDS)
+ID_HINT = "the id of an agent is changed with agent_rename"
 
 
 def _soul_summary(text: str) -> dict:
     return {"chars": len(text), "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]}
 
 
+def _flatten(value: Any, prefix: str = "") -> dict[str, Any]:
+    """Leaves of a dumped config by dotted path (lists and scalars are leaves); `chat_config.` is dropped for display."""
+    if isinstance(value, dict) and value:
+        out: dict[str, Any] = {}
+        for key, item in value.items():
+            out.update(_flatten(item, f"{prefix}.{key}" if prefix else str(key)))
+        return out
+    return {prefix.removeprefix("chat_config."): value}
+
+
 def _plain(config: AgentConfig) -> dict:
-    """The settings `agent_update` may change, as a flat dict (what a card diff and the audit show)."""
-    chat = config.chat_config
-    view: dict[str, Any] = {"name": config.name, "description": config.description, "model": chat.model}
-    for shown, stored in _CHAT_SETTINGS.items():
-        view[shown] = getattr(chat, stored)
-    view["avatar_style"] = config.avatar_style
-    view["dream_enabled"] = config.dream.enabled
-    return view
+    """The whole configuration as a flat dict (what a card diff and the audit show for the keys that change)."""
+    return _flatten(config.model_dump(mode="json"))
+
+
+def _merge(base: dict, extra: dict) -> dict:
+    out = dict(base)
+    for key, value in extra.items():
+        out[key] = _merge(out[key], value) if isinstance(value, dict) and isinstance(out.get(key), dict) else value
+    return out
 
 
 @dataclass
@@ -120,7 +122,7 @@ class AgentPlan:
         target = f"'{clean_text(self.target_name)}' [{self.target_id}]"
         verbs = {
             "create": f"asks to CREATE the agent {target}.",
-            "update": f"asks to change the agent {target}." if not self.is_self else "asks to change ITS OWN description or SOUL.",
+            "update": f"asks to change the agent {target}." if not self.is_self else "asks to change ITSELF.",
             "rename": f"asks to RENAME the agent {target} (its id; the data folder and picture move with it).",
             "delete": f"asks to DELETE the agent {target} (its configuration; its data folder is kept on disk).",
         }
@@ -382,48 +384,43 @@ class AgentAdmin:
         is_self = target.id == caller_id
         self._above(user, target, caller, "change")
         values = self._settings(settings)
-        if is_self and (name is not None or model is not None or values):
-            raise PermissionRefused(
-                "you can change only your own description and SOUL; ask the user, or another agent, to change anything else of you"
-            )
         updated = target
-        changes: dict[str, Any] = {}
+        raw = target.model_dump(mode="json")
         if name is not None:
-            changes["name"] = self._text(name, "name", NAME_MAX, single_line=True, required=True)
+            raw["name"] = self._text(name, "name", NAME_MAX, single_line=True, required=True)
         if description is not None:
-            changes["description"] = self._text(description, "description", DESCRIPTION_MAX, single_line=True)
-        chat_updates: dict[str, Any] = {}
+            raw["description"] = self._text(description, "description", DESCRIPTION_MAX, single_line=True)
         if model is not None:
-            chat_updates["model"] = str(model).strip() or None
+            raw["chat_config"]["model"] = str(model).strip() or None
         for key, value in values.items():
-            if key in _CHAT_SETTINGS:
-                chat_updates[_CHAT_SETTINGS[key]] = value
-            elif key == "avatar_style":
-                changes["avatar_style"] = value
-            elif key == "dream_enabled":
-                changes["dream"] = target.dream.model_copy(update={"enabled": value})
-        if chat_updates:
-            changes["chat_config"] = target.chat_config.model_copy(update=chat_updates)
-        if changes:
+            if key == "chat_config":
+                raw["chat_config"] = _merge(raw["chat_config"], value)
+            elif key == "dream.enabled":
+                raw["dream"]["enabled"] = value
+            elif key in _CHAT_FIELDS:
+                raw["chat_config"][key] = value
+            else:
+                raw[key] = value
+        if raw != target.model_dump(mode="json"):
             try:
-                updated = AgentConfig.model_validate(target.model_copy(update=changes).model_dump(mode="json"))
+                updated = AgentConfig.model_validate(raw)
             except ValidationError as exc:
                 raise PermissionRefused(f"invalid value: {self._errors(exc)}") from exc
-            if "model" in chat_updates and updated.chat_config.model != target.chat_config.model and updated.chat_config.model:
+            if updated.chat_config.model and updated.chat_config.model != target.chat_config.model:
                 try:
                     updated = self._service._check_agent_model(user, updated, target.chat_config.model)
                 except (AgentConfigError, ValueError) as exc:
                     raise PermissionRefused(f"invalid model: {clean_text(exc, 300)}") from exc
-            updated = updated.model_copy(update={"level": target.level, "approval_rules": target.approval_rules})
+            self._check_bounds(user, target, updated, caller, is_self)
         old_soul = self._soul(user_id, target.id) if soul is not None else None
         new_soul = self._soul_text(soul) if soul is not None else None
         before_plain, after_plain = _plain(target), _plain(updated)
         lines: list[str] = []
-        for key in before_plain:
-            if before_plain[key] != after_plain[key]:
-                lines.append(f"  {key}: {clean_text(before_plain[key], 120)} -> {clean_text(after_plain[key], 120)}")
-        before: dict[str, Any] = {key: before_plain[key] for key in before_plain if before_plain[key] != after_plain[key]}
-        after: dict[str, Any] = {key: after_plain[key] for key in before}
+        keys = [key for key in dict.fromkeys([*before_plain, *after_plain]) if before_plain.get(key) != after_plain.get(key)]
+        for key in keys:
+            lines.append(f"  {key}: {clean_text(before_plain.get(key), 120)} -> {clean_text(after_plain.get(key), 120)}")
+        before: dict[str, Any] = {key: before_plain.get(key) for key in keys}
+        after: dict[str, Any] = {key: after_plain.get(key) for key in keys}
         if new_soul is not None and new_soul != old_soul:
             before["soul"], after["soul"] = _soul_summary(old_soul or ""), _soul_summary(new_soul)
             lines.append(f"  SOUL: {len(old_soul or '')} -> {len(new_soul)} characters")
@@ -433,7 +430,7 @@ class AgentAdmin:
         def execute() -> None:
             if updated != target:
                 if is_self:  # the caller's own slot is busy running this very reply: write the file, not through the idle check
-                    self._store.modify(user_id, target.id, lambda config, _user: config.model_copy(update={"description": updated.description}))
+                    self._store.modify(user_id, target.id, lambda config, current: self._still(config, current, target, updated, caller))
                 else:
                     self._service.update_agent(user_id, target.id, updated)
             if new_soul is not None and new_soul != old_soul:
@@ -447,20 +444,59 @@ class AgentAdmin:
         )
 
     def _settings(self, settings: object) -> dict[str, Any]:
+        """Keys by their yaml names (or the aliases `groups`, `rules`, `enabled`, `dream_enabled`); `id` is not one."""
         if settings in (None, ""):
             return {}
         if not isinstance(settings, dict):
             raise PermissionRefused("settings must be an object such as {\"reasoning_effort\": \"low\"}")
-        forbidden = sorted(key for key in settings if key in _PERMISSION_KEYS)
-        if forbidden:
-            raise PermissionRefused(f"'{', '.join(forbidden)}' cannot be changed with agent_update: {PERMISSION_TOOLS_HINT}")
-        access = sorted(key for key in settings if key in _ACCESS_KEYS)
-        if access:
-            raise PermissionRefused(f"'{', '.join(access)}' cannot be changed with agent_update: {USER_ONLY_HINT}")
-        unknown = sorted(str(key) for key in settings if key not in PLAIN_SETTINGS)
-        if unknown:
-            raise PermissionRefused(f"unknown setting '{clean_text(', '.join(unknown), 60)}'; allowed: {', '.join(PLAIN_SETTINGS)}")
-        return dict(settings)
+        values: dict[str, Any] = {}
+        for key, value in settings.items():
+            key = _ALIASES.get(str(key), str(key))
+            if key == "id":
+                raise PermissionRefused(f"'id' cannot be changed with agent_update: {ID_HINT}")
+            if key not in PLAIN_SETTINGS and key not in ("chat_config", "dream.enabled"):
+                raise PermissionRefused(
+                    f"unknown setting '{clean_text(key, 60)}'; allowed: {', '.join(PLAIN_SETTINGS)}, chat_config (an object)"
+                )
+            if key == "chat_config" and not isinstance(value, dict):
+                raise PermissionRefused("chat_config must be an object")
+            values[key] = value
+        return values
+
+    @staticmethod
+    def _check_bounds(user: UserConfig, target: AgentConfig, updated: AgentConfig, caller: Level, is_self: bool) -> None:
+        """What no card can lift: the result stays within the caller's level and the user's maximum.
+
+        An agent may give another agent (or lower for itself) at most its own level and what that level can hold; it never
+        raises its own level. The store checks the same limits again when the change is written.
+        """
+        if is_self:
+            _check_self_change(target, updated, user)
+        effective = effective_agent_level(updated, user)
+        needed, service = required_level_reason(updated, user.terminal_backends)
+        if effective > caller or effective > user.max_level:
+            raise PermissionRefused(
+                f"this change would give the agent the level '{effective.label}', above your own level '{caller.label}' or the "
+                f"user's maximum '{user.max_level.label}'; an agent can give at most its own level"
+            )
+        if needed > caller:
+            raise PermissionRefused(
+                f"this change needs the level '{needed.label}' ({service}), above your own level '{caller.label}': you cannot grant "
+                "what you could not hold; ask the user (Agents tab)"
+            )
+        try:
+            check_approval_rules(updated, user)
+            if caller < effective:
+                check_approval_rules(updated.model_copy(update={"level": caller}), user)
+        except UserMessageError as exc:
+            raise PermissionRefused(str(exc)) from exc
+
+    def _still(self, config: AgentConfig, user: UserConfig, target: AgentConfig, updated: AgentConfig, caller: Level) -> AgentConfig:
+        """Under the store's lock: the agent is still the one the card showed, and the bounds hold against what is stored now."""
+        if config != target:
+            raise PermissionRefused("the agent changed while the approval was pending; ask again")
+        self._check_bounds(user, config, updated, caller, True)
+        return updated
 
     # ------------------------------------------------------------------ plans: rename, delete
 
