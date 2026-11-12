@@ -50,7 +50,10 @@ class ToolFixture(unittest.TestCase):
 class TerminalToolTests(ToolFixture):
     def test_five_tools_with_specs(self) -> None:
         tools = self.build(FakeBackend())
-        self.assertEqual(set(tools), {"terminal", "sandbox_read", "sandbox_write", "sandbox_patch", "sandbox_search"})
+        self.assertEqual(set(tools), {
+            "terminal", "sandbox_read", "sandbox_write", "sandbox_patch", "sandbox_search",
+            "process_start", "process_list", "process_read", "process_wait", "process_stop",
+        })
         self.assertEqual(tools["terminal"].tool_spec["function"]["parameters"]["required"], ["command"])
 
     def test_no_backend_no_tools(self) -> None:

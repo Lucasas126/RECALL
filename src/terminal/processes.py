@@ -176,7 +176,12 @@ class ProcessRegistry:
         except OSError:
             pass
         with self._lock:
-            current = self.get(record["user"], record["id"])
+            try:
+                current = self.get(record["user"], record["id"])
+            except ProcessError:  # the record is gone (its folder was removed): nothing left to update
+                self._live.pop((record["user"], record["id"]), None)
+                live.done.set()
+                return
             current["state"] = live.stop_reason or "exited"
             current["exit_code"] = code if not live.stop_reason else None
             current["ended"] = time.time()

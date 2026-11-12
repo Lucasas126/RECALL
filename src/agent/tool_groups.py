@@ -84,7 +84,10 @@ TOOL_GROUP_TOOLS: Final[dict[str, tuple[str, ...]]] = {
         "folder_list", "folder_read", "folder_search",
         "folder_write", "folder_append", "folder_edit", "folder_move", "folder_delete",
     ),
-    "terminal": ("terminal", "sandbox_read", "sandbox_write", "sandbox_patch", "sandbox_search"),
+    "terminal": (
+        "terminal", "sandbox_read", "sandbox_write", "sandbox_patch", "sandbox_search",
+        "process_start", "process_list", "process_read", "process_wait", "process_stop",
+    ),
     "delegate": ("task_start", "task_list", "task_result", "task_steer", "task_send", "task_stop", "task_wait"),
     "permissions": PERMISSION_TOOLS,
     "agents": AGENT_TOOLS,

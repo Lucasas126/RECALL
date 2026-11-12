@@ -340,7 +340,10 @@ class GrantTests(TerminalGrantFixture):
         worker = self._factory("user-one", "agent-one", granted)
         self.assertTrue(source.is_disposable(granted), "still excluded from learning")
         self.assertTrue(worker._disposable)
-        self.assertEqual(sorted(worker._tool_handlers), ["sandbox_patch", "sandbox_read", "sandbox_search", "sandbox_write", "terminal"])
+        self.assertEqual(sorted(worker._tool_handlers), [
+            "process_list", "process_read", "process_start", "process_stop", "process_wait",
+            "sandbox_patch", "sandbox_read", "sandbox_search", "sandbox_write", "terminal",
+        ])
         for blocked in ("memory", "memory_edit", "skill_manage", "soul_edit", "task_start"):
             self.assertNotIn(blocked, worker._tool_handlers)
         self.assertEqual(self._factory("user-one", "agent-one", plain)._tool_handlers, {}, "no grant, no terminal")
