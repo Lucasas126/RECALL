@@ -115,3 +115,11 @@ test("changes are counted per section for the tab dots", () => {
     { general: 1, models: 0, chats: 2, telegram: 0, connections: 0 },
   );
 });
+
+test("the voice message language is a models setting that resets to its default", () => {
+  assert.ok(api.SETTINGS_SECTIONS.models.includes("stt_language"));
+  assert.equal(api.preferenceChange("stt_language", "fr", "es", "es"), "fr");
+  assert.equal(api.preferenceChange("stt_language", "es", "fr", "es"), null);
+  assert.equal(api.preferenceChange("stt_language", null, "fr", null), null);
+  assert.equal(api.preferenceChange("stt_language", "fr", "fr", "es"), undefined);
+});

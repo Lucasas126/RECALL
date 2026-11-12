@@ -846,6 +846,7 @@ class ChatService:
                 "theme": "system",
                 "default_llm_model": user.models.chat,
                 "default_stt_model": user.models.stt,
+                "stt_language": user.models.stt_language or SPEECH_TO_TEXT.language,
                 "associative_max_matches": {
                     "default": ASSOC.top_n,
                     "min": ASSOCIATIVE_MAX_MATCHES_BOUNDS[0], "max": ASSOCIATIVE_MAX_MATCHES_BOUNDS[1],
@@ -911,6 +912,7 @@ class ChatService:
             "agent_id": agent_id,
             "default_llm_model": resolved.default_llm_model or user.models.chat,
             "default_stt_model": resolved.default_stt_model or user.models.stt,
+            "stt_language": resolved.stt_language or user.models.stt_language or SPEECH_TO_TEXT.language,
         })
 
     def provider_status(self, user_id: str, capability: CatalogCapability = "chat") -> dict:
@@ -2001,7 +2003,9 @@ class ChatService:
             return text, attachments
         self._require_chat(self._conversations(user_id, agent_id), chat_id)
         resolved = load_agent(user_id, agent_id)
-        transcription_model = user_models(self._user(user_id), self._preferences).stt
+        models = user_models(self._user(user_id), self._preferences)
+        transcription_model = models.stt
+        language = models.stt_language or SPEECH_TO_TEXT.language  # user > settings.yaml > auto-detect
         if provider_of(transcription_model, resolved.provider_name) != OPENROUTER:
             raise InputError("audio messages require an OpenRouter speech-to-text model")
         api_key = resolved.api_key if resolved.provider_name == OPENROUTER else get_secret(resolved.openrouter.api_key).strip()
@@ -2023,7 +2027,7 @@ class ChatService:
                 encoded,
                 attachment["format"],
                 model=transcription_model,
-                language=SPEECH_TO_TEXT.language,
+                language=language,
                 zdr=zdr_required(resolved.require_zdr, SPEECH_TO_TEXT.zdr),
             )
             if transcript:

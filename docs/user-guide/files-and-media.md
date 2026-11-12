@@ -140,7 +140,11 @@ supports audio input.
 
 The transcription model is a single user setting, the **Default STT model** in
 web **Settings** or Telegram `/settings`; it is shared by all chats and agents.
-The initial default is `openai/whisper-large-v3-turbo`. When ZDR applies
+The initial default is `openai/whisper-large-v3-turbo`.
+The spoken language is `models.stt_language` in `user.yaml` (a code such as `es` or `es-ES`; set it with
+`python -m src.admin user set --user U --set models.stt_language=es`, no restart). Precedence: the user's
+`models.stt_language`, then `speech_to_text.language` in `settings.yaml` (instance default), then the
+provider's auto-detection, which can misread short clips. When ZDR applies
 (`speech_to_text.zdr`, else the user's `require_zdr`) the model must have an
 active ZDR transcription endpoint and requests carry `provider: {"zdr": true}`;
 otherwise audio requests fail explicitly. Without ZDR the plain public

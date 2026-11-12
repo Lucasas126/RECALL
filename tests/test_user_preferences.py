@@ -37,7 +37,7 @@ class UserPreferencesStorageTests(unittest.TestCase):
         prefs = self.store.get("user-one")
         self.assertEqual(prefs.model_dump(), {
             "show_thinking": True, "language": "en", "agent_id": None,
-            "default_llm_model": None, "default_stt_model": None, "associative_max_matches": None, "disposable_retention_days": None,
+            "default_llm_model": None, "default_stt_model": None, "stt_language": None, "associative_max_matches": None, "disposable_retention_days": None,
             "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle",
         })
         self.assertEqual(prefs.model_fields_set, set())
@@ -149,7 +149,7 @@ class UserPreferencesStorageTests(unittest.TestCase):
             list(pool.map(update, ("language", "show_thinking", "agent_id")))
         self.assertEqual(self.store.get("user-one").model_dump(), {
             "show_thinking": False, "language": "es", "agent_id": "agent-b",
-            "default_llm_model": None, "default_stt_model": None, "associative_max_matches": None, "disposable_retention_days": None,
+            "default_llm_model": None, "default_stt_model": None, "stt_language": None, "associative_max_matches": None, "disposable_retention_days": None,
             "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle",
         })
 
@@ -163,7 +163,7 @@ class UserPreferencesStorageTests(unittest.TestCase):
                 task.result(timeout=60)
         self.assertEqual(self.store.get("user-one").model_dump(), {
             "show_thinking": False, "language": "es", "agent_id": "agent-b",
-            "default_llm_model": None, "default_stt_model": None, "associative_max_matches": None, "disposable_retention_days": None,
+            "default_llm_model": None, "default_stt_model": None, "stt_language": None, "associative_max_matches": None, "disposable_retention_days": None,
             "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle",
         })
 
@@ -247,7 +247,7 @@ class UserPreferencesWebTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self._plain(response.json()), {
             "show_thinking": True, "language": "es", "agent_id": "agent-a",
-            "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo",
+            "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo", "stt_language": None,
             "associative_max_matches": None, "disposable_retention_days": None,
             "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "orchestrator_default": False,
         })
@@ -263,7 +263,7 @@ class UserPreferencesWebTests(unittest.TestCase):
         telegram.update_preferences("user-one", UserPreferences(show_thinking=False))
         self.assertEqual(self._plain(self.client.get(self.url).json()), {
             "show_thinking": False, "language": "en", "agent_id": "agent-b",
-            "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo",
+            "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo", "stt_language": None,
             "associative_max_matches": None, "disposable_retention_days": None,
             "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "orchestrator_default": False,
         })
@@ -275,7 +275,7 @@ class UserPreferencesWebTests(unittest.TestCase):
         self.users["user-one"].agents.reverse()
         self.assertEqual(self._plain(self.client.get(self.url).json()), {
             "show_thinking": False, "language": "en", "agent_id": "agent-b",
-            "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo",
+            "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo", "stt_language": None,
             "associative_max_matches": None, "disposable_retention_days": None,
             "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "orchestrator_default": False,
         })
@@ -306,7 +306,7 @@ class UserPreferencesWebTests(unittest.TestCase):
         login(self.client, "user-two")
         self.assertEqual(self._plain(self.client.get(self.url).json()), {
             "show_thinking": True, "language": "en", "agent_id": "agent-c",
-            "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo",
+            "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo", "stt_language": None,
             "associative_max_matches": None, "disposable_retention_days": None,
             "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "orchestrator_default": False,
         })
@@ -314,7 +314,7 @@ class UserPreferencesWebTests(unittest.TestCase):
         login(self.client, "user-one")
         self.assertEqual(self._plain(self.client.get(self.url).json()), {
             "show_thinking": False, "language": "en", "agent_id": "agent-b",
-            "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo",
+            "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo", "stt_language": None,
             "associative_max_matches": None, "disposable_retention_days": None,
             "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "orchestrator_default": False,
         })
@@ -327,7 +327,7 @@ class UserPreferencesWebTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 404)
                 self.assertEqual(self._plain(self.service.get_preferences("user-one")), {
                     "show_thinking": True, "language": "en", "agent_id": "agent-a",
-                    "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo",
+                    "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo", "stt_language": None,
             "associative_max_matches": None, "disposable_retention_days": None,
             "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "orchestrator_default": False,
                 })

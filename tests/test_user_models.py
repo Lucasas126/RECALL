@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 from fastapi.testclient import TestClient
 
 import test_chat_models as models_tests
-from src.config.models import AgentConfig, ModelsConfig
+from src.config.models import AgentConfig, ModelsConfig, SpeechToTextConfig
 from src.config.preferences import UserPreferences
 from src.providers.catalog import CatalogUnavailable
 from src.service.chat import UnknownChat
@@ -127,6 +127,48 @@ class UserModelDefaultsTests(models_tests.ModelFixture):
             with patch("src.service.chat.OpenRouterProvider", return_value=transcriber):
                 self.service._transcribe_audio("user-one", "agent-one", self.chat, "", [attachment])
         self.assertEqual(transcriber.transcribe.call_args.kwargs["model"], "stt/chat")
+
+    def _transcription_language(self, user_value: str | None, instance_value: str | None) -> str | None:
+        resolved = Mock(provider_name="openrouter", api_key="test")
+        transcriber = Mock()
+        transcriber.transcribe.return_value = "Transcript"
+        attachment = {"modality": "audio", "name": "audio", "data_url": "data:audio/wav;base64,YQ==", "format": "wav"}
+        models = ModelsConfig(stt_language=user_value)
+        with patch("src.service.chat.load_agent", return_value=resolved), \
+                patch("src.service.chat.user_models", return_value=models), \
+                patch("src.service.chat.SPEECH_TO_TEXT", SpeechToTextConfig(language=instance_value)), \
+                patch("src.service.chat.OpenRouterProvider", return_value=transcriber):
+            self.service._transcribe_audio("user-one", "agent-one", self.chat, "", [attachment])
+        return transcriber.transcribe.call_args.kwargs["language"]
+
+    def test_transcription_language_precedence_is_user_then_settings_then_auto_detect(self) -> None:
+        self.assertEqual(self._transcription_language("es", "fr"), "es")
+        self.assertEqual(self._transcription_language(None, "fr"), "fr")
+        self.assertIsNone(self._transcription_language(None, None))
+
+    def test_stt_language_rejects_invalid_values(self) -> None:
+        self.assertEqual(ModelsConfig(stt_language="es-ES").stt_language, "es-ES")
+        for value in ("ES", "spa", "es_ES", "es-es", "", 5):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                ModelsConfig(stt_language=value)
+
+    def test_stt_language_preference_beats_user_yaml_and_null_resets_it(self) -> None:
+        self.assertIsNone(self.service.get_preferences("user-one")["stt_language"])
+        body = self.service.update_preferences("user-one", UserPreferences(stt_language="es"))
+        self.assertEqual(body["stt_language"], "es")
+        self.assertEqual(self.service.get_preferences("user-one")["stt_language"], "es")
+        resolved = Mock(provider_name="openrouter", api_key="test")
+        transcriber = Mock()
+        transcriber.transcribe.return_value = "Transcript"
+        attachment = {"modality": "audio", "name": "audio", "data_url": "data:audio/wav;base64,YQ==", "format": "wav"}
+        with patch("src.service.chat.load_agent", return_value=resolved), \
+                patch("src.service.chat.OpenRouterProvider", return_value=transcriber):
+            self.service._transcribe_audio("user-one", "agent-one", self.chat, "", [attachment])
+        self.assertEqual(transcriber.transcribe.call_args.kwargs["language"], "es")
+        body = self.service.update_preferences("user-one", UserPreferences(stt_language=None))
+        self.assertIsNone(body["stt_language"])
+        with self.assertRaises(ValueError):
+            UserPreferences(stt_language="spa")
 
     def test_invalid_audio_chat_returns_not_found_before_provider_access(self) -> None:
         attachment = {

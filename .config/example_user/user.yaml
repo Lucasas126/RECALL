@@ -5,6 +5,7 @@ models:
   chat: openai/gpt-4o-mini
   stt: openai/whisper-large-v3-turbo
   embeddings: openai/text-embedding-3-small
+  # stt_language: es  # optional spoken language for transcription (ISO-639-1, e.g. es or es-ES); unset auto-detects
 name: user-a
 # max_level: highest permission level of this user's agents (minimal, reader, assistant, collaborator, operator, admin);
 # required; set only by an administrator (`python -m src.admin user set`). See docs/reference/user-yaml.md

@@ -49,7 +49,10 @@ def user_models(
     chat = saved.default_llm_model or user.models.chat
     if agent is not None:
         chat = agent.chat_config.model or chat
-    return user.models.model_copy(update={"chat": chat, "stt": saved.default_stt_model or user.models.stt})
+    return user.models.model_copy(update={
+        "chat": chat, "stt": saved.default_stt_model or user.models.stt,
+        "stt_language": saved.stt_language or user.models.stt_language,
+    })
 
 
 def load_user_models(user_id: str, agent: Optional[AgentConfig] = None) -> ModelsConfig:
