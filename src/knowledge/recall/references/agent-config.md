@@ -99,7 +99,7 @@ MCP entry fields: `tools` (list; omitted means all of the server's tools), `read
 | `delegation.allowed_groups` | groups a task may be given: only `web` (web) |
 | `delegation.max_parallel` | running tasks per chat, 1-10; can only lower `settings.yaml` (3) |
 | `delegation.timeout_seconds` | per task, 10-3600; can only lower it (600) |
-| `delegation.max_tokens` | in + out per task; only lowers it (200000) |
+| `delegation.max_tokens` | in + out per task; only lowers it (default: no cap) |
 | `delegation.default_model` | model of fresh workers (the chat's) |
 | `delegation.targets` | other agents it may hand tasks to: `{agent, remember}`; see `references/delegation-targets.md` |
 

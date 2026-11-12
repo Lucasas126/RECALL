@@ -1186,7 +1186,7 @@ class TaskManager:
                 r["daily"] = dict(sorted(daily.items())[-DAILY_KEEP_DAYS:])
 
             self.store.update(user_id, task_id, change)
-            if live.tokens_in + live.tokens_out >= live.limits.max_tokens:
+            if live.limits.max_tokens and live.tokens_in + live.tokens_out >= live.limits.max_tokens:
                 self._request_stop(live, "token_limit")
             self._enforce_budget(user_id)
 
@@ -1208,7 +1208,7 @@ class TaskManager:
             if live.stop_reason is None:
                 if live.active_seconds() >= live.timeout_s:  # the time spent awaiting an approval does not count
                     self._request_stop(live, "timeout")
-                elif live.tokens_in + live.tokens_out >= live.limits.max_tokens:
+                elif live.limits.max_tokens and live.tokens_in + live.tokens_out >= live.limits.max_tokens:
                     self._request_stop(live, "token_limit")
             if live.stop_reason is not None and monotonic() - live.stopped >= _WATCH_GRACE_SECONDS:
                 break

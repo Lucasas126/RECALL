@@ -142,11 +142,17 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(
             (settings.max_parallel_per_parent, settings.max_parallel_per_user, settings.timeout_seconds,
              settings.max_tokens, settings.result_max_chars),
-            (3, 4, 600, 200_000, 8000),
+            (3, 4, 600, 0, 8000),
         )
         self.assertEqual(SUBAGENTS, settings, "settings.yaml carries the same numbers")
         with self.assertRaises(ValueError):
             SubagentSettings.model_validate({"max_depth": 2})
+
+    def test_no_token_cap_by_default_and_the_lowest_set_cap_wins(self) -> None:
+        self.assertEqual(task_limits(None).max_tokens, 0)
+        self.assertEqual(task_limits(AgentDelegationConfig(max_tokens=5000)).max_tokens, 5000)
+        with self.assertRaises(ValueError):
+            SubagentSettings(max_tokens=500)
 
     def test_agent_block_can_only_lower_the_limits(self) -> None:
         self.assertEqual(task_limits(None).max_parallel_per_parent, 3)
@@ -375,7 +381,7 @@ class TaskStartToolTests(SubagentFixture):
     def test_the_tool_and_the_system_prompt_state_the_limits(self) -> None:
         agent = self._factory("user-one", "agent-one", self.chat)
         spec = next(s for s in agent._tool_specs if s["function"]["name"] == "task_start")["function"]
-        for needle in ("3 running task(s) per chat", "4 per user", "10 min", "200,000 tokens", "8000 chars", "depth 1", "rate limit"):
+        for needle in ("3 running task(s) per chat", "4 per user", "10 min", "no token cap", "max_tokens", "8000 chars", "depth 1", "rate limit"):
             self.assertIn(needle, spec["description"])
         self.assertEqual(spec["parameters"]["properties"]["tools"]["items"]["enum"], ["web"])
         self.assertEqual(spec["parameters"]["required"], ["goal"])
@@ -414,6 +420,11 @@ class WorkerLimitsTests(SubagentFixture):
         self.assertEqual((result["status"], result["reason"]), ("timed_out", "token_limit"))
         self.assertEqual(result["tokens"], 120)
         self.assertEqual(self.record(result["id"])["usage"], {"in": 90, "out": 30})
+
+    def test_without_a_cap_a_heavy_worker_is_not_stopped(self) -> None:
+        self.child_behavior = "tokens"
+        result = self.run_task(limits=replace(LIMITS, max_tokens=0))
+        self.assertEqual((result["status"], result["tokens"]), ("done", 120))
 
     def test_below_the_cap_the_task_is_done_and_tokens_are_counted(self) -> None:
         result = self.run_task(limits=replace(LIMITS, max_tokens=100))
