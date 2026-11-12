@@ -23,7 +23,7 @@ from src.config.models import AgentTerminalBackend, AgentTerminalConfig, SshBack
 from src.terminal import files
 from src.terminal.approvals import ApprovalBroker
 from src.terminal.context import RunContext, run_context
-from src.terminal.rules import ApprovalRuleList, RuleSet
+from src.terminal.rules import ApprovalRule, ApprovalRuleList, RuleSet
 from src.terminal.session import AUDIT_FAILED, TerminalSession
 
 
@@ -375,6 +375,8 @@ class BuildToolsTests(unittest.TestCase):
     def test_the_notice_describes_the_effective_mode(self) -> None:
         self.build(self.agent())
         self.assertIn("approvals: every command and file operation asks first", terminal_notice(self.agent(approvals="manual")))
+        allowing = self.agent(approvals="manual", approval_rules=ApprovalRuleList(rules=[ApprovalRule(verdict="allow", tool="terminal", command="ls *")]))
+        self.assertIn("approval rules may allow some actions without asking", terminal_notice(allowing))
         notice = terminal_notice(self.agent())
         self.assertIn("approval rules decide", notice)
         self.assertIn("ask first unless a rule allows them", notice)

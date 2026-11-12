@@ -1,7 +1,7 @@
 # Delegating tasks to a worker
 
-> **Status: phases 1 to 3 of the [subagents design](../project/design-subagents.md).** Tasks run in the background while the agent keeps talking, a
-> finished task wakes the agent, and a worker can use the terminal with your approval of every command. Other agents as workers and cross-process control are planned and **not built yet**.
+> **Status: implemented** (see the [subagents design](../project/design-subagents.md)). Tasks run in the background while the agent keeps talking, a
+> finished task wakes the agent, a worker can use the terminal with your approval of every command, and an agent can hand a task to another agent of the same user (`task_start(agent=...)`, below).
 
 The `delegate` tool group gives an agent `task_start` and six tools to manage tasks (`task_list`, `task_result`, `task_steer`, `task_send`, `task_stop`,
 `task_wait`). The agent writes a self-contained goal, the context the worker needs and the worker's own system prompt (`instructions`), and `task_start`
