@@ -43,7 +43,7 @@ The web **Agents** tab configures these groups for each agent:
 
 <a id="delegate"></a>
 - `delegate`: seven tools, all returning compact JSON (or `error: ...` text), only for the chat that launched the task.
-  - `task_start(goal, context, instructions, tools, backends, model, timeout_s, wait=false, wake=true)` runs a task in a hidden worker chat. By default it returns `{id, status: "running"}` at once and the
+  - `task_start(goal, context, instructions, tools, backends, model, timeout_s, wait=false, wake=true, inherit=true)` runs a task in a hidden worker chat. By default it returns `{id, status: "running"}` at once and the
     result arrives later as a message in the chat (a *wake* turn, see the [delegation guide](../user-guide/delegation.md#results-wake-the-agent)); `wait=true` blocks and returns the result (`id`,
     `status` `done|failed|cancelled|timed_out`, `reason`, capped `result`, `tokens`); `wake=false` records the result silently (fire-and-forget). `instructions` is the worker's system prompt (no inherited SOUL);
     `tools` can only name `web`, and only if the agent has it. `backends` names terminal backends the agent itself has (enum in the schema, empty when it has no terminal): the worker then gets the terminal group for those backends, always on `manual` approvals, asked in the launching chat and attributed to the task; the task's timeout is paused while it waits (see [delegation](../user-guide/delegation.md#terminal-and-approvals)). The description states the limits (3 running tasks per chat, 4 per user, 10 minutes and 200 000 tokens per task, 8000 result characters, depth 1).

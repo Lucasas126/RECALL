@@ -20,7 +20,7 @@ merged with `--no-ff` into `main`, with tests and docs in the same commit. Order
 - `task_start(max_tokens=...)` lets the agent set a cap for one task; `agent.delegation.max_tokens` and the application setting stay as upper bounds when set.
 - Changes: `TaskLimits.max_tokens` becomes optional, the checks in `src/service/tasks.py` (~1189 and ~1211), the notice text `DELEGATE_NOTICE`, the task record `limits`, docs (delegation guide, settings reference).
 
-### 4. worker inheritance (`inherit`)
+### 4. worker inheritance (`inherit`) (done)
 Proposal, to confirm before coding:
 - `task_start(inherit=true)` for an ephemeral worker: it gets the parent's tool groups except `delegate`, `agents`, `permissions` and `self` (the worker never changes configuration or launches tasks), the parent's model unless `model` is set, and the parent's terminal backends **with the parent's own approval rules** instead of the forced `manual` mode.
 - Unchanged on purpose: depth 1, the level of the worker is never above the parent's, dangerous and protected actions stay denied for unattended runs, memory of the parent is not copied (the parent passes what matters in `context`).

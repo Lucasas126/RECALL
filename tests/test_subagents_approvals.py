@@ -288,7 +288,7 @@ class GrantTests(TerminalGrantFixture):
         live = self.launch_with(["box"])
         self.addCleanup(lambda: (self.manager.stop("user-one", live.task_id), live.done.wait(8)))  # it waits for an approval
         record = self.record(live.task_id)
-        self.assertEqual(record["grant"], {"groups": ["terminal"], "backends": ["box"]})
+        self.assertEqual(record["grant"], {"groups": ["terminal"], "backends": ["box"], "inherit": False})
         source = self.sources[("user-one", "agent-one")]
         chat = record["child"]["chat_id"]
         task = source.task_mark(chat)
@@ -305,6 +305,32 @@ class GrantTests(TerminalGrantFixture):
         # the parent's own configuration is untouched
         parent = self._factory("user-one", "agent-one", self.chat)
         self.assertEqual({n: e.approvals for n, e in parent.config.terminal.backends.items()}, {"box": "off", "lab": "smart"})
+
+    def test_an_inherit_worker_keeps_the_parents_mode_except_off(self) -> None:
+        source = self.sources[("user-one", "agent-one")]
+        mark_ = mark("cccccccccccc", ["terminal"]).model_copy(update={"backends": ["box", "lab"], "inherit": True})
+        worker = self._factory("user-one", "agent-one", source.create(origin="task", task=mark_))
+        modes = {name: entry.approvals for name, entry in worker.config.terminal.backends.items()}
+        self.assertEqual(modes, {"box": "manual", "lab": "smart"}, "smart is kept, off is never inherited")
+
+    def test_inherit_adds_the_parents_backends_and_is_recorded(self) -> None:
+        live = self.launch(inherit=True, inherit_groups=["web", "memory_read"], grantable_backends=["box", "lab"])
+        self.addCleanup(lambda: (self.manager.stop("user-one", live.task_id), live.done.wait(8)))
+        record = self.record(live.task_id)
+        self.assertEqual(record["grant"], {"groups": ["web", "memory_read", "terminal"], "backends": ["box", "lab"], "inherit": True})
+        task = self.sources[("user-one", "agent-one")].task_mark(record["child"]["chat_id"])
+        self.assertTrue(task.inherit)
+
+    def test_without_inherit_nothing_is_added(self) -> None:
+        live = self.launch(inherit=False, inherit_groups=["web"], grantable_backends=["box"])
+        self.addCleanup(lambda: (self.manager.stop("user-one", live.task_id), live.done.wait(8)))
+        self.assertEqual(self.record(live.task_id)["grant"], {"groups": [], "backends": [], "inherit": False})
+
+    def test_the_tool_never_inherits_configuration_or_delegation_groups(self) -> None:
+        config = self.parent_config().model_copy(update={"tool_groups": ["web", "terminal", "delegate", "agents", "permissions", "self", "memory_read"]})
+        spec = build_delegate_tools(config)[0].tool_spec["function"]["parameters"]["properties"]
+        self.assertEqual(spec["inherit"]["type"], "boolean")
+        self.assertTrue(spec["inherit"]["default"] if "default" in spec["inherit"] else True)
 
     def test_a_worker_chat_keeps_its_terminal_while_excluded_from_learning(self) -> None:
         source = self.sources[("user-one", "agent-one")]

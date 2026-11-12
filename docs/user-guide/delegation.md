@@ -52,7 +52,8 @@ without the group.
   [terminal and approvals](#terminal-and-approvals)).
 - **Same provider and model as the chat that launched it**, unless the agent names another model, or its `delegation.default_model` (Default worker model in the Delegation block) is set (checked like a chat's own model choice,
   including the zero-data-retention rule). Reasoning effort follows the launching chat too.
-- **Tools only by grant.** By default none. The agent may grant `web` (web search), and only if it has the group itself and `delegation.allowed_groups`
+- **Inherit (default for a fresh worker).** `task_start(inherit=true)`, the default, gives an ephemeral worker the agent's own tool groups except `delegate`, `agents`, `permissions` and `self` (never configuration, never more tasks, never the agent's own memory or SOUL tools), the agent's model unless `model` is set, and the agent's terminal backends **under the agent's own approval modes** (`smart` stays `smart`, `manual` stays `manual`, `off` becomes `manual`). Everything stays inside the launcher's level, the dangerous-command and protected-path rules still apply, and an existing agent run with `agent=` keeps its own groups and manual approvals. Risk: a worker that reads untrusted pages now holds the agent's terminal rights, so an agent should pass `inherit=false` for such jobs and for cheap read-only ones.
+- **Tools by grant (`inherit=false`).** Then none by default. The agent may grant `web` (web search), and only if it has the group itself and `delegation.allowed_groups`
   allows it. Memory, folders, MCP and `delegate` can never be granted, and the terminal only through `backends`, so a worker cannot do more than its parent and cannot launch tasks (depth 1).
 - **A readable brief.** In *Open chat*, the task message the worker received is shown as a **Task brief** card (who asked, task id, the *Goal* and a collapsible *Context*), and follow-ups and corrections as small labelled notes, instead of a plain message bubble. The worker still receives the same plain text.
 - **A hidden chat.** The worker's conversation is a chat file of the launching agent, marked as a task chat: it is not in the chat list, is never the
@@ -97,7 +98,7 @@ backends and delegation targets above that level are dropped.
 terminal tools (`terminal` and the `sandbox_*` tools) for those backends only; it is possible only if the agent has the `terminal` group
 and the backend itself, so a worker never gets a backend its parent lacks.
 
-- **Always `manual`.** Whatever the parent's mode for that backend (`off`, `smart` or `manual`, `local` included), every command the worker runs
+- **`manual` unless inherited.** With `inherit=false` (or an existing agent), whatever the parent's mode for that backend (`off`, `smart` or `manual`, `local` included), every command the worker runs
   needs your approval. Hardline rules, dangerous-command detection and [protected paths](terminal.md#protected-paths-local-backend) apply unchanged:
   a protected path is refused on `local` in every case, without asking.
 - **The card appears in the chat that launched the task**, not in the worker's hidden chat: in the web interface (live, and again after a reload),

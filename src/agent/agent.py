@@ -224,7 +224,7 @@ class Agent:
             self.config.mcp = {}
         cfg = self.config.terminal
         if cfg is not None and "terminal" in task.groups:
-            # only the granted backends the parent has, every one on manual approvals (a child never gets `off`/`smart`)
+            # only the granted backends the parent has, manual approvals unless `inherit` (a child never gets `off`)
             keep = [name for name in task.backends if name in cfg.backends and name in self.config.terminal_backends]
             if keep:
                 self.config.terminal = cfg.model_copy(update={
@@ -241,9 +241,14 @@ class Agent:
 
     @staticmethod
     def _worker_approvals(task: ChatTask, backend) -> str:
-        """Approval mode of a worker's backend: always `manual`, except an unattended task keeps `smart` (nobody is asked
-        anyway: dangerous and manual actions are denied, safe ones run); `off` is never inherited."""
-        return "smart" if task.unattended and backend.approvals == "smart" else "manual"
+        """Approval mode of a worker's backend: `manual`, except an unattended task keeps `smart` (nobody is asked
+        anyway: dangerous and manual actions are denied, safe ones run) and an `inherit` worker keeps its parent's mode;
+        `off` is never inherited."""
+        if backend.approvals == "off":
+            return "manual"
+        if task.unattended and backend.approvals == "smart" or task.inherit:
+            return backend.approvals
+        return "manual"
 
     def _build_base_tools(self) -> tuple[list[dict], dict]:
         config = self.config

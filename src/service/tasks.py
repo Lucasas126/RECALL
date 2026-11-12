@@ -555,6 +555,7 @@ class TaskManager:
         instructions: str, groups: list[str], model: str, timeout_s: int,
         backends: list[str] | None = None, grantable_backends: list[str] | None = None,
         agent: str = "", targets: list[dict] | None = None, parent_name: str = "", launcher_level: Level | None = None,
+        inherit: bool = False, inherit_groups: list[str] | None = None,
     ) -> dict:
         """Launch a task and block until it ends (phase 1's `task_start(wait=true)`); returns the result summary.
 
@@ -564,7 +565,7 @@ class TaskManager:
             parent, limits=limits, grantable=grantable, goal=goal, context=context, instructions=instructions,
             groups=groups, model=model, timeout_s=timeout_s, wake=False,
             backends=backends, grantable_backends=grantable_backends, agent=agent, targets=targets, parent_name=parent_name,
-            launcher_level=launcher_level,
+            launcher_level=launcher_level, inherit=inherit, inherit_groups=inherit_groups,
         )
         try:
             while not live.done.wait(0.2):
@@ -584,6 +585,7 @@ class TaskManager:
         instructions: str, groups: list[str], model: str, timeout_s: int, wake: bool = True,
         backends: list[str] | None = None, grantable_backends: list[str] | None = None,
         agent: str = "", targets: list[dict] | None = None, parent_name: str = "", launcher_level: Level | None = None,
+        inherit: bool = False, inherit_groups: list[str] | None = None,
     ) -> _LiveTask:
         """Check every limit and the grant, create the record and the hidden chat, and start the worker.
 
@@ -641,6 +643,11 @@ class TaskManager:
                     *groups,
                     *(group for group in MEMORY_GROUPS if group in target["groups"] and group in held and group_allowed(cap, group)),
                 ]
+        inherit = bool(inherit) and target is None  # an existing agent keeps its own groups, backends and approvals
+        if inherit:  # the parent's groups (no configuration or delegation) and backends, within the launcher's level
+            groups = list(dict.fromkeys([*groups, *(g for g in (inherit_groups or []) if group_allowed(cap, g))]))
+            if group_allowed(cap, "terminal"):
+                backends = list(dict.fromkeys([*backends, *(grantable_backends or [])]))
         if backends and not group_allowed(cap, "terminal"):
             raise TaskError(f"level: the terminal needs the level operator and the worker would run at {cap.label}")
         if backends:  # a terminal grant: only backends the parent has, and only with the parent's own terminal group
@@ -681,7 +688,8 @@ class TaskManager:
                 if target is not None else {"kind": "ephemeral", "agent_id": parent.agent_id}
             ),
             "child": {"agent_id": target["id"] if target is not None else parent.agent_id, "chat_id": None},
-            "title": _title(goal), "goal": goal, "grant": {"groups": groups, "backends": backends},
+            "title": _title(goal), "goal": goal,
+            "grant": {"groups": groups, "backends": backends, "inherit": inherit},
             "limits": {"timeout_s": timeout_s, "max_tokens": limits.max_tokens},
             "status": "running", "reason": None, "created_at": _now(), "started_at": _now(), "ended_at": None,
             "usage": {"in": 0, "out": 0}, "result": None, "error": None,
@@ -706,7 +714,7 @@ class TaskManager:
         try:
             chat_id = self._create_child_chat(
                 parent, task_id, groups, instructions, model, backends, record["title"], target=target, parent_name=parent_name,
-                level=cap,
+                level=cap, inherit=inherit,
             )
         except Exception as exc:
             self._finish(live, "failed", reason="launch_error", error=str(exc)[:300])
@@ -979,7 +987,7 @@ class TaskManager:
     def _create_child_chat(
         self, parent: RunContext, task_id: str, groups: list[str], instructions: str, model: str,
         backends: list[str] | None = None, title: str = "", *, target: dict | None = None, parent_name: str = "",
-        level: Level | None = None,
+        level: Level | None = None, inherit: bool = False,
     ) -> str:
         service = self._service
         # the worker chat lives under the agent that runs it: the parent's for an ephemeral worker, else the target's
@@ -989,7 +997,7 @@ class TaskManager:
             task_id=task_id, parent_agent_id=parent.agent_id, parent_chat_id=parent.chat_id, depth=1,
             groups=groups, instructions=instructions, created_at=_now(), backends=list(backends or []), title=title,
             kind="agent" if target is not None else "ephemeral", remember=bool(target and target["remember"]),
-            level=level,
+            level=level, inherit=inherit,
         )
         chat_id = conversations.create(origin=_CHILD_ORIGIN, task=mark)
         if target is not None:  # an existing agent keeps its own model, provider and reasoning settings
