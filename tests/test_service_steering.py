@@ -29,7 +29,6 @@ class SteeringFixture(unittest.TestCase):
         self.gates: dict[str, tuple[threading.Event, threading.Event]] = {}
         self.memory = True
         self.associative_memory = False
-        self.retained: int | None = None
         for user in ("user-one", "user-two"):
             for agent in ("agent-one", "agent-two"):
                 key = (user, agent)
@@ -94,7 +93,6 @@ class SteeringFixture(unittest.TestCase):
             models=ModelsConfig(), provider_name="ollama", api_key="",
             embeddings_provider_name="ollama", embeddings_api_key="",
             tools=False, associative_memory=self.associative_memory, has_memory=self.memory, level="admin",
-            conversation_messages_retained=self.retained,
         )
         instance = Agent(config, self.providers[(user, agent)], chat_id)
         self.agents[(user, agent)] = instance
@@ -228,15 +226,8 @@ class ServiceSteeringTests(SteeringFixture):
         self.assertIn(["Original", "Correction"], users)
         self.assertIn(["Other chat"], users)
 
-    def test_no_memory_and_small_retention_preserve_active_turn_only(self) -> None:
+    def test_no_memory_preserves_the_active_turn_only(self) -> None:
         self.memory = False
-        self._assert_retains_active_turn()
-
-    def test_small_retention_with_memory_preserves_active_turn_only(self) -> None:
-        self._assert_retains_active_turn()
-
-    def _assert_retains_active_turn(self) -> None:
-        self.retained = 1
         started, release = self._gate("Original")
         first = self._send("Original")
         self.assertTrue(started.wait(2))

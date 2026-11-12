@@ -325,8 +325,9 @@ class ClaudeSubscriptionConfigTests(unittest.TestCase):
         naming = ChatNamingConfig(model="claude_subscription:haiku")
         for require_zdr, naming_config, fails in ((True, naming, True), (False, naming, False),
                                                   (True, ChatNamingConfig(model="claude_subscription:haiku", zdr=False), False),
-                                                  (True, ChatNamingConfig(), False)):
-            with self.subTest(require_zdr=require_zdr, zdr=naming_config.zdr),                     patch.object(loader, "_load_yaml", return_value={**data, "require_zdr": require_zdr}),                     patch.object(loader, "CHAT_NAMING", naming_config):
+                                                  (True, ChatNamingConfig(model="openai/gpt-4o-mini"), False)):
+            with self.subTest(require_zdr=require_zdr, zdr=naming_config.zdr),                     patch.object(loader, "_load_yaml", return_value={**data, "require_zdr": require_zdr}),                     patch.object(loader, "CHAT_NAMING", naming_config), \
+                    patch.object(loader, "ASSOC", AssociativeMemoryConfig(query_model="openai/gpt-4o-mini")):
                 if fails:
                     with self.assertRaisesRegex(ValueError, "set chat_naming.zdr: false"):
                         loader.load_user("u")

@@ -149,7 +149,7 @@ class ToolConsistencyTests(unittest.TestCase):
 
 class ConfigConsistencyTests(unittest.TestCase):
     CLASSES = (
-        models.AgentConfig, models.ChatConfig, models.DreamConfig, models.FolderConfig,
+        models.AgentConfig, models.ChatConfig, models.CompactionConfig, models.DreamConfig, models.FolderConfig,
         models.AgentTerminalConfig, models.AgentTerminalBackend, models.AgentMcpConfig, models.AgentDelegationConfig,
         models.UserConfig, models.ProviderConfig, models.ModelsConfig, models.OpenRouterConfig,
         models.OllamaConfig, models.ClaudeSubscriptionConfig, models.SshBackendConfig, models.LocalBackendConfig,

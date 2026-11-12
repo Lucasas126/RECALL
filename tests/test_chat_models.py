@@ -162,7 +162,6 @@ class ModelFixture(steering.SteeringFixture):
             models=ModelsConfig(chat="vendor/default"), provider_name="openrouter", api_key="",
             embeddings_provider_name="openrouter", embeddings_api_key="", reasoning_effort="medium",
             tools=False, associative_memory=self.associative_memory, has_memory=self.memory,
-            conversation_messages_retained=self.retained,
         )
         instance = Agent(config, self.providers[(user, agent)], chat_id)
         self.agents[(user, agent)] = instance

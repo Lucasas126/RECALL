@@ -1240,12 +1240,13 @@ class ChatService:
                         "associative_fragments", "associative_query",
                         "source", "task_ids",  # a wake turn: a subagent result, not written by the user
                         "task_brief", "task_message",  # a worker chat's first message / follow-up, structured for the UI
+                        "tokens_before", "tokens_after", "manual",  # a compaction turn: the divider shows the reduction
                     )
                     if t.get(k) is not None
                 },
             }
             for position, t in enumerate(turns)
-            if t.get("role") in ("user", "assistant")
+            if t.get("role") in ("user", "assistant", "compaction")
         ]
         return {
             "chat": {
@@ -2108,6 +2109,19 @@ class ChatService:
                 run.events.put(None)
                 with slot.state:
                     slot.active.pop(chat_id, None)
+            self._compact_after_reply(slot, chat_id)
+
+    @staticmethod
+    def _compact_after_reply(slot: _AgentSlot, chat_id: str) -> None:
+        """Compact the chat once its reply is delivered, so nobody waits for it; queued messages run after it."""
+        agent = slot.agents.get(chat_id)
+        if agent is None or not callable(getattr(agent, "compaction_due", None)):
+            return
+        try:
+            if agent.compaction_due() is True:
+                agent.compact()
+        except Exception:  # the next turn retries, and cuts the oldest messages if the context nears the window
+            logger.exception("compaction after the reply failed for chat %s", chat_id)
 
     def _run(
         self, user_id: str, agent_id: str, slot: _AgentSlot, run: _MessageRun,
@@ -2214,6 +2228,9 @@ class ChatService:
                     messages, model=CHAT_NAMING.model, api_key=api_key, zdr=zdr,
                 )
             title = conversations.set_generated_title(chat_id, reply["response"] or "")
+        except InputError as e:  # e.g. no Claude login of this user's own: an expected setup gap, not a crash
+            logger.warning("chat naming skipped for %s/%s/%s: %s", user_id, agent_id, chat_id, e)
+            return
         except Exception:
             logger.exception("chat naming failed for %s/%s/%s; keeping the first-message title", user_id, agent_id, chat_id)
             return

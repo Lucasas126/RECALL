@@ -32,7 +32,7 @@ Unknown keys are rejected in the agent yaml and most blocks (not in `chat_config
 
 ### `chat_config` (Agents tab: Basic, Basic > Advanced and Tools)
 
-Basic holds Identity and Model and reasoning (`model`, `reasoning_effort`, `reasoning`, `keep_reasoning_in_memory`, `reasoning_tokens`); Advanced holds `stream`, `has_memory`, `recall_knowledge`, `associative_memory`, `associative_execution`, `max_tool_hops` and `conversation_messages_retained`. Rows show their default and a reset button.
+Basic holds Identity and Model and reasoning (`model`, `reasoning_effort`, `reasoning`, `keep_reasoning_in_memory`, `reasoning_tokens`); Advanced holds `stream`, `has_memory`, `recall_knowledge`, `associative_memory`, `associative_execution`, `max_tool_hops` and `compaction`. Rows show their default and a reset button.
 
 | Field | Meaning (default) |
 | --- | --- |
@@ -43,7 +43,7 @@ Basic holds Identity and Model and reasoning (`model`, `reasoning_effort`, `reas
 | `reasoning_tokens` | optional reasoning budget |
 | `keep_reasoning_in_memory` | store thinking in history (true) |
 | `max_tool_hops` | tool rounds per turn, 1-100; empty = settings value (50) |
-| `conversation_messages_retained` | last N messages in context (30); empty keeps all |
+| `compaction` | context compaction of long chats, see the table below |
 | `tools` | allow tools at all (true) |
 | `tool_groups` | list of groups; omitted means `memory_read`, `memory_edit`, `web`, `self` |
 | `allow`, `deny` | extra per-tool filters |
@@ -52,6 +52,16 @@ Basic holds Identity and Model and reasoning (`model`, `reasoning_effort`, `reas
 | `associative_execution` | `parallel` (default) or `sequential` |
 | `model` | default chat model, `provider:model` or a bare id; empty follows the user's |
 | `recall_knowledge` | gives you this built-in skill (true) |
+
+`chat_config.compaction`: when the context passes `trigger`, a small model writes my own notes (first person) on the older part, merged with the previous notes; they replace it as a system message right after the system prompt, which is never touched. The recent tail is kept verbatim and always opens on a user message. The full history stays in the chat: I look details up with `session_search`. Runs after a reply is delivered (or before a turn that finds it due); `/compact [instructions]` runs it by hand. If the summary model fails, the oldest messages are cut once the context reaches 90 % of the window (`[CUTOFF CONVERSATION]`).
+
+| Field | Meaning (default) |
+| --- | --- |
+| `compaction.enabled` | compact long chats (true) |
+| `compaction.mode` | unit of `trigger` and `keep_recent`: `percent` of the model's context window (default) or `tokens` |
+| `compaction.trigger` | compact when the context reaches this (50 %; tokens mode: at least 1000) |
+| `compaction.keep_recent` | recent tail kept verbatim (20 %), smaller than `trigger` |
+| `compaction.model` | summary model, `provider:model` (`claude_subscription:haiku`); empty uses the chat's own model, as does a chat that requires ZDR |
 
 MCP entry fields: `tools` (list; omitted means all of the server's tools), `read_only`, `instructions`.
 

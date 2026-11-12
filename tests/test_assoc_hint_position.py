@@ -10,7 +10,7 @@ HINT = "possibly relevant: fragment"
 
 def build(messages: list[dict], partial: str = "") -> SimpleNamespace:
     return SimpleNamespace(
-        messages=messages, _truncated=False, _partial=partial, _assoc_suggestion=HINT,
+        messages=messages, _truncated=False, _summary=None, _partial=partial, _assoc_suggestion=HINT,
     )
 
 

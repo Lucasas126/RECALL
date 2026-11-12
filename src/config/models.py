@@ -128,7 +128,7 @@ class ChatNamingConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    model: str = Field(default="openai/gpt-4o-mini", strict=True, min_length=1, max_length=256)
+    model: str = Field(default="claude_subscription:haiku", strict=True, min_length=1, max_length=256)
     api_key: str = Field(default="OPENROUTER_API_KEY", pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
     zdr: Optional[bool] = Field(default=None, strict=True)  # None follows the user's require_zdr
     min_messages: int = Field(default=5, ge=1, le=1000, strict=True)
@@ -148,7 +148,6 @@ class PromptCacheConfig(BaseModel):
     anthropic_providers: list[Annotated[str, StringConstraints(min_length=1, max_length=64)]] = Field(
         default_factory=lambda: ["Amazon Bedrock"], max_length=10,
     )
-    trim_slack_percent: int = Field(default=25, ge=0, le=90, strict=True)
 
 
 class AssociativeMemoryConfig(BaseModel):
@@ -159,7 +158,7 @@ class AssociativeMemoryConfig(BaseModel):
     context_messages: int = Field(default=8, ge=0, le=100, strict=True)
     top_n: int = Field(default=3, ge=1, le=20, strict=True)
     score_threshold: float = Field(default=0.45, ge=0, le=1)
-    query_model: Optional[str] = Field(default=None, strict=True, min_length=1, max_length=256)
+    query_model: Optional[str] = Field(default="claude_subscription:haiku", strict=True, min_length=1, max_length=256)
     api_key: str = Field(default="OPENROUTER_API_KEY", pattern=_ENV_NAME)
     zdr: Optional[bool] = Field(default=None, strict=True)  # None follows the user's require_zdr
 
@@ -609,6 +608,38 @@ class UserConfig(BaseModel):
 MAX_TOOL_HOPS_LIMIT = 100
 
 
+class CompactionConfig(BaseModel):
+    """An agent's context compaction: when the context passes `trigger`, a small model summarises the older part.
+
+    `mode` picks the unit of `trigger` and `keep_recent`: `percent` of the chat model's context window, or `tokens`.
+    The system prompt is always kept whole; `keep_recent` is the recent tail kept verbatim.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(default=True, strict=True)
+    mode: Literal["percent", "tokens"] = "percent"
+    trigger: int = Field(default=50, ge=1, le=10_000_000, strict=True)
+    keep_recent: int = Field(default=20, ge=0, le=10_000_000, strict=True)
+    # the summary model (`<provider>:<model>` or a bare id of the main provider); None = the chat's own model
+    model: Optional[str] = Field(default="claude_subscription:haiku", strict=True, min_length=1, max_length=256)
+
+    @field_validator("model")
+    @classmethod
+    def _valid_model_reference(cls, value: Optional[str]) -> Optional[str]:
+        return None if value is None else validate_reference(value)
+
+    @model_validator(mode="after")
+    def _sane_bounds(self) -> "CompactionConfig":
+        if self.mode == "percent" and (self.trigger > 95 or self.keep_recent > 90):
+            raise ValueError("compaction in percent mode: trigger must be at most 95 and keep_recent at most 90")
+        if self.mode == "tokens" and self.trigger < 1_000:
+            raise ValueError("compaction in tokens mode: trigger must be at least 1000 tokens")
+        if self.keep_recent >= self.trigger:
+            raise ValueError("compaction.keep_recent must be smaller than compaction.trigger")
+        return self
+
+
 class ChatConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -621,8 +652,8 @@ class ChatConfig(BaseModel):
     keep_reasoning_in_memory: bool = True
     # tool round-trips per turn for this agent (None = `agent.max_tool_hops` from settings.yaml)
     max_tool_hops: Optional[int] = Field(default=None, ge=1, le=MAX_TOOL_HOPS_LIMIT)
-    # last N conversation messages kept in context (None = all); system prompt is always kept
-    conversation_messages_retained: Optional[int] = Field(default=30, ge=1)
+    # summarise the older part of a long chat with a small model (see CompactionConfig)
+    compaction: CompactionConfig = Field(default_factory=CompactionConfig)
     # let the model call tools (memory recall, source read/write/list)
     tools: bool = True
     tool_groups: list[str] | None = None
@@ -802,7 +833,7 @@ class ResolvedAgent(BaseModel):
     reasoning_tokens: Optional[int] = Field(default=None, ge=1)
     keep_reasoning_in_memory: bool = True
     max_tool_hops: Optional[int] = Field(default=None, ge=1, le=MAX_TOOL_HOPS_LIMIT)
-    conversation_messages_retained: Optional[int] = None
+    compaction: CompactionConfig = Field(default_factory=CompactionConfig)
     tools: bool = True
     tool_groups: list[str] | None = None
     allow: list[str] | None = None
