@@ -106,6 +106,7 @@ class ChatTask(BaseModel):
     groups: list[str] = Field(default_factory=list)  # the tool groups the worker was granted
     instructions: str = ""  # the worker's system prompt, written by the parent
     backends: list[str] = Field(default_factory=list)  # terminal backends granted (always manual); "terminal" is then in groups
+    inherit: bool = False  # ephemeral worker started with `inherit`: the parent's approval mode on its backends (never `off`)
     title: str = ""  # the task's title, for attributing its approvals in the parent chat
     unattended: bool = False  # nobody watches: manual and dangerous actions are denied (phase 7 launches these)
     kind: str = Field(default="ephemeral", pattern=r"^(ephemeral|agent)$")  # `agent`: an existing agent of the user runs it, with its own SOUL
