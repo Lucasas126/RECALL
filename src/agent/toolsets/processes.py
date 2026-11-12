@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import time
+import uuid
 from typing import Annotated, Callable
 
 from src.agent.tooling import tool
 from src.terminal.audit import audit_path
-from src.terminal.backends import LocalBackend, scrubbed_env
+from src.terminal.backends import LocalBackend, SshBackend, minimal_env, scrubbed_env
 from src.terminal.context import current_run
 from src.terminal.output import clean, redact
 from src.terminal.processes import RUNNING, ProcessError, ProcessRegistry
@@ -70,19 +71,27 @@ def build_process_tools(
         session = sessions.get(chosen)
         if session is None:
             return f"error: unknown backend '{chosen}'; allowed backends: {', '.join(names)} (default: {default})"
-        if not isinstance(session.backend, LocalBackend):
-            return "error: background processes are not available on this backend yet; use `terminal` with a timeout"
+        ssh = isinstance(session.backend, SshBackend)
+        if not ssh and not isinstance(session.backend, LocalBackend):
+            return "error: background processes are not available on this backend; use `terminal` with a timeout"
         allowed, denial = session.authorize("process_start", command, command, cwd=workdir or None)
         if denial is not None:
             return denial
         cwd, ruling, verdict, decision = allowed
         run = current_run()
-        local_cwd = session.local_cwd(cwd)
         started = time.monotonic()
+        process_id = "p" + uuid.uuid4().hex[:8]
+        if ssh:
+            where = dict(
+                argv=session.backend.process_argv(command, cwd, process_id), cwd=None, env=minimal_env(), kind="ssh",
+                remote_stop=session.backend.kill_remote,
+            )
+        else:
+            where = dict(argv=[*LocalBackend.shell(), command], cwd=session.local_cwd(cwd), env=scrubbed_env())
         try:
             record = registry.start_local(
                 user_id=user_id, agent_id=agent_id, chat_id=run.chat_id if run else "", backend=chosen, command=command,
-                argv=[*LocalBackend.shell(), command], cwd=local_cwd, env=scrubbed_env(), notify=notify_on_complete,
+                notify=notify_on_complete, process_id=process_id, **where,
             )
         except ProcessError as exc:
             session._audit("process_start", command, cwd, decision, None, time.monotonic() - started, verdict=verdict.level, ruling=ruling)

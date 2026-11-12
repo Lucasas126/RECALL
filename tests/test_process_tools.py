@@ -6,17 +6,17 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from terminal_helpers import FakeBackend, Responder, StubBroker
+from terminal_helpers import FakeBackend, Responder, StubBroker, ssh_config
 from src.agent.toolsets import processes as process_tools
 from src.agent.toolsets.processes import build_process_tools
 from src.config.models import AgentTerminalBackend, AgentTerminalConfig, LocalBackendConfig, TerminalSettings
 from src.terminal.audit import audit_path
-from src.terminal.backends import LocalBackend
+from src.terminal.backends import LocalBackend, SshBackend
 from src.terminal.context import RunContext, run_context
 from src.terminal.session import TerminalSession
 
 
-class ProcessToolTests(unittest.TestCase):
+class ToolsBase(unittest.TestCase):
     def setUp(self) -> None:
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
@@ -37,6 +37,8 @@ class ProcessToolTests(unittest.TestCase):
         self.addCleanup(lambda: [process_tools.process_registry(self.root).stop_chat("u", chat) for chat in ("chat1", "")])
         return out
 
+
+class ProcessToolTests(ToolsBase):
     def test_the_five_tools_exist(self) -> None:
         self.assertEqual(set(self.tools()), {"process_start", "process_list", "process_read", "process_wait", "process_stop"})
 
@@ -105,7 +107,7 @@ class ProcessToolTests(unittest.TestCase):
         self.assertEqual(other["process_list"](), "no background processes")
         mine["process_stop"](process_id)
 
-    def test_a_remote_backend_is_refused_for_now(self) -> None:
+    def test_an_unknown_backend_kind_is_refused(self) -> None:
         tools = self.tools(backend=FakeBackend())
         self.assertIn("not available on this backend", tools["process_start"]("sleep 1"))
 
@@ -120,6 +122,48 @@ class ProcessToolTests(unittest.TestCase):
         tools = self.tools()
         process_id = tools["process_start"]("echo sk-ant-abcdefghijkl123456").split("started process ")[1].split(" ")[0]
         self.assertNotIn("abcdefghijkl", tools["process_wait"](process_id, 20))
+
+
+class SshProcessTests(ToolsBase):
+    """The same tools over ssh, with a fake `ssh` that runs the remote command on this machine."""
+
+    def fake_ssh(self) -> SshBackend:
+        script = self.root / "ssh"
+        script.write_text('#!/bin/bash\nfor last; do :; done\nexec bash -c "$last"\n')
+        script.chmod(0o755)
+        return SshBackend("box", ssh_config(), ssh_binary=str(script))
+
+    def test_start_wait_and_exit_code_over_ssh(self) -> None:
+        tools = self.tools(backend=self.fake_ssh())
+        started = tools["process_start"]("echo remote; exit 3")
+        process_id = started.split("started process ")[1].split(" ")[0]
+        waited = tools["process_wait"](process_id, 20)
+        self.assertIn("exit code 3", waited)
+        self.assertIn("remote", waited)
+        self.assertIn('"kind": "ssh"', (process_tools.process_registry(self.root).folder("u") / f"{process_id}.json").read_text())
+
+    def test_stop_kills_the_remote_group_too(self) -> None:
+        import os, time
+        tools = self.tools(backend=self.fake_ssh())
+        marker = self.root / "marker"
+        process_id = tools["process_start"](f"echo $$ > {marker}; sleep 60").split("started process ")[1].split(" ")[0]
+        for _ in range(50):
+            if marker.exists() and marker.read_text().strip():
+                break
+            time.sleep(0.1)
+        pid = int(marker.read_text())
+        self.assertIn("stopped", tools["process_stop"](process_id))
+        time.sleep(0.3)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(pid, 0)
+        self.assertFalse(Path(SshBackend.pid_file(process_id)).exists())
+
+    def test_argv_uses_the_hardened_ssh_options(self) -> None:
+        argv = SshBackend("box", ssh_config(), ssh_binary="ssh").process_argv("make", "~/x", "pabc")
+        self.assertEqual(argv[:3], ["ssh", "-F", "/dev/null"])
+        self.assertIn("StrictHostKeyChecking=yes", argv)
+        self.assertIn("setsid -w bash -c", argv[-1])
+        self.assertIn("/tmp/recall-proc-pabc.pid", argv[-1])
 
 
 if __name__ == "__main__":

@@ -38,7 +38,7 @@ Addresses are `source:path`, e.g. `mind_palace:notes/pets.md`.
 | `sandbox_write` | terminal | whole-file write |
 | `sandbox_patch` | terminal | unique find-and-replace (or `replace_all`), returns a diff |
 | `sandbox_search` | terminal | regex over contents, or a name glob (`files=true`); max 200 results |
-| `process_start` | terminal | start a long command in the background, get its id at once; same approval rules as `terminal`; local backends only for now; `notify_on_complete` (default true) |
+| `process_start` | terminal | start a long command in the background, get its id at once; same approval rules as `terminal`; local and ssh backends; `notify_on_complete` (default true) |
 | `process_list` | terminal | this agent's background processes with state and exit code |
 | `process_read` | terminal | state, exit code and the last lines (`tail`, at most 500) of a process's output (stdout and stderr together, last ~200 KB kept) |
 | `process_wait` | terminal | wait up to 120 s for a process to end, then its state and last lines |

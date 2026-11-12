@@ -16,6 +16,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from typing import Callable
 from pathlib import Path
 
 from src.terminal.backends import kill_tree
@@ -45,6 +46,7 @@ class _Live:
     proc: subprocess.Popen | None = None
     done: threading.Event = field(default_factory=threading.Event)
     reader: threading.Thread | None = None
+    remote_stop: Callable[[], object] | None = None  # kills the far side of an ssh process
     stop_reason: str = ""  # 'stopped' or 'timed_out' once someone asked the process to end
 
 
@@ -108,8 +110,9 @@ class ProcessRegistry:
 
     # ---- start
     def start_local(
-        self, *, user_id: str, agent_id: str, chat_id: str, backend: str, command: str, argv: list[str], cwd: str,
-        env: dict[str, str], notify: bool = True, max_lifetime: float | None = None,
+        self, *, user_id: str, agent_id: str, chat_id: str, backend: str, command: str, argv: list[str], cwd: str | None,
+        env: dict[str, str], notify: bool = True, max_lifetime: float | None = None, kind: str = "local",
+        remote_stop: Callable[[str], object] | None = None, process_id: str | None = None,
     ) -> dict:
         """Launch `argv` in its own process group and return its record at once."""
         with self._lock:
@@ -118,7 +121,7 @@ class ProcessRegistry:
                 raise ProcessError(f"limit: {self.max_per_chat} running processes in this chat; stop or wait for one first")
             if len(running) >= self.max_per_user:
                 raise ProcessError(f"limit: {self.max_per_user} running processes for this user; stop or wait for one first")
-            process_id = "p" + uuid.uuid4().hex[:8]
+            process_id = process_id or "p" + uuid.uuid4().hex[:8]
             kwargs: dict = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
             try:
                 proc = subprocess.Popen(
@@ -128,12 +131,12 @@ class ProcessRegistry:
                 raise ProcessError(f"could not start the process: {exc}") from None
             record = {
                 "id": process_id, "user": user_id, "agent": agent_id, "chat_id": chat_id, "backend": backend,
-                "command": command, "cwd": cwd, "started": time.time(), "state": RUNNING, "exit_code": None,
-                "ended": None, "pid": proc.pid, "notify": bool(notify), "kind": "local",
+                "command": command, "cwd": cwd or "", "started": time.time(), "state": RUNNING, "exit_code": None,
+                "ended": None, "pid": proc.pid, "notify": bool(notify), "kind": kind,
                 "max_lifetime": float(max_lifetime if max_lifetime is not None else self.max_lifetime),
             }
             self._save(record)
-            live = _Live(proc=proc)
+            live = _Live(proc=proc, remote_stop=(lambda: remote_stop(process_id)) if remote_stop else None)
             self._live[(user_id, process_id)] = live
         live.reader = threading.Thread(target=self._pump, args=(record, live), daemon=True, name=f"proc-{process_id}-out")
         live.reader.start()
@@ -168,7 +171,7 @@ class ProcessRegistry:
             except subprocess.TimeoutExpired:
                 if time.time() >= deadline and not live.stop_reason:
                     live.stop_reason = "timed_out"
-                    kill_tree(proc)
+                    self._terminate(live)
         if live.reader is not None:  # let the reader drain the pipe before the record says finished
             live.reader.join(timeout=5)
         try:
@@ -228,9 +231,19 @@ class ProcessRegistry:
         if live is None or live.proc is None:
             raise ProcessError(f"process {process_id} is not held by this server; it cannot be stopped from here")
         live.stop_reason = live.stop_reason or "stopped"
-        kill_tree(live.proc)
+        self._terminate(live)
         live.done.wait(10)
         return self.get(user_id, process_id)
+
+    @staticmethod
+    def _terminate(live: _Live) -> None:
+        """Kill the far side first (ssh), then the local process or the local ssh client."""
+        if live.remote_stop is not None:
+            try:
+                live.remote_stop()
+            except Exception:  # an unreachable host must not stop us killing the local side
+                logger.exception("remote stop failed")
+        kill_tree(live.proc)
 
     def stop_chat(self, user_id: str, chat_id: str) -> int:
         """Stop every running process of a chat (chat deletion)."""
@@ -249,7 +262,7 @@ class ProcessRegistry:
         count = 0
         with self._lock:
             for record in self.list(user_id):
-                if record["state"] == RUNNING and record.get("kind", "local") == "local" and (user_id, record["id"]) not in self._live:
+                if record["state"] == RUNNING and (user_id, record["id"]) not in self._live:
                     record["state"] = "lost"
                     record["ended"] = time.time()
                     self._save(record)

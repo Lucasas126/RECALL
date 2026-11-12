@@ -145,6 +145,22 @@ class SshBackend:
             remote_command(command, cwd),
         ]
 
+    @staticmethod
+    def pid_file(process_id: str) -> str:
+        return f"/tmp/recall-proc-{process_id}.pid"
+
+    def process_argv(self, command: str, cwd: str, process_id: str) -> list[str]:
+        """ssh argv that runs `command` in its own remote session, its leader's pid in a file so it can be killed later."""
+        pid_file = self.pid_file(process_id)
+        script = f"echo $$ > {pid_file}; {remote_command(command, cwd)}; code=$?; rm -f {pid_file}; exit $code"
+        argv = self.argv("true", "~")[:-1]
+        return [*argv, f"setsid -w bash -c {shlex.quote(script)}"]
+
+    def kill_remote(self, process_id: str) -> Result:
+        """Kill the remote process group started by `process_argv` (the local ssh is killed by the caller)."""
+        pid_file = self.pid_file(process_id)
+        return self.run(f"kill -KILL -- -$(cat {pid_file}) 2>/dev/null; rm -f {pid_file}", "~", 15)
+
     def run(self, command: str, cwd: str, timeout: float, stdin: bytes | str | None = None) -> Result:
         result = run_process(
             self.argv(command, cwd), cwd=None, env=minimal_env(), timeout=timeout + _CONNECT_TIMEOUT, stdin=stdin,
