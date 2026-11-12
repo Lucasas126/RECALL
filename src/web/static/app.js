@@ -4201,7 +4201,7 @@ function taskCardState(record, action, nowMs, listed = false) {
 
 // A wake turn: a subagent result delivered to the parent, stored as a user turn but not written by the user.
 function isWakeMessage(message) {
-  return message?.role === "user" && message?.source === "task";
+  return message?.role === "user" && (message?.source === "task" || message?.source === "process");
 }
 
 // The task titles and the readable body of a wake turn (the framing paragraphs for the model are cut off).
@@ -4209,7 +4209,7 @@ function wakeBubbleState(message) {
   const content = typeof message?.content === "string" ? message.content : "";
   const titles = [...content.matchAll(/^task (\w+) "(.*)" - /gm)].map((found) => ({ id: found[1], title: found[2] }));
   const parts = content.split("\n\n");
-  if (parts[0]?.startsWith("[RECALL task result")) parts.shift();
+  if (parts[0]?.startsWith("[RECALL ")) parts.shift();
   if (parts.length && parts[parts.length - 1].startsWith("If the user's latest request")) parts.pop();
   return { ids: Array.isArray(message?.task_ids) ? message.task_ids : titles.map((t) => t.id), titles: titles.map((t) => t.title), body: parts.join("\n\n").trim() };
 }
@@ -4676,7 +4676,7 @@ function wakeBubble(message) {
   const node = document.createElement("details");
   node.className = "msg task-wake";
   node.dataset.taskIds = info.ids.join(",");
-  const summary = element("summary", {}, element("span", { className: "task-wake-label", textContent: tr("Task result") }));
+  const summary = element("summary", {}, element("span", { className: "task-wake-label", textContent: message.source === "process" ? tr("Process result") : tr("Task result") }));
   if (info.titles.length) summary.append(element("span", { className: "task-wake-titles", textContent: info.titles.join(" · ") }));
   node.append(summary, element("pre", { className: "task-wake-body", textContent: info.body || String(message.content ?? "") }));
   return node;

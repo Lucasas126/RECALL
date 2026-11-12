@@ -760,6 +760,7 @@ _SPANISH = {
     "Send": "Enviar",
     "Open chat": "Abrir chat",
     "Task result": "Resultado de tarea",
+    "Process result": "Resultado de proceso",
     "1 task running": "1 tarea en curso",
     "{count} tasks running": "{count} tareas en curso",
     "Tasks finished": "Tareas terminadas",
