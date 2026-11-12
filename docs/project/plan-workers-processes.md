@@ -1,6 +1,6 @@
 # plan: background processes, worker inheritance and small fixes
 
-Status: **planned** (2026-11-12). Nothing here exists in the code yet. Each step is one branch and one commit (or a short series),
+Status: step 5 (background processes) is **done** (2026-11-12); see the terminal guide. Each step is one branch and one commit (or a short series),
 merged with `--no-ff` into `main`, with tests and docs in the same commit. Order is by dependency, not size.
 
 ## steps

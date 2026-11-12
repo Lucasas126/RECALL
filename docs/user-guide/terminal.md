@@ -420,9 +420,18 @@ for known secret formats and cut at 2000 characters; the output is not recorded.
 this file: the memory/palace/folder tools only reach their sources, and the sandbox tools only reach the sandbox. Records carry the `verdict` (`normal`, `dangerous`, `hardline`, `protected`) of refused and executed actions, and which rule decided: `layer` (`installation`, `user`, `agent`, `builtin` when no layer defines a default, `floor` for hardline and protected), `rule` (`agent:2`, or `user:<id>` for a rule with an `id`; `approvals:smart` for the shorthand; absent when a layer default decided), `rule_verdict` (`allow`, `ask` or `deny`: what the engine said before the person answered) and, when a card was shown, its `approval_id` and the `scope` of the answer (`once`, `session`, `agent`, or `deny`; an action allowed by a "for this session" grant is `decision: approved:session` with no `approval_id`). Changes to the agent's learned rules are lines of their own: `event: approval_rule`, `action` (`add` | `remove`), `actor` (`user`, or `admin` from the CLI), `user`, `agent`, the `rule`, and `index`, `chat` or `via: reset` where they apply. The approval card shows the rule that asked in its reason. **The audit trail fails closed:** when it cannot be written (full disk, bad permissions) the action is refused with an error instead of running unrecorded. The approval card of `sandbox_write`/`sandbox_patch` shows a truncated preview (400 characters) of the content, or of the old and new text; the preview is not written to the audit trail. Each
 decision is also kept in an in-memory log of the last 50 per user.
 
+## background processes
+
+A command that must outlive the 600 s ceiling (builds, test suites, long downloads) runs with `process_start` instead of `terminal`. It returns an id at once; the agent then uses `process_list`, `process_read`, `process_wait` or `process_stop`.
+
+- **Backends:** local and ssh ones. Output (stdout and stderr together) goes to a log; the last ~200 KB are kept.
+- **Notification:** with `notify_on_complete` (the default), a finished process wakes the chat like a subagent result: a collapsed "Process result" note with the state, the exit code and the last 20 output lines (untrusted data to the model). A reply in progress is never cut: the note waits behind it. A process the agent stopped itself does not wake it.
+- **Limits:** 5 running processes per chat, 10 per user, 2 hours of life each; deleting the chat stops its processes. A process that was running when RECALL restarted is marked `lost` and does not notify.
+- **Control:** approvals, protected paths and the audit trail are the same as for `terminal`.
+
 ## limits and privacy
 
-- Foreground only: a command that must keep running is killed at the timeout (default 60 s, ceiling 600 s). Each call starts a
+- `terminal` is foreground only: a command that must keep running is killed at the timeout (default 60 s, ceiling 600 s); use [`process_start`](#background-processes) for those. Each call starts a
   fresh shell; only the sandbox filesystem persists.
 - Output is stripped of terminal escape codes, redacted for known secret formats (API keys, bearer tokens, private key
   blocks, Telegram tokens) and truncated in the middle to the output limit.
