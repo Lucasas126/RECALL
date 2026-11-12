@@ -614,6 +614,11 @@ _SPANISH = {
     "Stop requested": "Parada solicitada",
     "Closed": "Cerrada",
     "Wrap-up warning sent to the agent": "Aviso de cierre enviado al agente",
+    "The agent replied without tool calls: told to go on or call dream_finish":
+        "El agente respondió sin herramientas: se le pidió seguir o llamar a dream_finish",
+    "The agent ended the session with dream_finish": "El agente cerró la sesión con dream_finish",
+    "Closed: the agent replied {count} times in a row without tool calls and never called dream_finish.":
+        "Cerrada: el agente respondió {count} veces seguidas sin herramientas y nunca llamó a dream_finish.",
     "Time limit reached": "Límite de tiempo alcanzado",
     "Cancel requested": "Cancelación solicitada",
     "the model call in flight was aborted and its reply discarded.": "se abortó la llamada al modelo en curso y se descartó su respuesta.",

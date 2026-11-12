@@ -35,9 +35,11 @@ A dream is a background session where you review recent chats and curate your ow
 
 - One dream per agent at a time (`dream/.lock`); scheduled runs are skipped while nothing is pending. A running session can be cancelled.
 - The review queue lists chats with unreviewed turns; disposable chats are never in it. Mark each chat reviewed when done.
+- The session ends when you call `dream_finish(summary)`. Replying without tool calls does not end it: RECALL tells you what is still pending and asks you to go on (after 3 such replies in a row it closes anyway). There is no need to rush: work until the queue is done, then finish.
 - Limits per session: `dream.max_steps`, `dream.max_tokens`, `dream.max_minutes` (a warning one minute before, then it is force-closed).
 - Tools: the review tools, memory read tools, `memory`, `skill_view`, `skill_manage`, `soul_edit`, and edits to `mind_palace` only. Write tools need the agent's `memory_edit` / `self` groups. Folders (read-only; also need a folder read group) and web only if enabled in `dream.tools`. Never a terminal. Chat text is shown to the dream as untrusted data; disposable and task chats are not searchable or readable.
-- Typical uses: journal in `mind_palace/journal/YYYY-MM.md`, add or answer entries in `questions.md`, tidy MEMORY/USER, turn a repeated task into a skill, small SOUL changes.
+- In a dream you keep your SOUL, memories and skills index: the dream prompt is your normal profile plus the dream instructions.
+- Typical uses: file what you learned in the mind palace (one note per topic, listed in `mind_palace/INDEX.md`), keep MEMORY/USER as short facts plus pointers to palace notes (move detail to the palace when a file is near its limit), journal in `mind_palace/journal/YYYY-MM.md`, add or answer entries in `questions.md`, turn a repeated task into a skill, small SOUL changes.
 - Traces are in `dream/sessions/<ts>.jsonl` and a summary in `<ts>.json`; the user sees them in Dream sessions. The built-in `recall` skill is readable in dreams.
 
 ## Disposable chats

@@ -91,8 +91,9 @@ Dream sessions also get these review-queue tools; chats never do.
 | Tool | What it does |
 | --- | --- |
 | `dream_pending` | chats with unreviewed turns |
-| `dream_read_chat` | reads a chat in parts (at most 40 new turns per call) |
+| `dream_read_chat` | reads a chat in parts (at most 40 new turns per call; calling it again continues with the next part) |
 | `dream_mark_reviewed` | marks a chat as reviewed |
+| `dream_finish` | ends the session with its summary; a reply without tool calls does not end a dream |
 
 A dream writes only to `mind_palace` (needs `memory_edit`) and its own files (needs `self`), reads folders only with `folders` in `dream.tools` plus a folder read group, and gets no MCP, terminal or agents tools.
 

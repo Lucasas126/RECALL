@@ -40,34 +40,51 @@ _ABORT_GRACE_SECONDS = 2.0    # how long a stop waits for an aborted model call'
 _STOP_MESSAGES = {"timed_out": "deadline reached", "cancelled": "cancel requested"}
 _WRAP_UP_TOKEN_SHARE = 0.8    # the token warning comes at 80% of max_tokens...
 _WRAP_UP_TOKEN_STEPS = 2      # ...or earlier, once fewer than this many steps of the current size still fit
+_MAX_IDLE_REPLIES = 3         # replies in a row without tool calls before a session that never calls dream_finish is closed
 
 DEFAULT_DREAM_PROMPT = """\
 ## Dream session
 
 You are dreaming: a background session with no user present. Nothing you write here is sent to the user;
-you only learn and tidy your own files. Work through the review queue and improve yourself.
+you only learn and tidy your own files. You keep your SOUL, memories and skills index: they are above.
+Work through the review queue and improve yourself. There is no hurry: work carefully until the work is
+done, and the session runs until you call `dream_finish` (or a limit stops it). A reply without tool
+calls does not end it.
 
-For each pending chat (use dream_pending, then dream_read_chat; long chats come in parts):
-- extract durable facts about the user, their preferences and corrections, unfinished tasks and
-  procedures that repeat;
-- update `USER.md` and `MEMORY.md` with the `memory` tool: compact, durable facts only, one batch per
-  target; remove or merge stale entries instead of piling up new ones;
-- create or improve a skill (`skill_manage`) when a procedure is worth repeating;
-- write longer material, topic notes and unfinished tasks to the mind palace;
-- call dream_mark_reviewed(chat_id) once you have saved what matters from it.
+### Where things go
+Your mind palace (`mind_palace:`) has no size limit: it is your long-term memory. MEMORY.md and USER.md
+are small and always in your prompt, so they hold only what you need in every chat, plus pointers that
+lead you to the palace ("Project X: status and decisions in mind_palace:projects/x.md").
+- Detail, history, project status, decisions, how-tos and lists go to palace notes, one note per topic
+  (`projects/`, `people/`, `topics/`, `decisions/`... as fits). Search first (`search`, `query_memory`) and
+  update the existing note instead of creating a near-duplicate.
+- Keep `mind_palace:INDEX.md` as the map of the palace: one line per note with what it holds. Add a line
+  for every note you create; fix lines that are stale.
+- MEMORY.md / USER.md (`memory` tool, one batch per target): stable facts, preferences, corrections, and
+  pointers. When a target is near its limit, move detail into a palace note and leave a one-line pointer,
+  instead of dropping facts or skipping the save. Remove entries that are stale or answered.
+- A procedure that repeats becomes a skill (`skill_manage`); improve an existing one before adding another.
+- Change `SOUL.md` (`soul_edit`) only for lasting lessons about how to behave; keep changes small and say
+  why in the journal.
 
-Change `SOUL.md` (`soul_edit`) only for lasting lessons about how to behave; keep changes small and say
-why in the journal.
+### The review
+1. `dream_pending` lists the chats with unreviewed turns.
+2. For each one, `dream_read_chat`; long chats come in parts: call it again with the same chat_id until
+   `remaining_after` is 0. Read every pending chat, even short or trivial ones: you can only mark what you read.
+3. Save what matters from it (durable facts about the user, preferences, corrections, decisions,
+   unfinished tasks, repeated procedures) in the places above, then `dream_mark_reviewed(chat_id)`.
+A trivial chat may have nothing to save: mark it reviewed anyway.
 
 Be curious: look things up in your mind palace, the user's folders or the web when it helps you understand a
 topic the user cares about. Keep `mind_palace:questions.md` as a short list of things you would like to
 ask the user, one `- ` item each with why you ask; few, worthwhile, never intrusive. Remove the ones that
 were answered. The opening message says which of your files do not exist yet: create them, do not read them.
 
-Before finishing, append an entry to this month's journal (`mind_palace:journal/YYYY-MM.md`, the path is
-given below): date, chats reviewed, what changed and what you learned. Then reply with a short summary
-of the session (it is shown in the dream session list) and stop calling tools. When a wrap-up warning
-arrives, do that at once: the session is closed soon after it.
+### Finishing
+When the queue is done (or a wrap-up warning arrives): append an entry to this month's journal
+(`mind_palace:journal/YYYY-MM.md`, the path is given below) with the date, chats reviewed, what changed
+and where, and what you learned; then call `dream_finish(summary)` with a short summary of the session
+(it is shown in the dream session list). Never claim a chat was reviewed unless you marked it.
 """
 
 
@@ -131,13 +148,13 @@ def _folders_allowed(config: ResolvedAgent) -> bool:
 
 def build_dream_tools(
     host: _ToolHost, queue: ReviewQueue, read_until: dict[str, int], reviewed: list[str],
-    web_client: TavilyClient | None,
+    web_client: TavilyClient | None, finish: dict | None = None,
 ) -> tuple[list[dict], dict[str, Callable[..., str]]]:
-    """The dream toolset: review queue and memory reads; palace edits only with the `memory_edit` group, own-file
-    edits only with `self`; optional web/folder reads; never a terminal."""
+    """The dream toolset: review queue (with `dream_finish`, which ends the session) and memory reads; palace edits
+    only with the `memory_edit` group, own-file edits only with `self`; optional web/folder reads; never a terminal."""
     groups = set(host.config.tool_groups or ())  # the agent's chat tool groups cap what a dream may write
     caps = dream_capabilities(host.config.level)  # ... and so does its level: the dream table of the design
-    funcs = list(build_review_tools(queue, read_until, reviewed))
+    funcs = list(build_review_tools(queue, read_until, reviewed, finish))
     if caps.memory_read:
         funcs.extend((*build_memory_tools(host), *build_tag_tools(host)))
     if "memory_edit" in groups and caps.memory_edit:
@@ -264,15 +281,26 @@ def _wrap_up_message(reason: str, detail: str) -> str:
     if reason == "time":
         return (
             f"[RECALL] {detail[0].upper()}{detail[1:]} left in this dream session. Finish now: append your journal "
-            "entry, call dream_mark_reviewed only for the chats you fully reviewed, then reply with a short summary "
-            "of the session and stop calling tools. Otherwise the session will be closed at its time limit: work "
-            "in progress is lost and chats not marked reviewed stay pending."
+            "entry, call dream_mark_reviewed only for the chats you fully reviewed, then call dream_finish with a "
+            "short summary of the session. Otherwise the session will be closed at its time limit: work in progress "
+            "is lost and chats not marked reviewed stay pending."
         )
     return (
         f"[RECALL] Wrap up now: {detail}. Finish the item you are working on, call dream_mark_reviewed only "
-        "for the chats you fully reviewed, append your journal entry, then reply with the final summary of the "
-        "session without calling more tools. When the token budget runs out the session is closed and nothing "
-        "more is saved."
+        "for the chats you fully reviewed, append your journal entry, then call dream_finish with the final "
+        "summary of the session. When the token budget runs out the session is closed and nothing more is saved."
+    )
+
+
+def _continue_message(pending: int) -> str:
+    """Sent when the model replies without tool calls: the session goes on until dream_finish."""
+    left = (
+        f"{pending} chat(s) are still pending: read them with dream_read_chat, save what matters and mark them "
+        "reviewed." if pending else "Nothing is pending."
+    )
+    return (
+        f"[RECALL] The dream session is still open: a reply without tool calls does not end it. {left} When the "
+        "work is done and the journal entry is appended, call dream_finish with a short summary."
     )
 
 
@@ -365,7 +393,8 @@ class DreamRunner:
             *self._file_notes(journal),
             f"Pending chats: {len(pending)}.",
             f"Budget: {dream.max_steps} model calls, {dream.max_tokens} tokens, "
-            f"{_format_seconds(self._limit)} of time. You get a wrap-up warning before the time or tokens run out.",
+            f"{_format_seconds(self._limit)} of time. You get a wrap-up warning before the time or tokens run out; until "
+            "then, take the time the work needs.",
         ]
         if not pending:
             lines.append("Nothing is pending; curate your palace, memories and skills, then write the journal.")
@@ -458,6 +487,7 @@ class DreamRunner:
         dream = self.config.dream
         reviewed: list[str] = []
         read_until: dict[str, int] = {}
+        finish: dict = {}  # filled by dream_finish: the only way, besides the limits, to end the session
         steps = tool_calls = errors = tokens_in = tokens_out = 0
         status: DreamStatus = "completed"
         error: Optional[str] = None
@@ -485,13 +515,14 @@ class DreamRunner:
             index.reconcile()  # queued stat-only scan; the session searches what is already indexed
             self.sources.conversations().reviewable_only = True  # dream read tools skip disposable and task chats
             host = _ToolHost(self.config, self.sources, index)
-            specs, handlers = build_dream_tools(host, self._queue, read_until, reviewed, self._web_client)
+            specs, handlers = build_dream_tools(host, self._queue, read_until, reviewed, self._web_client, finish)
             messages: list[dict] = [
                 {"role": "system", "content": self._system_prompt(profile)},
                 {"role": "user", "content": self._opening(pending)},
             ]
             warned: set[str] = set()
             last_input = 0
+            idle = 0  # consecutive replies without tool calls
             while True:
                 reason = self._check_stop()
                 if reason is not None:
@@ -548,8 +579,19 @@ class DreamRunner:
                     self._event("assistant", steps, text=reply)
                 calls = result.get("tool_calls") or []
                 if not calls:
-                    final_text = reply
-                    break
+                    # a reply without tool calls does not end a dream: only dream_finish (or a limit) does
+                    idle += 1
+                    if reply:
+                        final_text = reply
+                        messages.append({"role": "assistant", "content": reply})
+                    if idle >= _MAX_IDLE_REPLIES:  # a model that never calls dream_finish must not spin to the budget
+                        self._event("idle_closed", steps, replies=idle)
+                        break
+                    nudge = _continue_message(len(self._queue.pending()))
+                    messages.append({"role": "user", "content": nudge})
+                    self._event("continue_nudge", steps, text=nudge)
+                    continue
+                idle = 0
                 messages.append({
                     "role": "assistant", "content": reply,
                     "tool_calls": [{
@@ -588,6 +630,10 @@ class DreamRunner:
                     )
                     messages.append({"role": "tool", "tool_call_id": call["id"], "name": name, "content": output})
                 else:
+                    if "summary" in finish:  # the rest of that batch ran; the model asked to end the session
+                        final_text = finish["summary"]
+                        self._event("finish_requested", steps, summary=final_text)
+                        break
                     continue
                 break
         except Exception as exc:  # the session is recorded as failed; chats keep working

@@ -7054,6 +7054,14 @@ function renderTraceEvent(event) {
       return element("div", { className: "trace-stop" },
         element("div", { textContent: `${time ? `${time} · ` : ""}${tr("Wrap-up warning sent to the agent")}` }),
         ...expandablePre(event.text ?? ""));
+    case "continue_nudge":
+      return element("div", { className: "trace-stop" },
+        element("div", { textContent: `${time ? `${time} · ` : ""}${tr("The agent replied without tool calls: told to go on or call dream_finish")}` }),
+        ...expandablePre(event.text ?? ""));
+    case "finish_requested":
+      return note(tr("The agent ended the session with dream_finish"));
+    case "idle_closed":
+      return element("div", { className: "trace-stop", textContent: `${time ? `${time} · ` : ""}${tr("Closed: the agent replied {count} times in a row without tool calls and never called dream_finish.", { count: formatCount(event.replies) })}` });
     case "force_closed":
       return element("div", { className: "trace-stop", textContent: `${time ? `${time} · ` : ""}${{
         timed_out: tr("Time limit reached"), cancelled: tr("Cancel requested"),

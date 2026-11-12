@@ -245,7 +245,8 @@ in recall mode the subagent keeps only search/read tools — it can look things 
 ## dream mode toolset
 
 dream sessions get the review-queue tools (`dream_pending`, `dream_read_chat`,
-`dream_mark_reviewed`) and the memory read tools (disposable and task chats are
+`dream_mark_reviewed`, and `dream_finish`, the only call that ends a session
+besides its limits) and the memory read tools (disposable and task chats are
 not listed, searched or read). The edit tools (writes succeed only in `mind_palace`)
 exist only if the agent's `tool_groups` include `memory_edit`, and the `self` tools
 only if they include `self`. `folder_list`, `folder_read`, `folder_search`

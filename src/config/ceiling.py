@@ -31,7 +31,7 @@ GROUP_MIN_LEVEL: dict[str, Level] = {
 
 # reading the agent's own skills is how a skill is used at all, so it is never level-gated
 ALWAYS_ALLOWED_TOOLS: frozenset[str] = frozenset({"skill_view"})
-DREAM_REVIEW_TOOLS: tuple[str, ...] = ("dream_pending", "dream_read_chat", "dream_mark_reviewed")
+DREAM_REVIEW_TOOLS: tuple[str, ...] = ("dream_pending", "dream_read_chat", "dream_mark_reviewed", "dream_finish")
 
 
 def _tool_min_levels() -> dict[str, Level]:

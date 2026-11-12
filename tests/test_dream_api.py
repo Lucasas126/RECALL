@@ -156,7 +156,7 @@ class DreamApiTests(unittest.TestCase):
         chat = self.client.post(f"{self.base}/chats").json()["id"]
         conversations = SourceRegistry.for_agent("user-a", "aria").conversations()
         conversations.append(chat, "user", "hello")
-        self.provider.steps = [{"tool_calls": [{"id": "c1", "name": "dream_pending", "arguments": "{}"}]}, {"response": "All done."}]
+        self.provider.steps = [{"tool_calls": [{"id": "c1", "name": "dream_pending", "arguments": "{}"}]}, {"tool_calls": [{"id": "c2", "name": "dream_finish", "arguments": json.dumps({"summary": "All done."})}]}]
         self.assertEqual(self.client.get(f"{self.base}/dream/status").json()["pending_chats"], 1)
         started = self.client.post(f"{self.base}/dream/start")
         self.assertEqual(started.status_code, 202)
@@ -229,7 +229,7 @@ class DreamApiTests(unittest.TestCase):
         self.assertIn("No dream sessions yet.", status[0]["data"])
         self.assertIn("Use /dream start to start a new session.", status[0]["data"])
         self.assertIn("Schedule: none (manual only).", status[0]["data"])
-        self.provider.steps = [{"response": "Nothing to do."}]
+        self.provider.steps = [{"tool_calls": [{"id": "c1", "name": "dream_finish", "arguments": json.dumps({"summary": "Nothing to do."})}]}]
         started = _events(self.client.post(url, json={"content": "/dream start"}))
         self.assertEqual(started[0]["data"], "Nothing is pending; starting a dream session anyway.")
         self.assertTrue(self.dream.wait("user-a", "aria", 5))

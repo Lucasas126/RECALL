@@ -96,25 +96,29 @@ class ReviewQueue:
             })
         return sorted(items, key=lambda item: (item["first_new_at"], item["chat_id"]))
 
-    def read(self, chat_id: str, max_turns: int = 40, context_turns: int = 2) -> dict:
+    def read(self, chat_id: str, max_turns: int = 40, context_turns: int = 2, after: int | None = None) -> dict:
         """The next unreviewed turns of a chat (at most `max_turns`) plus a few earlier turns for context.
 
-        `read_until` is the watermark to store once these turns are reviewed; turns that arrive later,
-        or that did not fit, stay pending.
+        `after` continues a read in parts: the part starts after that turn (never before the stored
+        watermark), so a long chat can be read to its end before it is marked. `read_until` is the
+        watermark to store once these turns are reviewed; turns that arrive later, or that did not fit,
+        stay pending.
         """
         if not self._conversations.exists_chat(chat_id):
             raise FileNotFoundError(f"chat not found: {chat_id}")
         if self._conversations.is_disposable(chat_id):
             raise InputError("chat {chat_id} is disposable and is not reviewed", chat_id=chat_id)
         turns = self._conversations.load(chat_id)
-        reviewed = min(self.watermarks().get(chat_id, 0), len(turns))
+        stored = min(self.watermarks().get(chat_id, 0), len(turns))
+        reviewed = min(max(stored, after or 0), len(turns))
         end = min(len(turns), reviewed + max(1, max_turns))
         start = max(0, reviewed - context_turns)
         return {
             "chat_id": chat_id,
             "title": self._conversations.summary(chat_id)["title"],
             "total_turns": len(turns),
-            "reviewed_until": reviewed,
+            "reviewed_until": stored,
+            "read_from": reviewed + 1 if end > reviewed else end,
             "read_until": end,
             "remaining_after": len(turns) - end,
             "context": [render_turn(index + 1, turns[index]) for index in range(start, reviewed)],

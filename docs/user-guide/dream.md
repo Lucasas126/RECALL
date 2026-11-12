@@ -77,10 +77,12 @@ watermark per chat:
   `reviewed_until` (new chats start at 0). a chat that continues after being
   reviewed becomes pending again, with only the new part to read.
 - the dream lists pending chats (`dream_pending`), reads them
-  (`dream_read_chat`, returns only the unreviewed turns plus a little context)
-  and calls `dream_mark_reviewed(chat_id)` when done. marking stores the turn
-  count captured when the session read the chat, so messages that arrive during
-  the dream stay pending.
+  (`dream_read_chat`, returns only the unreviewed turns plus a little context;
+  calling it again for the same chat continues with the next part, so a long
+  chat is read to its end before it is marked) and calls
+  `dream_mark_reviewed(chat_id)` when done. marking stores the turn count
+  captured by the session's last read of the chat, so messages that arrive
+  during the dream stay pending.
 - a session that fails, hits its budget, times out or is cancelled leaves the
   rest pending; oldest first next time.
 - deleted chats are dropped from the state.
@@ -121,6 +123,20 @@ carries `reason` (`timed_out | cancelled`), `message` (for example "deadline
 reached, model call aborted"), `aborted_model_call`, `skipped_tool_calls` and,
 after an abort, `model_thread_ended`.
 
+### how a session ends
+
+a session ends only when the agent calls `dream_finish(summary)` (status
+`completed`, the summary is the one shown in the session list), or when a limit
+or a cancel stops it. a reply without tool calls does **not** end it: the
+runner keeps the reply, adds one user message ("the dream session is still
+open: N chats are still pending... call `dream_finish` when done", traced as
+`continue_nudge`) and calls the model again. `dream_finish` ends the session
+after the other tool calls of the same reply run (traced as
+`finish_requested`); an empty summary is refused. after 3 replies in a row
+without tool calls the session is closed anyway (status `completed`, traced as
+`idle_closed`, the last reply is the summary), so a model that never calls the
+tool cannot spin to its budget.
+
 ### time limit and cancel
 
 every session has a wall-clock limit, `dream.max_minutes` (default 5, 1–120).
@@ -129,7 +145,8 @@ every session has a wall-clock limit, `dream.max_minutes` (default 5, 1–120).
   once it is 1 minute or less (half the limit for `max_minutes: 1`, so 30 s), it
   appends one user message, once per session: about 1 minute left, finish now:
   append the journal entry, call `dream_mark_reviewed` only for the chats fully
-  reviewed, reply with a short summary and stop; otherwise the session is closed.
+  reviewed, then call `dream_finish` with a short summary; otherwise the session
+  is closed.
   it is traced as `wrap_up_warning` and its time is `timing.warning_at`. a
   separate, also one-time, token warning comes at 80% of `max_tokens`.
 - **deadline**: the session is force-closed with status `timed_out`. the close
@@ -162,7 +179,8 @@ every session has a wall-clock limit, `dream.max_minutes` (default 5, 1–120).
 
 read (scoped to the agent, existing guards apply):
 - `dream_pending`, `dream_read_chat` (at most 40 new turns per call, plus 2
-  turns of context; long chats are read in parts), `dream_mark_reviewed`
+  turns of context; long chats are read in parts, each call continuing the
+  last), `dream_mark_reviewed`, `dream_finish` (ends the session)
 - the memory read tools (`query_memory`, `search`, `list_memories`, `read`,
   tags) over the palace, conversations and `agent:` files. [Disposable
   chats](memory.md#disposable-chats) and subagent task chats are not listed,
