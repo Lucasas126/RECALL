@@ -78,4 +78,4 @@ With Claude Sonnet 5.5 (and often Opus), the text written right after a tool res
 
 ## The turn was cut after many tool calls
 
-A turn may do at most `agent.max_tool_hops` tool round-trips (`settings.yaml`, 25). Two rounds before the cut the model gets a system note with how many are left; after the last one it gets "Stop calling tools. Answer the user now using what you already have." and must answer without tools. An agent can override the limit with `chat_config.max_tool_hops` (1-100, empty = the application value; Agents tab, "Tool rounds per turn"). Raise it for long coding or research agents; do not raise it to hide a loop.
+A turn may do at most `agent.max_tool_hops` tool round-trips (`settings.yaml`, 50). Two rounds before the cut the model gets a system note with how many are left; after the last one it gets "Stop calling tools. Answer the user now using what you already have." and must answer without tools. An agent can override the limit with `chat_config.max_tool_hops` (1-100, empty = the application value; Agents tab, "Tool rounds per turn"). Raise it for long coding or research agents; do not raise it to hide a loop.
