@@ -42,7 +42,7 @@ Basic holds Identity and Model and reasoning (`model`, `reasoning_effort`, `reas
 | `reasoning_effort` | minimal, low, medium, high, xhigh, max (medium) |
 | `reasoning_tokens` | optional reasoning budget |
 | `keep_reasoning_in_memory` | store thinking in history (true) |
-| `max_tool_hops` | tool rounds per turn, 1-100; empty = settings value (25) |
+| `max_tool_hops` | tool rounds per turn, 1-100; empty = settings value (50) |
 | `conversation_messages_retained` | last N messages in context (30); empty keeps all |
 | `tools` | allow tools at all (true) |
 | `tool_groups` | list of groups; omitted means `memory_read`, `memory_edit`, `web`, `self` |

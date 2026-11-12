@@ -170,7 +170,7 @@ Application defaults in `settings.yaml` under a new `subagents:` block *(new, lo
 | `max_auto_wakes` | 3 consecutive wake-started turns without a user message | parent chat | `meta` chain counter; after that the result is stored and the user is told, not the agent woken |
 | `timeout_seconds` | 600 (max 3600) | task | watchdog thread cancels the child's token → `timed_out`; excludes time awaiting approval |
 | `max_tokens` | 200 000 in+out | task | watchdog sums `usage {in,out}` that `_remember_reply` persists on each assistant turn; per-call granularity needs a small `Agent` usage callback (`_track_usage` already computes it) |
-| per-turn steps | `agent.max_tool_hops` (settings, default 25) | child turn | existing `AGENT_MAX_TOOL_HOPS` |
+| per-turn steps | `agent.max_tool_hops` (settings, default 50) | child turn | existing `AGENT_MAX_TOOL_HOPS` |
 | `result_max_chars` | 8000 | wake and `task_result` | manager truncates, marks it, full text stays in the child chat |
 | cooldown on 429 | until the provider says, min 5 min | user + provider | see below |
 
