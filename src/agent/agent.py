@@ -436,10 +436,15 @@ class Agent:
         """Serve a model reference with its provider: the `<provider>:` prefix, else the main provider."""
         self.provider = self.provider_named(provider_of(model, self.config.provider_name), f"the model {model}")
 
-    def query_memory(self, query: str, top_k: int = 5, *, exclude_chat: str | None = None) -> list[dict]:
+    def query_memory(
+        self, query: str, top_k: int = 5, *, exclude_chat: str | None = None, only_source: str | None = None,
+        only_chat: str | None = None,
+    ) -> list[dict]:
         """Semantic recall over what is indexed (never syncs); `exclude_chat` leaves one chat's chunks out."""
         queried_at = perf_counter()
-        results = self.index.query(query, top_k, exclude_chat=exclude_chat)
+        results = self.index.query(
+            query, top_k, exclude_chat=exclude_chat, only_source=only_source, only_chat=only_chat,
+        )
         logger.debug(
             "query_memory %r -> %d hits (%.0f ms)", query, len(results), (perf_counter() - queried_at) * 1000,
         )

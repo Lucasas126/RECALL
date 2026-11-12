@@ -74,7 +74,7 @@ AGENT_TOOLS: Final[tuple[str, ...]] = (*AGENT_READ_TOOLS, *AGENT_CHANGE_TOOLS)
 
 TOOL_GROUP_TOOLS: Final[dict[str, tuple[str, ...]]] = {
     "memory_read": (
-        "query_memory", "search", "list_memories", "read", "list_tags", "find_notes_by_tag",
+        "query_memory", "search", "list_memories", "read", "list_tags", "find_notes_by_tag", "session_search",
     ),
     "memory_edit": ("write", "append", "edit", "move", "delete"),
     "web": ("web_search", "web_retrieve"),

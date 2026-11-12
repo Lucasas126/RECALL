@@ -117,6 +117,8 @@ class InboxTests(CrossProcessFixture):
         self.assertTrue(live.done.wait(8))
         command = self.remote.store.enqueue(USER, live.task_id, "steer", "late")
         self.manager.apply_commands(USER, live.task_id, limits=sub.LIMITS)
+        # the finishing thread may take the command first and log it a moment later: the outcome is None until then
+        self.assertTrue(until(lambda: self.remote.command_outcome(USER, live.task_id, command) is not None))
         self.assertEqual(self.remote.command_outcome(USER, live.task_id, command)["status"], "rejected")
 
     def test_a_command_for_a_task_nobody_runs_is_an_error_not_a_queue(self) -> None:

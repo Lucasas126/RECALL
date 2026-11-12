@@ -81,7 +81,10 @@ class DreamIndex(Protocol):
     """The semantic index used by a dream's memory tools."""
 
     def reconcile(self, *, folders: bool | None = None) -> None: ...
-    def query(self, query: str, top_k: int = 5, *, exclude_chat: str | None = None) -> list[dict]: ...
+    def query(
+        self, query: str, top_k: int = 5, *, exclude_chat: str | None = None, only_source: str | None = None,
+        only_chat: str | None = None,
+    ) -> list[dict]: ...
 
 
 class _NoIndex:
@@ -90,7 +93,7 @@ class _NoIndex:
     def reconcile(self, *, folders: bool | None = None) -> None:
         return None
 
-    def query(self, query: str, top_k: int = 5, *, exclude_chat: str | None = None) -> list[dict]:
+    def query(self, query: str, top_k: int = 5, **filters) -> list[dict]:
         return []
 
 
@@ -102,8 +105,11 @@ class _ToolHost:
     sources: SourceRegistry
     index: DreamIndex
 
-    def query_memory(self, query: str, top_k: int = 5, *, exclude_chat: str | None = None) -> list[dict]:
-        return self.index.query(query, top_k, exclude_chat=exclude_chat)
+    def query_memory(
+        self, query: str, top_k: int = 5, *, exclude_chat: str | None = None, only_source: str | None = None,
+        only_chat: str | None = None,
+    ) -> list[dict]:
+        return self.index.query(query, top_k, exclude_chat=exclude_chat, only_source=only_source, only_chat=only_chat)
 
 
 def dream_folder_options(config: ResolvedAgent) -> dict:
