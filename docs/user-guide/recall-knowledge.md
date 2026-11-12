@@ -24,7 +24,7 @@ Every agent can read a built-in manual about how RECALL itself works: the **`rec
 
 ## Extending it
 
-Edit the Markdown under `src/knowledge/recall/`: keep the hub under 6 KB and each reference under 8 KB, write for the agent (what
+Edit the Markdown under `src/knowledge/recall/`: keep the hub under 6 KB and each reference under 12 KB, write for the agent (what
 to do, which file, which key), and state only what the code or the docs confirm. Add every new reference file to the hub's router
 table. `tests/test_recall_knowledge.py` checks that links resolve, that every real tool and every config field is documented and no
 unknown tool is named, that cited source paths exist, and that the pack ships in the image. When you change behavior, config fields,
