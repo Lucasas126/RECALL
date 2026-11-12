@@ -41,7 +41,9 @@ APPROVAL_MODES = {
 def _approval_text(shorthand: str | None, rules: RuleSet) -> str:
     """How a backend's actions are authorized, in one clause for the system prompt."""
     if shorthand is not None:
-        return APPROVAL_MODES[shorthand]
+        allows = any(rule.verdict == "allow" for layer in rules.layers for rule in layer.rules)
+        suffix = "; approval rules may allow some actions without asking" if shorthand == "manual" and allows else ""
+        return APPROVAL_MODES[shorthand] + suffix
     layer = rules.default_layer()
     default = layer.default if layer is not None else "ask"
     base = {"allow": "actions run without asking unless a rule says otherwise", "ask": "actions ask first unless a rule allows them",

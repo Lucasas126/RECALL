@@ -14,7 +14,7 @@ One list of ideas and planned work, with what is already done kept separate. Imp
 - **Warnings section** for configuration mismatches: a reasoning effort or token budget the selected model does not support, a tool that is unavailable, a model that is not offered. (Today the reasoning selector is disabled with an explanation when unsupported; there is no general warnings area.)
 
 - **Hand a web chat over to Telegram**: a voluntary action that sets the chat's `origin` to `telegram` (the marker in `<chat_id>.origin.json`, already exposed in chat summaries) and notifies the user, so the bot continues it. The origin marker is the base; nothing else exists yet.
-- **Orchestrator follow-ups**: agents invoking other agents (agent-to-agent delegation), a default routed agent for the web UI, per-agent routing hints beyond the description, and a log of routing decisions to tune descriptions.
+- **Orchestrator follow-ups**: a default routed agent for the web UI, per-agent routing hints beyond the description, and a log of routing decisions to tune descriptions.
 
 ### tools
 
@@ -65,13 +65,10 @@ Capability gaps an agent reported, in the order they block it; each line says wh
 1. **Search in old conversations**: a session-search tool over conversations with filters (date, chat, origin); recalling what was said and decided depends on it.
 2. **Scheduled jobs and proactive Telegram messages**: cron-like jobs with an unattended approval policy; reminders, recurring reports and any automation depend on it.
 3. **Ask the user with options**: clarify cards in web and Telegram; confirming choices without free-text round trips depends on it.
-4. **Subagents**: delegate work with budgets and backend rules; splitting long tasks and parallel research depend on it.
-5. **Messages between agents**: agent-to-agent hand-offs; the orchestrator follow-ups and delegation depend on it.
-6. **Background processes**: long-running commands with a process tool; builds, servers and watchers depend on it.
-7. **Browser**: driving a web page; sites that need clicks, logins or scripts depend on it.
-8. **Vision**: analysing images the agent did not receive in chat; screenshots and files on the backend depend on it.
-9. **Voice tools**: speech output and input as tools; spoken replies depend on it.
-10. **Connectors**: mail, calendar, drive and similar accounts beyond MCP; personal-data tasks depend on it.
+4. **Browser**: driving a web page; sites that need clicks, logins or scripts depend on it.
+5. **Vision**: analysing images the agent did not receive in chat; screenshots and files on the backend depend on it.
+6. **Voice tools**: speech output and input as tools; spoken replies depend on it.
+7. **Connectors**: mail, calendar, drive and similar accounts beyond MCP; personal-data tasks depend on it.
 
 Skills imported from other agent systems:
 
@@ -80,6 +77,7 @@ Skills imported from other agent systems:
 
 ## done
 
+- Subagents (`delegate` group: `task_start` and task tools, budgets and limits, backend rules), messages between agents (`task_start(agent=...)` hands a task to another agent of the same user, allowlisted in `delegation.targets`) and background processes (`process_*` tools) ([delegation](../user-guide/delegation.md), [terminal guide](../user-guide/terminal.md#background-processes)).
 - Terminal tool group, phase 1: `terminal`, `sandbox_read`, `sandbox_write`, `sandbox_patch` and `sandbox_search` against an SSH sandbox (or a local backend on trusted installs), foreground commands with timeouts, approvals (manual / smart / off) through the API and Telegram buttons, a hardline blocklist, redacted and truncated output, an audit file, unattended behaviour for dreams, and `python -m src.admin terminal-test` ([terminal guide](../user-guide/terminal.md)).
 - Telegram orchestrator: a decision model (OpenRouter Decisions API, alpha) picks the agent for a message that starts a new chat, with override buttons ([Telegram](../user-guide/telegram.md#telegram-orchestrator-automatic-agent-choice)).
 - Video input: models with image input but no video get sampled frames plus transcribed audio ([files and media](../user-guide/files-and-media.md#video-input)).
