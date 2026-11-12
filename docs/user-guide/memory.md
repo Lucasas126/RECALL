@@ -13,6 +13,7 @@ and [sources](../architecture/sources.md).
   characters) are set for the whole application in `memory_limits` of [settings.yaml](../reference/settings-yaml.md#memory-limits).
 - **associative memory**: before each reply RECALL searches the agent's index and suggests the best fragments to the agent
   (modes, settings and the per-user maximum are below).
+- **context compaction**: long chats summarise their older part instead of forgetting it (below).
 - **dream mode**: background sessions in which the agent reviews recent conversations and curates its own files: [dream mode](dream.md).
 - **user folders**: folders on the server (for example an Obsidian vault) that an agent may read and, optionally, edit
   (below). The Obsidian safe/auto overlay is a planned design: [overlay](../architecture/obsidian-overlay.md).
@@ -218,3 +219,22 @@ earlier history. There is no fork; the chat keeps its id.
   refreshed with the next reconcile.
 - Only your own stored messages can be edited; `/dream` command replies are not stored and
   have no edit button. Telegram has no edit control.
+
+## Context compaction
+
+A chat grows until it no longer fits the model's context window. Instead of dropping the oldest messages, RECALL
+compacts them: a small model writes the agent's own notes on the older part of the chat (first person, merged with the
+notes of the previous compaction) and those notes replace it in the context. The full chat stays on disk and in the
+index, so details can still be found with associative memory or the agent's memory search.
+
+- **When**: right after a reply is delivered, when the context has passed `compaction.trigger`; the next message waits
+  for it. A turn that finds it due (for example after a long tool run) compacts first.
+- **What the model sees**: the system prompt, untouched; a system message that starts with `[CONTEXT COMPACTED]` with
+  the notes; then the recent tail (`compaction.keep_recent`), verbatim, always starting at a user message.
+- **Settings** (per agent, `chat_config.compaction` in [agent.yaml](../reference/agent-yaml.md), web: Agents > Basic >
+  Advanced, coming with the form fields): `enabled` (true), `mode` (`percent` of the model's window, or `tokens`), `trigger` (50), `keep_recent` (20)
+  and `model` (`claude_subscription:haiku`, the user's own Claude login; null uses the chat's own model).
+- **Stored**: a `compaction` turn in the chat's JSONL with the notes and the tokens before and after; a reloaded chat
+  starts from the latest one. The web shows it as a divider.
+- **If the summary model fails**: it is retried once on the next turn; meanwhile, when the context reaches 90 % of the
+  window, the oldest messages are cut and the model sees a `[CUTOFF CONVERSATION]` marker, so the chat keeps working.

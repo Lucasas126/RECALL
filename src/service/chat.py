@@ -25,7 +25,7 @@ from src.config.levels_help import levels_catalog
 from src.config.errors import describe_config_error
 from src.config.levels import Level, backend_min_level, check_agent_level, effective_agent_level, parse_level
 from src.config.favorites import ModelFavorites
-from src.config.loader import agent_default_model, load_agent, load_agent_config, load_user, user_models
+from src.config.loader import load_agent, load_agent_config, load_user, user_models
 from src.config.model_refs import CLAUDE_SUBSCRIPTION, OPENROUTER, PROVIDERS, is_claude_subscription, model_name, provider_of
 from src.config.models import (
     AgentConfig, DreamConfig, FolderConfig, ReasoningEffort, ResolvedAgent, UserConfig,
@@ -37,7 +37,7 @@ from src.config.preferences import (
 )
 from src.config.field_defaults import agent_defaults
 from src.config.secrets import fingerprint as secrets_fingerprint, get_secret
-from src.config.zdr import chat_zdr, ensure_zdr_compatible, zdr_required
+from src.config.zdr import chat_zdr, zdr_required
 from src.config.settings import (
     ASSOC, CHAT_NAMING, CONFIG_DIR, DATA_DIR, MCP, ORCHESTRATOR, PDF, SPEECH_TO_TEXT, TAVILY, TELEGRAM_ALLOWED_USERS_ENV,
     TERMINAL, VIDEO_DECOMPOSITION, WEB_PUBLIC_URL, memory_limits,
@@ -660,7 +660,7 @@ class ChatService:
         return avatar, content
 
     def _check_agent_model(self, user: UserConfig, config: AgentConfig, current: str | None) -> AgentConfig:
-        """Validate a new or changed agent default model (provider usable, model offered, ZDR policy).
+        """Validate a new or changed agent default model (provider usable, model offered under the user's ZDR policy).
 
         An unchanged value is kept as it is, so a model retired since it was chosen never blocks saving the
         agent's other settings. Returns the config with the model in its canonical form.
@@ -668,7 +668,6 @@ class ChatService:
         model = config.chat_config.model
         if model is None or model == current:
             return config
-        agent_default_model(user, config)
         canonical = self._check_model(user, model, "chat")
         return config.model_copy(update={"chat_config": config.chat_config.model_copy(update={"model": canonical})})
 
@@ -1367,7 +1366,8 @@ class ChatService:
         if model_id is not None:
             model_id = self._check_model(user, model_id, "chat", zdr=zdr)
             effective = chat_zdr(user.require_zdr, model_id, zdr)
-            stored = None if effective == user.require_zdr else effective
+            # ZDR never applies to a Claude subscription model, so its selection carries no flag
+            stored = None if is_claude_subscription(model_id) or effective == user.require_zdr else effective
         slot = self._slot(user_id, agent_id)
         with slot.state:
             if self._chat_busy(slot, chat_id):
@@ -1383,7 +1383,7 @@ class ChatService:
                 # an effort the new model does not support would be sent to it; drop it
                 if self._reasoning_effort_override(conversations, chat_id) is not None:
                     effective = model_id or user_models(
-                        self._user(user_id), self._preferences, self._agent_config(user_id, agent_id), check=False,
+                        self._user(user_id), self._preferences, self._agent_config(user_id, agent_id),
                     ).chat
                     if self._reasoning_effort_supported(self._user(user_id), effective) is False:
                         conversations.set_reasoning_effort(chat_id, None)
@@ -1924,7 +1924,7 @@ class ChatService:
             selection = conversations.model_selection(chat_id)
         except (FileNotFoundError, ValueError) as exc:
             raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
-        resolved = load_agent(user_id, agent_id, check_agent_model=False)
+        resolved = load_agent(user_id, agent_id)
         chat_model = selection.id if selection else resolved.models.chat  # the agent's default, else the user's
         supported = model_provider(resolved, chat_model).supported_modalities(chat_model)
         if "video" in supported or "image" not in supported:
@@ -1994,7 +1994,7 @@ class ChatService:
         if not audio:
             return text, attachments
         self._require_chat(self._conversations(user_id, agent_id), chat_id)
-        resolved = load_agent(user_id, agent_id, check_agent_model=False)
+        resolved = load_agent(user_id, agent_id)
         transcription_model = user_models(self._user(user_id), self._preferences).stt
         if provider_of(transcription_model, resolved.provider_name) != OPENROUTER:
             raise InputError("audio messages require an OpenRouter speech-to-text model")
@@ -2152,10 +2152,8 @@ class ChatService:
                 ),
             )
         else:
-            # the agent's default model is checked (ZDR policy) only for a chat that does not choose its own
-            inherits = self._conversations(user_id, agent_id).model_selection(run.chat_id) is None
             agent.refresh_user_models(
-                user_models(self._user(user_id), self._preferences, self._agent_config(user_id, agent_id), check=inherits),
+                user_models(self._user(user_id), self._preferences, self._agent_config(user_id, agent_id)),
                 self._preferences.get(user_id).associative_max_matches,
             )
         agent.config.language = self.language(user_id)
@@ -2213,13 +2211,12 @@ class ChatService:
         ]
         try:
             user = self._user(user_id)
-            zdr = zdr_required(user.require_zdr, CHAT_NAMING.zdr)
-            if is_claude_subscription(CHAT_NAMING.model):
-                ensure_zdr_compatible(CHAT_NAMING.model, zdr, "chat_naming")
+            if is_claude_subscription(CHAT_NAMING.model):  # ZDR is an OpenRouter filter; it never applies here
                 # runs with the requesting user's own Claude login, never another user's
                 provider = claude_subscription_provider(user.claude_subscription, user_id=user.id, purpose="chat_naming.model")
-                reply = provider.invoke(messages, CHAT_NAMING.model, stream=False, zdr=zdr)
+                reply = provider.invoke(messages, CHAT_NAMING.model, stream=False)
             else:
+                zdr = zdr_required(user.require_zdr, CHAT_NAMING.zdr)
                 api_key = get_secret(CHAT_NAMING.api_key).strip()
                 if not api_key:
                     logger.warning("chat naming skipped: env var %s is not set", CHAT_NAMING.api_key)
@@ -2493,7 +2490,7 @@ class ChatService:
 
     def _agent_index(self, user_id: str, agent_id: str) -> VectorIndex:
         self._owned_agent(user_id, agent_id)
-        config = load_agent(user_id, agent_id, check_agent_model=False)
+        config = load_agent(user_id, agent_id)
         sources = SourceRegistry.for_agent(config.user_id, config.id, **chat_folder_options(config))
         return self._index_factory(config, sources)
 

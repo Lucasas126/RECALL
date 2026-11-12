@@ -6,13 +6,12 @@ from typing import Optional
 
 import yaml
 
-from src.config.agents import AgentModelError, AgentStore
+from src.config.agents import AgentStore
 from src.config.levels import check_agent_level, effective_agent_level
 from src.config.models import AgentConfig, ModelsConfig, ResolvedAgent, UserConfig
 from src.config.preferences import UserPreferencesStore
 from src.config.secrets import get_secret
 from src.config.settings import ASSOC, CHAT_NAMING, CONFIG_DIR, DATA_DIR, MCP, TERMINAL
-from src.config.zdr import ensure_zdr_compatible, zdr_required
 from src.agent.tool_groups import DEFAULT_TOOL_GROUPS
 from src.terminal.resolve import resolve_backends
 from src.utils.i18n import InputError
@@ -30,11 +29,7 @@ def _load_yaml(path: Path) -> dict:
 
 def load_user(user_id: str) -> UserConfig:
     """Load a user's config; raises FileNotFoundError if the user does not exist."""
-    user = UserConfig(**_load_yaml(CONFIG_DIR / user_id / "user.yaml"))
-    if user.require_zdr:  # the framework-wide helper models inherit the policy; Claude subscription has no ZDR
-        ensure_zdr_compatible(CHAT_NAMING.model, zdr_required(True, CHAT_NAMING.zdr), "chat_naming")
-        ensure_zdr_compatible(ASSOC.query_model, zdr_required(True, ASSOC.zdr), "associative_memory")
-    return user
+    return UserConfig(**_load_yaml(CONFIG_DIR / user_id / "user.yaml"))
 
 
 def load_agent_config(user_id: str, agent_id: str) -> AgentConfig:
@@ -42,38 +37,18 @@ def load_agent_config(user_id: str, agent_id: str) -> AgentConfig:
     return AgentStore(CONFIG_DIR, DATA_DIR).load(user_id, agent_id)
 
 
-def agent_default_model(user: UserConfig, agent: AgentConfig) -> Optional[str]:
-    """The agent's own default chat model, checked against the user's ZDR policy; None when it sets none.
-
-    Claude subscription models have no zero-retention routing, so they are refused while ZDR is required
-    (an agent default has no `zdr` override of its own). Raises AgentModelError with a message for the user.
-    """
-    model = agent.chat_config.model
-    if model is None:
-        return None
-    try:
-        ensure_zdr_compatible(model, user.require_zdr, "chat_config.model")
-    except ValueError as exc:
-        raise AgentModelError(
-            "The default model of agent '{agent_id}' ({model}) cannot be used while zero data retention is "
-            "required: Claude subscription models have no ZDR. Choose another model or clear it in the agent's settings.",
-            agent_id=agent.id, model=model,
-        ) from exc
-    return model
-
-
 def user_models(
-    user: UserConfig, preferences: UserPreferencesStore, agent: Optional[AgentConfig] = None, *, check: bool = True,
+    user: UserConfig, preferences: UserPreferencesStore, agent: Optional[AgentConfig] = None,
 ) -> ModelsConfig:
     """Resolve inference overrides while preserving the user's embedding model.
 
     The chat model is the agent's default when `agent` sets one, else the user's default. A model chosen
-    inside a chat is applied later, per chat. `check=False` skips the agent default's ZDR check (read-only views).
+    inside a chat is applied later, per chat.
     """
     saved = preferences.get(user.id)
     chat = saved.default_llm_model or user.models.chat
     if agent is not None:
-        chat = (agent_default_model(user, agent) if check else agent.chat_config.model) or chat
+        chat = agent.chat_config.model or chat
     return user.models.model_copy(update={"chat": chat, "stt": saved.default_stt_model or user.models.stt})
 
 
@@ -81,12 +56,10 @@ def load_user_models(user_id: str, agent: Optional[AgentConfig] = None) -> Model
     return user_models(load_user(user_id), UserPreferencesStore(CONFIG_DIR), agent)
 
 
-def load_agent(user_id: str, agent_id: Optional[str] = None, *, check_agent_model: bool = True) -> ResolvedAgent:
+def load_agent(user_id: str, agent_id: Optional[str] = None) -> ResolvedAgent:
     """Load a user and one of its agents, resolving the provider key from the environment.
 
-    `models.chat` is the agent's default chat model when it sets one, else the user's. An agent default the
-    user's ZDR policy forbids raises AgentModelError unless `check_agent_model` is false (chat paths, where a
-    chat with its own selection does not use the default; the service then checks it per chat).
+    `models.chat` is the agent's default chat model when it sets one, else the user's.
     """
 
     user = load_user(user_id)
@@ -133,7 +106,7 @@ def load_agent(user_id: str, agent_id: Optional[str] = None, *, check_agent_mode
         require_zdr=user.require_zdr,
         id=agent.id,
         name=agent.name,
-        models=user_models(user, UserPreferencesStore(CONFIG_DIR), agent, check=check_agent_model),
+        models=user_models(user, UserPreferencesStore(CONFIG_DIR), agent),
         provider_name=user.provider.name,
         api_key=api_key,
         embeddings_provider_name=embeddings_provider.name,

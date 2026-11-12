@@ -37,8 +37,7 @@ A provider is **available** when the server can use it, checked on the server:
 
 Slow checks (Ollama, Claude Code) are cached for 60 seconds per server, so opening
 the picker does not start the CLI each time; the key check is a plain lookup. The
-Claude tab is labelled *experimental* (and *experimental, not ZDR* when the user
-requires ZDR). The ZDR checkbox appears for OpenRouter only; Ollama and Claude
+Claude tab is labelled *experimental*. The ZDR checkbox appears for OpenRouter only; Ollama and Claude
 subscription models do not use it. Telegram has
 no provider switcher: its list is the user's favorites from all available
 providers, each line tagged with its provider.
@@ -75,9 +74,8 @@ user default** (web and Telegram). The agent default is edited in the web UI
 follows the user default), not in Telegram. Saving validates it like a chat model
 (provider usable, model offered, ZDR catalog filter) and rewrites the agent file
 through the agent store, which keeps all other keys but not YAML comments.
-With `require_zdr` a `claude_subscription:` agent default is refused (it has no
-ZDR and an agent default has no `zdr` override): saving fails, and a file edited
-by hand fails the replies of chats that inherit it with a clear message. A retired
+`require_zdr` does not affect a `claude_subscription:` agent default (ZDR is an
+OpenRouter filter). A retired
 model behaves as a retired user default. Dream with no `dream.model` follows the
 agent default; chat naming and associative memory keep their own models. The STT
 model has no per-chat override; it is always the current user default.
@@ -256,16 +254,13 @@ The **ZDR only** filter applies to OpenRouter rows. Ollama rows have no per-toke
 price; they are local models except Ollama cloud models (tags ending in `cloud`),
 which run on Ollama's servers and are labelled cloud (and not ZDR when the user requires ZDR). With the experimental [Claude subscription](claude-subscription.md)
 available, `claude_subscription:haiku`, `:sonnet` and `:opus` are listed in their own
-group whatever the ZDR filter, labelled experimental (and not ZDR when the user requires ZDR), without per-token
-prices. Choosing one stores the chat override without a `zdr` flag, or as
-`{"provider": "claude_subscription", "id": "claude_subscription:sonnet", "zdr": false}`
-when the user requires ZDR. The composer shows "Claude subscription" (plus ", not ZDR" when the user requires ZDR; no warning style, and the *experimental* note lives on the picker tab only). The default
+group whatever the ZDR filter, labelled experimental, without per-token
+prices. Choosing one stores the chat override without a `zdr` flag
+(`{"provider": "claude_subscription", "id": "claude_subscription:sonnet"}`). The composer shows "Claude subscription" (no warning style; the *experimental* note lives on the picker tab only). The default
 LLM picker and the Dream tab's **Browse** use this dialog; Telegram `/selectmodel`
 and the default model in `/settings` list the user's favorites from all available
-providers instead (no search). The default STT picker lists OpenRouter only. Telegram says nothing about ZDR unless the user requires it (or the chat opted in);
-then it never says "ZDR: enabled" for a Claude subscription model but "Not ZDR (Claude
-subscription, experimental)" (or the Spanish equivalent). Its lists tag Claude rows
-with 🧪 and "plan" ("plan, no ZDR" when the user requires ZDR).
+providers instead (no search). The default STT picker lists OpenRouter only. Telegram says nothing about ZDR unless the user requires it (or the chat opted in),
+and never for a Claude subscription model. Its lists tag Claude rows with 🧪 and "plan".
 
 `GET /api/agents/<agent_id>/chats/<chat_id>` includes
 `"model": {"provider": "openrouter", "id": "vendor/model", "zdr": true, "require_zdr": false}`

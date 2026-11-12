@@ -143,8 +143,9 @@ care simply uses any model. A user who wants the guarantee sets `require_zdr: tr
 The per-feature `zdr` keys (`chat_naming.zdr`, `associative_memory.zdr`,
 `speech_to_text.zdr` in `settings.yaml`) remain valid as overrides; when unset they
 inherit `require_zdr`. A chat's stored `zdr` flag overrides it too (see
-[choosing a model per chat](../user-guide/models-and-providers.md#choosing-a-model-per-chat)). The decision lives in
-`src/config/zdr.py`.
+[choosing a model per chat](../user-guide/models-and-providers.md#choosing-a-model-per-chat)). ZDR is an OpenRouter
+routing filter: it never applies to `claude_subscription:` models, which work the same with `require_zdr: true`. The
+decision lives in `src/config/zdr.py`.
 
 ## shared user preferences
 

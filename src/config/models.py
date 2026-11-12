@@ -7,7 +7,6 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstr
 
 from src.agent.tool_groups import validate_tool_groups
 from src.config.levels import LevelField
-from src.config.zdr import ensure_zdr_compatible
 from src.terminal.rules import ApprovalRuleList
 from src.config.model_refs import (
     CAPABILITIES, CLAUDE_SUBSCRIPTION, MAIN_PROVIDERS, OPENROUTER, prefix_of, validate_reference,
@@ -130,13 +129,14 @@ class ChatNamingConfig(BaseModel):
 
     model: str = Field(default="claude_subscription:haiku", strict=True, min_length=1, max_length=256)
     api_key: str = Field(default="OPENROUTER_API_KEY", pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
-    zdr: Optional[bool] = Field(default=None, strict=True)  # None follows the user's require_zdr
+    zdr: Optional[bool] = Field(default=None, strict=True)  # OpenRouter only; None follows the user's require_zdr
     min_messages: int = Field(default=5, ge=1, le=1000, strict=True)
 
-    @model_validator(mode="after")
-    def _claude_subscription_needs_no_zdr(self) -> "ChatNamingConfig":
-        _check_model_zdr(self.model, self.zdr, "chat_naming")
-        return self
+    @field_validator("model")
+    @classmethod
+    def _valid_model(cls, value: str) -> str:
+        validate_reference(value)
+        return value
 
 
 class PromptCacheConfig(BaseModel):
@@ -160,12 +160,14 @@ class AssociativeMemoryConfig(BaseModel):
     score_threshold: float = Field(default=0.45, ge=0, le=1)
     query_model: Optional[str] = Field(default="claude_subscription:haiku", strict=True, min_length=1, max_length=256)
     api_key: str = Field(default="OPENROUTER_API_KEY", pattern=_ENV_NAME)
-    zdr: Optional[bool] = Field(default=None, strict=True)  # None follows the user's require_zdr
+    zdr: Optional[bool] = Field(default=None, strict=True)  # OpenRouter only; None follows the user's require_zdr
 
-    @model_validator(mode="after")
-    def _claude_subscription_needs_no_zdr(self) -> "AssociativeMemoryConfig":
-        _check_model_zdr(self.query_model, self.zdr, "associative_memory")
-        return self
+    @field_validator("query_model")
+    @classmethod
+    def _valid_query_model(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None:
+            validate_reference(value)
+        return value
 
 
 class OrchestratorConfig(BaseModel):
@@ -179,7 +181,7 @@ class OrchestratorConfig(BaseModel):
     enabled: bool = Field(default=False, strict=True)
     model: str = Field(default="typesafe/jev-1.14", strict=True, min_length=1, max_length=256)
     api_key: str = Field(default="OPENROUTER_API_KEY", pattern=_ENV_NAME)
-    zdr: Optional[bool] = Field(default=None, strict=True)  # None follows the user's require_zdr
+    zdr: Optional[bool] = Field(default=None, strict=True)  # OpenRouter only; None follows the user's require_zdr
     min_confidence: float = Field(default=0.6, ge=0, le=1, allow_inf_nan=False)
     timeout_seconds: float = Field(default=4, ge=1, le=30, allow_inf_nan=False)
     grace_seconds: float = Field(default=8, ge=0, le=600, allow_inf_nan=False)
@@ -213,7 +215,7 @@ class IndexConfig(BaseModel):
 class SpeechToTextConfig(BaseModel):
     """OpenRouter speech-to-text settings."""
 
-    zdr: Optional[bool] = Field(default=None, strict=True)  # None follows the user's require_zdr
+    zdr: Optional[bool] = Field(default=None, strict=True)  # OpenRouter only; None follows the user's require_zdr
     language: Optional[str] = Field(default=None, pattern=r"^[a-z]{2}(?:-[A-Z]{2})?$")
 
 
@@ -237,13 +239,6 @@ class PdfConfig(BaseModel):
     ocr_dpi: int = Field(default=300, ge=72, le=600, strict=True)
     ocr_languages: str = Field(default="eng+spa", min_length=1, max_length=64, pattern=r"^[A-Za-z_]+(\+[A-Za-z_]+)*$")
     tesseract_cmd: str | None = Field(default=None, min_length=1, max_length=512)
-
-
-def _check_model_zdr(model: Optional[str], zdr: Optional[bool], section: str) -> None:
-    """Validate the model reference; an explicit `zdr: true` cannot go with a Claude subscription model."""
-    if model is not None:
-        validate_reference(model)
-    ensure_zdr_compatible(model, zdr, section)
 
 
 class ProviderConfig(BaseModel):

@@ -366,8 +366,7 @@ class Agent:
         cls, user_id: str, agent_id: Optional[str] = None, chat_id: Optional[str] = None,
         mcp: McpManager | None = None,
     ) -> "Agent":
-        # an agent default the ZDR policy forbids is checked per chat by the service, where a chat's own model wins
-        config = load_agent(user_id, agent_id, check_agent_model=False)
+        config = load_agent(user_id, agent_id)
         provider = main_provider(config)
         sources = SourceRegistry.for_agent(config.user_id, config.id, **chat_folder_options(config))
         profile = load_profile(sources, recall_knowledge=config.recall_knowledge)
@@ -991,14 +990,12 @@ class Agent:
         return chars // 4
 
     def _compaction_model(self) -> tuple[LLMProvider, str, bool]:
-        """The summary model: `compaction.model`, else the chat's own (also when ZDR forbids the configured one)."""
+        """The summary model: `compaction.model`, else the chat's own; ZDR applies only to OpenRouter models."""
         model = self.config.compaction.model
         if model is None or model == self.config.models.chat:
             return self.provider, self.config.models.chat, self.zdr_required
-        if self.zdr_required and is_claude_subscription(model):
-            logger.warning("compaction model %s skipped: this chat requires ZDR; using the chat's model", model)
-            return self.provider, self.config.models.chat, self.zdr_required
-        return self.provider_named(provider_of(model, self.config.provider_name), "compaction.model"), model, self.zdr_required
+        zdr = self.zdr_required and not is_claude_subscription(model)
+        return self.provider_named(provider_of(model, self.config.provider_name), "compaction.model"), model, zdr
 
     def compaction_due(self) -> bool:
         """Whether the context passed this agent's compaction trigger."""

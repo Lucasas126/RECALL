@@ -25,10 +25,6 @@ class AgentConfigError(UserMessageError, ValueError):
     """An agent configuration could not be read, validated or saved."""
 
 
-class AgentModelError(AgentConfigError):
-    """An agent's default chat model cannot be used under the user's policy."""
-
-
 class UnknownApprovalRule(AgentConfigError):
     """No agent approval rule at that position."""
 

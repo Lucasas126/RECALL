@@ -33,7 +33,7 @@ from src.agent import templates as agent_templates
 from src.config.agents import AgentConfigError, AgentStore
 from src.config.errors import describe_config_error
 from src.config.levels import Level, check_agent_level, effective_agent_level, required_level_reason
-from src.config.loader import agent_default_model, load_agent_config, load_user
+from src.config.loader import load_agent_config, load_user
 from src.config.models import AgentConfig, UserConfig
 from src.config.secrets import is_set
 from src.config.settings import CONFIG_DIR, DATA_DIR, TERMINAL
@@ -405,10 +405,6 @@ def check_user(user_id: str, levels: list[str] | None = None) -> tuple[list[str]
             config = load_agent_config(user_id, agent_id)
         except Exception:
             continue  # already reported above with its file name
-        try:
-            agent_default_model(user, config)
-        except Exception as exc:
-            errors.append(f"{user_id}/{agent_id}: {describe_config_error(exc)}")
         needed, service = required_level_reason(config, user.terminal_backends)
         try:
             check_agent_level(config, user, max_level)

@@ -586,8 +586,7 @@ function translateInterface() {
     ["agent-delegation-no-agents", "You have no other agents."],
     ["agent-max-hops-label", "Tool rounds per turn"],
     ["agent-max-hops-hint", "How many tool round-trips the agent may do before it must answer. Empty uses the application value."],
-    ["agent-retained-label", "Messages kept in context"],
-    ["agent-retained-hint", "Older messages are left out of the prompt. Empty keeps all messages."], ["agent-save", "Save agent"], ["agent-delete", "Delete agent"],
+    ["agent-save", "Save agent"], ["agent-delete", "Delete agent"],
     ["agent-tab-basic", "Basic"], ["agent-advanced-summary", "Advanced"], ["agent-tab-tools", "Tools"],
     ["agent-tab-mcp", "MCP"], ["agent-tab-soul", "Soul & memory"], ["agent-tab-dream", "Dream"],
     ["agent-tab-sessions", "Dream sessions"],
@@ -1246,7 +1245,7 @@ function openNewAgent() {
     name: "", id: "", description: "",
     chat_config: {
       stream: true, has_memory: true, reasoning: true, reasoning_effort: "medium", reasoning_tokens: null,
-      keep_reasoning_in_memory: true, conversation_messages_retained: 30, tools: true, associative_memory: "llm",
+      keep_reasoning_in_memory: true, tools: true, associative_memory: "llm",
       associative_execution: "parallel", recall_knowledge: true,
     },
   });
@@ -1322,7 +1321,6 @@ function fillAgentForm(agent) {
   $("agent-reasoning-tokens").disabled = config.reasoning_tokens == null;
   setNumberValue($("agent-reasoning-tokens"), config.reasoning_tokens);
   setNumberValue($("agent-max-hops"), config.max_tool_hops);
-  setNumberValue($("agent-retained"), config.conversation_messages_retained);
   renderAgentMcp(config.mcp ?? {});
   renderFolders(agent.folders ?? []);
   resetIndexStatus();
@@ -2145,7 +2143,6 @@ function agentFormBody() {
       keep_reasoning_in_memory: $("agent-keep-reasoning").checked,
       recall_knowledge: $("agent-recall-knowledge").checked,
       max_tool_hops: optionalNumber("agent-max-hops"),
-      conversation_messages_retained: optionalNumber("agent-retained"),
       tools: $("agent-tools").checked,
       tool_groups: [...document.querySelectorAll('input[name="agent-tool-group"]:checked')].map((input) => input.value),
       mcp: agentMcpBody(),
@@ -2707,7 +2704,7 @@ function renderProviderTabs() {
       const any = row.id === ANY_PROVIDER;
       if (any) tab.title = tr("Models of every available provider");
       tab.append(Object.assign(document.createElement("strong"), { textContent: any ? tr("Any") : row.label }));
-      const experimental = tr(state.user?.require_zdr ? "experimental, not ZDR" : "experimental");
+      const experimental = tr("experimental");
       const note = row.available ? (row.experimental ? experimental : "") : providerReason(row);
       if (note) tab.append(Object.assign(document.createElement("small"), { textContent: note }));
       tab.addEventListener("click", () => chooseProvider(row.id));
@@ -3127,7 +3124,7 @@ async function deleteChat(chat) {
 function modelPolicy(model) {
   if (!model) return "";
   const zdr = model.zdr || model.require_zdr;
-  if (model.provider === "claude_subscription") return tr(zdr ? "Claude subscription, not ZDR" : "Claude subscription");
+  if (model.provider === "claude_subscription") return tr("Claude subscription");
   if (model.provider === "ollama") {
     if (!/cloud$/.test(model.id)) return tr("Local Ollama model");
     return tr(zdr ? "Ollama cloud model, not ZDR" : "Ollama cloud model");
@@ -3325,7 +3322,7 @@ function renderModelList() {
     id.textContent = model.id;
     const providers = document.createElement("small");
     providers.textContent = !available ? tr("Unavailable under the current filter")
-      : subscription ? tr(zdrInPlay ? "Experimental: uses your own Claude Code login. Not ZDR." : "Experimental: uses your own Claude Code login.")
+      : subscription ? tr("Experimental: uses your own Claude Code login.")
       : cloud ? tr(zdrInPlay ? "Ollama cloud model: runs on Ollama's servers. Not ZDR." : "Ollama cloud model: runs on Ollama's servers.")
       : local ? tr("Runs on your Ollama server.")
       : !zdrInPlay ? ""
@@ -7135,7 +7132,6 @@ selectRow("agent-associative", chatDefault("associative_memory"), () => {
 });
 selectRow("agent-associative-execution", chatDefault("associative_execution"));
 numberRow("agent-max-hops", () => agentDefaultSpec("chat_config.max_tool_hops"), () => tr("Application value"));
-numberRow("agent-retained", () => agentDefaultSpec("chat_config.conversation_messages_retained"), () => "");
 checkboxRow("agent-tools", chatDefault("tools"));
 numberRow("agent-terminal-timeout", () => agentDefaultSpec("terminal.timeout_seconds"), () => "");
 // delegation block: limits can only lower the application's, so an empty value is the default

@@ -14,7 +14,7 @@ web UI and the Telegram bot after editing it. In Docker you can mount your own c
 | `web` | `host`, `port`, `session_secret_env`, `public_url` | [web authentication](#web-authentication) |
 | `telegram` | `allowed_users_env` (default `TELEGRAM_ALLOWED_USERS`), `chat_idle_minutes` (default `60`, 1-10080; `RECALL_TELEGRAM_CHAT_IDLE_MINUTES` overrides it) | [Telegram](../user-guide/telegram.md#telegram-access) |
 | `video`, `pdf`, `speech_to_text` | frame sampling, OCR and transcription defaults | [files and media](../user-guide/files-and-media.md) |
-| `prompt_cache` | `enabled`, `anthropic_providers`, `trim_slack_percent` | [prompt caching](#prompt-caching) |
+| `prompt_cache` | `enabled`, `anthropic_providers` | [prompt caching](#prompt-caching) |
 | `tavily` | `api_key` (variable name), `timeout_seconds`, `max_content_chars` | [shared web access](#shared-web-access-tavily) |
 | `associative_memory` | `context_messages`, `top_n`, `score_threshold`, `query_model`, `api_key`, `zdr` | [memory](../user-guide/memory.md#associative-memory) |
 | `chat_naming` | `model`, `api_key`, `zdr`, `min_messages` | [chat naming](#chat-naming) |
@@ -120,7 +120,6 @@ input price. It is framework-wide, in the root `settings.yaml`:
 prompt_cache:
   enabled: true
   anthropic_providers: [Amazon Bedrock]
-  trim_slack_percent: 25
 ```
 
 How each model family is handled:
@@ -155,16 +154,9 @@ to let OpenRouter choose freely. Requiring the `Anthropic` provider alone (no
 fallback) returned "no endpoints found" when tested with ZDR on, so it is not a
 useful value here.
 
-`trim_slack_percent` (0-90) controls how the context window is cut. A cut moves
-the start of the history, which invalidates the cached history. Without slack the
-agent drops one message per turn once `conversation_messages_retained` is reached,
-so the cache would be lost on every turn. With slack, the agent cuts down to
-`retained - slack%` and then lets the window grow again until it passes
-`retained`, so the cache survives between cuts. The window never exceeds
-`conversation_messages_retained`; it only holds fewer messages right after a cut
-(20 retained with 25% slack goes from 21 to 15 messages). Use `0` for the exact
-sliding window. It applies to every provider, not only OpenRouter. Small windows
-(for example 3 or less) are not reduced.
+Long chats are kept within the window by [context compaction](../user-guide/memory.md#context-compaction):
+the older part becomes a summary placed right after the system prompt, so the system prompt and its cache are never
+touched; the history after the summary is cached again from the next turn.
 
 What still invalidates the cache, by design:
 
@@ -174,7 +166,7 @@ What still invalidates the cache, by design:
   is why MCP notes live in the system prompt and are not split into a separate block.
 - A different chat or model: each has its own prefix.
 - A pause longer than the cache lifetime.
-- Editing earlier messages or the first message in the window being cut off.
+- Editing earlier messages, and a compaction (once, when the summary replaces the older messages).
 
 The web debug panel and the saved `usage_report` show the result on a second line
 of the usage report:

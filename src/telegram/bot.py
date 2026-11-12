@@ -233,8 +233,8 @@ def _llm_label(model: dict[str, Any], index: int, current: str | None, favorites
     head = f"{'✅ ' if model['id'] == current else ''}{'⭐ ' if model['id'] in favorites else ''}"
     provider = model.get("provider")
     tag = _provider_tag(provider)
-    if provider == "claude_subscription":  # no per-token price; never ZDR
-        return f"{head}🧪 {index}. {tag} · {model['name'][:22]} | {'plan, no ZDR' if zdr else 'plan'}"
+    if provider == "claude_subscription":  # no per-token price; ZDR does not apply to it
+        return f"{head}🧪 {index}. {tag} · {model['name'][:22]} | plan"
     if provider == "ollama":
         return f"{head}{'🏠' if model.get('local', True) else '☁️'} {index}. {tag} · {model['name'][:22]} | {'local' if model.get('local', True) else 'cloud'}"
     return (
@@ -254,13 +254,11 @@ def _favorite_models(service: ChatService, user_id: str) -> tuple[list[dict[str,
 def _zdr_line(session: TelegramSession, model: dict[str, Any]) -> str:
     """The data-retention line of a chat model; empty unless ZDR is in play (required by the user or by this chat).
 
-    Never 'enabled' for Claude subscription or Ollama models.
+    Never 'enabled' for Ollama models; none for Claude subscription models, where ZDR does not apply.
     """
-    if not (model.get("zdr") or model.get("require_zdr")):
-        return ""
     provider = model.get("provider")
-    if provider == "claude_subscription":
-        return _msg(session, "Not ZDR (Claude subscription, experimental)")
+    if provider == "claude_subscription" or not (model.get("zdr") or model.get("require_zdr")):
+        return ""
     if provider == "ollama" and is_ollama_cloud(model["id"]):
         return _msg(session, "Not ZDR (Ollama cloud model)")
     if provider == "ollama":
@@ -444,7 +442,7 @@ def _panel_view(
         mixed = any(model.get("provider", "openrouter") != "openrouter" for model in panel.items)
         if zdr:
             template = (
-                "Current model: {model}\n\nPage {page}/{pages}. {count} models available.\nChoose another model. Prices are USD per 1 million tokens (input / output). OpenRouter models: ZDR only. 🧪 Claude subscription: experimental, not ZDR. 🏠 Ollama: local:"
+                "Current model: {model}\n\nPage {page}/{pages}. {count} models available.\nChoose another model. Prices are USD per 1 million tokens (input / output). OpenRouter models: ZDR only. 🧪 Claude subscription: experimental. 🏠 Ollama: local:"
                 if mixed else "Current model: {model}\n\nPage {page}/{pages}. {count} models available.\nChoose another model. Prices are USD per 1 million tokens (input / output). ZDR enabled:")
         else:
             template = (
