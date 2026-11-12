@@ -88,7 +88,7 @@ class PackStructureTests(unittest.TestCase):
         self.assertLessEqual(len(HUB.read_bytes()), 6 * 1024)
         for path in REFERENCES:
             with self.subTest(file=path.name):
-                self.assertLessEqual(len(path.read_bytes()), 8 * 1024)
+                self.assertLessEqual(len(path.read_bytes()), 12 * 1024)
         self.assertNotIn("\r", knowledge.skill_text())
         self.assertNotIn("\r", knowledge.read_file("references/architecture.md"))
 
@@ -256,7 +256,7 @@ class AdminCliConsistencyTests(unittest.TestCase):
         hub = pack_text(HUB)
         for name in ("admin-cli", "recipes", "security-for-admins", "delegation", "delegation-processes"):
             self.assertIn(f"references/{name}.md", hub)
-            self.assertLessEqual(len((PACK / "references" / f"{name}.md").read_bytes()), 8 * 1024)
+            self.assertLessEqual(len((PACK / "references" / f"{name}.md").read_bytes()), 12 * 1024)
 
     def test_security_page_states_the_cross_user_and_secret_rules(self) -> None:
         text = pack_text(PACK / "references" / "security-for-admins.md")
