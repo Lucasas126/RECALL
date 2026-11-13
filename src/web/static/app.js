@@ -1601,6 +1601,8 @@ function drawApprovalRules(entries) {
   const rules = entries.filter((entry) => entry.learned); // the others are in the rule editor
   state.agentForm.learnedEntries = rules;
   state.agentForm.learned = rules.map((entry) => entry.rule);
+  const open = chats.find((chat) => chat.id === state.chatId && chat.agent_id === state.agentId);
+  if (open?.unread && !document.hidden) markChatRead(open.agent_id, open.id);
   list.replaceChildren(...rules.map((entry) => {
     const item = document.createElement("li");
     const text = Object.assign(document.createElement("span"), { className: "approval-rule-text", textContent: approvalRuleText(entry.rule) });
@@ -2929,6 +2931,11 @@ globalThis.addEventListener("focus", async () => {
   }
 });
 
+// the open chat is being read: clear the server's unread mark (a reply that ends while it is open is read too)
+function markChatRead(agentId, chatId) {
+  api(`/api/agents/${encodeURIComponent(agentId)}/chats/${encodeURIComponent(chatId)}/read`, { method: "POST" }).catch(() => {});
+}
+
 async function refreshChats() {
   if (!state.user) return;
   const session = state.session;
@@ -2954,6 +2961,11 @@ async function refreshChats() {
       const generating = isGenerating(chat.agent_id, chat.id) || Boolean(chat.active);
       li.dataset.active = String(Boolean(chat.active));
       li.classList.toggle("generating", generating);
+      // dot before the title: blinking while the agent works, fixed when it waits for you (approval) or its answer is unread
+      const here = chat.id === state.chatId && chat.agent_id === state.agentId;
+      const dot = chat.pending_approvals > 0 && !here ? "approval"
+        : chat.unread && !here ? "ready" : generating ? "working" : "";
+      if (dot) li.dataset.dot = dot;
       const meta = document.createElement("div");
       meta.className = "chat-meta";
       const title = document.createElement("span");
@@ -3145,6 +3157,7 @@ async function openChat(chatId) {
   if (session !== state.session || agentId !== state.agentId || revision !== state.chatModelRevision || state.modelBusy) return;
   state.chatId = chatId;
   state.chatInfo = data.chat;
+  markChatRead(agentId, chatId);
   applyChatModels(data);
   if ($("agents-view").hidden) rememberChat(agentId, chatId, data.messages.length > 0);
   const key = chatKey(agentId, chatId);
@@ -7653,3 +7666,9 @@ try {
   if (localStorage.getItem("claude-usage-open") === "1") setClaudeUsageOpen(true);
 } catch { /* storage may be blocked */ }
 usageTimer = setInterval(() => { if (!document.hidden) refreshClaudeUsage(); }, USAGE_REFRESH_MS);
+
+// the chat list shows which chats are working, waiting for an approval or have an unread answer: keep it current
+setInterval(() => {
+  if (document.hidden || !state.user || document.querySelector("#chat-list .rename-input")) return;
+  refreshChats().catch(() => {});
+}, 4000);

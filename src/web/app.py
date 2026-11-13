@@ -619,6 +619,10 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     def stop_chat(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):
         return service.stop_chat(user_id, agent_id, chat_id)
 
+    @app.post("/api/agents/{agent_id}/chats/{chat_id}/read")
+    def mark_chat_read(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):
+        return service.mark_chat_read(user_id, agent_id, chat_id)
+
     @app.get("/api/claude/usage")
     def claude_usage(user_id: str = Depends(current_user)):
         return service.claude_usage(user_id)
