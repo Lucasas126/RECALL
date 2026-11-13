@@ -64,6 +64,8 @@ def _hops_warning(hop: int, limit: int) -> str | None:
 # max characters of a tool result shown to channels and stored with the turn
 _ACTION_RESULT_CHARS = 500
 _INTERRUPTED_MARKER = "[Response interrupted by user.]"
+# closes a checkpoint turn that was never replaced by the final one (the server stopped mid-reply)
+_CHECKPOINT_MARKER = "[Response cut off: the server stopped before it finished. What is shown above was saved as it happened.]"
 # separates the text written before an associative-memory hit interrupted the reply from its continuation
 _HIT_BREAK = "\n\n"
 _ASSOC_NOTICE = (
@@ -324,6 +326,9 @@ class Agent:
         # the latest compaction summary of this chat (my notes on the part that left the context)
         self._summary: Optional[str] = None
         self._tool_counter = 0  # fallback tool call ids when the provider gives none
+        self._checkpointed = False  # a partial assistant turn of the running reply is on disk (the last line)
+        self._round_replies: list[str] = []  # text the model wrote before each tool round of this turn
+        self._round_reasoning: list[str] = []
         # transient associative-memory hint, injected into the context of the current turn only
         self._assoc_suggestion: Optional[str] = None
         self._assoc_match_count = 0
@@ -503,6 +508,9 @@ class Agent:
         self._model_spans = []
         self._partial = ""
         self._carried_reasoning = ""
+        self._checkpointed = False
+        self._round_replies = []
+        self._round_reasoning = []
         self.last_actions = []
         self._timeline = TimelineBuilder()
         self.last_reasoning = ""
@@ -824,6 +832,8 @@ class Agent:
 
     def _remember_tool_calls(self, reply: str, reasoning: str, tool_calls: list[dict]) -> None:
         """Append the model's tool-call turn to the in-context memory (OpenAI shape)."""
+        self._round_replies.append(reply)
+        self._round_reasoning.append(reasoning)
         self.messages.append(
             {
                 "role": "assistant",
@@ -894,8 +904,33 @@ class Agent:
             actions.append({"name": name, "arguments": args, "result": text, "error": failed})
             self.last_actions.append(actions[-1])
             yield "tool", {**actions[-1], "id": call_id}
+        self._checkpoint()
         if cancellation is not None:
             cancellation.raise_if_cancelled()
+
+    def _checkpoint(self) -> None:
+        """Save what this reply has done so far (text, reasoning, tool actions) after each tool round.
+
+        A restart in the middle of a long reply (a release that restarts the server, a crash) would otherwise lose
+        everything: the turn is only written when the reply ends. The checkpoint is replaced by the next one and by
+        the final turn; if it stays the last line, the chat shows the reply as cut off and the model sees it.
+        """
+        if not self.config.has_memory or self._disposable:
+            return
+        text = "\n\n".join(r.strip() for r in self._round_replies if r and r.strip())
+        reasoning = "\n\n".join(r.strip() for r in self._round_reasoning if r and r.strip())
+        try:
+            self.sources.conversations().checkpoint(
+                self.chat_id, text,
+                replace=self._checkpointed,
+                model=self.config.models.chat,
+                reasoning=reasoning or None,
+                actions=self.last_actions or None,
+                timeline=self._timeline.build(len(self.last_actions)),
+            )
+            self._checkpointed = True
+        except Exception:  # a failed checkpoint must never break the reply
+            logger.warning("could not checkpoint the running reply of chat %s", self.chat_id, exc_info=True)
 
     def _remember_interrupted(self, reply: str, reasoning: str) -> None:
         pending: dict[str, dict] = {}
@@ -947,17 +982,21 @@ class Agent:
         self.index.after_turn(self.chat_id, written)  # queued: the reply is not delayed
 
     @staticmethod
-    def _reply_content(reply: str | list[dict], interrupted: bool) -> str | list[dict]:
+    def _reply_content(reply: str | list[dict], interrupted: bool, checkpoint: bool = False) -> str | list[dict]:
         if not interrupted:
             return reply
+        marker = _CHECKPOINT_MARKER if checkpoint else _INTERRUPTED_MARKER
         if isinstance(reply, list):
-            return [*reply, {"type": "text", "text": _INTERRUPTED_MARKER}]
-        return f"{reply}\n\n{_INTERRUPTED_MARKER}"
+            return [*reply, {"type": "text", "text": marker}]
+        return f"{reply}\n\n{marker}"
 
     def _log_turn(self, role: str, content: str | list[dict], **extra) -> None:
         """Persist a turn to the active chat's jsonl (independent of in-context memory)."""
         extra = {k: v for k, v in extra.items() if v is not None}
-        self.sources.conversations().append(self.chat_id, role, content, **extra)
+        replaces = role == "assistant" and self._checkpointed  # the final turn takes the place of the checkpoint
+        if replaces:
+            self._checkpointed = False
+        self.sources.conversations().append(self.chat_id, role, content, drop_checkpoint=replaces, **extra)
 
     # ------------------------------------------------------------------ context window
 
@@ -973,7 +1012,7 @@ class Agent:
         for t in history:
             if t.get("role") not in ("user", "assistant"):
                 continue
-            content = self._reply_content(t["content"], bool(t.get("interrupted")))
+            content = self._reply_content(t["content"], bool(t.get("interrupted")), bool(t.get("checkpoint")))
             if t["role"] == "user" and t.get("ts"):
                 content = self._stamped(content, t["ts"], t.get("channel"))
             self.messages.append({"role": t["role"], "content": content})
