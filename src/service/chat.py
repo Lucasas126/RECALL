@@ -1533,9 +1533,10 @@ class ChatService:
             run_meta["media"] = media
         run = _MessageRun(chat_id, text, attachments, stream, meta=run_meta or None,
                            channel=channel if channel in ("web", "telegram") else None)
-        if transcripts and channel == "web":  # show what the speech-to-text heard, so the person can check it
-            heard = "\n".join(transcripts)
-            notice = f"{notice}\n\n🎤 {heard}" if notice else f"🎤 {heard}"
+        # keep what the speech-to-text heard next to each recording, so the person can check it any time
+        recordings = [item for item in media if item["modality"] == "audio"]
+        for item, heard in zip(recordings, transcripts):
+            item["transcript"] = heard
         if notice:
             run.events.put(ChatEvent("notice", text=notice, generation_id=run.generation_id))
         deadline = monotonic() + _REWIND_WAIT_SECONDS

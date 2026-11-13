@@ -29,8 +29,13 @@ class VoiceMessageServiceTests(models_tests.ModelFixture):
         self.assertIn("Hello there", turn["content"])
         self.assertEqual(turn["media"], [{
             "name": "voice.webm", "modality": "audio", "mime_type": "audio/webm;codecs=opus",
-            "data_url": _AUDIO["data_url"],
+            "data_url": _AUDIO["data_url"], "transcript": "Hello there",
         }])
+
+    def test_transcript_survives_reloading_the_chat(self) -> None:
+        self._send_audio("Hola qué tal")
+        reloaded = self.service.get_chat("user-one", "agent-one", self.chat)["messages"][0]
+        self.assertEqual(reloaded["media"][0]["transcript"], "Hola qué tal")
 
     def test_empty_transcription_gives_a_clear_error_and_logs_it(self) -> None:
         with self.assertLogs("recall.service", level="WARNING") as logs:
