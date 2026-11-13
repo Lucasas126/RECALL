@@ -107,7 +107,7 @@ button.link { background: none; border: none; color: var(--muted); padding: 0; }
 aside { background: var(--side); border-right: 1px solid var(--line); padding: 22px 16px 12px; min-width: 0; display: flex; flex-direction: column; gap: 16px; overflow: hidden; min-height: 0; }
 aside .bar { display: flex; align-items: center; padding: 0 6px; }
 #chat-list { list-style: none; margin: 0 -4px; padding: 0 4px; overflow-y: auto; flex: 1; min-height: 0; }
-#chat-list li { position: relative; display: flex; align-items: center; gap: 4px; padding: 8px 6px 8px 16px; border: 1px solid transparent; border-radius: var(--radius-sm); cursor: pointer; }
+#chat-list li { position: relative; display: flex; align-items: center; gap: 4px; padding: 8px 6px 8px 26px; border: 1px solid transparent; border-radius: var(--radius-sm); cursor: pointer; }
 #chat-list li:hover { background: var(--raised); }
 #chat-list .chat-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 #chat-list .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .875rem; line-height: 1.35; color: var(--muted); }
@@ -935,9 +935,9 @@ select.warning { border-color: var(--warn); color: var(--warn); }
 #chat-list .chat-section::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 #chat-list .chat-section:hover { background: none; }
 
-/* Narrow main column: the options drop to a second row under the input */
+/* Narrow main column: the options drop to a second row under the input; send and mic stay on the input row, and .multiline (app.js) pulls them down */
 @container main (max-width: 680px) {
-  #composer { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "pend pend pend pend" "attach input mic send" "controls controls mic send"; }
+  #composer { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "pend pend pend pend" "attach input mic send" "controls controls controls controls"; }
   #chat-controls { margin: 0 0 0 36px; }
 }
 
