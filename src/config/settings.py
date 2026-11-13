@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 
 from src.config.models import (
-    AssociativeMemoryConfig, ChatNamingConfig, ClaudeLoginSettings, IndexConfig, McpSettings, MemoryLimits, OrchestratorConfig, PdfConfig, PromptCacheConfig, SpeechToTextConfig, TavilyConfig, TerminalSettings,
+    ApprovalExplainConfig, AssociativeMemoryConfig, ChatNamingConfig, ClaudeLoginSettings, IndexConfig, McpSettings, MemoryLimits, OrchestratorConfig, PdfConfig, PromptCacheConfig, SpeechToTextConfig, TavilyConfig, TerminalSettings,
     SubagentSettings, VideoDecompositionConfig,
 )
 
@@ -125,6 +125,9 @@ TAVILY = TavilyConfig.model_validate(_raw.get("tavily", {}))
 
 # ------------------------------------------------------------------ chat naming
 CHAT_NAMING = ChatNamingConfig.model_validate(_raw.get("chat_naming", {}))
+
+# ------------------------------------------------------------------ approval explanations
+APPROVAL_EXPLAIN = ApprovalExplainConfig.model_validate(_raw.get("approval_explain", {}))
 
 # ------------------------------------------------------------------ mcp servers
 MCP = McpSettings.model_validate(_raw.get("mcp", {}))

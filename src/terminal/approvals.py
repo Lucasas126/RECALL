@@ -140,6 +140,7 @@ class ApprovalBroker:
                 _emitter(run)("approval", dict(payload))
             except Exception:  # an unreachable client is the same as nobody answering
                 logger.exception("could not deliver approval %s", approval_id)
+            self._explain_async(item)
             deadline = time.monotonic() + timeout
             cancellation = getattr(run, "cancellation", None)
             while not item.event.wait(_POLL_SECONDS):
@@ -151,6 +152,34 @@ class ApprovalBroker:
             if waiting is not None:
                 _safe(waiting, False)
         return item.outcome or Outcome(False, "cancelled")
+
+    # ---------------------------------------------------------------- explaining
+    def _explain_async(self, item: _Pending) -> None:
+        """Ask the run's `explain` for a sentence about the card without delaying it; failures leave the card as it is."""
+        explain = getattr(item.run, "explain", None)
+        if explain is None:
+            return
+        snapshot = dict(item.payload)
+
+        def work() -> None:
+            try:
+                text = explain(snapshot)
+            except Exception:
+                logger.warning("could not explain approval %s", item.id, exc_info=True)
+                return
+            text = " ".join(str(text or "").split())
+            if not text:
+                return
+            with self._lock:
+                if item.outcome is not None:  # answered meanwhile: nobody needs it
+                    return
+                item.payload["explanation"] = text
+            try:
+                _emitter(item.run)("approval_explanation", {"id": item.id, "text": text})
+            except Exception:
+                logger.exception("could not deliver the explanation of approval %s", item.id)
+
+        threading.Thread(target=work, name=f"approval-explain-{item.id}", daemon=True).start()
 
     # ---------------------------------------------------------------- answering
     def resolve(self, approval_id: str, user_id: str, decision: str, scope: str = "once") -> str:

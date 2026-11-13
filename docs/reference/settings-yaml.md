@@ -18,6 +18,7 @@ web UI and the Telegram bot after editing it. In Docker you can mount your own c
 | `tavily` | `api_key` (variable name), `timeout_seconds`, `max_content_chars` | [shared web access](#shared-web-access-tavily) |
 | `associative_memory` | `context_messages`, `top_n`, `score_threshold`, `query_model`, `api_key`, `zdr` | [memory](../user-guide/memory.md#associative-memory) |
 | `chat_naming` | `model`, `api_key`, `zdr`, `min_messages` | [chat naming](#chat-naming) |
+| `approval_explain` | `enabled`, `model`, `api_key`, `zdr`, `max_context_chars` | [approval explanations](#approval-explanations) |
 | `mcp` | `connect_timeout_seconds`, `call_timeout_seconds`, `servers` | [MCP servers](../user-guide/mcp.md) |
 
 ## folders
@@ -266,6 +267,30 @@ subagents:
 
 A provider rate limit fails the task (reason `rate_limit`) and blocks launches for the cooldown; it is never retried. The same numbers are stated to the agent in
 the `task_start` description and its system prompt.
+
+## approval explanations
+
+A small model writes one or two sentences on every approval card (web and Telegram): what the action does and why
+the agent is probably running it. It reads the last few turns of the chat plus the tool, backend, directory and command.
+
+```yaml
+approval_explain:
+  enabled: true
+  model: claude_subscription:haiku
+  api_key: OPENROUTER_API_KEY
+  # zdr: true
+  max_context_chars: 3000
+```
+
+`model`, `api_key` and `zdr` work as in [chat naming](#chat-naming) (a `claude_subscription:` model runs with the
+requesting user's own Claude login). `max_context_chars` (200-20000) limits the conversation tail it sees. The text is
+in the user's language. Behavior:
+
+- the card is shown at once and the sentence is added when the model answers (an `approval_explanation` event); a
+  failure or an answer after the card was settled leaves the card as it was;
+- the explanation is informational only: it never changes the risk, the options or the decision, and the command is
+  always shown as is. The command and the conversation are untrusted data for that model;
+- `enabled: false` turns it off for everyone.
 
 ## chat naming
 

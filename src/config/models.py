@@ -139,6 +139,24 @@ class ChatNamingConfig(BaseModel):
         return value
 
 
+class ApprovalExplainConfig(BaseModel):
+    """Framework-wide small model that explains an approval card in a sentence or two; api_key names an environment variable."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(default=True, strict=True)
+    model: str = Field(default="claude_subscription:haiku", strict=True, min_length=1, max_length=256)
+    api_key: str = Field(default="OPENROUTER_API_KEY", pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
+    zdr: Optional[bool] = Field(default=None, strict=True)  # OpenRouter only; None follows the user's require_zdr
+    max_context_chars: int = Field(default=3000, ge=200, le=20_000, strict=True)
+
+    @field_validator("model")
+    @classmethod
+    def _valid_model(cls, value: str) -> str:
+        validate_reference(value)
+        return value
+
+
 class PromptCacheConfig(BaseModel):
     """Framework-wide OpenRouter prompt-caching settings for Claude models."""
 

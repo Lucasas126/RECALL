@@ -1698,6 +1698,8 @@ class _ApprovalCard:
     telegram_chat_id: int
     message_id: int
     body: str  # Markdown shown above the outcome line
+    buttons: Any = None  # the keyboard shown under it, kept so an edit does not drop it
+    explained: bool = False  # the small model's sentence was added
 
 
 def task_attribution(language: str, task: dict | None) -> str:
@@ -1719,6 +1721,8 @@ def _approval_text(language: str, data: dict) -> str:
     lines = [message(language, "🔐 *Approval needed* ({risk})", risk=risk)]
     if label := task_attribution(language, data.get("task")):
         lines.append(_md_escape(label))
+    if data.get("explanation"):
+        lines.append("_" + _md_escape(str(data["explanation"])) + "_")
     lines.append("```\n" + command + "\n```")
     if data.get("backend"):
         lines.append(message(language, "Backend: {backend}", backend=_md_escape(str(data["backend"]))))
@@ -1775,8 +1779,26 @@ async def _send_approval(context: ContextTypes.DEFAULT_TYPE, state: TelegramBotS
     markup = _approval_buttons(language, approval_id, data.get("options"))
     sent = await context.bot.send_message(telegram_chat_id, plain, entities=entities, reply_markup=markup)
     state.approvals[approval_id] = _ApprovalCard(
-        session.user_id, session.agent_id, session.chat_id, telegram_chat_id, sent.message_id, body,
+        session.user_id, session.agent_id, session.chat_id, telegram_chat_id, sent.message_id, body, markup,
     )
+
+
+async def _explain_approval(bot, state: TelegramBotState, data: dict, language: str) -> None:
+    """Add the small model's sentence to the approval message that is still waiting (nothing when it was answered)."""
+    card = state.approvals.get(str(data.get("id")))
+    text = " ".join(str(data.get("text") or "").split())
+    if card is None or not text or card.explained:
+        return
+    card.explained = True
+    marker = "```\n"
+    index = card.body.find(marker)
+    line = "_" + _md_escape(text) + "_\n"
+    card.body = card.body[:index] + line + card.body[index:] if index >= 0 else card.body + "\n" + line
+    plain, entities = _convert_markdown(card.body)
+    with suppress(TelegramError):
+        await bot.edit_message_text(
+            plain, chat_id=card.telegram_chat_id, message_id=card.message_id, entities=entities, reply_markup=card.buttons,
+        )
 
 
 async def _close_approval(bot, state: TelegramBotState, approval_id: str, decision: str, reason: str,
@@ -1893,6 +1915,9 @@ async def _send_generation(
                 content.append("notice", event.text)
             elif event.kind == "approval" and event.data:
                 await _send_approval(context, state, session, chat.id, event.data, language)
+                continue
+            elif event.kind == "approval_explanation" and event.data:
+                await _explain_approval(context.bot, state, event.data, language)
                 continue
             elif event.kind == "approval_resolved" and event.data:
                 await _close_approval(
@@ -2066,6 +2091,9 @@ async def _send_wake(bot, state: TelegramBotState, telegram_id: int, session: Te
                     SimpleNamespace(bot=bot), state, TelegramSession(user_id, agent_id, chat_id), telegram_id, item.data, language,
                 )
                 continue
+            elif item.kind == "approval_explanation" and item.data:
+                await _explain_approval(bot, state, item.data, language)
+                continue
             elif item.kind == "approval_resolved" and item.data:
                 await _close_approval(
                     bot, state, str(item.data.get("id")), str(item.data.get("decision")), str(item.data.get("reason", "")), language,
@@ -2087,7 +2115,7 @@ async def _send_wake(bot, state: TelegramBotState, telegram_id: int, session: Te
 
 async def _handle_task_event(bot, state: TelegramBotState, event: dict) -> None:
     kind = event.get("kind")
-    if kind not in ("task_started", "task_finished", "task_wake", "task_approval", "task_approval_resolved"):
+    if kind not in ("task_started", "task_finished", "task_wake", "task_approval", "task_approval_resolved", "task_approval_explanation"):
         return
     try:
         if kind == "task_finished":  # the host is known from the start: no chat lookup needed
@@ -2103,6 +2131,8 @@ async def _handle_task_event(bot, state: TelegramBotState, event: dict) -> None:
                         TelegramSession(event["user_id"], event["agent_id"], event["chat_id"]),
                         telegram_id, event.get("data") or {}, session.language,
                     )
+                elif kind == "task_approval_explanation":
+                    await _explain_approval(bot, state, event.get("data") or {}, session.language)
                 elif kind == "task_approval_resolved":
                     data = event.get("data") or {}
                     await _close_approval(

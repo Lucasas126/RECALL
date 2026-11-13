@@ -5171,8 +5171,10 @@ function buildApprovalCard(entry) {
   const command = make("pre", "approval-command", approval.command ?? "");
   command.tabIndex = 0;
   const attribution = approvalTaskLabel(approval, tr);
-  if (attribution) detail.append(head, make("p", "approval-task", attribution), command);
-  else detail.append(head, command);
+  const explanation = make("p", "approval-explanation", approval.explanation ?? "");
+  explanation.hidden = !approval.explanation;
+  if (attribution) detail.append(head, make("p", "approval-task", attribution), explanation, command);
+  else detail.append(head, explanation, command);
   card.append(summary, detail);
   for (const [label, value] of [[tr("Working directory"), approval.cwd], [tr("Reason"), approval.reason]]) {
     if (!value) continue;
@@ -5198,7 +5200,7 @@ function buildApprovalCard(entry) {
   const error = make("p", "approval-error");
   error.setAttribute("role", "alert");
   detail.append(actions, status, error);
-  entry.nodes = { card, summary, countdown, actions, approve, approveButtons, deny, status, error };
+  entry.nodes = { card, explanation, summary, countdown, actions, approve, approveButtons, deny, status, error };
   return card;
 }
 
@@ -5252,6 +5254,15 @@ function showApproval(approval, place) {
   renderApproval(entry);
   if (!approvalTimer) approvalTimer = setInterval(approvalTimerTick, 1000);
   return entry;
+}
+
+// The small model's sentence arrives after the card; a card already drawn is filled in, one drawn later gets it from its data.
+function explainApproval({ id, text }) {
+  const entry = approvalEntries.get(id);
+  if (!entry || !text) return;
+  entry.data.explanation = text;
+  entry.nodes.explanation.textContent = text;
+  entry.nodes.explanation.hidden = false;
 }
 
 function settleApproval({ id, decision, reason, scope }) {
@@ -5350,6 +5361,7 @@ async function syncApprovals(agentId, chatId) {
   }
   if (session !== state.session || !Array.isArray(pending)) return;
   const listed = new Set(pending.map((approval) => approval.id));
+  for (const approval of pending) if (approval.explanation) explainApproval({ id: approval.id, text: approval.explanation });
   if (state.agentId === agentId && state.chatId === chatId) {
     for (const approval of pending) showApproval({ agent_id: agentId, chat_id: chatId, ...approval }, placeApprovalInView);
   }
@@ -6348,6 +6360,7 @@ function handleEvent(raw, request) {
   else if (event === "notice") reply.notice(payload);
   else if (event === "approval") reply.approval({ agent_id: request.agentId, chat_id: request.chatId, ...payload });
   else if (event === "approval_resolved") settleApproval(payload);
+  else if (event === "approval_explanation") explainApproval(payload);
   else if (event === "task_started") reply.taskStarted?.(payload);
   else if (event === "interrupted") reply.interrupted(payload);
   else if (event === "unavailable") request.unavailable = true;  // a task's live view: another process runs it
