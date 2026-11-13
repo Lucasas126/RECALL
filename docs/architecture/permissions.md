@@ -36,6 +36,7 @@ approval/sandbox split, Meta's *Agents Rule of Two*, OWASP LLM06 (excessive agen
 | `terminal` on a real machine, unprivileged | no | no | no | no | ask (always) | ask |
 | `terminal` on a real machine with sudo/root, and the `local` backend | no | no | no | no | no | ask |
 | `delegate`: hand tasks to the user's other agents | no | no | no | no | yes | yes |
+| `notify`: send the owner a short Telegram message | no | no | yes | yes | yes | yes |
 | `permissions`: view and adjust levels and rules of the same user's agents, up to the user's `max_level` | no | no | no | no | yes | yes |
 | `agents`: list, create, edit, rename and delete the same user's agents (never their level, groups or rules) | no | no | no | no | yes | yes |
 | act on other users' agents, data and settings; admin CLI | no | no | no | no | no | yes |

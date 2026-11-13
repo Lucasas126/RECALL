@@ -62,6 +62,7 @@ SERVICE_MIN_LEVEL: dict[str, Level] = {
     "memory_edit": Level.ASSISTANT,
     "self": Level.ASSISTANT,
     "web": Level.ASSISTANT,
+    "notify": Level.ASSISTANT,
     "folders_edit": Level.COLLABORATOR,
     "delegate": Level.COLLABORATOR,
     "mcp": Level.COLLABORATOR,
