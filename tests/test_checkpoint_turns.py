@@ -92,7 +92,7 @@ class CheckpointTests(unittest.TestCase):
         last = self.agent.messages[-1]
         self.assertEqual(last["role"], "assistant")
         self.assertIn("server stopped", last["content"])
-        self.assertIn("Working on it", last["content"])
+        self.assertTrue(any(m.get("content") == "Working on it" for m in self.agent.messages))  # said before its tool call
 
     def test_only_a_checkpoint_is_dropped(self) -> None:
         chat = self.agent.chat_id
@@ -103,3 +103,54 @@ class CheckpointTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RestoreToolContextTests(CheckpointTests):
+    """A reloaded chat gives the model its tool calls and results back, not only the text."""
+
+    def reload(self) -> Agent:
+        registry = Mock()
+        registry.conversations.return_value = self.conversations
+        config = self.agent.config
+        with (
+            patch("src.agent.agent.SourceRegistry.for_agent", return_value=registry),
+            patch("src.agent.agent.VectorIndex.for_agent"),
+        ):
+            return Agent(config, self.provider, self.agent.chat_id)
+
+    def test_calls_and_results_survive_a_reload_in_order(self) -> None:
+        self.provider.invoke.side_effect = [_tool_round(), _tool_round(), {"response": "All done"}]
+        self.agent.invoke("Do it", stream=False)
+        roles = [m["role"] for m in self.reload().messages[1:]]
+        self.assertEqual(roles.count("tool"), 2)
+        self.assertEqual(roles[-1], "assistant")
+        messages = self.reload().messages
+        ids = [c["id"] for m in messages if m.get("tool_calls") for c in m["tool_calls"]]
+        self.assertEqual(ids, [m["tool_call_id"] for m in messages if m["role"] == "tool"])  # every call has its result
+        self.assertEqual({m["content"] for m in messages if m["role"] == "tool"}, {"done"})
+        self.assertEqual(messages[-1]["content"], "All done")
+
+    def test_a_cut_reply_keeps_its_work_and_the_marker(self) -> None:
+        self.provider.invoke.side_effect = [_tool_round(), RuntimeError("stop")]
+        with self.assertRaises(RuntimeError):
+            self.agent.invoke("Do it", stream=False)
+        messages = self.reload().messages
+        self.assertEqual([m["role"] for m in messages[1:]], ["user", "assistant", "tool", "assistant"])
+        self.assertTrue(messages[-1]["content"].startswith("[Response cut off"))
+
+    def test_long_stored_results_are_marked_as_cut(self) -> None:
+        self.agent._tool_handlers = {"terminal": lambda **_: "x" * 900}
+        self.provider.invoke.side_effect = [_tool_round(), {"response": "ok"}]
+        self.agent.invoke("Do it", stream=False)
+        result = next(m["content"] for m in self.reload().messages if m["role"] == "tool")
+        self.assertIn("[stored result, cut for length]", result)
+
+    def test_inconsistent_stored_data_falls_back_to_the_text(self) -> None:
+        self.conversations.append(self.agent.chat_id, "user", "q")
+        self.conversations.append(
+            self.agent.chat_id, "assistant", "a",
+            actions=[{"name": "terminal", "arguments": {}, "result": "r"}],
+            timeline=[{"type": "tool", "index": 7}],
+        )
+        self.assertEqual([m["role"] for m in self.reload().messages[1:]], ["user", "assistant"])
+        self.assertEqual(self.reload().messages[-1]["content"], "a")

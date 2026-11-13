@@ -1009,12 +1009,17 @@ class Agent:
         if found is not None:
             self._summary = found[1]["content"]
             history = history[found[1]["covers_until"]:]
-        for t in history:
+        for position, t in enumerate(history):
             if t.get("role") not in ("user", "assistant"):
                 continue
             content = self._reply_content(t["content"], bool(t.get("interrupted")), bool(t.get("checkpoint")))
             if t["role"] == "user" and t.get("ts"):
                 content = self._stamped(content, t["ts"], t.get("channel"))
+            if t["role"] == "assistant" and t.get("actions"):
+                restored = self._restore_tool_rounds(t, position)
+                if restored is not None:
+                    self.messages.extend(restored)
+                    continue
             self.messages.append({"role": t["role"], "content": content})
         # seed the context input size from the most recent persisted usage (or the latest compaction)
         for t in reversed(history):
@@ -1027,6 +1032,69 @@ class Agent:
                 if t.get("model", self._default_chat_model) == self.config.models.chat:
                     self._ctx_input_tokens = u["in"]
                 break
+
+    def _restore_tool_rounds(self, turn: dict, position: int) -> Optional[list[dict]]:
+        """Rebuild the tool rounds of a stored assistant turn as context messages (calls, results, final text).
+
+        The chat file keeps each action (name, arguments, result cut to a few hundred characters) and the timeline
+        that orders text and tools, so a reloaded chat keeps what the model had done instead of only what it said.
+        Call ids are not stored: they are generated here. None when the stored data does not add up (the caller
+        then falls back to the text of the turn alone).
+        """
+        actions = turn.get("actions")
+        if not isinstance(actions, list) or not all(isinstance(a, dict) and a.get("name") for a in actions):
+            return None
+        segments = turn.get("timeline")
+        if not segments:
+            segments = [{"type": "tool", "index": i} for i in range(len(actions))]
+        rounds: list[tuple[str, list[int]]] = []  # (text said before the calls, indexes of the calls of that round)
+        text, calls, seen = "", [], []
+        for segment in segments:
+            kind = segment.get("type") if isinstance(segment, dict) else None
+            if kind == "tool":
+                index = segment.get("index")
+                if not isinstance(index, int) or not 0 <= index < len(actions):
+                    return None
+                calls.append(index)
+                seen.append(index)
+            elif kind == "text":
+                if calls:  # text after tools closes that round
+                    rounds.append((text, calls))
+                    text, calls = "", []
+                text = (text + "\n\n" if text else "") + str(segment.get("text") or "")
+        if calls:
+            rounds.append((text, calls))
+            text = ""
+        if sorted(seen) != list(range(len(actions))):
+            return None
+        trailing = text
+        interrupted = bool(turn.get("interrupted"))
+        messages: list[dict] = []
+        for number, (text, indexes) in enumerate(rounds):
+            calls, results = [], []
+            for index in indexes:
+                action = actions[index]
+                call_id = f"restored-{position}-{index}"
+                arguments = action.get("arguments")
+                calls.append({
+                    "id": call_id, "type": "function",
+                    "function": {
+                        "name": action["name"],
+                        "arguments": arguments if isinstance(arguments, str) else json.dumps(arguments or {}),
+                    },
+                })
+                result = str(action.get("result") or "")
+                if result.endswith("…"):
+                    result += " [stored result, cut for length]"
+                results.append({"role": "tool", "tool_call_id": call_id, "name": action["name"], "content": result})
+            messages.append({"role": "assistant", "content": text, "tool_calls": calls})
+            messages.extend(results)
+        if interrupted:
+            marker = self._reply_content(trailing, True, bool(turn.get("checkpoint")))
+            messages.append({"role": "assistant", "content": marker.lstrip()})
+        elif turn.get("content"):
+            messages.append({"role": "assistant", "content": turn["content"]})
+        return messages
 
     # ------------------------------------------------------------------ compaction
 
