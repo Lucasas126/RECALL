@@ -71,6 +71,23 @@ class WebSteeringTests(steering.SteeringFixture):
         self.assertTrue(history[1]["interrupted"])
         self.assertEqual(history[-1]["content"], "Answer: Correction")
 
+    def test_stop_endpoint_cancels_the_running_reply_and_keeps_the_partial(self) -> None:
+        started, release = self._gate("Original")
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            original = pool.submit(self.client.post, self.messages_url, json={"content": "Original"})
+            self.assertTrue(started.wait(2))
+            stop = self.client.post(f"/api/agents/agent-one/chats/{self.chat}/stop")
+            self.assertEqual(stop.status_code, 202)
+            release.set()
+            events = _events(original.result(timeout=3))
+        self.assertEqual([e["event"] for e in events], ["text", "interrupted", "done"])
+        history = self.client.get(f"/api/agents/agent-one/chats/{self.chat}").json()["messages"]
+        self.assertTrue(history[-1]["interrupted"])
+
+    def test_stop_endpoint_unknown_chat_and_nothing_running(self) -> None:
+        self.assertEqual(self.client.post("/api/agents/agent-one/chats/nope/stop").status_code, 404)
+        self.assertEqual(self.client.post(f"/api/agents/agent-one/chats/{self.chat}/stop").status_code, 202)
+
     def test_stream_error_remains_explicit_and_followed_by_done(self) -> None:
         with self.assertLogs("recall", level="ERROR"):
             response = self.client.post(self.messages_url, json={"content": "fail"})

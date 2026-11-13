@@ -613,6 +613,14 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
+    @app.post("/api/agents/{agent_id}/chats/{chat_id}/stop", status_code=202)
+    def stop_chat(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):
+        return service.stop_chat(user_id, agent_id, chat_id)
+
+    @app.get("/api/claude/usage")
+    def claude_usage(user_id: str = Depends(current_user)):
+        return service.claude_usage(user_id)
+
     @app.get("/api/agents/{agent_id}/chats/{chat_id}/stream")
     def follow_reply(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):
         language = service.language(user_id)
