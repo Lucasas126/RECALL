@@ -140,6 +140,20 @@ audio file and sent like any other audio, so it is transcribed first (see below)
 receives the `[AUDIO]` text, the same as a Telegram voice note. Browsers allow the microphone only
 on HTTPS or `localhost`; where it is unavailable the button stays disabled.
 
+## attachments in the web UI
+
+- **Paste:** Ctrl+V in the composer attaches a copied image or file (PDF, audio, video) like the
+  paperclip, with the same type and size limits (10 MB per file, 25 MB in total). Pasted
+  screenshots are named `pasted-<date>-<time>.png`. If the clipboard also holds text, only the
+  text is pasted.
+- **Preview:** images show as thumbnails, audio with a player and video with controls inside the
+  message. The original audio and video are stored in the turn (`media`) and survive a reload;
+  they take disk space in the chat file and are not indexed for memory search.
+- **Transcripts:** each voice note keeps its transcript (`media[].transcript`), shown under the
+  player after a reload too. If the transcription comes back empty the message is not sent and
+  the audio is not stored; the error says no speech was detected. Each transcription is logged
+  with file name, format, MIME type, size, model, language and characters returned.
+
 ## speech-to-text
 
 Audio is always transcribed before the chat model is invoked. RECALL uses

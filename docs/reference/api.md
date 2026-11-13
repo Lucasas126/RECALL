@@ -300,6 +300,20 @@ Tasks launched by the `delegate` tools (see [delegating tasks](../user-guide/del
 
 Errors: `401` no session, `404` unknown task (`code: "unknown_task"`) or a task of another user, `400` empty or too long steer text, `409` steer or stop on a task that does not run in this process (already ended, or owned by another process). A wake turn in `GET .../chats/<chat_id>` has `role: "user"`, `source: "task"` and `task_ids`; the UI shows it as a "Task result" note, not as a message of the user.
 
+## Background processes and unread state
+
+| route | what it does |
+| --- | --- |
+| `GET /api/agents/<agent_id>/chats/<chat_id>/processes` | the chat's background processes (`{processes: [...]}`: id, command with secrets filtered, backend, elapsed time). Lost processes are marked before listing (`recover`). The web UI polls every ~3 s. |
+| `POST /api/agents/<agent_id>/chats/<chat_id>/processes/<process_id>/stop` | stops one of the chat's processes (`202`, `{stopped}`); it does not wake the agent |
+| `POST /api/agents/<agent_id>/chats/<chat_id>/read` | clears the chat's unread mark |
+
+The chat list also returns, per chat, `unread` (a reply finished and the chat was not opened since; stored as `<chat_id>.unread.json` next to the chat), `pending_approvals` (count) and `processes` (count). The web UI shows a blinking dot while the agent works or a background process runs, and a steady dot for an unread reply or a pending approval. Server restarts keep this state, and so do other devices.
+
+## Checkpointed replies
+
+After every tool round the agent stores the reply so far as an assistant turn marked `interrupted` and `checkpoint`; the next round and the final reply replace it. If the server stops mid-reply, the turn stays: the web UI shows it as interrupted and the model sees "Response cut off: the server stopped before it finished".
+
 ## Editing a message
 
 `GET /api/agents/<agent_id>/chats/<chat_id>` returns each message with an `index`: its
