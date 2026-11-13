@@ -310,6 +310,11 @@ Errors: `401` no session, `404` unknown task (`code: "unknown_task"`) or a task 
 
 The chat list also returns, per chat, `unread` (a reply finished and the chat was not opened since; stored as `<chat_id>.unread.json` next to the chat), `pending_approvals` (count) and `processes` (count). The web UI shows a blinking dot while the agent works or a background process runs, and a steady dot for an unread reply or a pending approval. Server restarts keep this state, and so do other devices.
 
+## Editing after Stop
+
+The web UI gives every user bubble its stored index once a reply has ended, so it can be edited. It pairs the user bubbles on screen with the stored user messages
+(not the assistant ones, whose count differs after a stopped, steered or failed reply), so Stop no longer leaves the edit buttons disabled until a reload.
+
 ## Checkpointed replies
 
 After every tool round the agent stores the reply so far as an assistant turn marked `interrupted` and `checkpoint`; the next round and the final reply replace it. If the server stops mid-reply, the turn stays: the web UI shows it as interrupted and the model sees "Response cut off: the server stopped before it finished".
