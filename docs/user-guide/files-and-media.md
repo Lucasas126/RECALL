@@ -123,12 +123,22 @@ error that names this section; PDFs with selectable text still work.
 
 ## message tags and timestamps
 
-Each user turn is sent to the model prefixed with its local timestamp (for example
-`[2026-10-31 14:01+01:00]`), taken from the `ts` stored with the turn, so reloaded
-chats keep the same dates. Assistant replies are not prefixed. Text derived from
+Each user turn is sent to the model prefixed with its local timestamp and the channel
+it was written from (for example `[2026-10-31 14:01+01:00 via telegram]` or
+`[2026-10-31 14:01+01:00 via web UI]`), taken from the `ts` and `channel` stored with
+the turn, so reloaded chats keep the same dates and channels. Turns stored before the
+channel was recorded, and turns written by the system, carry only the timestamp. Assistant replies are not prefixed. Text derived from
 audio starts with `[AUDIO]`, and text describing a video starts with `[VIDEO]`.
 Stored conversations keep the original message text; the prefixes are added only
 to the context sent to the model.
+
+## voice messages in the web UI
+
+The microphone button in the web composer records from the browser's microphone. Press it to start
+(it turns red and shows the elapsed time), press it again to stop: the recording is attached as an
+audio file and sent like any other audio, so it is transcribed first (see below) and the model
+receives the `[AUDIO]` text, the same as a Telegram voice note. Browsers allow the microphone only
+on HTTPS or `localhost`; where it is unavailable the button stays disabled.
 
 ## speech-to-text
 

@@ -343,6 +343,7 @@ class _MessageRun:
     attachments: list[dict]
     stream: Optional[bool]
     continuation: bool = False
+    channel: Optional[str] = None  # where the user wrote it: "web" or "telegram" (None for system turns)
     source: Optional[str] = None  # "task" for a wake turn written by the system, not the user
     meta: Optional[dict] = None  # persisted on the user turn (source, task_ids)
     blocks: Optional[list[str]] = None  # a wake turn's task blocks: later results merge into a queued wake
@@ -1477,6 +1478,7 @@ class ChatService:
         self, user_id: str, agent_id: str, chat_id: str, text: str,
         stream: Optional[bool] = None, attachments: Optional[list[dict]] = None,
         rewind_to: Optional[int] = None, internal_task: bool = False, meta: Optional[dict] = None,
+        channel: Optional[str] = None,
     ) -> Iterator[ChatEvent]:
         """Send a user message to a chat and yield the reply as events.
 
@@ -1492,6 +1494,8 @@ class ChatService:
         removed (kept in the chat's `.removed.json` sidecar) and `text` is sent in its place, as one atomic
         step with respect to the chat's worker. When `attachments` is empty the original turn's
         attachments are kept; long-term memory (Dream) is not rewound.
+
+        `channel` (`web` or `telegram`) is where the person wrote; it is stored on the turn and shown to the model.
         """
         conversations = self._conversations(user_id, agent_id)
         if not internal_task:
@@ -1515,7 +1519,8 @@ class ChatService:
             raise InputError("message is empty")
         slot = self._slot(user_id, agent_id)
         # `meta` (structured task brief / follow-up) is stored on the user turn; only the TaskManager may set it
-        run = _MessageRun(chat_id, text, attachments, stream, meta=dict(meta) if (meta and internal_task) else None)
+        run = _MessageRun(chat_id, text, attachments, stream, meta=dict(meta) if (meta and internal_task) else None,
+                           channel=channel if channel in ("web", "telegram") else None)
         if notice:
             run.events.put(ChatEvent("notice", text=notice, generation_id=run.generation_id))
         deadline = monotonic() + _REWIND_WAIT_SECONDS
@@ -2225,7 +2230,7 @@ class ChatService:
         try:
             result = agent.invoke(
                 run.text, stream=run.stream, cancellation=run.cancellation,
-                continuation=run.continuation, attachments=run.attachments, meta=run.meta,
+                continuation=run.continuation, attachments=run.attachments, meta=run.meta, channel=run.channel,
             )
             if memory := agent.memory_event():  # a search that already finished (replies that are not streamed)
                 yield ChatEvent("memory", data=memory, generation_id=run.generation_id)
