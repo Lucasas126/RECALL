@@ -25,6 +25,7 @@ SERVICE_TEXT = {
     "self": "edit the agent's own MEMORY, USER, SOUL and skills (tool group self)",
     "web": "search the web (tool group web)",
     "notify": "send the user a short Telegram message, at most 30 an hour (tool group notify)",
+    "files_send": "send the user a file the agent can already read (tool group files_send)",
     "folders_edit": "edit the user's folders (tool group folders_edit; asks)",
     "delegate": "launch web-only workers (tool group delegate; asks only where the rules say)",
     "mcp": "use MCP servers the user allows (asks)",

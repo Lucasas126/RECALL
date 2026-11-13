@@ -1359,6 +1359,36 @@ async def _download_attachment(message, bot) -> dict:
     }
 
 
+async def _send_agent_files(bot, telegram_chat_id: int, files: list[dict], language: str) -> None:
+    """Deliver the files a `send_file` call queued: a photo, voice note, video or document by type, with its caption.
+
+    A file Telegram refuses (too large for its limits, a type it rejects as a photo) is retried as a plain document;
+    if that fails too the person is told which file did not go, and the reply carries on.
+    """
+    for item in files:
+        try:
+            header, _, payload = str(item.get("data_url", "")).partition(",")
+            data = base64.b64decode(payload)
+        except Exception:
+            logger.warning("send_file: unreadable file data for %s", item.get("name"))
+            continue
+        name = str(item.get("name") or "file")
+        caption = str(item.get("caption") or "") or None
+        sender = {"image": bot.send_photo, "audio": bot.send_audio, "video": bot.send_video}.get(item.get("modality"))
+        try:
+            if sender is None:
+                await bot.send_document(telegram_chat_id, document=data, filename=name, caption=caption)
+            else:
+                field = {"image": "photo", "audio": "audio", "video": "video"}[item["modality"]]
+                await sender(telegram_chat_id, **{field: data}, caption=caption, filename=name)
+        except TelegramError:
+            try:  # a rejected photo/video still goes through as a document
+                await bot.send_document(telegram_chat_id, document=data, filename=name, caption=caption)
+            except TelegramError:
+                logger.warning("send_file: Telegram refused %s", name, exc_info=True)
+                await bot.send_message(telegram_chat_id, message(language, "Could not send the file {name}.", name=name))
+
+
 async def _next_event(events) -> tuple[bool, ChatEvent | None]:
     def take_next() -> tuple[bool, ChatEvent | None]:
         try:
@@ -1940,6 +1970,8 @@ async def _send_generation(
                 if event.data is None:
                     raise ValueError("Telegram tool event is missing its action data")
                 content.add_action(event.data)
+                if event.data.get("files"):
+                    await _send_agent_files(context.bot, chat.id, event.data["files"], language)
             elif event.kind == "notice":
                 content.append("notice", event.text)
             elif event.kind == "approval" and event.data:
@@ -2113,6 +2145,8 @@ async def _send_wake(bot, state: TelegramBotState, telegram_id: int, session: Te
                 content.start_action(item.data)
             elif item.kind == "tool" and item.data is not None:
                 content.add_action(item.data)
+                if item.data.get("files"):
+                    await _send_agent_files(bot, telegram_id, item.data["files"], language)
             elif item.kind == "notice":
                 content.append("notice", item.text)
             elif item.kind == "approval" and item.data:

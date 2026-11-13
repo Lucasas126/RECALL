@@ -80,6 +80,14 @@ The web **Agents** tab configures these groups for each agent:
   without them it returns an error the agent can read. At most 30 notices an hour per agent (counted in the running process, so a restart resets it) and 3500 characters each.
   Not built in a disposable chat (workers and tasks). No approval card: it only reaches the owner's own chat.
 
+<a id="files_send"></a>
+- `files_send` (level `reader`): `send_file(path, caption="")` hands the user a file the agent can **already read**. `path` is `<source>:<path>`, resolved by the same code
+  as `read` and `folder_read`, so hidden entries, protected paths (keys, secrets, `.env`) and anything outside the agent's readable sources are refused exactly as there; the
+  tool opens no new access. A file from a terminal backend is not covered: that stays behind the terminal's own approval. Up to 10 MB a file and 25 MB a reply. The file is
+  stored with the assistant turn (`media`, so it survives a reload; images, audio and video are previewed, anything else is a download) and, in a Telegram chat, sent as a
+  photo, audio, video or document (a refused photo is retried as a document). The model's context only gets the short tool result, never the bytes. Not built in a disposable
+  chat (workers and tasks). No approval card: the user receives only what the agent could already read.
+
 <a id="agents"></a>
 - `agents` (level `operator`): create, edit, rename and delete the **same user's agents**, never another user's and never by a path. Results are JSON or `error: ...`;
   names, descriptions and SOULs are data. Reads (no card): `agent_list()` (per agent: `id`, `name`, `description`, effective `level`, default `model`, `tool_groups`,

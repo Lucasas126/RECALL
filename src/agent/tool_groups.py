@@ -39,6 +39,11 @@ TOOL_GROUP_CATALOG: Final[tuple[dict[str, str], ...]] = (
         "description": "Send you a short message on Telegram (for example when a long task is done).",
     },
     {
+        "id": "files_send",
+        "name": "Send files",
+        "description": "Send you a file the agent can already read (a note, a document, an image), in the web chat and on Telegram.",
+    },
+    {
         "id": "terminal",
         "name": "Terminal sandbox",
         "description": "Run commands and edit files in a sandbox, with your approval.",
@@ -90,6 +95,7 @@ TOOL_GROUP_TOOLS: Final[dict[str, tuple[str, ...]]] = {
         "folder_write", "folder_append", "folder_edit", "folder_move", "folder_delete",
     ),
     "notify": ("notify_telegram",),
+    "files_send": ("send_file",),
     "terminal": (
         "terminal", "sandbox_read", "sandbox_write", "sandbox_patch", "sandbox_search",
         "process_start", "process_list", "process_read", "process_wait", "process_stop",
@@ -113,6 +119,7 @@ DISPOSABLE_BLOCKED_TOOLS: Final[frozenset[str]] = frozenset(
     | set(TOOL_GROUP_TOOLS["permissions"])  # nor change anyone's permissions: workers never hold that group
     | set(TOOL_GROUP_TOOLS["agents"])  # nor create, change or delete agents: same
     | set(TOOL_GROUP_TOOLS["notify"])  # nor write to the user's phone
+    | set(TOOL_GROUP_TOOLS["files_send"])  # nor hand files to the user
 )
 
 
