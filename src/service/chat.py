@@ -1028,9 +1028,16 @@ class ChatService:
         days = self._retention_days(user_id)
         with slot.state:
             busy = {chat_id for chat_id in conversations.chats() if self._chat_busy(slot, chat_id)}
+        registry = process_registry(DATA_DIR)
+        registry.recover(user_id)
+        running: dict[str, int] = {}
+        for record in registry.list(user_id):
+            if record["state"] == "running" and record.get("agent") == agent_id and record.get("chat_id"):
+                running[record["chat_id"]] = running.get(record["chat_id"], 0) + 1
         summaries = [
             {
                 **conversations.summary(chat_id, days), "active": chat_id in busy,
+                "processes": running.get(chat_id, 0),  # background processes still running for this chat
                 "pending_approvals": len(self._approvals.pending(user_id, agent_id, chat_id)),  # tools waiting for a go-ahead
                 "unread": conversations.has_unread(chat_id),  # a reply finished that nobody has opened (kept on the server)
             }
@@ -1591,6 +1598,7 @@ class ChatService:
         self._owned_agent(user_id, agent_id)
         self._require_chat(self._conversations(user_id, agent_id), chat_id)
         registry = process_registry(DATA_DIR)
+        registry.recover(user_id)  # after a restart, records this server no longer holds are `lost`, not running
         return [
             {
                 "id": r["id"], "backend": r["backend"], "command": redact(r["command"])[:200],

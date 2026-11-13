@@ -66,3 +66,25 @@ class ChatListDotStaticTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProcessesAndRecoverTests(models_tests.ModelFixture):
+    def _process_registry(self):
+        from src.agent.toolsets.processes import process_registry
+        from src.service.chat import DATA_DIR
+        return process_registry(DATA_DIR)
+
+    def test_a_dead_running_record_is_lost_not_listed_as_running(self) -> None:
+        registry = self._process_registry()
+        folder = registry.folder("user-one")
+        import json
+        (folder / "pdead0001.json").write_text(json.dumps({
+            "id": "pdead0001", "user": "user-one", "agent": "agent-one", "chat_id": self.chat, "backend": "dev",
+            "command": "sleep 99", "state": "running", "started": 1.0, "exit_code": None,
+        }), encoding="utf-8")
+        self.assertEqual(self.service.list_processes("user-one", "agent-one", self.chat), [])
+        listed = {c["id"]: c for c in self.service.list_chats("user-one", "agent-one", self.chat)}
+        self.assertEqual(listed[self.chat]["processes"], 0)
+
+    def test_page_counts_processes_as_working(self) -> None:
+        self.assertIn("chat.processes > 0", (_STATIC / "app.js").read_text(encoding="utf-8"))

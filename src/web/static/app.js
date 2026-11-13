@@ -2958,7 +2958,7 @@ async function refreshChats() {
       }
       const li = document.createElement("li");
       li.classList.toggle("active", chat.id === state.chatId && chat.agent_id === state.agentId);
-      const generating = isGenerating(chat.agent_id, chat.id) || Boolean(chat.active);
+      const generating = isGenerating(chat.agent_id, chat.id) || Boolean(chat.active) || chat.processes > 0;
       li.dataset.active = String(Boolean(chat.active));
       li.classList.toggle("generating", generating);
       // dot before the title: blinking while the agent works, fixed when it waits for you (approval) or its answer is unread
