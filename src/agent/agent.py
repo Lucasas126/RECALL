@@ -1070,6 +1070,11 @@ class Agent:
         extra = len(compaction.summary_message(self._summary)["content"]) if self._summary else 0
         extra += len(json.dumps(self._tool_specs)) if self._tool_specs else 0
         cut = compaction.split(self.messages, total, keep, force=manual, extra_chars=extra)
+        small = False
+        if cut is None and manual:
+            # a short chat fits entirely in the normal tail: keep only its latest 20 % and summarise the rest
+            cut = compaction.split(self.messages, total, total * compaction.SMALL_CHAT_KEEP_PERCENT // 100, force=True, extra_chars=extra)
+            small = cut is not None
         if cut is None:
             return None
         older, tail = self.messages[1:cut.start], self.messages[cut.start:]
@@ -1082,7 +1087,7 @@ class Agent:
             summary = compaction.summarise(provider, model, text, zdr=zdr)
         previous = len(compaction.summary_message(self._summary)["content"]) // 4 if self._summary else 0
         after = max(0, total - cut.summarised_tokens - previous) + len(compaction.summary_message(summary)["content"]) // 4
-        result = compaction.CompactionResult(summary, total, after, model, manual)
+        result = compaction.CompactionResult(summary, total, after, model, manual, small=small)
         users_in_tail = sum(1 for m in tail if m.get("role") == "user")
         history = self.sources.conversations().load(self.chat_id)
         covers = compaction.covers_until(history, users_in_tail)

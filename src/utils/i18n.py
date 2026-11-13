@@ -815,6 +815,8 @@ _SPANISH = {
     "This agent keeps no conversation history, so there is nothing to compact.": "Este agente no guarda historial de conversación, así que no hay nada que compactar.",
     "Compaction failed: {error}": "La compactación ha fallado: {error}",
     "Nothing to compact yet: the chat is still short.": "Aún no hay nada que compactar: el chat todavía es corto.",
+    "The chat is short, so only its latest 20 % was kept.": "El chat es corto, así que solo se ha conservado su último 20 %.",
+    "short chat: only its latest 20 % kept": "chat corto: solo se conserva su último 20 %",
     "Context compacted: {before} → {after} tokens.": "Contexto compactado: {before} → {after} tokens.",
     "status: running": "estado: en curso",
     "status: done": "estado: terminada",

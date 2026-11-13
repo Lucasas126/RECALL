@@ -1301,7 +1301,7 @@ class ChatService:
                         "associative_fragments", "associative_query",
                         "source", "task_ids",  # a wake turn: a subagent result, not written by the user
                         "task_brief", "task_message",  # a worker chat's first message / follow-up, structured for the UI
-                        "tokens_before", "tokens_after", "manual",  # a compaction turn: the divider shows the reduction
+                        "tokens_before", "tokens_after", "manual", "small",  # a compaction turn: the divider shows the reduction
                     )
                     if t.get(k) is not None
                 },
@@ -2503,10 +2503,13 @@ class ChatService:
             return message(language, "Compaction failed: {error}", error=str(exc)[:300])
         if result is None:
             return message(language, "Nothing to compact yet: the chat is still short.")
-        return message(
+        text = message(
             language, "Context compacted: {before} → {after} tokens.",
             before=_thousands(result.tokens_before), after=_thousands(result.tokens_after),
         )
+        if result.small:
+            text += " " + message(language, "The chat is short, so only its latest 20 % was kept.")
+        return text
 
     # ------------------------------------------------------------------ dream mode and own files
 

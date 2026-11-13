@@ -4898,7 +4898,7 @@ function compactionDivider(message) {
   const label = message.manual
     ? tr("Context compacted with /compact: {before} → {after} tokens", { before, after })
     : tr("Context compacted: {before} → {after} tokens", { before, after });
-  const node = element("div", { className: "compaction-divider", textContent: label });
+  const node = element("div", { className: "compaction-divider", textContent: message.small ? `${label} · ${tr("short chat: only its latest 20 % kept")}` : label });
   node.setAttribute("role", "separator");
   return node;
 }

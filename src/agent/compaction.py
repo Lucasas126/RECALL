@@ -63,6 +63,10 @@ class Split:
     tail_tokens: int
 
 
+# share of a short chat kept as the tail by a manual /compact when the normal tail would cover all of it
+SMALL_CHAT_KEEP_PERCENT = 20
+
+
 @dataclass
 class CompactionResult:
     summary: str
@@ -71,6 +75,7 @@ class CompactionResult:
     model: str
     manual: bool
     approx: bool = True
+    small: bool = False  # manual /compact on a chat shorter than the normal tail: kept only its latest part
 
 
 def summary_message(summary: str) -> dict:
@@ -202,6 +207,7 @@ def record(result: CompactionResult, covers_until: int) -> dict:
         "tokens_after": result.tokens_after,
         "model": result.model,
         "manual": result.manual or None,
+        "small": result.small or None,
     }
 
 

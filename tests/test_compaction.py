@@ -177,6 +177,32 @@ class CompactionServiceTests(steering.SteeringFixture):
         self.assertEqual(agent._summary, self.agents[("user-one", "agent-one")]._summary)
         self.assertEqual(agent.messages[1]["role"], "user")
 
+    def test_manual_compact_on_a_short_chat_keeps_only_its_latest_part(self) -> None:
+        for provider in self.providers.values():
+            provider.context_window.return_value = 1_000_000  # the normal tail would cover the whole chat
+        for i in range(5):
+            self._say(f"m{i}")
+        self.assertEqual(self.summaries, [])
+        agent = self.agents[("user-one", "agent-one")]
+        result = agent.compact(manual=True)
+        self.assertIsNotNone(result)
+        self.assertTrue(result.small)
+        self.assertEqual(len(self.summaries), 1)
+        self.assertLess(result.tokens_after, result.tokens_before)
+        self.assertEqual(agent.messages[1]["role"], "user")
+        self.assertLess(len(agent.messages), 11)
+        self.assertIn("m4", agent.messages[-2]["content"])  # the latest exchange stays
+        stored = [t for t in self._stored() if t["role"] == "compaction"]
+        self.assertTrue(stored[-1]["small"])
+
+    def test_manual_compact_on_a_normal_chat_is_not_marked_small(self) -> None:
+        for i in range(5):
+            self._say(f"m{i}")
+        agent = self.agents[("user-one", "agent-one")]
+        result = agent.compact(manual=True)
+        if result is not None:
+            self.assertFalse(result.small)
+
     def test_the_previous_summary_goes_into_the_next_one(self) -> None:
         for i in range(14):
             self._say(f"m{i}")
