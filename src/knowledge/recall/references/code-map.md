@@ -17,7 +17,7 @@ Paths are relative to the repository root. In Docker the same tree sits under `/
 | Path | Role |
 | --- | --- |
 | `src/agent/agent.py` | `Agent`: context, system prompt, streaming reply loop, tool execution, memory events |
-| `src/agent/profile.py` | reads SOUL, memories, skills, questions; builds the system-prompt blocks |
+| `src/agent/profile.py` | reads SOUL, memories, skills, for_user.md; builds the system-prompt blocks |
 | `src/agent/default_soul.md` | template SOUL.md given to new agents |
 | `src/agent/default_soul.py` | loads that template |
 | `src/agent/templates.py` | agent templates for `agent create --from-template` and `agent_create` (`default`, `guide`, `permission-manager`; SOULs in `src/agent/*_soul.md`) |

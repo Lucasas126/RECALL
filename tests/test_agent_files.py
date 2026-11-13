@@ -5,7 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
-from src.agent.profile import AgentProfile, load_profile, open_questions, system_prompt
+from src.agent.profile import AgentProfile, load_profile, open_items, system_prompt
 from pydantic import ValidationError
 
 from src.agent.dream import dream_folder_options
@@ -188,20 +188,20 @@ class SkillToolTests(AgentFilesFixture):
 
 
 class PromptAssemblyTests(AgentFilesFixture):
-    def test_order_is_soul_memories_skills_questions_then_extra_blocks(self) -> None:
+    def test_order_is_soul_memories_skills_for_user_then_extra_blocks(self) -> None:
         self.files.write_memory_text("memory", "Use metric units")
         self.files.write_memory_text("user", "Name: User A")
         self.files.write_skill("weekly-plan", SKILL)
         self.sources.mind_palace().write(
-            "questions.md", "# Questions\n- [x] answered one\n- first?\n  - why: curious\n- [ ] second?\n- third?\n- fourth?\n",
+            "for_user.md", "# For the user\n- [x] answered one\n- first?\n  - why: curious\n- [ ] second?\n- third?\n- fourth?\n",
         )
         self.files.write_soul("I am the soul.")
         profile = load_profile(self.sources)
-        self.assertEqual(profile.questions, ["first?", "second?", "third?"])
+        self.assertEqual(profile.for_user, ["first?", "second?", "third?"])
         prompt = system_prompt(profile, ["## Connected services (MCP)\n\nnotes"])
         positions = [prompt.index(part) for part in (
             "I am the soul.", "Use metric units", "Name: User A", "weekly-plan: Plan the user's week",
-            "Ask at most one", "- first?", "## Connected services",
+            "Raise at most one", "- first?", "## Connected services",
         )]
         self.assertEqual(positions, sorted(positions))
         self.assertNotIn("answered one", prompt)
@@ -234,7 +234,8 @@ class PromptAssemblyTests(AgentFilesFixture):
 
     def test_empty_profile_is_only_the_soul(self) -> None:
         self.assertEqual(system_prompt(AgentProfile(soul="Hi")), "Hi")
-        self.assertEqual(open_questions("no list here"), [])
+        self.assertEqual(open_items("no list here"), [])
+        self.assertEqual(open_items("- [x] done\n- [ ] a\n- b\n", limit=20), ["a", "b"])
 
 
 class FolderTests(AgentFilesFixture):

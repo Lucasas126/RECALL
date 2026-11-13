@@ -79,6 +79,13 @@ _HIT_CUT_NOTE = (
 )
 
 
+_DREAM_TASKS_NOTICE = (
+    "## Tasks for your dreams\n\n"
+    "When the user asks you to do something in a dream (research a topic, improve one of your skills or "
+    "notes), add it to `mind_palace:dream_tasks.md` as one `- [ ] task (date, why)` item; your next dream "
+    "session does it and checks it off. Tell the user it is queued for the next dream."
+)
+
 _DISPOSABLE_NOTICE = (
     "## Disposable chat\n\n"
     "This is a disposable chat: nothing from it will be remembered. Your persistent memory, SOUL, skills, "
@@ -175,7 +182,7 @@ class Agent:
         self._mcp = mcp
         # per-agent access to the data plane (mind palace, conversations, own files, user folders)
         self.sources = sources or SourceRegistry.for_agent(config.user_id, config.id, **chat_folder_options(config))
-        # SOUL, memories, skills index and questions, frozen for this chat's lifetime
+        # SOUL, memories, skills index and for_user items, frozen for this chat's lifetime
         self.profile = profile or AgentProfile()
         # semantic index over the indexed sources; updated in the background, never on a turn's path
         self.index = VectorIndex.for_agent(
@@ -395,6 +402,8 @@ class Agent:
             blocks.append(_ASSOC_NOTICE)
         if self._disposable and self._task is None:
             blocks.append(_DISPOSABLE_NOTICE)
+        elif self._task is None and "append" in self._tool_handlers and self.config.has_memory:
+            blocks.append(_DREAM_TASKS_NOTICE)
         if "task_start" in self._tool_handlers and (notice := delegate_notice(self.config)):
             blocks.append(notice)
         if "terminal" in self._tool_handlers and (notice := terminal_notice(self.config)):
