@@ -1029,7 +1029,12 @@ class ChatService:
         with slot.state:
             busy = {chat_id for chat_id in conversations.chats() if self._chat_busy(slot, chat_id)}
         summaries = [
-            {**conversations.summary(chat_id, days), "active": chat_id in busy} for chat_id in conversations.chats()
+            {
+                **conversations.summary(chat_id, days), "active": chat_id in busy,
+                "pending_approvals": len(self._approvals.pending(user_id, agent_id, chat_id)),  # tools waiting for a go-ahead
+                "unread": conversations.has_unread(chat_id),  # a reply finished that nobody has opened (kept on the server)
+            }
+            for chat_id in conversations.chats()
         ]
         return sorted(summaries, key=lambda s: s["updated"], reverse=True)
 
@@ -2235,7 +2240,23 @@ class ChatService:
                 run.events.put(None)
                 with slot.state:
                     slot.active.pop(chat_id, None)
+            self._mark_unread(user_id, agent_id, chat_id)
             self._compact_after_reply(slot, chat_id)
+
+    def _mark_unread(self, user_id: str, agent_id: str, chat_id: str) -> None:
+        """A reply just ended: remember it on the server until the chat is opened, so it shows on any device."""
+        try:
+            self._conversations(user_id, agent_id).set_unread(chat_id, True)
+        except Exception:  # a failed mark must never break the reply
+            logger.warning("could not mark chat %s/%s/%s unread", user_id, agent_id, chat_id, exc_info=True)
+
+    def mark_chat_read(self, user_id: str, agent_id: str, chat_id: str) -> dict:
+        """The person opened the chat: clear its unread mark."""
+        self._owned_agent(user_id, agent_id)
+        conversations = self._conversations(user_id, agent_id)
+        self._require_chat(conversations, chat_id)
+        conversations.set_unread(chat_id, False)
+        return {"unread": False}
 
     @staticmethod
     def _compact_after_reply(slot: _AgentSlot, chat_id: str) -> None:

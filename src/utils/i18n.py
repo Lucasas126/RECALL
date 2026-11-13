@@ -147,6 +147,7 @@ _SPANISH = {
     "wait for this chat's active and queued replies before changing its type": "Espera a que terminen las respuestas activas y pendientes de este chat antes de cambiar su tipo.",
     "chat {chat_id} is disposable and is not reviewed": "El chat {chat_id} es desechable y no se revisa.",
     "Could not save the disposable flag for chat {chat_id}.": "No se ha podido guardar el estado desechable del chat {chat_id}.",
+    "Could not save the unread mark of chat {chat_id}.": "No se ha podido guardar la marca de respuesta sin leer del chat {chat_id}.",
     "Could not read the task mark of chat {chat_id}.": "No se ha podido leer la marca de tarea del chat {chat_id}.",
     "Could not save the task mark of chat {chat_id}.": "No se ha podido guardar la marca de tarea del chat {chat_id}.",
     "a task chat is internal and cannot be converted to a normal chat": "un chat de tarea es interno y no se puede convertir en un chat normal",

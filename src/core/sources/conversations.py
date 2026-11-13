@@ -22,6 +22,7 @@ DEFAULT_DISPOSABLE_RETENTION_DAYS = 30
 _DISPOSABLE_SUFFIX = ".disposable.json"
 _ORIGIN_SUFFIX = ".origin.json"
 _TASK_SUFFIX = ".task.json"
+_UNREAD_SUFFIX = ".unread.json"
 DEFAULT_ORIGIN = "web"  # chats without an origin marker predate it and count as web chats
 _ORIGIN_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 
@@ -279,6 +280,27 @@ class ConversationsSource(Source):
         except OSError as exc:
             raise ChatMetadataError("Could not save the disposable flag for chat {chat_id}.", chat_id=chat_id) from exc
 
+    def _unread_path(self, chat_id: str) -> Path:
+        return self.resolve(f"{chat_id}{_UNREAD_SUFFIX}")
+
+    def has_unread(self, chat_id: str) -> bool:
+        """Whether a reply finished in this chat that nobody has opened yet (state kept on the server)."""
+        self._path(chat_id)  # validates the id
+        return self._unread_path(chat_id).is_file()
+
+    def set_unread(self, chat_id: str, unread: bool) -> None:
+        """Mark or clear the chat's unread reply; a vanished chat is ignored (it was deleted meanwhile)."""
+        if not self.exists_chat(chat_id):
+            return
+        path = self._unread_path(chat_id)
+        try:
+            if not unread:
+                path.unlink(missing_ok=True)
+            else:
+                atomic_write_text(path, json.dumps({"since": datetime.now().astimezone().isoformat(timespec="seconds")}) + "\n")
+        except OSError as exc:
+            raise ChatMetadataError("Could not save the unread mark of chat {chat_id}.", chat_id=chat_id) from exc
+
     def _origin_path(self, chat_id: str) -> Path:
         return self.resolve(f"{chat_id}{_ORIGIN_SUFFIX}")
 
@@ -372,6 +394,7 @@ class ConversationsSource(Source):
         disposable = self._disposable_path(chat_id)
         origin = self._origin_path(chat_id)
         task = self._task_path(chat_id)
+        unread = self._unread_path(chat_id)
         legacy_transcription = self.resolve(f"{chat_id}.stt.json")  # per-chat STT overrides are no longer read
         removed = self._removed_path(chat_id)
         path.unlink()
@@ -382,6 +405,7 @@ class ConversationsSource(Source):
         disposable.unlink(missing_ok=True)
         origin.unlink(missing_ok=True)
         task.unlink(missing_ok=True)
+        unread.unlink(missing_ok=True)
         legacy_transcription.unlink(missing_ok=True)
 
     def _removed_path(self, chat_id: str) -> Path:
