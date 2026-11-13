@@ -240,3 +240,6 @@ How it works, so you can judge it:
 - An expired token is not refreshed by RECALL (the CLI does that on its next run),
   so the strip stays hidden until the login is used again.
 - It is only about the subscription: users on other providers never see it.
+- `/usage` in the web chat or Telegram answers the same numbers as text (for example `Session (5 h): 6% (resets in 2h 14m)`).
+  RECALL answers it itself: it is not stored in the chat and never reaches the model. Without a usable login it says why
+  instead of hiding.

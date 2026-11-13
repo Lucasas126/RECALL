@@ -180,7 +180,8 @@ is `404`. The web UI's send button becomes Stop while a reply runs and the box i
 `session` (5 hours), `week`, `week_opus` or `week_sonnet` (only the windows the plan has), `percent` is 0-100 and
 `resets_at` an ISO time or `null`. When it cannot be known: `{"available": false, "reason"}` with `no_own_login`,
 `no_credentials`, `expired`, `unauthorized` or `unreachable`. Cached one minute per user; the token is never part of the
-answer. See [plan usage](../user-guide/claude-subscription.md#plan-usage).
+answer. The chat command `/usage` (sent as a message, answered like `/dream` and `/compact`) returns the same numbers as
+text. See [plan usage](../user-guide/claude-subscription.md#plan-usage).
 
 Tool steps are announced live: `tool_start` (`{"id", "name", "arguments"}`) is sent right before a tool runs, and the `tool` event that follows when it finishes (`{"id", "name", "arguments", "result", "error"}`) carries the same `id` (the provider's tool call id, else `call-<n>`). Tools run one after another, so each start is followed by its own final event. A tool that was interrupted never gets a final event: the stream then ends with `interrupted` (or `error`), and clients mark any step still running as stopped. A `tool_start` is part of the replay of `.../stream`, so a viewer that attaches mid-run sees the running steps. Stored `actions` are unchanged (finished tools only, without `id`), and Telegram ignores `tool_start`.
 

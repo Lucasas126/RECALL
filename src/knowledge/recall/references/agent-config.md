@@ -135,3 +135,5 @@ Provider options: `ollama.host`; `claude_subscription` takes `claude_config_dir`
 Backends (`terminal_backends.<name>`): `type` is `ssh` (`host`, `port`, `user`, `key_file`, `known_hosts_file`) or `local` (`workdir`; refused unless `terminal.allow_local` in `settings.yaml`); both take `description`; `ssh` also takes `kind` (`machine` default, or `sandbox` for a disposable one). `local` is its own kind.
 
 Preferences (`preferences.json`, Settings dialog and Telegram `/settings`) are separate from the yaml and apply from the next read. The Settings dialog has General, Models, Chats & memory, Telegram and Connections; a row's reset button stores nothing (null), so the setting follows the default again.
+
+Claude plan usage: the web chat shows a strip next to the message box (session and week, as colours and bars) and `/usage` (web chat and Telegram) answers the same numbers as text; both read the user's own Claude login and are hidden or explained when there is none.

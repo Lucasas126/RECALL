@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -78,3 +79,22 @@ def fetch_usage(config_dir: str | None, *, timeout: float = 10.0) -> dict:
     except ValueError:
         return {"available": False, "reason": "unreachable"}
     return {"available": True, "windows": windows}
+
+
+def reset_in(iso: str | None, now: datetime | None = None) -> str | None:
+    """Time until a window resets as `45m`, `2h 14m` or `3d 5h`; `0m` once it has passed; None when unknown."""
+    if not iso:
+        return None
+    try:
+        moment = datetime.fromisoformat(iso)
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    minutes = max(0, round((moment - (now or datetime.now(timezone.utc))).total_seconds() / 60))
+    if minutes < 60:
+        return f"{minutes}m"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours}h {minutes % 60}m"
+    return f"{hours // 24}d {hours % 24}h"

@@ -56,7 +56,7 @@ from src.providers.ollama import OllamaUnavailable
 from src.providers.openrouter import OpenRouterProvider
 from src.providers.claude_subscription import claude_subscription_provider
 from src.providers.claude_subscription.login import login_allowed, resolved_settings
-from src.providers.claude_subscription.usage import fetch_usage
+from src.providers.claude_subscription.usage import fetch_usage, reset_in
 from src.providers.provider import get_provider
 from src.providers.tavily import TavilyClient
 from src.providers.telegram_notify import TelegramNotifier
@@ -89,6 +89,7 @@ def _thousands(value: int) -> str:
     return f"{value:,}".replace(",", ".")
 
 
+_USAGE_RE = re.compile(r"^/usage(?:@\w+)?\s*$", re.IGNORECASE)
 _COMPACT_RE = re.compile(r"^/compact(?:@\w+)?(?:\s+(?P<arg>.*?))?\s*$", re.IGNORECASE | re.DOTALL)
 
 _ROUTING_INSTRUCTIONS = (
@@ -2306,6 +2307,35 @@ class ChatService:
             events = self._events(run, run.events.subscribe())
             self._enqueue(user_id, agent_id, slot, chat_id, run, steer=False)
         return "".join(event.text or "" for event in events if event.kind == "text")
+
+    def usage_command(self, user_id: str, text: str) -> str | None:
+        """Answer `/usage`: the Claude plan usage (session and week) in words; None when `text` is not that command.
+
+        Not stored in any chat and never sent to the model. Users without a usable Claude login get the reason.
+        """
+        if _USAGE_RE.match(text.strip()) is None:
+            return None
+        language = self.language(user_id)
+        report = self.claude_usage(user_id)
+        if not report.get("available"):
+            reason = {
+                "no_own_login": "You have no Claude login of your own, so there is no plan usage to show.",
+                "no_credentials": "No Claude login was found for you; run `claude auth login` first.",
+                "expired": "Your Claude login token has expired; use a Claude model once and ask again.",
+                "unauthorized": "Claude refused the login token; log in again with `claude auth login`.",
+            }.get(report.get("reason"), "Claude plan usage could not be read right now; try again in a moment.")
+            return message(language, reason)
+        labels = {
+            "session": "Session (5 h)", "week": "Week", "week_opus": "Week (Opus)", "week_sonnet": "Week (Sonnet)",
+        }
+        lines = [message(language, "Claude plan usage")]
+        for window in report["windows"]:
+            line = f"{message(language, labels[window['key']])}: {round(window['percent'])}%"
+            left = reset_in(window.get("resets_at"))
+            if left:
+                line += " (" + message(language, "resets in {time}", time=left) + ")"
+            lines.append(line)
+        return "\n".join(lines)
 
     def _manual_compaction(self, user_id: str, agent_id: str, slot: _AgentSlot, run: _MessageRun) -> str:
         """Run a `/compact` on the chat's worker and word the outcome for the user."""

@@ -6126,7 +6126,7 @@ async function dispatchMessage(content, attachments, edit = null) {
   userMessage.text(content);
   userMessage.attachments(edit ? edit.shown : attachments);
   // /dream and /compact are answered by RECALL itself (not stored, not the model): shown as a system reply
-  const command = !edit && !attachments.length && (DREAM_COMMAND.test(content) || COMPACT_COMMAND.test(content));
+  const command = !edit && !attachments.length && (DREAM_COMMAND.test(content) || COMPACT_COMMAND.test(content) || USAGE_COMMAND.test(content));
   const reply = addMessage(command ? "command" : "assistant", state.view);
   const request = {
     userId: state.user.id, agentId: state.agentId, chatId: state.chatId,
@@ -6375,6 +6375,7 @@ const TRACE_RESULT_CHARS = 4000;
 // same grammar as the server's /dream parser: such messages are answered by RECALL, not the model
 const DREAM_COMMAND = /^\/dream(?:@\w+)?(?:\s[\s\S]*)?$/i;
 const COMPACT_COMMAND = /^\/compact(?:@\w+)?(?:\s[\s\S]*)?$/i;
+const USAGE_COMMAND = /^\/usage(?:@\w+)?\s*$/i;
 const numberFormat = new Intl.NumberFormat("en-US");
 
 function dreamUrl(suffix) {

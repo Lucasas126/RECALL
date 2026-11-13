@@ -88,6 +88,24 @@ class WebSteeringTests(steering.SteeringFixture):
         self.assertEqual(self.client.post("/api/agents/agent-one/chats/nope/stop").status_code, 404)
         self.assertEqual(self.client.post(f"/api/agents/agent-one/chats/{self.chat}/stop").status_code, 202)
 
+    def test_usage_command_is_answered_by_recall_and_not_stored(self) -> None:
+        report = {"available": True, "windows": [
+            {"key": "session", "percent": 6.4, "resets_at": None}, {"key": "week", "percent": 14.0, "resets_at": None},
+        ]}
+        with steering.patch.object(self.service, "claude_usage", return_value=report):
+            events = _events(self.client.post(self.messages_url, json={"content": "/usage"}))
+        self.assertEqual([e["event"] for e in events], ["text", "done"])
+        self.assertIn("Session (5 h): 6%", events[0]["data"])
+        self.assertIn("Week: 14%", events[0]["data"])
+        history = self.client.get(f"/api/agents/agent-one/chats/{self.chat}").json()["messages"]
+        self.assertEqual(history, [])
+
+    def test_usage_command_without_login_explains_why(self) -> None:
+        report = {"available": False, "reason": "no_own_login"}
+        with steering.patch.object(self.service, "claude_usage", return_value=report):
+            events = _events(self.client.post(self.messages_url, json={"content": "/usage"}))
+        self.assertIn("no Claude login of your own", events[0]["data"])
+
     def test_stream_error_remains_explicit_and_followed_by_done(self) -> None:
         with self.assertLogs("recall", level="ERROR"):
             response = self.client.post(self.messages_url, json={"content": "fail"})
