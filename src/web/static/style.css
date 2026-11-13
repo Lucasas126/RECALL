@@ -623,7 +623,7 @@ details.thinking { border-left: 2px solid var(--line); padding-left: 10px; }
 .sidebar-footer #user-name { flex: 1; min-width: 0; margin-right: 4px; }
 
 /* Composer: one card with the input and the chat options as compact chips */
-#composer-row { display: flex; align-items: flex-end; min-width: 0; margin: 0 var(--gutter) calc(14px + env(safe-area-inset-bottom)); gap: 6px; }
+#composer-row { display: flex; align-items: stretch; min-width: 0; margin: 0 var(--gutter) calc(14px + env(safe-area-inset-bottom)); gap: 6px; }
 #composer { flex: 1; min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; grid-template-areas: "pend pend pend pend pend" "attach input controls mic send"; align-items: end; gap: 0 4px; margin: 0; padding: 4px 6px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--bg); box-shadow: 0 1px 3px #0000001f; }
 #composer:focus-within { border-color: var(--accent); }
 #composer:has(#input:focus-visible) { box-shadow: 0 0 0 1px var(--accent); }   /* one 2px ring in total with the border */
@@ -631,8 +631,9 @@ details.thinking { border-left: 2px solid var(--line); padding-left: 10px; }
 #pending-attachments:empty { display: none; }
 #input { grid-area: input; flex: none; width: 100%; min-height: 36px; max-height: 40vh; padding: 7px 6px; border: 0; border-radius: 0; background: transparent; outline: none; font-size: .9375rem; line-height: 1.5; }
 #attach { grid-area: attach; width: 36px; height: 36px; border-radius: 4px; }
-#mic { grid-area: mic; width: 36px; height: 36px; border-radius: 4px; }
-#send { grid-area: send; width: 36px; height: 36px; border-radius: 4px; }
+#mic { grid-area: mic; align-self: end; width: 36px; height: 36px; border-radius: 4px; }
+#mic.recording { width: auto; min-width: 36px; padding: 0 10px; border-radius: 18px; }
+#send { grid-area: send; align-self: end; width: 36px; height: 36px; border-radius: 4px; }
 #chat-controls { grid-area: controls; flex-basis: auto; flex-wrap: nowrap; overflow: hidden; gap: 2px; min-width: 0; max-width: 100%; margin: 0 4px 0 0; padding: 0 0 3px; align-self: end; }
 #chat-controls > * { flex-shrink: 0; }
 #chat-model-label, #chat-effort-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -935,12 +936,12 @@ select.warning { border-color: var(--warn); color: var(--warn); }
 
 /* Narrow main column: the options drop to a second row under the input */
 @container main (max-width: 680px) {
-  #composer { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "pend pend pend pend" "attach input mic send" "controls controls controls controls"; }
+  #composer { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "pend pend pend pend" "attach input mic send" "controls controls mic send"; }
   #chat-controls { margin: 0 0 0 36px; }
 }
 
 /* A multi-line message gets the whole width of the box; the options move under it (the class is set by app.js) */
-#composer.multiline { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "pend pend pend pend" "attach input mic send" ". controls controls controls"; }
+#composer.multiline { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "pend pend pend pend" "attach input mic send" ". controls mic send"; }
 #composer.multiline #chat-controls { margin: 0; }
 
 /* Associative memory status: on the line of the author name, not inside the reply */
@@ -988,25 +989,26 @@ html.resizing-sidebar #app { transition: none; }
 @media (prefers-reduced-motion: reduce) { #chat-tasks-indicator .task-ind-dot { animation: none !important; } }
 
 /* Claude plan usage: a strip to the right of the composer; folded it shows one dot per window, unfolded the bars */
-#claude-usage { flex: none; display: flex; align-items: stretch; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--bg); color: var(--muted); font: 12px/1.3 var(--mono); }
+#claude-usage { flex: none; display: flex; flex-direction: row; align-items: stretch; gap: 0; padding: 0; overflow: visible; min-height: 0; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--bg); color: var(--muted); font: 12px/1.3 var(--mono); }
 #claude-usage[hidden] { display: none; }
-#claude-usage-toggle { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 6px 7px; border: 0; background: transparent; color: inherit; cursor: pointer; border-radius: 5px; }
+#claude-usage-toggle { display: flex; flex-direction: row; align-items: center; justify-content: center; align-self: stretch; gap: 0; padding: 0 10px; margin: 0; border: 0; background: transparent; color: inherit; cursor: pointer; border-radius: 5px; }
 #claude-usage-toggle:hover { background: var(--raised); color: var(--text); }
-#claude-usage-dots { display: flex; flex-direction: column; gap: 5px; }
+#claude-usage-dots { display: flex; flex-direction: row; gap: 5px; }
+#claude-usage-toggle[hidden] { display: none; }
 .usage-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); opacity: .5; }
 .usage-dot[data-level="ok"] { background: var(--ok); opacity: 1; }
 .usage-dot[data-level="warn"] { background: #e0b341; opacity: 1; }
 .usage-dot[data-level="high"] { background: #e07a3f; opacity: 1; }
 .usage-dot[data-level="crit"] { background: #d9534f; opacity: 1; }
-.usage-chevron { width: 12px; height: 12px; transition: transform .15s; }
+.usage-chevron { display: none; }  /* the dots alone sit centred; the whole strip is the toggle */
 #claude-usage-toggle[aria-expanded="true"] .usage-chevron { transform: rotate(180deg); }
-#claude-usage-body { display: flex; flex-direction: column; justify-content: center; gap: 8px; padding: 6px 10px 6px 4px; min-width: 150px; }
+#claude-usage-body { display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 3px 8px; min-width: 150px; text-align: center; cursor: pointer; }
 #claude-usage-body[hidden] { display: none; }
-.usage-row .usage-head { display: flex; justify-content: space-between; gap: 10px; color: var(--text); }
+.usage-row .usage-head { display: flex; justify-content: center; align-items: baseline; gap: 8px; color: var(--text); }
 .usage-row .usage-reset { color: var(--muted); font-size: 11px; }
-.usage-bar { height: 5px; margin: 3px 0 2px; border-radius: 3px; background: var(--shade); overflow: hidden; }
+.usage-bar { height: 4px; margin: 2px 0 0; border-radius: 3px; background: var(--shade); overflow: hidden; }
 .usage-bar > span { display: block; height: 100%; width: 0; border-radius: 3px; background: var(--ok); }
 .usage-bar > span[data-level="warn"] { background: #e0b341; }
 .usage-bar > span[data-level="high"] { background: #e07a3f; }
 .usage-bar > span[data-level="crit"] { background: #d9534f; }
-@media (max-width: 640px) { #claude-usage-body { min-width: 120px; } }
+@media (max-width: 640px) { #claude-usage-body { min-width: 110px; } }

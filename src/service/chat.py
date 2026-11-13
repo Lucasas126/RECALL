@@ -1519,8 +1519,9 @@ class ChatService:
         if not media and rewind_to is not None and not attachments:
             media = list(original.get("media") or [])
         text, attachments, notice = self._decompose_videos(user_id, agent_id, chat_id, text, attachments)
+        transcripts: list[str] = []
         text, attachments = self._transcribe_audio(
-            user_id, agent_id, chat_id, text, attachments,
+            user_id, agent_id, chat_id, text, attachments, transcripts,
         )
         text, attachments = self._extract_documents(text, attachments)
         if not text.strip() and not attachments:
@@ -1532,6 +1533,9 @@ class ChatService:
             run_meta["media"] = media
         run = _MessageRun(chat_id, text, attachments, stream, meta=run_meta or None,
                            channel=channel if channel in ("web", "telegram") else None)
+        if transcripts and channel == "web":  # show what the speech-to-text heard, so the person can check it
+            heard = "\n".join(transcripts)
+            notice = f"{notice}\n\n🎤 {heard}" if notice else f"🎤 {heard}"
         if notice:
             run.events.put(ChatEvent("notice", text=notice, generation_id=run.generation_id))
         deadline = monotonic() + _REWIND_WAIT_SECONDS
@@ -2083,6 +2087,7 @@ class ChatService:
 
     def _transcribe_audio(
         self, user_id: str, agent_id: str, chat_id: str, text: str, attachments: list[dict],
+        transcripts_out: Optional[list] = None,
     ) -> tuple[str, list[dict]]:
         audio = [attachment for attachment in attachments if attachment["modality"] == "audio"]
         if not audio:
@@ -2128,6 +2133,8 @@ class ChatService:
                 )
                 raise InputError("no speech was detected in '{name}'", name=attachment["name"])
             transcripts.append(transcript)
+        if transcripts_out is not None:
+            transcripts_out.extend(transcripts)
         if transcripts:
             text = "\n\n".join(part for part in [text.strip(), *(
                 self._transcription_text(transcript) for transcript in transcripts

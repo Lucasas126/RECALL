@@ -659,7 +659,7 @@ function translateInterface() {
   $("agent-delegation-model").placeholder = tr("The model of the chat");
   for (const [id, text] of [
     ["settings-open", "Settings"], ["settings-close", "Close"], ["tasks-open", "Tasks"], ["tasks-close", "Close"], ["assoc-close", "Close"],
-    ["logout", "Log out"], ["jump-latest", "Jump to latest"], ["claude-usage-toggle", "Claude plan usage"], ["theme-toggle", "Switch theme"],
+    ["logout", "Log out"], ["jump-latest", "Jump to latest"], ["claude-usage-toggle", "Claude plan usage"], ["claude-usage-body", "Claude plan usage"], ["theme-toggle", "Switch theme"],
   ]) {
     $(id).title = tr(text);
     $(id).setAttribute("aria-label", tr(text));
@@ -7616,9 +7616,8 @@ function renderClaudeUsage(report) {
     fill.dataset.level = level;
     const reset = item.resets_at ? tr("resets in {time}", { time: usageReset(item.resets_at) }) : "";
     body.append(element("div", { className: "usage-row" },
-      element("div", { className: "usage-head" }, element("span", { textContent: tr(USAGE_LABELS[item.key] ?? item.key) }), element("strong", { textContent: `${percent}%` })),
-      element("div", { className: "usage-bar" }, fill),
-      element("div", { className: "usage-reset", textContent: reset })));
+      element("div", { className: "usage-head" }, element("span", { textContent: tr(USAGE_LABELS[item.key] ?? item.key) }), element("span", { className: "usage-reset", textContent: reset }), element("strong", { textContent: `${percent}%` })),
+      element("div", { className: "usage-bar" }, fill)));
   }
 }
 
@@ -7631,16 +7630,20 @@ async function refreshClaudeUsage() {
     renderClaudeUsage(null);
   }
 }
-$("claude-usage-toggle").addEventListener("click", () => {
-  const open = $("claude-usage-body").hidden;
+// collapsed: the dots button opens it; open: the text itself is the toggle (no separate button column)
+function setClaudeUsageOpen(open) {
   $("claude-usage-body").hidden = !open;
+  $("claude-usage-toggle").hidden = open;
   $("claude-usage-toggle").setAttribute("aria-expanded", String(open));
+  $("claude-usage-body").setAttribute("aria-expanded", String(open));
   try { localStorage.setItem("claude-usage-open", open ? "1" : "0"); } catch { /* storage may be blocked */ }
+}
+$("claude-usage-toggle").addEventListener("click", () => setClaudeUsageOpen(true));
+$("claude-usage-body").addEventListener("click", () => setClaudeUsageOpen(false));
+$("claude-usage-body").addEventListener("keydown", (event) => {
+  if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setClaudeUsageOpen(false); }
 });
 try {
-  if (localStorage.getItem("claude-usage-open") === "1") {
-    $("claude-usage-body").hidden = false;
-    $("claude-usage-toggle").setAttribute("aria-expanded", "true");
-  }
+  if (localStorage.getItem("claude-usage-open") === "1") setClaudeUsageOpen(true);
 } catch { /* storage may be blocked */ }
 usageTimer = setInterval(() => { if (!document.hidden) refreshClaudeUsage(); }, USAGE_REFRESH_MS);
