@@ -349,6 +349,8 @@ class Agent:
         self.last_reasoning: str = ""
         # tool calls made during the last turn (name, arguments, truncated result, error flag)
         self.last_actions: list[dict] = []
+        self.outbox: list[dict] = []  # files `send_file` queued during this reply
+        self._turn_files: list[dict] = []  # every file of this reply, stored with its turn
         self._timeline = TimelineBuilder()  # order of thinking, tool steps and text of the reply being built
         # formatted usage breakdown of the last reply (for the caller to display)
         self.last_usage: str = ""
@@ -512,6 +514,7 @@ class Agent:
         self._round_replies = []
         self._round_reasoning = []
         self.last_actions = []
+        self.outbox, self._turn_files = [], []
         self._timeline = TimelineBuilder()
         self.last_reasoning = ""
         self.last_usage = ""
@@ -903,7 +906,9 @@ class Agent:
                 text = text[:_ACTION_RESULT_CHARS] + "…"
             actions.append({"name": name, "arguments": args, "result": text, "error": failed})
             self.last_actions.append(actions[-1])
-            yield "tool", {**actions[-1], "id": call_id}
+            files, self.outbox = self.outbox, []
+            self._turn_files.extend(files)
+            yield "tool", {**actions[-1], "id": call_id, **({"files": files} if files else {})}
         self._checkpoint()
         if cancellation is not None:
             cancellation.raise_if_cancelled()
@@ -926,6 +931,7 @@ class Agent:
                 model=self.config.models.chat,
                 reasoning=reasoning or None,
                 actions=self.last_actions or None,
+                media=self._turn_files or None,
                 timeline=self._timeline.build(len(self.last_actions)),
             )
             self._checkpointed = True
@@ -964,6 +970,7 @@ class Agent:
             "zdr": self.zdr_required,
             "reasoning": reasoning or None,
             "actions": self.last_actions or None,
+            "media": self._turn_files or None,
             "timeline": self._timeline.build(len(self.last_actions)),
             "associative_matches": self._assoc_match_count if self._assoc_outcome in ("found", "none") else None,
             "associative_skipped": True if self._assoc_outcome == "skipped" else None,

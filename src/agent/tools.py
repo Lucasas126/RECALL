@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Callable
 from src.agent.toolsets.agents import build_agent_tools
 from src.agent.toolsets.delegate import build_delegate_tools
 from src.agent.toolsets.editing import build_edit_tools
+from src.agent.toolsets.files_send import build_files_send_tools
 from src.agent.toolsets.notify import build_notify_tools
 from src.agent.toolsets.memory import build_memory_tools
 from src.agent.toolsets.permissions import build_permission_tools
@@ -29,7 +30,7 @@ _ORDER = (
     "folder_list", "folder_read", "folder_search",
     "folder_write", "folder_append", "folder_edit", "folder_move", "folder_delete",
     "web_search", "web_retrieve",
-    "notify_telegram",
+    "notify_telegram", "send_file",
     "terminal", "sandbox_read", "sandbox_write", "sandbox_patch", "sandbox_search",
     "process_start", "process_list", "process_read", "process_wait", "process_stop",
     "task_start", "task_list", "task_result", "task_steer", "task_send", "task_stop", "task_wait",
@@ -88,6 +89,8 @@ def build_tools(
         base_tools.extend(build_folder_tools(agent, writable="folders_edit" in selected and not disposable))
     if web_client is not None and "web" in selected:
         base_tools.extend(build_web_tools(web_client))
+    if "files_send" in selected and not disposable:
+        base_tools.extend(build_files_send_tools(agent))
     if "notify" in selected and not disposable:  # a worker's hidden chat never writes to the user's phone
         base_tools.extend(build_notify_tools(agent))
     if "terminal" in selected and (not disposable or worker_terminal):

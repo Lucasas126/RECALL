@@ -154,6 +154,17 @@ on HTTPS or `localhost`; where it is unavailable the button stays disabled.
   the audio is not stored; the error says no speech was detected. Each transcription is logged
   with file name, format, MIME type, size, model, language and characters returned.
 
+## files and notices from the agent
+
+An agent can hand you a file and message you on Telegram, with two tool groups you pick per agent (see [tools](../reference/tools.md#files_send)):
+
+- `files_send` (level `reader`): `send_file` sends a file the agent can already read, for example a note from your Obsidian folder. It shows in the web chat (images,
+  audio and video are previewed, other files are a download link), is kept with the reply so it is still there after a reload, and, in a Telegram chat, arrives as a
+  photo, audio, video or document. Up to 10 MB a file and 25 MB a reply. It opens no new access: files from a terminal machine still need the terminal's approval card,
+  and if you are not there to answer it the send fails after the card's timeout and the agent is told.
+- `notify` (level `assistant`): `notify_telegram` sends you a short message on Telegram, for example "tell me when you finish". It needs the bot token on the server and
+  your user linked in `TELEGRAM_ALLOWED_USERS`; at most 30 an hour per agent.
+
 ## speech-to-text
 
 Audio is always transcribed before the chat model is invoked. RECALL uses

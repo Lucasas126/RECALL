@@ -17,7 +17,7 @@ L = Level
 # the "Levels and services" table of docs/architecture/permissions.md: the first level that may hold each group
 GROUP_FIRST_LEVEL = {
     "memory_read": L.READER, "folders_read": L.READER,
-    "memory_edit": L.ASSISTANT, "self": L.ASSISTANT, "web": L.ASSISTANT, "notify": L.ASSISTANT,
+    "memory_edit": L.ASSISTANT, "self": L.ASSISTANT, "web": L.ASSISTANT, "notify": L.ASSISTANT, "files_send": L.READER,
     "folders_edit": L.COLLABORATOR, "delegate": L.COLLABORATOR,
     "terminal": L.OPERATOR, "permissions": L.OPERATOR, "agents": L.OPERATOR,
 }

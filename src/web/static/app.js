@@ -3762,11 +3762,13 @@ function activateView(container) {
 function attachmentView(attachment) {
   const label = attachment.name || attachment.modality || "attachment";
   const kind = attachment.data_url && ["image", "audio", "video"].includes(attachment.modality) ? attachment.modality : null;
-  const item = document.createElement(kind ? "div" : "span");
+  const download = !kind && attachment.data_url && attachment.modality === "document";  // a file the agent sent
+  const item = document.createElement(kind ? "div" : download ? "a" : "span");
   item.className = "attachment-name" + (kind ? ` attachment-${kind}` : "");
   item._attachment = attachment;
   if (!kind) {
     item.textContent = label;
+    if (download) { item.href = attachment.data_url; item.download = label; item.title = tr("Download"); }
     return item;
   }
   const media = document.createElement(kind === "image" ? "img" : kind);
@@ -3811,6 +3813,7 @@ function renderMessages(messages) {
       });
     }
     if (m.role === "assistant") {
+      if (m.media?.length) view.attachments(m.media);
       for (const step of historySteps(m)) {
         if (step.type === "reasoning") view.thinking(step.text);
         else if (step.type === "tool") view.action(step.action);
@@ -5944,6 +5947,7 @@ function addMessage(role, parent = state.view ?? $("messages")) {
     // The final `tool` event: completes the step started above in place (same position, same open/closed state).
     action(a) {
       actionCount++;
+      if (a.files?.length) renderAttachmentNames(a.files);  // `send_file`: the files the agent hands over
       const { steps, index } = toolStepsApply(liveSteps, "tool", a);
       const started = index < liveNodes.length;
       liveSteps = steps;

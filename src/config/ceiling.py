@@ -23,6 +23,7 @@ GROUP_MIN_LEVEL: dict[str, Level] = {
     "self": SERVICE_MIN_LEVEL["self"],
     "web": SERVICE_MIN_LEVEL["web"],
     "notify": SERVICE_MIN_LEVEL["notify"],
+    "files_send": SERVICE_MIN_LEVEL["files_send"],
     "folders_edit": SERVICE_MIN_LEVEL["folders_edit"],
     "delegate": SERVICE_MIN_LEVEL["delegate"],
     "permissions": SERVICE_MIN_LEVEL["permissions"],

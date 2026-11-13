@@ -1,6 +1,6 @@
 # Tools and tool groups
 
-The user selects tool groups per agent (`chat_config.tool_groups`, Tools tab). Without a selection you get `memory_read`, `memory_edit`, `web` and `self`; folder groups, `notify`, `terminal`, `delegate`, `permissions` and `agents` are always explicit. `chat_config.tools: false` removes all tools. `skill_view` is always available while you have any skill. Web tools need a Tavily key on the server. MCP tools (`<server_id>__<tool>`) are added per agent and are untrusted.
+The user selects tool groups per agent (`chat_config.tool_groups`, Tools tab). Without a selection you get `memory_read`, `memory_edit`, `web` and `self`; folder groups, `notify`, `files_send`, `terminal`, `delegate`, `permissions` and `agents` are always explicit. `chat_config.tools: false` removes all tools. `skill_view` is always available while you have any skill. Web tools need a Tavily key on the server. MCP tools (`<server_id>__<tool>`) are added per agent and are untrusted.
 
 Addresses are `source:path`, e.g. `mind_palace:notes/pets.md`.
 
@@ -21,6 +21,7 @@ Addresses are `source:path`, e.g. `mind_palace:notes/pets.md`.
 | `move` | memory_edit | move or rename within the allowed sources; errors on an existing destination unless `overwrite=true` |
 | `delete` | memory_edit | delete a file |
 | `web_search` | web | public web search (Tavily); 1-10 results, untrusted; never send secrets |
+| `send_file` | files_send | hand the user a file you can already read (`<source>:<path>`), in the web chat and on Telegram; 10 MB a file; level reader |
 | `notify_telegram` | notify | a short Markdown message to the owner's own Telegram chat; 30 an hour; level assistant; send it last |
 | `web_retrieve` | web | read a public page as markdown, optional focus query; capped, untrusted |
 | `memory` | self | edit `MEMORY.md` (target `memory`) or `USER.md` (target `user`): add, patch, remove, or an atomic `operations` batch |
@@ -78,6 +79,7 @@ Addresses are `source:path`, e.g. `mind_palace:notes/pets.md`.
 | `memory_edit` | `write`, `append`, `edit`, `move`, `delete` |
 | `web` | `web_search`, `web_retrieve` |
 | `notify` | `notify_telegram` |
+| `files_send` | `send_file` |
 | `self` | `memory`, `skill_view`, `skill_manage`, `soul_edit` |
 | `folders_read` | `folder_list`, `folder_read`, `folder_search` |
 | `folders_edit` | the read tools plus `folder_write`, `folder_append`, `folder_edit`, `folder_move`, `folder_delete` |
