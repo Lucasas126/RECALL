@@ -1284,7 +1284,7 @@ class ChatService:
                 "index": position,
                 **{
                     k: t[k] for k in (
-                        "role", "content", "ts", "reasoning", "actions", "timeline", "interrupted",
+                        "role", "content", "ts", "reasoning", "actions", "timeline", "interrupted", "checkpoint",
                         "associative_matches", "associative_skipped", "usage", "usage_report",
                         "associative_fragments", "associative_query",
                         "source", "task_ids",  # a wake turn: a subagent result, not written by the user

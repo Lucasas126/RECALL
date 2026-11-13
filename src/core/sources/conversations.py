@@ -425,11 +425,17 @@ class ConversationsSource(Source):
             raise ChatMetadataError("Could not rewind chat {chat_id}.", chat_id=chat_id) from exc
         return dropped
 
-    def append(self, chat_id: str, role: str, content: str, **extra) -> dict:
-        """Append a turn to an existing chat as one JSONL line."""
+    def append(self, chat_id: str, role: str, content: str, *, drop_checkpoint: bool = False, **extra) -> dict:
+        """Append a turn to an existing chat as one JSONL line.
+
+        `drop_checkpoint` first removes the chat's last line when it is a checkpoint (see `checkpoint`): the final
+        turn replaces the partial one written while the reply was still running.
+        """
         path = self._path(chat_id)
         if not path.is_file():
             raise FileNotFoundError(f"chat not found: {chat_id}")
+        if drop_checkpoint:
+            self._drop_checkpoint(path)
         turn = {
             "role": role,
             "content": content,
@@ -439,6 +445,29 @@ class ConversationsSource(Source):
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(turn, ensure_ascii=False) + "\n")
         return turn
+
+    def checkpoint(self, chat_id: str, content: str, *, replace: bool, **extra) -> dict:
+        """Save the assistant turn still being written, so a restart in the middle does not lose what was done.
+
+        The turn is stored as `interrupted` with `checkpoint: true`. With `replace`, the previous checkpoint of the
+        same reply (the chat's last line) is overwritten instead of adding another turn.
+        """
+        return self.append(
+            chat_id, "assistant", content, drop_checkpoint=replace, **extra, interrupted=True, checkpoint=True,
+        )
+
+    @staticmethod
+    def _drop_checkpoint(path: Path) -> None:
+        """Remove the file's last line when it is a checkpoint turn; any other last line stays."""
+        with open(path, "rb+") as fh:
+            data = fh.read().rstrip(b"\n")
+            start = data.rfind(b"\n") + 1
+            try:
+                last = json.loads(data[start:])
+            except ValueError:
+                return
+            if isinstance(last, dict) and last.get("checkpoint") is True:
+                fh.truncate(start)
 
     def load(self, chat_id: str) -> list[dict]:
         """Read all turns of a chat."""
