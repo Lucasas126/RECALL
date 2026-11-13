@@ -44,7 +44,7 @@ class ScriptedProvider:
         self.calls.append({"messages": [dict(message) for message in messages], "model": model, **kwargs})
         if self.gate is not None:
             self.gate.wait(5)
-        step = self.steps.pop(0) if self.steps else {"response": "done"}
+        step = self.steps.pop(0) if self.steps else _finish("done")
         if isinstance(step, Exception):
             raise step
         if callable(step):
@@ -54,6 +54,11 @@ class ScriptedProvider:
 
 def _call(call_id: str, name: str, **arguments) -> dict:
     return {"id": call_id, "name": name, "arguments": json.dumps(arguments)}
+
+
+def _finish(summary: str, call_id: str = "fin", **extra) -> dict:
+    """A model step that ends the session with dream_finish."""
+    return {"tool_calls": [_call(call_id, "dream_finish", summary=summary)], **extra}
 
 
 class DreamFixture(unittest.TestCase):
@@ -185,14 +190,14 @@ class DreamRunnerTests(DreamFixture):
                 _call("c6", "write", memory_path="conversations:x.jsonl", content="nope"),
                 _call("c7", "soul_edit", action="patch", old_string="I am Aria.", new_string="I am Aria, curious."),
             ]},
-            {"response": "Reviewed 1 chat; learned the user's city.", "usage": {"prompt_tokens": 100, "completion_tokens": 20}},
+            _finish("Reviewed 1 chat; learned the user's city.", usage={"prompt_tokens": 100, "completion_tokens": 20}),
         ])
         summary = self.runner(provider).run()
         self.assertEqual(summary["status"], "completed")
         self.assertEqual(summary["chats_reviewed"], [chat_id])
         self.assertEqual((summary["pending_before"], summary["pending_after"]), (1, 0))
         self.assertEqual(summary["steps"], 4)
-        self.assertEqual(summary["tool_calls"], 7)
+        self.assertEqual(summary["tool_calls"], 8)
         self.assertEqual(summary["errors"], 1)  # the refused write to conversations
         self.assertEqual(summary["summary"], "Reviewed 1 chat; learned the user's city.")
         changed = {item["path"]: item["change"] for item in summary["files_changed"]}
@@ -210,7 +215,7 @@ class DreamRunnerTests(DreamFixture):
         self.assertIn("## Dream session", first["messages"][0]["content"])
         self.assertTrue(first["messages"][0]["content"].startswith("I am Aria."))
         names = {spec["function"]["name"] for spec in first["tools"]}
-        self.assertTrue({"dream_pending", "dream_read_chat", "dream_mark_reviewed", "memory", "soul_edit", "skill_manage", "append"} <= names)
+        self.assertTrue({"dream_pending", "dream_read_chat", "dream_mark_reviewed", "dream_finish", "memory", "soul_edit", "skill_manage", "append"} <= names)
         self.assertFalse(names & {"web_search", "folder_read", "folder_write"})
         # trace and summary files
         trace = self.state.trace("20261103-040000-abcd")
@@ -218,8 +223,8 @@ class DreamRunnerTests(DreamFixture):
         self.assertEqual(kinds[0], "session_started")
         self.assertEqual(kinds[-1], "session_finished")
         self.assertIn("reasoning", kinds)
-        self.assertEqual(kinds.count("tool_call"), 7)
-        self.assertEqual(kinds.count("tool_result"), 7)
+        self.assertEqual(kinds.count("tool_call"), 8)
+        self.assertEqual(kinds.count("tool_result"), 8)
         call = next(event for event in trace if event["type"] == "tool_call" and event["name"] == "memory")
         self.assertEqual(call["arguments"]["content"], "Lives in Valencia")
         refused = next(event for event in trace if event["type"] == "tool_result" and event["id"] == "c6")
@@ -263,6 +268,86 @@ class DreamRunnerTests(DreamFixture):
         self.assertIn("Only tidy the palace.", provider.calls[0]["messages"][0]["content"])
         self.assertNotIn("## Dream session", provider.calls[0]["messages"][0]["content"])
         self.assertEqual(len(self.queue.pending()), 1)
+
+
+class DreamFinishTests(DreamFixture):
+    def runner(self, provider, **dream) -> DreamRunner:
+        return DreamRunner(_config(**dream), provider, self.sources, session_id="20261103-040000-abcd", trigger="manual")
+
+    def test_a_reply_without_tool_calls_does_not_end_the_session(self) -> None:
+        chat_id = self.chat("I moved to Valencia", "Noted!")
+        provider = ScriptedProvider([
+            {"response": "I am short on time, so I will stop here."},
+            {"tool_calls": [_call("c1", "dream_read_chat", chat_id=chat_id)]},
+            {"tool_calls": [_call("c2", "dream_mark_reviewed", chat_id=chat_id)]},
+            _finish("Reviewed 1 chat."),
+        ])
+        summary = self.runner(provider).run()
+        self.assertEqual((summary["status"], summary["summary"]), ("completed", "Reviewed 1 chat."))
+        self.assertEqual(summary["chats_reviewed"], [chat_id])
+        nudge = provider.calls[1]["messages"][-1]
+        self.assertEqual(nudge["role"], "user")
+        self.assertIn("1 chat(s) are still pending", nudge["content"])
+        self.assertIn("dream_finish", nudge["content"])
+        self.assertEqual(provider.calls[1]["messages"][-2], {"role": "assistant", "content": "I am short on time, so I will stop here."})
+        self.assertEqual(len(_events_of(self.state, "continue_nudge")), 1)
+        self.assertEqual(len(_events_of(self.state, "finish_requested")), 1)
+
+    def test_dream_finish_ends_after_the_rest_of_its_batch_runs(self) -> None:
+        chat_id = self.chat("hi")
+        provider = ScriptedProvider([
+            {"tool_calls": [_call("c1", "dream_read_chat", chat_id=chat_id)]},
+            {"tool_calls": [_finish("Done.")["tool_calls"][0], _call("c2", "dream_mark_reviewed", chat_id=chat_id)]},
+            _finish("never reached"),
+        ])
+        summary = self.runner(provider).run()
+        self.assertEqual(summary["summary"], "Done.")
+        self.assertEqual(summary["steps"], 2)
+        self.assertEqual(self.queue.pending(), [])
+
+    def test_an_empty_summary_is_refused_and_the_session_goes_on(self) -> None:
+        provider = ScriptedProvider([
+            {"tool_calls": [_call("c1", "dream_finish", summary="  ")]},
+            _finish("Nothing pending."),
+        ])
+        summary = self.runner(provider).run()
+        self.assertEqual((summary["steps"], summary["errors"], summary["summary"]), (2, 1, "Nothing pending."))
+
+    def test_a_model_that_never_calls_dream_finish_is_closed_after_a_few_idle_replies(self) -> None:
+        provider = ScriptedProvider([{"response": "bye"}] * 10)
+        summary = self.runner(provider).run()
+        self.assertEqual((summary["status"], summary["steps"], summary["summary"]), ("completed", 3, "bye"))
+        self.assertEqual(len(_events_of(self.state, "continue_nudge")), 2)
+        self.assertEqual(len(_events_of(self.state, "idle_closed")), 1)
+
+    def test_long_chats_are_read_in_parts_and_marked_to_the_end(self) -> None:
+        chat_id = self.chat(*[f"turn {n}" for n in range(1, 6)])
+        provider = ScriptedProvider([
+            {"tool_calls": [_call("c1", "dream_read_chat", chat_id=chat_id, max_turns=2)]},
+            {"tool_calls": [_call("c2", "dream_read_chat", chat_id=chat_id, max_turns=2)]},
+            {"tool_calls": [_call("c3", "dream_read_chat", chat_id=chat_id, max_turns=2)]},
+            {"tool_calls": [_call("c4", "dream_read_chat", chat_id=chat_id, max_turns=2)]},
+            {"tool_calls": [_call("c5", "dream_mark_reviewed", chat_id=chat_id)]},
+            _finish("ok"),
+        ])
+        self.runner(provider).run()
+        parts = [json.loads(event["result"]) for event in _events_of(self.state, "tool_result") if event["name"] == "dream_read_chat"]
+        self.assertEqual([(part["read_from"], part["read_until"]) for part in parts], [(1, 2), (3, 4), (5, 5), (5, 5)])
+        self.assertEqual([turn["n"] for turn in parts[1]["turns"]], [3, 4])
+        self.assertEqual([turn["n"] for turn in parts[1]["context"]], [1, 2])
+        self.assertIn("note", parts[3])
+        self.assertEqual(self.queue.pending(), [])
+
+    def test_the_default_prompt_points_memory_at_the_palace(self) -> None:
+        provider = ScriptedProvider([_finish("ok")])
+        self.runner(provider).run()
+        prompt = provider.calls[0]["messages"][0]["content"]
+        for phrase in ("no size limit", "pointers", "INDEX.md", "dream_finish", "There is no hurry"):
+            self.assertIn(phrase, prompt)
+
+
+def _events_of(state, kind: str) -> list[dict]:
+    return [event for event in state.trace("20261103-040000-abcd") if event["type"] == kind]
 
 
 class DreamManagerTests(DreamFixture):

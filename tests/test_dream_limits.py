@@ -14,7 +14,7 @@ from src.config.settings import _public_url
 from src.core.sources.registry import SourceRegistry
 from src.providers.cancellation import GenerationCancelled
 from src.service.dream import DreamDependencies, DreamManager, dream_notification, session_link
-from test_dream import DreamFixture, ScriptedProvider, _call, _config
+from test_dream import DreamFixture, ScriptedProvider, _call, _config, _finish
 
 SESSION = "20261103-040000-abcd"
 REPO = Path(__file__).resolve().parents[1]
@@ -104,7 +104,7 @@ class DreamTimeLimitTests(DreamFixture):
             after(230, pending),  # 70 s left: no warning yet
             after(20, pending),   # 50 s left: warning before the next call
             after(5, pending),
-            {"response": "wrapped up"},
+            _finish("wrapped up"),
         ])
         summary = self.runner(provider, clock, max_minutes=5).run()
         self.assertEqual(summary["status"], "completed")
@@ -115,7 +115,7 @@ class DreamTimeLimitTests(DreamFixture):
         self.assertEqual([len(warnings(call)) for call in provider.calls], [0, 0, 1, 1])
         text = warnings(provider.calls[2])[0]
         self.assertEqual(provider.calls[2]["messages"][-1]["content"], text)  # injected right before that call
-        for phrase in ("About 1 minute left", "journal", "dream_mark_reviewed", "stop calling tools", "closed"):
+        for phrase in ("About 1 minute left", "journal", "dream_mark_reviewed", "dream_finish", "closed"):
             self.assertIn(phrase, text)
         traced = _events(self.state, "wrap_up_warning")
         self.assertEqual(len(traced), 1)
