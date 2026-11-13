@@ -62,6 +62,7 @@ _APPROVAL_CALLBACK = "ap"
 _TASK_CALLBACK = "tk"
 _TASK_RESULT_CHARS = 1500
 _APPROVAL_COMMAND_CHARS = 900
+_APPROVAL_LINE_CHARS = 120
 # seconds the answer waits after an idle new chat is announced, so the user can still pick another place;
 # opening the agent picker gives the user more time
 _REROUTE_GRACE_SECONDS = 8
@@ -1446,9 +1447,9 @@ class _ReplyContent:
             self.parts.append((kind, text))
 
     def _action_kind(self) -> str:
-        # Tool events have no phase field; retain the latest emitted token context.
-        thinking = self.parts and self.parts[-1][0] in ("reasoning", "reasoning_tool")
-        return "reasoning_tool" if thinking else "tool"
+        # Every action line goes inside the collapsible block, also one that comes before any thinking or after text:
+        # as plain italic lines they read as part of the answer.
+        return "reasoning_tool"
 
     def start_action(self, action: dict) -> None:
         """Show a tool's line as soon as it starts (`tool_start`); the finished `tool` event completes the same line."""
@@ -1700,6 +1701,8 @@ class _ApprovalCard:
     body: str  # Markdown shown above the outcome line
     buttons: Any = None  # the keyboard shown under it, kept so an edit does not drop it
     explained: bool = False  # the small model's sentence was added
+    stream: Any = None  # the reply stream that shows the outcome as one more action line (None: the card stays)
+    line: str = ""  # that action line without its tick: ">tool(\"command\")"
 
 
 def task_attribution(language: str, task: dict | None) -> str:
@@ -1770,8 +1773,16 @@ def _approval_outcome(language: str, decision: str, reason: str, scope: str = ""
     return message(language, "❌ Denied")
 
 
+def _approval_line(data: dict) -> str:
+    """The action line an answered card leaves in the reply: `>terminal("ls -la")` (first line of the command, cut)."""
+    command = " ".join(str(data.get("command", "")).split("\n", 1)[0].split())
+    if len(command) > _APPROVAL_LINE_CHARS:
+        command = command[:_APPROVAL_LINE_CHARS] + "…"
+    return f">{data.get('tool', '')}({json.dumps(command, ensure_ascii=False)})"
+
+
 async def _send_approval(context: ContextTypes.DEFAULT_TYPE, state: TelegramBotState, session: TelegramSession,
-                         telegram_chat_id: int, data: dict, language: str) -> None:
+                         telegram_chat_id: int, data: dict, language: str, stream: Any = None) -> None:
     """Ask for an approval with [Approve][Deny] buttons; the reply stream simply waits."""
     approval_id = str(data["id"])
     body = _approval_text(language, data)
@@ -1780,6 +1791,7 @@ async def _send_approval(context: ContextTypes.DEFAULT_TYPE, state: TelegramBotS
     sent = await context.bot.send_message(telegram_chat_id, plain, entities=entities, reply_markup=markup)
     state.approvals[approval_id] = _ApprovalCard(
         session.user_id, session.agent_id, session.chat_id, telegram_chat_id, sent.message_id, body, markup,
+        stream=stream, line=_approval_line(data),
     )
 
 
@@ -1803,10 +1815,27 @@ async def _explain_approval(bot, state: TelegramBotState, data: dict, language: 
 
 async def _close_approval(bot, state: TelegramBotState, approval_id: str, decision: str, reason: str,
                           language: str, scope: str = "") -> None:
-    """Show the outcome on the approval message and drop its buttons (idempotent)."""
+    """Settle the approval message (idempotent).
+
+    When the reply that asked is still streaming, the card disappears and the outcome becomes one more action line of
+    that reply (`✅ >terminal("ls")` / `❌ ...`). Otherwise the card stays with the outcome and no buttons.
+    """
     card = state.approvals.pop(approval_id, None)
     if card is None:
         return
+    stream = card.stream
+    if stream is not None and not stream.ended and stream.content is not None and card.line:
+        stream.content.append("reasoning_tool", f"{'✅' if decision == 'approved' else '❌'} {card.line}")
+        try:
+            await bot.delete_message(chat_id=card.telegram_chat_id, message_id=card.message_id)
+        except TelegramError:  # too old or already gone: keep the card with its outcome
+            pass
+        else:
+            preview = _final_messages(stream.content.parts, show_thinking=stream.show_thinking)
+            if preview:
+                with suppress(TelegramError):
+                    await stream.update(*preview[-1], force=True)
+            return
     plain, entities = _convert_markdown(card.body + "\n\n" + _approval_outcome(language, decision, reason, scope))
     with suppress(TelegramError):
         await bot.edit_message_text(
@@ -1914,7 +1943,7 @@ async def _send_generation(
             elif event.kind == "notice":
                 content.append("notice", event.text)
             elif event.kind == "approval" and event.data:
-                await _send_approval(context, state, session, chat.id, event.data, language)
+                await _send_approval(context, state, session, chat.id, event.data, language, stream)
                 continue
             elif event.kind == "approval_explanation" and event.data:
                 await _explain_approval(context.bot, state, event.data, language)
@@ -2089,6 +2118,7 @@ async def _send_wake(bot, state: TelegramBotState, telegram_id: int, session: Te
             elif item.kind == "approval" and item.data:
                 await _send_approval(
                     SimpleNamespace(bot=bot), state, TelegramSession(user_id, agent_id, chat_id), telegram_id, item.data, language,
+                    stream,
                 )
                 continue
             elif item.kind == "approval_explanation" and item.data:
@@ -2130,6 +2160,7 @@ async def _handle_task_event(bot, state: TelegramBotState, event: dict) -> None:
                         SimpleNamespace(bot=bot), state,
                         TelegramSession(event["user_id"], event["agent_id"], event["chat_id"]),
                         telegram_id, event.get("data") or {}, session.language,
+                        state.reply_hosts.get((telegram_id, event["user_id"], event["agent_id"], event["chat_id"])),
                     )
                 elif kind == "task_approval_explanation":
                     await _explain_approval(bot, state, event.get("data") or {}, session.language)
