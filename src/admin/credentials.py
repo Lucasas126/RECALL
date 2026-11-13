@@ -15,7 +15,7 @@ import sys
 from src.admin.users import AdminError
 from src.config import secrets
 from src.config.loader import load_user
-from src.config.settings import ASSOC, CHAT_NAMING, CONFIG_DIR, ORCHESTRATOR, TAVILY, TELEGRAM_ALLOWED_USERS_ENV
+from src.config.settings import APPROVAL_EXPLAIN, ASSOC, CHAT_NAMING, CONFIG_DIR, ORCHESTRATOR, TAVILY, TELEGRAM_ALLOWED_USERS_ENV
 
 
 def _user_ids_with_keys() -> list[tuple[str, str]]:
@@ -71,6 +71,7 @@ def known_names() -> dict[str, list[str]]:
     add(TAVILY.api_key, "settings tavily.api_key")
     add(ASSOC.api_key, "settings associative_memory.api_key")
     add(CHAT_NAMING.api_key, "settings chat_naming.api_key")
+    add(APPROVAL_EXPLAIN.api_key, "settings approval_explain.api_key")
     add(ORCHESTRATOR.api_key, "settings orchestrator.api_key")
     add("TELEGRAM_BOT_TOKEN", "telegram bot")
     add(TELEGRAM_ALLOWED_USERS_ENV, "telegram allowed users")

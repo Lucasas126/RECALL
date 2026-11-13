@@ -38,6 +38,8 @@ class RunContext:
     # writes narrow allow rules (a list of ApprovalRule) for an agent id to its configuration; raises when it cannot.
     # None where the chat service does not own the agent files: 'always for this agent' is then not offered
     learn_rules: Callable[[str, list], object] | None = None
+    # returns a short explanation of an approval payload (or None); called off the tool thread after the card is out
+    explain: Callable[[dict], str | None] | None = None
     # the `permissions` tools' port (src/service/agent_permissions.AgentPermissions); None where the service does not
     # own the agent files, and then those tools refuse
     permissions: Any = None
