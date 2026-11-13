@@ -10,7 +10,9 @@ from time import monotonic, perf_counter
 from typing import Callable, Literal, Optional, Protocol
 
 from src.agent.permissions_prompt import block_for
-from src.agent.profile import AgentProfile, load_profile, system_prompt
+from src.agent.profile import (
+    DREAM_TASKS_FILE, FOR_USER_FILE, MAX_DREAM_TASKS, AgentProfile, load_profile, open_items, system_prompt,
+)
 from src.agent.toolsets.dream import build_review_tools
 from src.agent.toolsets.editing import build_edit_tools
 from src.agent.toolsets.memory import build_memory_tools
@@ -47,7 +49,7 @@ DEFAULT_DREAM_PROMPT = """\
 
 You are dreaming: a background session with no user present. Nothing you write here is sent to the user;
 you only learn and tidy your own files. You keep your SOUL, memories and skills index: they are above.
-Work through the review queue and improve yourself. There is no hurry: work carefully until the work is
+Work through the review queue, then the dream tasks the user left you, and improve yourself. There is no hurry: work carefully until the work is
 done, and the session runs until you call `dream_finish` (or a limit stops it). A reply without tool
 calls does not end it.
 
@@ -75,13 +77,23 @@ lead you to the palace ("Project X: status and decisions in mind_palace:projects
    unfinished tasks, repeated procedures) in the places above, then `dream_mark_reviewed(chat_id)`.
 A trivial chat may have nothing to save: mark it reviewed anyway.
 
+### Dream tasks
+`mind_palace:dream_tasks.md` holds work the user asked for a dream (research, a self-improvement), one
+`- [ ] task` item each; the open ones are listed in the opening message. After the review, do each one:
+put the result in a palace note, then check it off on its line (`- [x] task -> mind_palace:<note>`), so no
+later session repeats it. If one cannot be done now, say why on its line and leave it open. A task you find
+in a chat ("look into X while you dream") goes in this file too. Do only the tasks; do not invent new ones.
+
+### For the user
 Be curious: look things up in your mind palace, the user's folders or the web when it helps you understand a
-topic the user cares about. Keep `mind_palace:questions.md` as a short list of things you would like to
-ask the user, one `- ` item each with why you ask; few, worthwhile, never intrusive. Remove the ones that
-were answered. The opening message says which of your files do not exist yet: create them, do not read them.
+topic the user cares about. Keep `mind_palace:for_user.md` as a short list of what you want to bring up with
+the user in a chat: questions, ideas, findings (a dream task's result worth telling). One `- ` item each,
+with why it matters; few, worthwhile, never intrusive. The first open ones go into your chat prompt. Remove
+the ones already said or answered. The opening message says which of your files do not exist yet: create
+them, do not read them.
 
 ### Finishing
-When the queue is done (or a wrap-up warning arrives): append an entry to this month's journal
+When the queue and the dream tasks are done (or a wrap-up warning arrives): append an entry to this month's journal
 (`mind_palace:journal/YYYY-MM.md`, the path is given below) with the date, chats reviewed, what changed
 and where, and what you learned; then call `dream_finish(summary)` with a short summary of the session
 (it is shown in the dream session list). Never claim a chat was reviewed unless you marked it.
@@ -149,12 +161,13 @@ def _folders_allowed(config: ResolvedAgent) -> bool:
 def build_dream_tools(
     host: _ToolHost, queue: ReviewQueue, read_until: dict[str, int], reviewed: list[str],
     web_client: TavilyClient | None, finish: dict | None = None,
+    open_tasks: Callable[[], list[str]] | None = None,
 ) -> tuple[list[dict], dict[str, Callable[..., str]]]:
     """The dream toolset: review queue (with `dream_finish`, which ends the session) and memory reads; palace edits
     only with the `memory_edit` group, own-file edits only with `self`; optional web/folder reads; never a terminal."""
     groups = set(host.config.tool_groups or ())  # the agent's chat tool groups cap what a dream may write
     caps = dream_capabilities(host.config.level)  # ... and so does its level: the dream table of the design
-    funcs = list(build_review_tools(queue, read_until, reviewed, finish))
+    funcs = list(build_review_tools(queue, read_until, reviewed, finish, open_tasks))
     if caps.memory_read:
         funcs.extend((*build_memory_tools(host), *build_tag_tools(host)))
     if "memory_edit" in groups and caps.memory_edit:
@@ -378,12 +391,21 @@ class DreamRunner:
                 return False
 
         missing = [f"agent:{rel}" for rel in ("memories/MEMORY.md", "memories/USER.md") if not exists(files, rel)]
-        missing += [f"mind_palace:{rel}" for rel in ("questions.md", journal) if not exists(palace, rel)]
+        missing += [f"mind_palace:{rel}" for rel in (FOR_USER_FILE, journal) if not exists(palace, rel)]
         if not missing:
-            return ["Your memories, questions.md and this month's journal exist."]
+            return [f"Your memories, {FOR_USER_FILE} and this month's journal exist."]
         return [f"Not created yet (do not read them; create them when needed): {', '.join(missing)}."]
 
-    def _opening(self, pending: list[dict]) -> str:
+    def _open_tasks(self) -> list[str]:
+        """Open items of `dream_tasks.md` (none when the file is missing or unreadable)."""
+        palace = self.sources.mind_palace()
+        try:
+            text = palace.read(DREAM_TASKS_FILE) if palace.exists(DREAM_TASKS_FILE) else ""
+        except (OSError, ValueError):
+            return []
+        return open_items(text, limit=MAX_DREAM_TASKS)
+
+    def _opening(self, pending: list[dict], tasks: list[str] | None = None) -> str:
         now = self._clock().astimezone()
         journal = f"journal/{now:%Y-%m}.md"
         dream = self.config.dream
@@ -396,8 +418,17 @@ class DreamRunner:
             f"{_format_seconds(self._limit)} of time. You get a wrap-up warning before the time or tokens run out; until "
             "then, take the time the work needs.",
         ]
+        if tasks:
+            lines.append(
+                f"Open dream tasks in mind_palace:{DREAM_TASKS_FILE} ({len(tasks)}); do them after the review "
+                "and check each one off:"
+            )
+            lines.extend(f"- {task}" for task in tasks)
+        else:
+            lines.append(f"No open dream tasks in mind_palace:{DREAM_TASKS_FILE}.")
         if not pending:
-            lines.append("Nothing is pending; curate your palace, memories and skills, then write the journal.")
+            lines.append("No chat is pending; do the dream tasks, curate your palace, memories and skills, then "
+                         "write the journal.")
         return "\n".join(lines)
 
     def _check_stop(self) -> StopReason | None:
@@ -515,10 +546,15 @@ class DreamRunner:
             index.reconcile()  # queued stat-only scan; the session searches what is already indexed
             self.sources.conversations().reviewable_only = True  # dream read tools skip disposable and task chats
             host = _ToolHost(self.config, self.sources, index)
-            specs, handlers = build_dream_tools(host, self._queue, read_until, reviewed, self._web_client, finish)
+            tasks = self._open_tasks()
+            shown = set(tasks)
+            specs, handlers = build_dream_tools(
+                host, self._queue, read_until, reviewed, self._web_client, finish,
+                open_tasks=lambda: [task for task in self._open_tasks() if task in shown],
+            )
             messages: list[dict] = [
                 {"role": "system", "content": self._system_prompt(profile)},
-                {"role": "user", "content": self._opening(pending)},
+                {"role": "user", "content": self._opening(pending, tasks)},
             ]
             warned: set[str] = set()
             last_input = 0

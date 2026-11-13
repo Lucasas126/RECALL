@@ -31,7 +31,8 @@ data/<user_id>/<agent_id>/
   skills/<name>/SKILL.md   procedures; frontmatter name + description
   mind_palace/             free-form notes (existing source)
     journal/YYYY-MM.md     what was done / learned, appended by dreams
-    questions.md           things the agent wants to ask the user
+    for_user.md            questions, ideas and findings to bring up with the user
+    dream_tasks.md         work the user asked for the next dream
   conversations/           chats (existing source)
   dream/
     review_state.json      review queue (see below)
@@ -50,15 +51,15 @@ in code: `AgentFilesSource` (`agent:` source, `src/core/sources/agent_files.py`)
 holds `SOUL.md`, `soul_history/`, `memories/` and `skills/` and refuses any other
 path of the agent folder; `DreamStateSource` (`dream`, not readable by tools)
 holds the review state, traces and lock. memory entries are separated by a line
-holding only `§`. `questions.md` entries are top-level `- ` list items; items
-checked as `- [x]` count as answered.
+holding only `§`. `for_user.md` and `dream_tasks.md` entries are top-level `- `
+list items; items checked as `- [x]` count as done.
 
 ## prompt assembly (chats and dreams)
 
 system prompt = `SOUL.md` + `MEMORY.md` + `USER.md` + skills index (name and
 description of each skill; the body is loaded on demand with `skill_view`) +
-up to 3 open questions from `questions.md` + current extra blocks (associative
-notice, MCP notes). dreams add the agent's dream prompt after the profile blocks.
+up to 3 open items from `for_user.md` + current extra blocks (associative
+notice, dream tasks notice, MCP notes). dreams add the agent's dream prompt after the profile blocks.
 the assembly lives in `src/agent/profile.py`; empty blocks are left out.
 
 files are read when a chat's agent is built: changes made by a dream take
@@ -215,7 +216,8 @@ write (only the agent's own files; everything else is refused):
 - `memory` (add / patch / remove on `MEMORY.md` or `USER.md`, usual semantics:
   char limit enforced on the final result, batch is atomic)
 - `skill_manage` (create / patch / delete skills, write supporting files)
-- mind palace write/append/edit/move/delete (journal, `questions.md`, notes);
+- mind palace write/append/edit/move/delete (journal, `for_user.md`,
+  `dream_tasks.md`, notes);
   the generic edit tools refuse every other source because the dream registry
   opens only the palace for writing
 
@@ -237,8 +239,11 @@ for the next chats (see [memory index](memory.md#memory-index)).
 - adjust `SOUL.md` only for lasting changes in how to behave; small, explained.
 - look things up (palace, user folders, web) when it helps understand a topic the user
   cares about.
-- keep `questions.md`: things it is curious about, with why it asks. be curious
-  and creative, not intrusive: few, worthwhile questions; remove answered ones.
+- after the review, do the open items of `dream_tasks.md`: result in a palace
+  note, then check the item off with a link to it (or say on its line why it
+  stays open).
+- keep `for_user.md`: questions, ideas and findings to bring up with the user,
+  with why. few, worthwhile, not intrusive; remove the ones already said.
 - append a journal entry: what was reviewed, what changed, what was learned.
 - mark each chat reviewed when done with it.
 
@@ -259,11 +264,24 @@ folders must exist (saving a missing one is a `400`); hidden entries
 with `indexed: true` feed associative memory. the safe/auto [overlay](../architecture/obsidian-overlay.md)
 is still planned.
 
-### questions for the user
+### for the user
 
-open entries of `questions.md` are injected in the chat prompt (max 3) with the
-rule: ask at most one, only when it fits naturally, never interrupt a task. the
-chat agent removes or annotates a question when the user answers it.
+open entries of `for_user.md` (questions, ideas, findings) are injected in the
+chat prompt (max 3) with the rule: raise at most one, only when it fits
+naturally, never interrupt a task. the chat agent removes an entry once it said
+it or the user answered.
+
+### dream tasks
+
+`dream_tasks.md` is the queue of work the user asks for a dream: research, a
+point self-improvement. in a chat the agent adds `- [ ] task (date, why)` when
+the user asks (chats with the `memory_edit` group get a short notice saying so);
+the user can also edit the file. a dream lists the open tasks (up to 20) in its
+opening message and does them after the chat review: result in a palace note,
+then `- [x] task -> mind_palace:<note>`. the first `dream_finish` while a task
+shown at the start is still open is refused once with the list, so the model
+checks it off or notes why it stays open; a second call ends the session. a
+scheduled run also starts when no chat is pending but a task is open.
 
 ## chats can write too
 

@@ -52,7 +52,7 @@ Addresses are `source:path`. Sources: `mind_palace` (your notes, writable), `con
 
 1. The channel authenticates the user and calls `ChatService.send` (web: SSE stream; Telegram: updates).
 2. The service validates input, converts attachments (audio is transcribed, video split into frames and audio, PDFs replaced by extracted text) and enqueues the message on the worker of that (user, agent). A new message to a chat that is still replying cancels the unfinished reply and keeps the partial text.
-3. `Agent.from_config` loads the resolved agent (`src/config/loader.py`), builds the sources, and `load_profile` reads SOUL, memories, skills index and open questions into the system prompt.
+3. `Agent.from_config` loads the resolved agent (`src/config/loader.py`), builds the sources, and `load_profile` reads SOUL, memories, skills index and open `for_user.md` items into the system prompt.
 4. Per turn, associative memory (if enabled) searches the vector index for fragments; with `parallel` timing it runs beside the model call.
 5. `Agent.invoke` calls the provider with the context and tools; tool calls run (at most `agent.max_tool_hops` round-trips from `settings.yaml`), results return to the model, until a final answer.
 6. The exchange is appended to `conversations/`; the index is updated in the background after the reply; the service emits events (`reasoning`, `text`, `tool`, `usage`, `interrupted`, `notice`, `memory`).

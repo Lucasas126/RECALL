@@ -23,7 +23,7 @@ design and the decisions taken.
 
 ### the agent's own memory (always on)
 
-- `mind_palace:` (notes, `journal/`, `questions.md`): always a source, always
+- `mind_palace:` (notes, `journal/`, `for_user.md`, `dream_tasks.md`): always a source, always
   indexed, always readable and writable by the agent. Not configurable.
 - skills (`agent:skills/**/SKILL.md` and their files): indexed, so a relevant
   skill surfaces by itself. Read-only through the index; edited with the `self`

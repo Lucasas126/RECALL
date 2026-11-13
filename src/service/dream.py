@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Callable, Iterable, Literal, Optional
 
 from src.agent.dream import DreamIndex, DreamRunner, dream_folder_options
+from src.agent.profile import DREAM_TASKS_FILE, open_items
 from src.config.models import DreamConfig, ResolvedAgent
 from src.core.review import ReviewQueue
 from src.core.sources.registry import SourceRegistry
@@ -22,6 +23,15 @@ _COMMAND_RE = re.compile(r"^/dream(?:@\w+)?(?:\s+(?P<arg>.*?))?\s*$", re.IGNOREC
 DreamCommand = Literal["status", "start", "cancel", "invalid"]
 StartStatus = Literal["started", "started_nothing_pending", "already_running", "nothing_pending"]
 CancelStatus = Literal["cancelling", "not_running"]
+
+
+def _has_dream_tasks(sources) -> bool:
+    """Whether the agent's `dream_tasks.md` has an open item (a reason to dream with no chat pending)."""
+    palace = sources.mind_palace()
+    try:
+        return bool(palace.exists(DREAM_TASKS_FILE) and open_items(palace.read(DREAM_TASKS_FILE), limit=1))
+    except (OSError, ValueError):
+        return False
 
 
 def parse_dream_command(text: str) -> DreamCommand | None:
@@ -115,7 +125,7 @@ class DreamManager:
     # ------------------------------------------------------------------ sessions
 
     def start(self, user_id: str, agent_id: str, trigger: str = "manual") -> dict:
-        """Start a session unless one runs; scheduled starts skip agents with nothing pending."""
+        """Start a session unless one runs; scheduled starts skip agents with no pending chat and no dream task."""
         config = self._deps.resolve_agent(user_id, agent_id)
         sources = self._deps.registry(config)
         state = sources.dream_state()
@@ -128,7 +138,7 @@ class DreamManager:
                 return {"status": "already_running", "session_id": None}
             try:
                 pending = ReviewQueue(sources.conversations(), state).pending()
-                if trigger == "schedule" and not pending:
+                if trigger == "schedule" and not pending and not _has_dream_tasks(sources):
                     lock.release()
                     return {"status": "nothing_pending", "session_id": None, "pending": 0}
                 now = self._deps.clock()

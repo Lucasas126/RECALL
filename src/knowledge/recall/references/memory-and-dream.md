@@ -8,14 +8,14 @@
 | `memories/MEMORY.md` | your own notes and lessons | `memory_limits.memory_chars` (2500) | always, with a used/limit counter |
 | `memories/USER.md` | what you know about the user | `memory_limits.user_chars` (2500) | always, with a counter |
 | `skills/<name>/SKILL.md` | procedures you wrote; frontmatter `name` and `description`; supporting files under the folder | 50000 chars per file | index only; load with `skill_view` |
-| `mind_palace/` | free-form notes; `questions.md` holds things you want to ask | none | up to 3 open questions |
+| `mind_palace/` | free-form notes; `for_user.md` holds questions, ideas and findings for the user; `dream_tasks.md` holds work queued for your next dream | none | up to 3 open `for_user.md` items |
 | `conversations/` | every chat as JSONL | none | the current chat only |
 
 The limits are set in `settings.yaml` for every user and agent. Memory entries are separated by a line holding only `§`; use the `memory` tool instead of editing the file by hand. Put facts in memory, procedures in skills, personality in SOUL.
 
 ## Frozen prompt per chat
 
-The system prompt is built when a chat starts: SOUL, then memories, skills index and open questions, then notices (associative memory, disposable chat, terminal, MCP). Your edits reach the files at once but only new chats see them; the tool results say so. Do not expect to see your own change in this conversation. The last line of the profile blocks, `Profile loaded <time>; SOUL <n> chars, <k> skills (own) + built-in recall`, tells you when this chat's profile was read: changes apply to new chats, so compare it with the time of an edit.
+The system prompt is built when a chat starts: SOUL, then memories, skills index and open `for_user.md` items, then notices (associative memory, disposable chat, terminal, MCP). Your edits reach the files at once but only new chats see them; the tool results say so. Do not expect to see your own change in this conversation. The last line of the profile blocks, `Profile loaded <time>; SOUL <n> chars, <k> skills (own) + built-in recall`, tells you when this chat's profile was read: changes apply to new chats, so compare it with the time of an edit.
 
 ## Associative memory
 
@@ -35,11 +35,12 @@ A dream is a background session where you review recent chats and curate your ow
 
 - One dream per agent at a time (`dream/.lock`); scheduled runs are skipped while nothing is pending. A running session can be cancelled.
 - The review queue lists chats with unreviewed turns; disposable chats are never in it. Mark each chat reviewed when done.
+- Dream tasks: when the user asks for something to be done in a dream (research, a self-improvement), add `- [ ] task (date, why)` to `mind_palace:dream_tasks.md`. A dream lists the open ones at the start, does them after the review, and checks each off with a link to its result note (`- [x] task -> mind_palace:<note>`); `dream_finish` refuses once while a listed task is still open. A scheduled dream also runs when only tasks are pending.
 - The session ends when you call `dream_finish(summary)`. Replying without tool calls does not end it: RECALL tells you what is still pending and asks you to go on (after 3 such replies in a row it closes anyway). There is no need to rush: work until the queue is done, then finish.
 - Limits per session: `dream.max_steps`, `dream.max_tokens`, `dream.max_minutes` (a warning one minute before, then it is force-closed).
 - Tools: the review tools, memory read tools, `memory`, `skill_view`, `skill_manage`, `soul_edit`, and edits to `mind_palace` only. Write tools need the agent's `memory_edit` / `self` groups. Folders (read-only; also need a folder read group) and web only if enabled in `dream.tools`. Never a terminal. Chat text is shown to the dream as untrusted data; disposable and task chats are not searchable or readable.
 - In a dream you keep your SOUL, memories and skills index: the dream prompt is your normal profile plus the dream instructions.
-- Typical uses: file what you learned in the mind palace (one note per topic, listed in `mind_palace/INDEX.md`), keep MEMORY/USER as short facts plus pointers to palace notes (move detail to the palace when a file is near its limit), journal in `mind_palace/journal/YYYY-MM.md`, add or answer entries in `questions.md`, turn a repeated task into a skill, small SOUL changes.
+- Typical uses: file what you learned in the mind palace (one note per topic, listed in `mind_palace/INDEX.md`), keep MEMORY/USER as short facts plus pointers to palace notes (move detail to the palace when a file is near its limit), journal in `mind_palace/journal/YYYY-MM.md`, add or clear entries in `for_user.md`, do and check off `dream_tasks.md` items, turn a repeated task into a skill, small SOUL changes.
 - Traces are in `dream/sessions/<ts>.jsonl` and a summary in `<ts>.json`; the user sees them in Dream sessions. The built-in `recall` skill is readable in dreams.
 
 ## Disposable chats

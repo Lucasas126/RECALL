@@ -9,13 +9,15 @@ from src.core.review import ReviewQueue
 
 def build_review_tools(
     queue: ReviewQueue, read_until: dict[str, int], reviewed: list[str], finish: dict | None = None,
+    open_tasks: Callable[[], list[str]] | None = None,
 ) -> list[Callable[..., str]]:
     """Build the review-queue tools of a dream session.
 
     `read_until` records, per chat, the watermark captured by the session's last read, and
     `reviewed` collects the chats marked during the session; both belong to the caller. `finish`
     receives the summary when the model calls `dream_finish`: the session ends only through that call
-    (or its limits), never because a reply has no tool calls.
+    (or its limits), never because a reply has no tool calls. `open_tasks` returns the dream tasks shown at
+    the start that are still open in `dream_tasks.md`: the first `dream_finish` with some left is refused once.
     """
     finish = finish if finish is not None else {}
 
@@ -55,11 +57,21 @@ def build_review_tools(
     @tool
     def dream_finish(summary: Annotated[str, "short summary of the session, shown in the dream session list"]) -> str:
         """End the dream session. Call it only when the work is done: every pending chat read and marked
-        reviewed (or left pending on purpose, saying why in the summary), what you learned filed in the mind
-        palace and your memory, and the journal entry appended. Replying without tool calls does not end
+        reviewed (or left pending on purpose, saying why in the summary), every dream task done and checked
+        off in dream_tasks.md, what you learned filed in the mind palace and your memory, and the journal entry
+        appended. Replying without tool calls does not end
         the session; this call does."""
         if not summary.strip():
             return "error: give a short summary of the session"
+        still = open_tasks() if open_tasks is not None else []
+        if still and not finish.get("tasks_reminded"):
+            finish["tasks_reminded"] = True
+            listed = "\n".join(f"- {task}" for task in still)
+            return (
+                "not finished: these dream tasks are still open in mind_palace:dream_tasks.md. Do them, or mark "
+                "each one done (`- [x] ... -> result in mind_palace:<note>`), or note on its line why it stays "
+                "open, so the next session does not repeat it. Then call dream_finish again.\n" + listed
+            )
         finish["summary"] = summary.strip()
         left = len(queue.pending())
         return f"session finished; {left} chat(s) still pending." if left else "session finished; nothing pending."

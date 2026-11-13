@@ -346,6 +346,41 @@ class DreamFinishTests(DreamFixture):
             self.assertIn(phrase, prompt)
 
 
+class DreamTasksTests(DreamFixture):
+    def runner(self, provider) -> DreamRunner:
+        return DreamRunner(_config(), provider, self.sources, session_id="20261103-040000-abcd", trigger="manual")
+
+    def test_open_tasks_are_listed_and_finish_is_refused_once_while_one_is_open(self) -> None:
+        palace = self.sources.mind_palace()
+        palace.write("dream_tasks.md", "# Dream tasks\n- [x] old one -> mind_palace:old.md\n- [ ] research heat pumps\n")
+        done = "# Dream tasks\n- [x] old one -> mind_palace:old.md\n- [x] research heat pumps -> mind_palace:topics/heat.md\n"
+        provider = ScriptedProvider([
+            _finish("Early.", call_id="f1"),
+            {"tool_calls": [_call("w1", "write", memory_path="mind_palace:dream_tasks.md", content=done)]},
+            _finish("Did the task.", call_id="f2"),
+        ])
+        summary = self.runner(provider).run()
+        opening = provider.calls[0]["messages"][1]["content"]
+        self.assertIn("- research heat pumps", opening)
+        self.assertNotIn("old one", opening)
+        refusal = provider.calls[1]["messages"][-1]["content"]
+        self.assertIn("still open", refusal)
+        self.assertIn("research heat pumps", refusal)
+        self.assertEqual((summary["status"], summary["summary"]), ("completed", "Did the task."))
+
+    def test_a_second_finish_ends_the_session_even_with_tasks_open(self) -> None:
+        self.sources.mind_palace().write("dream_tasks.md", "- [ ] cannot do this yet\n")
+        provider = ScriptedProvider([_finish("one", call_id="f1"), _finish("Left it open: needs the user.", call_id="f2")])
+        summary = self.runner(provider).run()
+        self.assertEqual((summary["steps"], summary["summary"]), (2, "Left it open: needs the user."))
+
+    def test_without_tasks_the_opening_says_so_and_finish_is_immediate(self) -> None:
+        provider = ScriptedProvider([_finish("Nothing to do.")])
+        summary = self.runner(provider).run()
+        self.assertIn("No open dream tasks", provider.calls[0]["messages"][1]["content"])
+        self.assertEqual(summary["steps"], 1)
+
+
 def _events_of(state, kind: str) -> list[dict]:
     return [event for event in state.trace("20261103-040000-abcd") if event["type"] == kind]
 
@@ -383,6 +418,12 @@ class DreamManagerTests(DreamFixture):
         self.assertEqual(manager.start("u", "a")["status"], "started_nothing_pending")
         manager.wait("u", "a", 5)
         self.assertEqual(manager.start("u", "a", trigger="schedule")["status"], "nothing_pending")
+
+    def test_schedule_runs_when_only_a_dream_task_is_open(self) -> None:
+        self.sources.mind_palace().write("dream_tasks.md", "- [ ] research something\n")
+        manager = self.manager(ScriptedProvider([_finish("ok")]), _config(enabled=True, every_hours=1))
+        self.assertEqual(manager.start("u", "a", trigger="schedule")["status"], "started_nothing_pending")
+        manager.wait("u", "a", 5)
 
     def test_tick_starts_due_sessions_once_and_notifies(self) -> None:
         self.chat("hello")
