@@ -234,12 +234,21 @@ index, so details can still be found with associative memory or the agent's memo
 - **On demand**: `/compact` in the web chat or Telegram compacts the current chat now, whatever the trigger;
   `/compact <focus>` tells the summary what to keep (for example `/compact keep the exact figures`). RECALL answers it
   itself (it is not stored and never reaches the model) with the tokens before and after. It is refused while the chat
-  is replying; a message sent during a compaction waits for it.
+  is replying; a message sent during a compaction waits for it. When the whole chat fits in the normal tail
+  (`keep_recent`, 20 % of the window by default, so a short chat on a large window never has anything to summarise),
+  `/compact` keeps only the latest 20 % of the chat as the tail and summarises everything before it; the answer and the
+  divider say it was a short chat. The last exchange is always kept.
 - **Settings** (per agent, `chat_config.compaction` in [agent.yaml](../reference/agent-yaml.md), web: Agents > Basic >
   Advanced): `enabled` (true), `mode` (`percent` of the model's window, or `tokens`), `trigger` (50), `keep_recent` (20)
   and `model` (`claude_subscription:haiku`, the user's own Claude login; null uses the chat's own model).
 - **Stored**: a `compaction` turn in the chat's JSONL with the notes and the tokens before and after; a reloaded chat
   starts from the latest one. The web shows it as a divider with the tokens before and after (marked when it came from
-  `/compact`).
+  `/compact`; a short-chat compaction says so).
+- **After a restart**: a reloaded chat gives the model back its tool calls and their results, not only the text. Each stored
+  assistant turn keeps its actions (name, arguments, result) and a timeline of text and tools; the context is rebuilt from
+  them in order, from the latest compaction on, so a long task cut in two by a deploy keeps its thread. The stored result
+  of an action is cut to 500 characters, so a long output comes back shortened and marked `[stored result, cut for length]`.
+  Call ids are not stored: they are generated again on reload. A turn whose stored data does not add up falls back to its
+  text alone. The first message after a restart sends all of it without a warm cache.
 - **If the summary model fails**: it is retried once on the next turn; meanwhile, when the context reaches 90 % of the
   window, the oldest messages are cut and the model sees a `[CUTOFF CONVERSATION]` marker, so the chat keeps working.

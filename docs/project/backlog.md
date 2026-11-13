@@ -7,7 +7,7 @@ One list of ideas and planned work, with what is already done kept separate. Imp
 
 ### automation and behavior
 
-- **Reminders and proactive messages**: the agent schedules a message ("remind me on Friday...") sent later through Telegram and shown in the web, reusing the dream scheduler. First step towards automations.
+- **Reminders and proactive messages**: a one-off message the agent sends while it works already exists (`notify_telegram`, see [done](#done)); what is planned is the agent *scheduling* a message ("remind me on Friday...") sent later through Telegram and shown in the web, reusing the dream scheduler. The agent schedules a message ("remind me on Friday...") sent later through Telegram and shown in the web, reusing the dream scheduler. First step towards automations.
 - **Automations**: rules and actions based on conversation or calendar events.
 - **Recall mode**: the agent enters its mind palace with a context trimmed to the last messages, searches and reads what it needs, and returns only the relevant information, dropping the retrieval process from its context. Complements [dream mode](../user-guide/dream.md): dreams write the palace, recall reads it cheaply.
 - **Warnings section** for configuration mismatches: a reasoning effort or token budget the selected model does not support, a tool that is unavailable, a model that is not offered. (Today the reasoning selector is disabled with an explanation when unsupported; there is no general warnings area.)
@@ -75,6 +75,10 @@ Skills imported from other agent systems:
 
 ## done
 
+- Agent-sent files and notices: `send_file` (group `files_send`, level `reader`) hands the user a file the agent can already read, in the web chat and on Telegram; `notify_telegram` (group `notify`, level `assistant`, 30 an hour) sends the owner a short Telegram message ([files and media](../user-guide/files-and-media.md#files-and-notices-from-the-agent), [tools](../reference/tools.md#files_send)). Still open: sending a file straight from a terminal backend (with the approval card), and generating a file (a PDF) for the agent to send.
+- A reloaded chat gives the model its tool calls and results back, not only the text ([memory](../user-guide/memory.md#context-compaction)); a reply cut by a restart is kept as a checkpoint ([API](../reference/api.md#checkpointed-replies)).
+- `/compact` works on short chats: it keeps the latest 20 % and says so ([memory](../user-guide/memory.md#context-compaction)).
+- Web chat: playable audio and video and image previews of what you send, permanent transcriptions under each recording, a voice recording button, paste with Ctrl+V, a background-process panel, and a dot in the chat list while an agent works or a reply is unread (kept on the server).
 - Search inside conversations (`session_search`, meaning-based or exact text; [tools reference](../reference/tools.md)).
 - Subagents (`delegate` group: `task_start` and task tools, budgets and limits, backend rules), messages between agents (`task_start(agent=...)` hands a task to another agent of the same user, allowlisted in `delegation.targets`) and background processes (`process_*` tools) ([delegation](../user-guide/delegation.md), [terminal guide](../user-guide/terminal.md#background-processes)).
 - Terminal tool group, phase 1: `terminal`, `sandbox_read`, `sandbox_write`, `sandbox_patch` and `sandbox_search` against an SSH sandbox (or a local backend on trusted installs), foreground commands with timeouts, approvals (manual / smart / off) through the API and Telegram buttons, a hardline blocklist, redacted and truncated output, an audit file, unattended behaviour for dreams, and `python -m src.admin terminal-test` ([terminal guide](../user-guide/terminal.md)).
