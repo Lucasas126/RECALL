@@ -421,6 +421,14 @@ details.msg.task-wake { align-self: flex-start; padding: 6px 12px; border-style:
   .task-steer-form { flex-direction: column; }
 }
 #usage { padding: 4px var(--gutter); color: var(--muted); font: 12px/1.4 var(--mono); }
+#processes { margin: 0 var(--gutter) 6px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 5px; background: var(--raised); color: var(--muted); font-size: 13px; }
+#processes summary { cursor: pointer; }
+#processes summary::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: var(--accent); animation: mic-pulse 1.4s ease-in-out infinite; }
+#processes ul { list-style: none; margin: 6px 0 2px; padding: 0; display: grid; gap: 4px; }
+#processes li { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.process-command { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--mono); }
+.process-meta, .process-time { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.process-stop { padding: 2px 8px; font-size: .85em; }
 #usage summary { cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #usage pre { margin: 4px 0 0; white-space: pre-wrap; max-height: 140px; overflow-y: auto; }
 #chat-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -567,6 +575,14 @@ details.thinking { border-left: 2px solid var(--line); padding-left: 10px; }
 .icon-btn { display: inline-grid; place-items: center; flex-shrink: 0; width: 36px; height: 36px; padding: 0; border-color: transparent; background: none; color: var(--muted); border-radius: 50%; }
 .icon-btn.recording { color: #fff; background: #c0392b; animation: mic-pulse 1.2s ease-in-out infinite; }
 @keyframes mic-pulse { 50% { opacity: .6; } }
+/* while recording the button grows to show the elapsed time, and the composer outline turns red */
+.icon-btn.recording { display: inline-flex; align-items: center; gap: 6px; width: auto; padding: 0 12px; border-radius: 18px; }
+.mic-time { font-variant-numeric: tabular-nums; font-size: .85em; font-weight: 600; }
+#composer:has(#mic.recording), #composer:has(#mic.recording):focus-within { border-color: #c0392b; box-shadow: 0 0 0 1px #c0392b; }
+.attachment-image, .attachment-audio, .attachment-video { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 6px; border-radius: 8px; max-width: min(100%, 360px); }
+.attachment-image img, .attachment-video video { max-width: 100%; max-height: 260px; border-radius: 6px; display: block; }
+.attachment-audio audio { width: min(100%, 300px); height: 36px; }
+.attachment-label { font-size: .8em; color: var(--muted); }
 .icon-btn:hover:not(:disabled) { color: var(--text); background: var(--raised); border-color: transparent; }
 #send { color: var(--on-accent); border-radius: 4px; }
 #send:hover:not(:disabled) { color: var(--on-accent); background: var(--accent-strong); }

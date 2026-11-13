@@ -90,7 +90,7 @@
         <div id="messages" role="log" aria-live="polite" aria-relevant="additions"></div>
         <button id="jump-latest" type="button" class="icon-btn" title="Jump to latest" aria-label="Jump to latest" hidden><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button>
       </div>
-      <details id="usage" hidden><summary></summary><pre></pre></details>
+      <details id="processes" hidden><summary></summary><ul></ul></details>
       <div id="composer-row">
       <form id="composer">
         <div id="chat-controls">
@@ -115,7 +115,7 @@
         <textarea id="input" rows="2" placeholder="Write a message…" disabled></textarea>
         <input id="file-input" type="file" accept="image/*,video/*,audio/*,application/pdf,.pdf" multiple hidden>
         <button id="attach" type="button" class="icon-btn" disabled title="Attach image, video, audio or PDF" aria-label="Attach image, video, audio or PDF"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
-        <button id="mic" type="button" class="icon-btn" disabled title="Record a voice message" aria-label="Record a voice message"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v4"/></svg></button>
+        <button id="mic" type="button" class="icon-btn" disabled title="Record a voice message" aria-label="Record a voice message"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v4"/></svg><span id="mic-time" class="mic-time" hidden aria-live="off"></span></button>
         <button id="send" type="submit" class="icon-btn" disabled title="Send" aria-label="Send"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg></button>
       </form>
       <aside id="claude-usage" hidden aria-label="Claude plan usage">
@@ -126,6 +126,7 @@
         <div id="claude-usage-body" hidden></div>
       </aside>
       </div>
+      <details id="usage" hidden><summary></summary><pre></pre></details>
       </div>
       <section id="agents-view" hidden>
         <button class="nav-toggle" type="button" aria-controls="sidebar" aria-expanded="false" title="Menu" aria-label="Menu"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>

@@ -634,6 +634,15 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
+    @app.get("/api/agents/{agent_id}/chats/{chat_id}/processes")
+    def list_processes(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):
+        return {"processes": service.list_processes(user_id, agent_id, chat_id)}
+
+    @app.post("/api/agents/{agent_id}/chats/{chat_id}/processes/{process_id}/stop", status_code=202)
+    def stop_process(agent_id: str, chat_id: str, process_id: str, user_id: str = Depends(current_user)):
+        service.stop_process(user_id, agent_id, chat_id, process_id)
+        return {"stopped": process_id}
+
     @app.get("/api/agents/{agent_id}/chats/{chat_id}/approvals")
     def list_approvals(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):
         return service.list_approvals(user_id, agent_id, chat_id)
