@@ -75,8 +75,9 @@ Each model request starts one `claude -p` process in stream-json mode:
 - Cancelling a reply (Stop, steering, an associative-memory pause, dream limits)
   kills the CLI's whole process tree (`taskkill /T` on Windows, the process group
   on Linux/macOS), so the `node` child behind the npm shim never outlives it.
-- RECALL never reads, copies, refreshes or prints Claude credential files; all
-  authentication goes through `claude`.
+- The only credential read is for the plan usage indicator (see [plan usage](#plan-usage)).
+  RECALL never copies, refreshes or prints Claude credential files, and all
+  authentication and every model request go through `claude`.
 
 The provider refuses to start the CLI when RECALL's environment sets
 `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`,
@@ -214,3 +215,28 @@ unlocked by a flag.
   `claude_subscription:<name>` in YAML or the Dream tab.
 - Docker: not supported. The image has no Node.js, no Claude Code and no login;
   run RECALL directly on the host to use this provider (see [deployment](../deployment/docker.md)).
+
+## plan usage
+
+Next to the message box the web UI shows how much of the Claude plan is used: the
+5-hour session and the week (plus the Opus and Sonnet weekly windows when the plan
+has them). Folded, it shows one coloured dot per window; unfolded, a bar with the
+percentage and the time until the window resets. Green is below 50 %, yellow from
+50 %, orange from 80 % and red from 95 %. The strip remembers whether it was open
+and refreshes every two minutes while the tab is visible.
+
+How it works, so you can judge it:
+
+- RECALL reads the OAuth access token from `.credentials.json` in the user's Claude
+  login folder (`claude_config_dir`, or `CLAUDE_CONFIG_DIR`, or `~/.claude`) and
+  asks `https://api.anthropic.com/api/oauth/usage`, the endpoint Claude Code itself
+  uses for its `/usage` view. The token is sent only to that address, never logged
+  and never returned: the web API answers with percentages and reset times only.
+- Only the user's own login is used, with the same rule as the chat models (a login
+  folder of their own, or being listed in `default_login_users`). Answers are cached
+  for a minute per user.
+- The endpoint is not a documented public API and can change; when it fails, the
+  strip hides itself and nothing else is affected.
+- An expired token is not refreshed by RECALL (the CLI does that on its next run),
+  so the strip stays hidden until the login is used again.
+- It is only about the subscription: users on other providers never see it.

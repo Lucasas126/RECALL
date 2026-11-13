@@ -5,6 +5,7 @@ const ICONS = {
   clock: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 7v5l3 2\"/></svg>",
   alert: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 7.5v5.5\"/><path d=\"M12 16.5h.01\"/></svg>",
   send: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M12 19V5\"/><path d=\"m5 12 7-7 7 7\"/></svg>",
+  stop: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><rect x=\"6\" y=\"6\" width=\"12\" height=\"12\" rx=\"1.5\" fill=\"currentColor\"/></svg>",
   steer: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><polygon points=\"3 11 22 2 13 21 11 13 3 11\"/></svg>",
   pencil: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M12 20h9\"/><path d=\"M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z\"/></svg>",
   trash: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M3 6h18\"/><path d=\"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6\"/><path d=\"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2\"/></svg>",
@@ -658,7 +659,7 @@ function translateInterface() {
   $("agent-delegation-model").placeholder = tr("The model of the chat");
   for (const [id, text] of [
     ["settings-open", "Settings"], ["settings-close", "Close"], ["tasks-open", "Tasks"], ["tasks-close", "Close"], ["assoc-close", "Close"],
-    ["logout", "Log out"], ["jump-latest", "Jump to latest"], ["theme-toggle", "Switch theme"],
+    ["logout", "Log out"], ["jump-latest", "Jump to latest"], ["claude-usage-toggle", "Claude plan usage"], ["theme-toggle", "Switch theme"],
   ]) {
     $(id).title = tr(text);
     $(id).setAttribute("aria-label", tr(text));
@@ -992,6 +993,7 @@ async function showApp(user) {
   renderUserAvatar();
   renderThemeToggle();
   renderAgentOptions();
+  refreshClaudeUsage();
   showTab("chats");
   try {
     await refreshPreferences();
@@ -3644,10 +3646,38 @@ function updateBusy() {
   updateEditButtons();
   updateModelControls();
   if ($("model-dialog").open) renderModelList();
-  $("send").innerHTML = state.busy ? ICONS.steer : ICONS.send;
-  $("send").title = state.busy ? "Steer" : "Send";
-  $("send").setAttribute("aria-label", state.busy ? "Steer" : "Send");
+  updateSendButton();
   renderAgentBanner();
+}
+
+// While a reply streams the button stops it; with text (or attachments) in the box it steers (sends) instead.
+function sendMode() {
+  if (!state.busy) return "send";
+  return $("input").value.trim() || state.attachments.length ? "steer" : "stop";
+}
+
+function updateSendButton() {
+  const mode = sendMode();
+  const label = tr({ send: "Send", steer: "Steer", stop: "Stop" }[mode]);
+  $("send").innerHTML = ICONS[mode];
+  $("send").dataset.mode = mode;
+  $("send").title = label;
+  $("send").setAttribute("aria-label", label);
+}
+$("input").addEventListener("input", updateSendButton);
+
+// Asks the server to stop the open chat's reply; its stream then ends with the partial answer kept.
+async function stopReply() {
+  const { agentId, chatId } = state;
+  if (!agentId || !chatId) return;
+  $("send").disabled = true;
+  try {
+    await api(`/api/agents/${agentId}/chats/${chatId}/stop`, { method: "POST" });
+  } catch (err) {
+    addMessage("assistant", state.view).error(err);
+  } finally {
+    setComposer(Boolean(state.chatId));
+  }
 }
 
 function resetStreams() {
@@ -6073,6 +6103,7 @@ $("file-input").addEventListener("change", async (event) => {
 $("composer").addEventListener("submit", async (e) => {
   e.preventDefault();
   const content = $("input").value.trim();
+  if (sendMode() === "stop" && state.user && state.chatId && !state.modelBusy) { await stopReply(); return; }
   if ((!content && !state.attachments.length) || !state.user || !state.chatId || state.modelBusy) return;
   const attachments = state.attachments.splice(0);
   renderPendingAttachments();
@@ -7326,3 +7357,76 @@ api("/api/me").then(showApp, showLogin);
   }).observe(input);
   input.addEventListener("input", () => { if (!input.value) composer.classList.remove("multiline"); });
 })();
+
+
+// ------------------------------------------------------------------ Claude plan usage
+
+const USAGE_LABELS = { session: "Session (5 h)", week: "Week", week_opus: "Week (Opus)", week_sonnet: "Week (Sonnet)" };
+const USAGE_REFRESH_MS = 120000;
+
+// green below 50 %, then yellow, orange and red from 80 % and 95 %
+function usageLevel(percent) {
+  return percent >= 95 ? "crit" : percent >= 80 ? "high" : percent >= 50 ? "warn" : "ok";
+}
+
+// "2h 15m", "3d 4h" or "now" until an ISO time
+function usageReset(iso, now = Date.now()) {
+  const ms = Date.parse(iso) - now;
+  if (!Number.isFinite(ms)) return "";
+  if (ms <= 0) return tr("now");
+  const minutes = Math.round(ms / 60000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${minutes % 60}m`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+}
+
+function renderClaudeUsage(report) {
+  const box = $("claude-usage");
+  const windows = report?.available ? report.windows : [];
+  box.hidden = !windows.length;
+  if (!windows.length) return;
+  const body = $("claude-usage-body");
+  body.replaceChildren();
+  for (const dot of box.querySelectorAll(".usage-dot")) dot.dataset.level = "";
+  for (const item of windows) {
+    const percent = Math.round(item.percent);
+    const level = usageLevel(item.percent);
+    const dot = box.querySelector(`.usage-dot[data-window="${item.key}"]`);
+    if (dot) {
+      dot.dataset.level = level;
+      dot.title = `${tr(USAGE_LABELS[item.key] ?? item.key)}: ${percent}%`;
+    }
+    const fill = element("span", {});
+    fill.style.width = `${percent}%`;
+    fill.dataset.level = level;
+    const reset = item.resets_at ? tr("resets in {time}", { time: usageReset(item.resets_at) }) : "";
+    body.append(element("div", { className: "usage-row" },
+      element("div", { className: "usage-head" }, element("span", { textContent: tr(USAGE_LABELS[item.key] ?? item.key) }), element("strong", { textContent: `${percent}%` })),
+      element("div", { className: "usage-bar" }, fill),
+      element("div", { className: "usage-reset", textContent: reset })));
+  }
+}
+
+let usageTimer = null;
+async function refreshClaudeUsage() {
+  if (!state.user) return renderClaudeUsage(null);
+  try {
+    renderClaudeUsage(await api("/api/claude/usage"));
+  } catch {
+    renderClaudeUsage(null);
+  }
+}
+$("claude-usage-toggle").addEventListener("click", () => {
+  const open = $("claude-usage-body").hidden;
+  $("claude-usage-body").hidden = !open;
+  $("claude-usage-toggle").setAttribute("aria-expanded", String(open));
+  try { localStorage.setItem("claude-usage-open", open ? "1" : "0"); } catch { /* storage may be blocked */ }
+});
+try {
+  if (localStorage.getItem("claude-usage-open") === "1") {
+    $("claude-usage-body").hidden = false;
+    $("claude-usage-toggle").setAttribute("aria-expanded", "true");
+  }
+} catch { /* storage may be blocked */ }
+usageTimer = setInterval(() => { if (!document.hidden) refreshClaudeUsage(); }, USAGE_REFRESH_MS);

@@ -55,6 +55,8 @@ from src.providers.mcp import McpManager
 from src.providers.ollama import OllamaUnavailable
 from src.providers.openrouter import OpenRouterProvider
 from src.providers.claude_subscription import claude_subscription_provider
+from src.providers.claude_subscription.login import login_allowed, resolved_settings
+from src.providers.claude_subscription.usage import fetch_usage
 from src.providers.provider import get_provider
 from src.providers.tavily import TavilyClient
 from src.providers.telegram_notify import TelegramNotifier
@@ -391,6 +393,8 @@ class ChatService:
         # (model id -> (monotonic time, supported)) so opening chats does not refetch the catalog
         self._reasoning_support: dict[str, tuple[float, bool]] = {}
         self._availability = ProviderAvailability()
+        self._usage_lock = threading.Lock()
+        self._usage_cache: dict[str, tuple[float, dict]] = {}
         self._dream = dream or DreamManager(self._dream_dependencies())
         self._cleanup_thread: threading.Thread | None = None
         self._cleanup_stop = threading.Event()
@@ -1138,6 +1142,28 @@ class ChatService:
         slot = self._slot(user_id, agent_id)
         with slot.state:
             self._discard_replies(slot, chat_id)
+
+    def stop_chat(self, user_id: str, agent_id: str, chat_id: str) -> dict:
+        """Stop the chat's running reply (the partial answer is kept as an interrupted turn) and drop queued ones."""
+        self._owned_agent(user_id, agent_id)
+        self._require_chat(self._conversations(user_id, agent_id), chat_id)
+        self.cancel_chat_run(user_id, agent_id, chat_id)
+        return {"status": "stopping"}
+
+    def claude_usage(self, user_id: str) -> dict:
+        """Plan usage (session and week, in percent) of the user's Claude login; cached for a minute."""
+        user = self._user(user_id)
+        if not login_allowed(user.id, user.claude_subscription):
+            return {"available": False, "reason": "no_own_login"}
+        folder = resolved_settings(user.id, user.claude_subscription).claude_config_dir
+        with self._usage_lock:
+            hit = self._usage_cache.get(user_id)
+            if hit is not None and monotonic() - hit[0] < 60:
+                return hit[1]
+        result = fetch_usage(folder)
+        with self._usage_lock:
+            self._usage_cache[user_id] = (monotonic(), result)
+        return result
 
     def _remove_task_chat(self, user_id: str, agent_id: str, chat_id: str) -> None:
         """Delete a task's hidden chat that never ran (a launch that failed half-way); errors are logged, not raised."""

@@ -94,6 +94,7 @@ Paths are relative to the repository root. In Docker the same tree sits under `/
 | `src/providers/openrouter.py` | OpenRouter chat, embeddings, speech-to-text |
 | `src/providers/ollama.py` | Ollama chat and embeddings |
 | `src/providers/claude_subscription/provider.py` | Claude Code subscription chat |
+| `src/providers/claude_subscription/usage.py` | plan usage (session/week %) from the login's OAuth token; `ChatService.claude_usage`, `GET /api/claude/usage` |
 | `src/providers/catalog.py` | OpenRouter model catalog |
 | `src/providers/tavily.py` | web search and extraction client |
 | `src/providers/mcp.py` | MCP manager and connections |

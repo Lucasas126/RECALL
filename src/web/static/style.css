@@ -605,7 +605,8 @@ details.thinking { border-left: 2px solid var(--line); padding-left: 10px; }
 .sidebar-footer #user-name { flex: 1; min-width: 0; margin-right: 4px; }
 
 /* Composer: one card with the input and the chat options as compact chips */
-#composer { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "pend pend pend pend" "attach input controls send"; align-items: end; gap: 0 4px; margin: 0 var(--gutter) calc(14px + env(safe-area-inset-bottom)); padding: 4px 6px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--bg); box-shadow: 0 1px 3px #0000001f; }
+#composer-row { display: flex; align-items: flex-end; min-width: 0; margin: 0 var(--gutter) calc(14px + env(safe-area-inset-bottom)); gap: 6px; }
+#composer { flex: 1; min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "pend pend pend pend" "attach input controls send"; align-items: end; gap: 0 4px; margin: 0; padding: 4px 6px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--bg); box-shadow: 0 1px 3px #0000001f; }
 #composer:focus-within { border-color: var(--accent); }
 #composer:has(#input:focus-visible) { box-shadow: 0 0 0 1px var(--accent); }   /* one 2px ring in total with the border */
 #pending-attachments { grid-area: pend; flex-basis: auto; padding: 2px 4px 4px; }
@@ -964,3 +965,27 @@ html.resizing-sidebar #app { transition: none; }
   #chat-tasks-indicator::after { content: attr(data-short); font-variant-numeric: tabular-nums; }
 }
 @media (prefers-reduced-motion: reduce) { #chat-tasks-indicator .task-ind-dot { animation: none !important; } }
+
+/* Claude plan usage: a strip to the right of the composer; folded it shows one dot per window, unfolded the bars */
+#claude-usage { flex: none; display: flex; align-items: stretch; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--bg); color: var(--muted); font: 12px/1.3 var(--mono); }
+#claude-usage[hidden] { display: none; }
+#claude-usage-toggle { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 6px 7px; border: 0; background: transparent; color: inherit; cursor: pointer; border-radius: 5px; }
+#claude-usage-toggle:hover { background: var(--raised); color: var(--text); }
+#claude-usage-dots { display: flex; flex-direction: column; gap: 5px; }
+.usage-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); opacity: .5; }
+.usage-dot[data-level="ok"] { background: var(--ok); opacity: 1; }
+.usage-dot[data-level="warn"] { background: #e0b341; opacity: 1; }
+.usage-dot[data-level="high"] { background: #e07a3f; opacity: 1; }
+.usage-dot[data-level="crit"] { background: #d9534f; opacity: 1; }
+.usage-chevron { width: 12px; height: 12px; transition: transform .15s; }
+#claude-usage-toggle[aria-expanded="true"] .usage-chevron { transform: rotate(180deg); }
+#claude-usage-body { display: flex; flex-direction: column; justify-content: center; gap: 8px; padding: 6px 10px 6px 4px; min-width: 150px; }
+#claude-usage-body[hidden] { display: none; }
+.usage-row .usage-head { display: flex; justify-content: space-between; gap: 10px; color: var(--text); }
+.usage-row .usage-reset { color: var(--muted); font-size: 11px; }
+.usage-bar { height: 5px; margin: 3px 0 2px; border-radius: 3px; background: var(--shade); overflow: hidden; }
+.usage-bar > span { display: block; height: 100%; width: 0; border-radius: 3px; background: var(--ok); }
+.usage-bar > span[data-level="warn"] { background: #e0b341; }
+.usage-bar > span[data-level="high"] { background: #e07a3f; }
+.usage-bar > span[data-level="crit"] { background: #d9534f; }
+@media (max-width: 640px) { #claude-usage-body { min-width: 120px; } }

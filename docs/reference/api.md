@@ -10,10 +10,10 @@ plus an optional `"code"` (see [error codes](#error-codes)).
 | --- | --- |
 | session | `POST /api/login`, `POST /api/logout`, `GET /api/me` (the profile and agents, each agent and the user with `avatar` (see [profile pictures](#profile-pictures)), plus the user's effective `max_level` (read-only, [permission levels](../architecture/permissions.md)) and `terminal_backends`: `[{"name", "type", "description", "kind", "min_level"}]` sorted by name, the user's terminal backends for the agent form (`kind` is `sandbox`, `machine` or `local`, `min_level` the level the backend needs); never hosts, users or key paths), `GET /api/localization?language=en\|es`, `GET /api/version` (public: `{"version": "0.1.0", "build": null}`; `version` comes from `pyproject.toml`, `build` is the first 7 characters of `RECALL_BUILD` or `null`) |
 | preferences | `GET`/`PATCH /api/preferences` ([details](user-yaml.md#preferences-api), including the Telegram orchestrator's `default_agent_id`, `orchestrator` / `core_agent_id` and the read-only `orchestrator_default`; the response also carries a read-only `limits` object `{soul_chars, memory_chars, user_chars}` from the `memory_limits` block of settings.yaml and a read-only `defaults` object with the effective defaults and number bounds), `GET /api/speech-to-text/models` |
-| models | `GET /api/providers/status`, `GET /api/models/catalog`, `GET /api/models`, `GET`/`POST /api/models/favorites`, `DELETE /api/models/favorites/<model_id>` ([models and providers](../user-guide/models-and-providers.md)) |
+| models | `GET /api/claude/usage` ([plan usage](#claude-plan-usage)), `GET /api/providers/status`, `GET /api/models/catalog`, `GET /api/models`, `GET`/`POST /api/models/favorites`, `DELETE /api/models/favorites/<model_id>` ([models and providers](../user-guide/models-and-providers.md)) |
 | agents | `GET`/`POST /api/agents`, `GET`/`PUT`/`DELETE /api/agents/<agent_id>`, `GET`/`PUT`/`DELETE /api/agents/<agent_id>/avatar` ([profile pictures](#profile-pictures)), `GET /api/tool-groups`, `GET /api/agents/<agent_id>/index`, `POST /api/agents/<agent_id>/index/reindex` (table below) |
 | MCP | `GET /api/mcp`, `GET /api/mcp/<server_id>/tools`, `POST /api/mcp/<server_id>/connect`, `DELETE /api/mcp/<server_id>/connection` ([MCP servers](../user-guide/mcp.md)) |
-| chats | `GET /api/chats`, `GET`/`POST /api/agents/<agent_id>/chats`, `POST .../chats/<chat_id>/disposable`, `GET`/`DELETE .../chats/<chat_id>`, `GET .../chats/<chat_id>/models`, `PUT .../model`, `PUT .../reasoning-effort`, `PUT .../title`, `POST .../chats/<chat_id>/messages` (SSE, see [architecture](../architecture/overview.md#web-steering)), `GET .../chats/<chat_id>/stream` ([following a running reply](#following-a-running-reply)), `GET .../chats/<chat_id>/approvals`, `POST .../chats/<chat_id>/approvals/<approval_id>` ([terminal approvals](#terminal-approvals)) |
+| chats | `GET /api/chats`, `GET`/`POST /api/agents/<agent_id>/chats`, `POST .../chats/<chat_id>/disposable`, `GET`/`DELETE .../chats/<chat_id>`, `GET .../chats/<chat_id>/models`, `PUT .../model`, `PUT .../reasoning-effort`, `PUT .../title`, `POST .../chats/<chat_id>/messages` (SSE, see [architecture](../architecture/overview.md#web-steering)), `GET .../chats/<chat_id>/stream` ([following a running reply](#following-a-running-reply)), `POST .../chats/<chat_id>/stop` ([stopping a reply](#stopping-a-reply)), `GET .../chats/<chat_id>/approvals`, `POST .../chats/<chat_id>/approvals/<approval_id>` ([terminal approvals](#terminal-approvals)) |
 | approval rules | `GET`/`DELETE /api/agents/<agent_id>/approval-rules`, `DELETE .../approval-rules/<index>`, `POST .../approval-rules/reset`, `GET .../approval-rules/effective` ([learned approval rules](#learned-approval-rules)) |
 | levels and administration | `GET /api/levels`, `GET /api/admin/users`, `PUT /api/admin/users/<user_id>/max-level` ([permission levels in the web UI](#permission-levels-in-the-web-ui)) |
 | subagent tasks | `GET /api/tasks`, `GET /api/tasks/<task_id>`, `POST .../steer`, `POST .../stop`, `GET .../chat` ([table below](#subagent-tasks)) |
@@ -166,6 +166,21 @@ the events produced so far (consecutive `reasoning`/`text` chunks arrive merged,
 original `messages` request is unchanged; closing a viewer does not cancel the reply. Codes: `200` SSE; `204` (empty body)
 when no reply is running, meaning the saved chat is complete; `404` unknown chat; `401` not logged in. The replay is
 dropped when the reply ends, so after `204` read `GET .../chats/<chat_id>`.
+
+### stopping a reply
+
+`POST /api/agents/<agent_id>/chats/<chat_id>/stop` answers `202 {"status": "stopping"}` and cancels the chat's running
+reply and any queued ones. The stream of the cancelled reply ends with `interrupted` (the partial answer is kept in the
+chat, marked `interrupted`) and `done`. With nothing running it is a no-op that still answers `202`; an unknown chat
+is `404`. The web UI's send button becomes Stop while a reply runs and the box is empty (with text it steers).
+
+### Claude plan usage
+
+`GET /api/claude/usage` returns `{"available": true, "windows": [{"key", "percent", "resets_at"}]}` where `key` is
+`session` (5 hours), `week`, `week_opus` or `week_sonnet` (only the windows the plan has), `percent` is 0-100 and
+`resets_at` an ISO time or `null`. When it cannot be known: `{"available": false, "reason"}` with `no_own_login`,
+`no_credentials`, `expired`, `unauthorized` or `unreachable`. Cached one minute per user; the token is never part of the
+answer. See [plan usage](../user-guide/claude-subscription.md#plan-usage).
 
 Tool steps are announced live: `tool_start` (`{"id", "name", "arguments"}`) is sent right before a tool runs, and the `tool` event that follows when it finishes (`{"id", "name", "arguments", "result", "error"}`) carries the same `id` (the provider's tool call id, else `call-<n>`). Tools run one after another, so each start is followed by its own final event. A tool that was interrupted never gets a final event: the stream then ends with `interrupted` (or `error`), and clients mark any step still running as stopped. A `tool_start` is part of the replay of `.../stream`, so a viewer that attaches mid-run sees the running steps. Stored `actions` are unchanged (finished tools only, without `id`), and Telegram ignores `tool_start`.
 
