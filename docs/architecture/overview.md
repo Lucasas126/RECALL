@@ -189,8 +189,10 @@ and video attachments.
 
 ### web steering
 
-The composer remains enabled while a reply is generating; its button reads
-`Steer`. Sending another message stops the previous generation on the server,
+The composer remains enabled while a reply is generating. Its button is `Stop`
+while the box is empty (`POST .../chats/<chat_id>/stop` cancels the reply on the
+server and keeps the partial answer) and `Steer` once there is text or an
+attachment. Sending another message stops the previous generation on the server,
 not just the browser fetch. Each stream has its own reply view. The partial
 answer remains visible with an interruption label, also when reopening history;
 the interruption snapshot replaces text/reasoning and adds missing actions

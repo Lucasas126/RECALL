@@ -133,7 +133,7 @@ Errors appear as a card with a title, a hint and sometimes a button.
 | provider unavailable (`provider_unavailable`) | Claude did not report its login state | choose another model |
 | model unavailable (`model_unavailable`) | the model is retired or not installed | choose another model |
 | rate limited (`rate_limited`) | the provider is busy (HTTP 429) | wait or choose another model |
-| agent busy (`agent_busy`) | the agent is still answering | wait; you can also send a new message to steer it |
+| agent busy (`agent_busy`) | the agent is still answering | wait; you can also send a new message to steer it, or press Stop to end the reply |
 | service not connected (`mcp_not_connected`) | a tool needs an account you have not connected | Settings > Connections |
 
 The full table is in the [API reference](../reference/api.md#error-codes).

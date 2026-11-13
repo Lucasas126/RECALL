@@ -12,6 +12,8 @@ RECALL is built for a household or a small trusted group, not for the open inter
 - **Telegram**: ids that are not in `TELEGRAM_ALLOWED_USERS` are ignored completely; one bot token, one polling process.
 - **Claude logins**: the experimental Claude provider uses a login of the account RECALL runs as, or of a per-user
   `claude_config_dir`. Never share one person's login with another; see [Claude subscription](../user-guide/claude-subscription.md).
+  The web UI's plan usage indicator reads that login's access token from the login folder and sends it only to
+  `api.anthropic.com` (`/api/oauth/usage`); it is never logged or returned to the browser.
 - **Privacy of model providers**: zero data retention is an optional per-user policy (`require_zdr`), see
   [models and providers](../user-guide/models-and-providers.md#openrouter-model-catalog-and-zero-data-retention). Tavily and
   any MCP server receive what the agent sends them.
