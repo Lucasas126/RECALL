@@ -3927,12 +3927,14 @@ function startEdit(el) {
 async function syncEditIndexes(request) {
   const data = await api(chatsUrl(`/${request.chatId}`));
   if (!isCurrent(request) || isGenerating(request.agentId, request.chatId)) return;
-  const bubbles = [...state.view.querySelectorAll(":scope > .msg.user, :scope > .msg.assistant")]
-    .filter((el) => !el.classList.contains("error-only"));
-  if (bubbles.length !== data.messages.length) return;
+  // pair user bubbles with the stored user messages in order; the assistant bubbles are left out of the count on
+  // purpose: a stopped, steered or failed reply can leave more or fewer of them than stored turns, and a mismatch
+  // there used to leave every edit button without its index until the page was reloaded
+  const bubbles = [...state.view.querySelectorAll(":scope > .msg.user")];
+  const stored = data.messages.filter((m) => m.role === "user" && !isWakeMessage(m));
+  if (bubbles.length !== stored.length) return;
   bubbles.forEach((el, position) => {
-    const m = data.messages[position];
-    if (m.role === "user" && el.classList.contains("user")) setEditable(el, m.index);
+    if (stored[position].index != null) setEditable(el, stored[position].index);
   });
 }
 
