@@ -2,11 +2,15 @@ import unittest
 from pathlib import Path
 
 
-class TranscriptNoticeTests(unittest.TestCase):
-    def test_web_shows_transcript_and_mic_does_not_overlap(self):
+class PersistentTranscriptTests(unittest.TestCase):
+    def test_the_transcript_is_stored_on_the_audio_media_and_shown_by_the_page(self):
         chat = Path("src/service/chat.py").read_text()
-        self.assertIn('if transcripts and channel == "web"', chat)
+        self.assertIn('item["transcript"] = heard', chat)
+        self.assertNotIn("🎤", chat)
+        js = Path("src/web/static/app.js").read_text()
+        self.assertIn("attachment.transcript", js)
         css = Path("src/web/static/style.css").read_text()
+        self.assertIn(".attachment-transcript", css)
         self.assertIn("#mic.recording { width: auto", css)
 
 

@@ -3764,6 +3764,12 @@ function attachmentView(attachment) {
   caption.className = "attachment-label";
   caption.textContent = label;
   item.append(media, caption);
+  if (kind === "audio" && attachment.transcript) {
+    const heard = document.createElement("span");
+    heard.className = "attachment-transcript";
+    heard.textContent = attachment.transcript;
+    item.append(heard);
+  }
   return item;
 }
 
