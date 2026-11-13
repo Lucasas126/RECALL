@@ -40,12 +40,11 @@ class TelegramActionFormattingTests(unittest.TestCase):
                     entity for entity in entities
                     if entity.type == MessageEntity.EXPANDABLE_BLOCKQUOTE
                 ]
-                self.assertEqual(len(quotes), bool(thinking))
-                if quotes:
-                    self.assertLessEqual(quotes[0].offset, italic.offset)
-                    self.assertGreaterEqual(
-                        quotes[0].offset + quotes[0].length, italic.offset + italic.length,
-                    )
+                self.assertEqual(len(quotes), 1)  # the action is in the collapsible block even with no thinking before it
+                self.assertLessEqual(quotes[0].offset, italic.offset)
+                self.assertGreaterEqual(
+                    quotes[0].offset + quotes[0].length, italic.offset + italic.length,
+                )
 
     def test_multiple_calls_and_empty_arguments(self) -> None:
         self.assertEqual(_format_actions([
@@ -93,11 +92,25 @@ class TelegramActionFormattingTests(unittest.TestCase):
         self.assertEqual(sorted(expected, key=text.index), expected)
         quotes = [e for e in entities if e.type == MessageEntity.EXPANDABLE_BLOCKQUOTE]
         self.assertEqual(len(quotes), 2)
-        for action, inside in ((">first()", True), (">second()", False), (">third()", True)):
+        for action, inside in ((">first()", True), (">second()", True), (">third()", True)):
             offset = _utf16_len(text[:text.index(action)])
             self.assertEqual(
                 any(q.offset <= offset < q.offset + q.length for q in quotes), inside,
             )
+
+    def test_an_action_before_any_thinking_or_after_text_is_inside_the_collapsible_block(self) -> None:
+        content = _ReplyContent()
+        content.add_action({"name": "first", "arguments": {}})
+        content.append("text", "Answer")
+        content.add_action({"name": "second", "arguments": {}})
+        text, entities = _generation_message(content.parts)
+        quotes = [e for e in entities if e.type == MessageEntity.EXPANDABLE_BLOCKQUOTE]
+        self.assertEqual(len(quotes), 2)
+        for action in (">first()", ">second()"):
+            offset = _utf16_len(text[:text.index(action)])
+            self.assertTrue(any(q.offset <= offset < q.offset + q.length for q in quotes), action)
+        offset = _utf16_len(text[:text.index("Answer")])
+        self.assertFalse(any(q.offset <= offset < q.offset + q.length for q in quotes))
 
     def test_markdown_tokens_are_coalesced_before_rendering(self) -> None:
         content = _ReplyContent()
