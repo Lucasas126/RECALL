@@ -34,6 +34,11 @@ TOOL_GROUP_CATALOG: Final[tuple[dict[str, str], ...]] = (
         "description": "Create, edit, move and delete files in the agent's user folders that are not read-only.",
     },
     {
+        "id": "notify",
+        "name": "Telegram notices",
+        "description": "Send you a short message on Telegram (for example when a long task is done).",
+    },
+    {
         "id": "terminal",
         "name": "Terminal sandbox",
         "description": "Run commands and edit files in a sandbox, with your approval.",
@@ -84,6 +89,7 @@ TOOL_GROUP_TOOLS: Final[dict[str, tuple[str, ...]]] = {
         "folder_list", "folder_read", "folder_search",
         "folder_write", "folder_append", "folder_edit", "folder_move", "folder_delete",
     ),
+    "notify": ("notify_telegram",),
     "terminal": (
         "terminal", "sandbox_read", "sandbox_write", "sandbox_patch", "sandbox_search",
         "process_start", "process_list", "process_read", "process_wait", "process_stop",
@@ -106,6 +112,7 @@ DISPOSABLE_BLOCKED_TOOLS: Final[frozenset[str]] = frozenset(
     | set(TOOL_GROUP_TOOLS["delegate"])  # nor can it launch tasks: this also gives depth 1 (children are disposable)
     | set(TOOL_GROUP_TOOLS["permissions"])  # nor change anyone's permissions: workers never hold that group
     | set(TOOL_GROUP_TOOLS["agents"])  # nor create, change or delete agents: same
+    | set(TOOL_GROUP_TOOLS["notify"])  # nor write to the user's phone
 )
 
 

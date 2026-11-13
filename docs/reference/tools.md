@@ -74,6 +74,12 @@ The web **Agents** tab configures these groups for each agent:
   *Approve* and *Deny*; it is never remembered, is audited (`permission_change` in `terminal_audit.jsonl`) and applied through the same
   validation as the web form. Not available in dreams, scheduled tasks or workers. See [permissions](../architecture/permissions.md#implemented-step-5-the-permissions-tool-group).
 
+<a id="notify"></a>
+- `notify` (level `assistant`): `notify_telegram(text)` sends a short Markdown message to the Telegram chat(s) linked to the user who owns the agent. The recipient is never
+  a parameter, so an agent cannot write to anyone else. Use it for "tell me when you are done". It needs the server's bot token and the user linked in the Telegram allow-list;
+  without them it returns an error the agent can read. At most 30 notices an hour per agent (counted in the running process, so a restart resets it) and 3500 characters each.
+  Not built in a disposable chat (workers and tasks). No approval card: it only reaches the owner's own chat.
+
 <a id="agents"></a>
 - `agents` (level `operator`): create, edit, rename and delete the **same user's agents**, never another user's and never by a path. Results are JSON or `error: ...`;
   names, descriptions and SOULs are data. Reads (no card): `agent_list()` (per agent: `id`, `name`, `description`, effective `level`, default `model`, `tool_groups`,

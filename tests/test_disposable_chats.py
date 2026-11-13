@@ -178,7 +178,8 @@ class DisposableToolTests(unittest.TestCase):
             WRITE_TOOLS | {"folder_write", "folder_append", "folder_edit", "folder_move", "folder_delete"}
             | TERMINAL_TOOLS | {"task_start", "task_list", "task_result", "task_steer", "task_send", "task_stop", "task_wait"}  # a disposable chat cannot launch tasks either
             | set(TOOL_GROUP_TOOLS["permissions"])  # nor change anyone's permissions
-            | set(TOOL_GROUP_TOOLS["agents"]),  # nor create, change or delete agents
+            | set(TOOL_GROUP_TOOLS["agents"])  # nor create, change or delete agents
+            | set(TOOL_GROUP_TOOLS["notify"]),  # nor write to the user's phone
         )
 
     def test_a_disposable_chat_never_builds_the_terminal_tools(self) -> None:
