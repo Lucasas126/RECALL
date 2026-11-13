@@ -2,6 +2,7 @@ import json
 import tempfile
 import time
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -69,6 +70,21 @@ class FetchUsageTests(unittest.TestCase):
                 self.assertEqual(usage.fetch_usage(folder)["reason"], "unreachable")
             with mock.patch.object(usage.httpx, "get", return_value=_Response(200, ValueError())):
                 self.assertEqual(usage.fetch_usage(folder)["reason"], "unreachable")
+
+
+class ResetInTests(unittest.TestCase):
+    NOW = datetime(2026, 11, 13, 10, 0, tzinfo=timezone.utc)
+
+    def test_wording(self):
+        for iso, expected in (
+            ("2026-11-13T10:45:00+00:00", "45m"), ("2026-11-13T12:14:00+00:00", "2h 14m"),
+            ("2026-11-16T15:00:00+00:00", "3d 5h"), ("2026-11-13T09:00:00+00:00", "0m"),
+        ):
+            self.assertEqual(usage.reset_in(iso, self.NOW), expected)
+
+    def test_unknown(self):
+        self.assertIsNone(usage.reset_in(None, self.NOW))
+        self.assertIsNone(usage.reset_in("not a date", self.NOW))
 
 
 if __name__ == "__main__":

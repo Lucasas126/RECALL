@@ -198,6 +198,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/dreamcancel — Stop the running dream session\n"
         "/help — Show this help\n"
         + message(language, "/compact — Summarize the older part of this chat now; /compact <focus> says what to keep\n")
+        + message(language, "/usage — Claude plan usage (session and week)\n")
         + message(language, "/tasks — Subagent tasks of this chat, with a Stop button\n"
                             "/task — /task <id> shows a task; /task <id> <text> corrects a running one\n")
         + "\nYou can send text, images, audio, voice messages, and video directly."
@@ -1283,6 +1284,24 @@ async def compact_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await update.effective_message.reply_text(reply or "")
 
 
+async def usage_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """`/usage` shows the Claude plan usage (session and week)."""
+    state: TelegramBotState = context.application.bot_data["state"]
+    session = _session(update, state)
+    if session is None:
+        await _unauthorized(update)
+        return
+    try:
+        reply = await asyncio.to_thread(state.service.usage_command, session.user_id, "/usage")
+    except (ServiceError, ValueError, OSError, RuntimeError) as exc:
+        logger.warning("Telegram /usage failed: %s", exc)
+        await update.effective_message.reply_text(
+            _msg(session, "Generation failed: {error}", error=error_message(session.language, exc)),
+        )
+        return
+    await update.effective_message.reply_text(reply or "")
+
+
 async def dream_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """`/dream` shows the dream status; `/dream start|cancel` still work as text (the menu advertises the one-word forms)."""
     await _run_dream_command(update, context, " ".join(["/dream", *(context.args or [])]))
@@ -2312,6 +2331,7 @@ def build_application(
         BotCommand("dreamstart", "Start a dream session now"),
         BotCommand("dreamcancel", "Stop the running dream session"),
         BotCommand("compact", "Summarize the older part of this chat: /compact [focus]"),
+        BotCommand("usage", "Claude plan usage: session and week"),
         BotCommand("tasks", "Subagent tasks of this chat"),
         BotCommand("task", "Show or correct a subagent task: /task <id> [text]"),
         BotCommand("help", "Show available commands"),
@@ -2338,6 +2358,7 @@ def build_application(
     application.add_handler(CallbackQueryHandler(approval_callback, pattern=rf"^{_APPROVAL_CALLBACK}:"))
     application.add_handler(CallbackQueryHandler(task_callback, pattern=rf"^{_TASK_CALLBACK}:"))
     application.add_handler(CommandHandler("compact", compact_command))
+    application.add_handler(CommandHandler("usage", usage_command))
     application.add_handler(CommandHandler("tasks", tasks_command))
     application.add_handler(CommandHandler("task", task_command))
     application.add_handler(CommandHandler(["newchat", "new", "selectagent"], new_chat))

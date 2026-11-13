@@ -24,7 +24,7 @@ Telegram provides `/help`,
 `/settings`, `/newchat`, `/selectmodel`, `/selectagent`, `/agent`, `/model`,
 `/stt`, `/dream` (status of the active agent's [dream mode](dream.md#commands): last
 session with its summary, schedule, pending chats), `/dreamstart` (starts a session) and
-`/dreamcancel` (stops it), `/compact` ([compacts the current chat](memory.md#context-compaction) now; `/compact <focus>` says what to keep), `/tasks` and `/task` ([subagent tasks](delegation.md#telegram)). Every command is one word so Telegram renders it as tappable and lists it in the
+`/dreamcancel` (stops it), `/compact` ([compacts the current chat](memory.md#context-compaction) now; `/compact <focus>` says what to keep), `/usage` ([Claude plan usage](claude-subscription.md#plan-usage): session and week, in text), `/tasks` and `/task` ([subagent tasks](delegation.md#telegram)). Every command is one word so Telegram renders it as tappable and lists it in the
 command menu; `/dream start` and `/dream cancel` typed as text still work but are not advertised.
 Telegram's native command menu is populated at startup, and
 `/help` prints the same command list in the chat.
