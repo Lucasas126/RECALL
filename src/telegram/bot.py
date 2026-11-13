@@ -1917,7 +1917,7 @@ async def _send_generation(
         events = await asyncio.to_thread(
             state.service.send,
             user_id, agent_id, chat_id, text,
-            stream=True, attachments=attachments,
+            stream=True, attachments=attachments, channel="telegram",
         )
         while True:
             has_event, event = await _next_event(events)

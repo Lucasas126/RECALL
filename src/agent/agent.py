@@ -44,6 +44,7 @@ from src.providers.mcp import McpManager
 from src.providers.tavily import TavilyClient
 
 logger = get_logger("agent")
+_CHANNEL_NAMES = {"web": "web UI", "telegram": "telegram"}  # how a message channel reads in the model context
 
 # appended to the context on the final tool hop to force a direct answer
 _FINAL_NUDGE = "Stop calling tools. Answer the user now using what you already have."
@@ -469,13 +470,14 @@ class Agent:
         self, user_input: str, stream: Optional[bool] = None,
         cancellation: CancellationToken | None = None,
         *, continuation: bool = False, attachments: Optional[list[dict]] = None,
-        meta: Optional[dict] = None,
+        meta: Optional[dict] = None, channel: Optional[str] = None,
     ) -> Union[str, Iterator[tuple[str, str | dict]]]:
         """Send a user message and return the reply, updating conversation memory.
 
         Returns a string or a generator of (kind, payload) events. Cancellation preserves
         the accepted input and partial reply as an interrupted turn, then raises
         GenerationCancelled. A steering continuation retains the active turn even without memory.
+        `channel` (`web`, `telegram`) is where the message came from; it is stored on the turn and shown to the model.
         """
         if stream is None:
             stream = self.config.stream
@@ -511,8 +513,8 @@ class Agent:
             if cancellation is not None:
                 cancellation.raise_if_cancelled()
         except GenerationCancelled:
-            self.messages.append({"role": "user", "content": self._stamped(user_content, ts)})
-            self._log_turn("user", user_content, ts=ts, **(meta or {}))
+            self.messages.append({"role": "user", "content": self._stamped(user_content, ts, channel)})
+            self._log_turn("user", user_content, ts=ts, **dict(meta or {}, channel=channel))
             self._remember_interrupted("", "")
             raise
         if self._associative_enabled():
@@ -521,8 +523,8 @@ class Agent:
             self._assoc_job = associative.RecallJob(
                 self, list(self.messages[1:]), user_input, chat_id=self.chat_id,
             ).start()
-        self.messages.append({"role": "user", "content": self._stamped(user_content, ts)})
-        self._log_turn("user", user_content, ts=ts, **(meta or {}))  # `meta`: source/task_ids of a wake turn
+        self.messages.append({"role": "user", "content": self._stamped(user_content, ts, channel)})
+        self._log_turn("user", user_content, ts=ts, **dict(meta or {}, channel=channel))  # `meta`: source/task_ids of a wake turn
         if not continuation:
             self._guard_context()
         self._refresh_mcp_tools()
@@ -573,9 +575,10 @@ class Agent:
         return parts
 
     @staticmethod
-    def _stamped(content: str | list[dict], ts: str) -> str | list[dict]:
-        """Prefix a user turn with its local timestamp so the model knows when it was sent."""
-        prefix = f"[{datetime.fromisoformat(ts).isoformat(sep=' ', timespec='minutes')}]"
+    def _stamped(content: str | list[dict], ts: str, channel: Optional[str] = None) -> str | list[dict]:
+        """Prefix a user turn with its local timestamp (and channel, when known) so the model knows when and where."""
+        stamp = datetime.fromisoformat(ts).isoformat(sep=" ", timespec="minutes")
+        prefix = f"[{stamp} via {_CHANNEL_NAMES.get(channel, channel)}]" if channel else f"[{stamp}]"
         if isinstance(content, str):
             return f"{prefix} {content}" if content else prefix
         parts = list(content)
@@ -972,7 +975,7 @@ class Agent:
                 continue
             content = self._reply_content(t["content"], bool(t.get("interrupted")))
             if t["role"] == "user" and t.get("ts"):
-                content = self._stamped(content, t["ts"])
+                content = self._stamped(content, t["ts"], t.get("channel"))
             self.messages.append({"role": t["role"], "content": content})
         # seed the context input size from the most recent persisted usage (or the latest compaction)
         for t in reversed(history):

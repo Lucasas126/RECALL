@@ -607,7 +607,7 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
         events = service.send(
             user_id, agent_id, chat_id, body.content, stream=True,
             attachments=[attachment.model_dump() for attachment in body.attachments],
-            rewind_to=body.edit_index,
+            rewind_to=body.edit_index, channel="web",
         )
 
         return StreamingResponse(

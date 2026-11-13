@@ -3622,9 +3622,13 @@ $("model-zdr").addEventListener("change", () => refreshModels());
 
 // ------------------------------------------------------------------ messages
 
+// The voice recorder's state (see the voice message section below); declared first because setComposer reads it.
+const voice = { recorder: null, stream: null, chunks: [], timer: null, startedAt: 0, discard: false };
+
 function setComposer(enabled) {
   $("input").disabled = !enabled || state.modelBusy;
   $("attach").disabled = !enabled || state.modelBusy;
+  $("mic").disabled = !voice.recorder && (!enabled || state.modelBusy || !voiceSupported());
   $("send").disabled = !enabled || state.modelBusy;
 }
 
@@ -6051,6 +6055,11 @@ function attachmentModality(file) {
   return null;
 }
 
+// The speech-to-text endpoint names MP4 audio (what Safari records) "m4a".
+function audioFormat(mimeType) {
+  return mimeType.split(";")[0] === "audio/mp4" ? "m4a" : null;
+}
+
 function readAttachment(file) {
   const pdf = isPdf(file);
   return new Promise((resolve, reject) => {
@@ -6059,7 +6068,7 @@ function readAttachment(file) {
       modality: attachmentModality(file),
       name: file.name,
       mime_type: pdf ? "application/pdf" : file.type,
-      format: pdf ? "pdf" : file.type.split("/")[1].split(";")[0],
+      format: pdf ? "pdf" : audioFormat(file.type) ?? file.type.split("/")[1].split(";")[0],
       data_url: reader.result,
       size: file.size,
     });
@@ -6093,6 +6102,70 @@ function renderPendingAttachments() {
 }
 
 $("attach").addEventListener("click", () => $("file-input").click());
+
+// ---- voice messages: record in the browser, attach as audio; the server transcribes it like any audio file
+
+// Browsers expose the microphone only on HTTPS or localhost.
+function voiceSupported() {
+  return Boolean(navigator.mediaDevices?.getUserMedia) && typeof MediaRecorder !== "undefined";
+}
+
+function voiceStopTracks() {
+  voice.stream?.getTracks().forEach((track) => track.stop());
+  clearInterval(voice.timer);
+  voice.recorder = voice.stream = voice.timer = null;
+  $("mic").classList.remove("recording");
+  $("mic").title = tr("Record a voice message");
+  $("mic").setAttribute("aria-label", tr("Record a voice message"));
+}
+
+function voiceTick() {
+  const seconds = Math.floor((Date.now() - voice.startedAt) / 1000);
+  $("mic").title = tr("Stop recording ({time})", { time: `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}` });
+}
+
+async function voiceStart() {
+  voice.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  voice.chunks = [];
+  voice.discard = false;
+  voice.recorder = new MediaRecorder(voice.stream);
+  voice.recorder.addEventListener("dataavailable", (event) => { if (event.data.size) voice.chunks.push(event.data); });
+  voice.recorder.addEventListener("stop", async () => {
+    const type = voice.recorder?.mimeType || "audio/webm";
+    const chunks = voice.chunks;
+    const discard = voice.discard;
+    voiceStopTracks();
+    if (discard || !chunks.length) return;
+    try {
+      const extension = type.includes("mp4") ? "m4a" : type.includes("ogg") ? "ogg" : "webm";
+      const file = new File(chunks, `voice.${extension}`, { type });
+      if (file.size > MAX_FILE_BYTES) throw new Error(tr("{name}: maximum size is 10 MB", { name: file.name }));
+      const total = state.attachments.reduce((sum, item) => sum + item.size, 0) + file.size;
+      if (total > MAX_TOTAL_FILE_BYTES) throw new Error(tr("Attachments exceed the 25 MB total limit"));
+      state.attachments.push(await readAttachment(file));
+      renderPendingAttachments();
+      updateSendButton();
+    } catch (err) {
+      addMessage("assistant").error(err);
+    }
+  });
+  voice.recorder.start();
+  voice.startedAt = Date.now();
+  $("mic").classList.add("recording");
+  $("mic").setAttribute("aria-label", tr("Stop recording"));
+  voiceTick();
+  voice.timer = setInterval(voiceTick, 1000);
+}
+
+$("mic").addEventListener("click", async () => {
+  if (voice.recorder) { voice.recorder.stop(); return; }
+  try {
+    await voiceStart();
+  } catch (err) {
+    voiceStopTracks();
+    addMessage("assistant").error(err?.name === "NotAllowedError" ? new Error(tr("Microphone access was denied")) : err);
+  }
+});
 $("file-input").addEventListener("change", async (event) => {
   const files = [...event.target.files];
   event.target.value = "";

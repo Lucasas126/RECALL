@@ -565,6 +565,8 @@ details.thinking { border-left: 2px solid var(--line); padding-left: 10px; }
 /* Icons */
 .icon { width: 18px; height: 18px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
 .icon-btn { display: inline-grid; place-items: center; flex-shrink: 0; width: 36px; height: 36px; padding: 0; border-color: transparent; background: none; color: var(--muted); border-radius: 50%; }
+.icon-btn.recording { color: #fff; background: #c0392b; animation: mic-pulse 1.2s ease-in-out infinite; }
+@keyframes mic-pulse { 50% { opacity: .6; } }
 .icon-btn:hover:not(:disabled) { color: var(--text); background: var(--raised); border-color: transparent; }
 #send { color: var(--on-accent); border-radius: 4px; }
 #send:hover:not(:disabled) { color: var(--on-accent); background: var(--accent-strong); }
