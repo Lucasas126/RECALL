@@ -672,6 +672,20 @@ details.thinking { border-left: 2px solid var(--line); padding-left: 10px; }
   #model-picker, #chat-effort { min-height: 44px; }
   #composer { padding-bottom: calc(4px + env(safe-area-inset-bottom)); margin-bottom: 8px; }
 }
+/* Phones: the model and the reasoning effort become one icon each instead of their text (the full name stays in the title and in the model dialog); a non-default effort tints its icon */
+@media (max-width: 520px) {
+  #chat-controls { flex-wrap: nowrap; gap: 0; }
+  #model-picker, #chat-effort { width: 44px; min-width: 44px; padding: 0; font-size: 0; color: transparent; background-image: none !important; text-overflow: clip; }
+  #model-picker { position: relative; max-width: 44px; }
+  #model-picker::before, #chat-effort-label::after { content: ""; position: absolute; inset: 0; margin: auto; width: 20px; height: 20px; background: var(--muted); pointer-events: none; -webkit-mask: center / contain no-repeat; mask: center / contain no-repeat; }
+  #model-picker::before { -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='6' y='6' width='12' height='12' rx='2'/%3E%3Cpath d='M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4'/%3E%3C/svg%3E"); mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='6' y='6' width='12' height='12' rx='2'/%3E%3Cpath d='M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4'/%3E%3C/svg%3E"); }
+  #chat-effort-label { position: relative; }
+  #chat-effort-label::after { -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 17a8 8 0 1 1 16 0'/%3E%3Cpath d='M12 17l4-5'/%3E%3C/svg%3E"); mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 17a8 8 0 1 1 16 0'/%3E%3Cpath d='M12 17l4-5'/%3E%3C/svg%3E"); }
+  #chat-effort-label:has(#chat-effort option:not([value=""]):not([value="unavailable"]):checked)::after { background: var(--accent); }
+  #model-picker:hover:not(:disabled)::before { background: var(--text); }
+  #model-picker:disabled::before, #chat-effort:disabled + * { opacity: .5; }
+  #chat-effort-label:has(#chat-effort:disabled)::after { opacity: .5; }
+}
 @media (pointer: coarse) {
   #new-chat-row button { height: 44px; } #new-chat-row #new-disposable-chat { width: 44px; }
   #model-picker, #chat-effort, #chat-make-disposable, #agent-banner { min-height: 44px; }

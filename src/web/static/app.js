@@ -948,7 +948,7 @@ function renderAgentBanner() {
   $("agent-title").textContent = name || "—";
   renderAvatar($("agent-avatar"), state.user?.agents.find((a) => a.id === state.agentId)?.avatar, name);
   $("input").placeholder = state.busy
-    ? "Send another message to steer the response..."
+    ? "Steer the response..."
     : name ? `Message ${name}...` : "Write a message...";
 }
 
