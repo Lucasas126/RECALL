@@ -3162,6 +3162,7 @@ async function openChat(chatId) {
   updateBusy();
   syncApprovals(agentId, chatId);
   ensureTaskPolling();  // task cards and wake replies of this chat
+  startProcessPolling();
   await refreshChats();
   $("input").focus();
 }
@@ -3744,6 +3745,28 @@ function activateView(container) {
   scrollDown(true);
 }
 
+// One attachment of a sent message. `data_url` (kept on the turn) lets the person see or hear what was sent.
+function attachmentView(attachment) {
+  const label = attachment.name || attachment.modality || "attachment";
+  const kind = attachment.data_url && ["image", "audio", "video"].includes(attachment.modality) ? attachment.modality : null;
+  const item = document.createElement(kind ? "div" : "span");
+  item.className = "attachment-name" + (kind ? ` attachment-${kind}` : "");
+  item._attachment = attachment;
+  if (!kind) {
+    item.textContent = label;
+    return item;
+  }
+  const media = document.createElement(kind === "image" ? "img" : kind);
+  media.src = attachment.data_url;
+  if (kind === "image") { media.alt = label; media.loading = "lazy"; }
+  else { media.controls = true; media.preload = "metadata"; }
+  const caption = document.createElement("span");
+  caption.className = "attachment-label";
+  caption.textContent = label;
+  item.append(media, caption);
+  return item;
+}
+
 function renderMessages(messages) {
   const container = document.createElement("div");
   container.className = "chat-view";
@@ -3776,6 +3799,7 @@ function renderMessages(messages) {
       }
     } else {
       view.text(m.content);
+      if (m.media?.length) view.attachments(m.media);
     }
     if (m.interrupted) view.interrupted();
     if (m.usage_report) showUsage(m.usage_report);
@@ -3856,7 +3880,8 @@ function startEdit(el) {
   };
   const submit = () => {
     const text = field.value.trim();
-    const attachments = [...el.querySelectorAll(".message-attachments .attachment-name")].map((n) => ({ name: n.textContent }));
+    const attachments = [...el.querySelectorAll(".message-attachments .attachment-name")]
+      .map((n) => n._attachment ?? { name: n.textContent });
     if (!text && !attachments.length) return;
     if (state.busy || state.modelBusy) return;
     dispatchMessage(text, [], { index, el, shown: attachments });
@@ -4713,6 +4738,74 @@ async function taskSteer(card, field, form, box) {
 
 // Polls the open chat's tasks every ~3 s while one runs or a result is on its way; a wake reply that started
 // without a request of this page is then attached to like a reply that runs after a reload.
+// ---- background processes of the open chat: a collapsible line above the message box, each with Stop
+const PROCESS_POLL_MS = 3000;
+const processPanel = { timer: null, key: null, shown: "" };
+
+function processElapsed(started) {
+  const seconds = Math.max(0, Math.floor(Date.now() / 1000 - started));
+  const minutes = Math.floor(seconds / 60);
+  return minutes >= 60 ? `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}m` : `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function renderProcesses(processes) {
+  const box = $("processes");
+  box.hidden = processes.length === 0;
+  const signature = JSON.stringify(processes.map((p) => p.id));
+  const summary = box.querySelector("summary");
+  summary.textContent = processes.length === 1
+    ? tr("{count} process running in the background", { count: 1 })
+    : tr("{count} processes running in the background", { count: processes.length });
+  if (signature === processPanel.shown) {  // same list: only the clocks change, so an open row is not rebuilt
+    box.querySelectorAll("[data-started]").forEach((n) => { n.textContent = processElapsed(Number(n.dataset.started)); });
+    return;
+  }
+  processPanel.shown = signature;
+  box.querySelector("ul").replaceChildren(...processes.map((process) => {
+    const stop = element("button", { type: "button", className: "process-stop", textContent: tr("Stop process") });
+    stop.addEventListener("click", async () => {
+      stop.disabled = true;
+      try {
+        await api(`/api/agents/${encodeURIComponent(state.agentId)}/chats/${encodeURIComponent(state.chatId)}/processes/${process.id}/stop`, { method: "POST" });
+      } catch (err) {
+        stop.disabled = false;
+        addMessage("assistant").error(err);
+      }
+      pollProcesses();
+    });
+    const time = element("span", { className: "process-time", textContent: processElapsed(process.started) });
+    time.dataset.started = process.started;
+    return element("li", {},
+      element("code", { className: "process-command", textContent: process.command, title: process.command }),
+      element("span", { className: "process-meta", textContent: process.backend }),
+      time, stop);
+  }));
+}
+
+async function pollProcesses() {
+  const { agentId, chatId, session } = state;
+  if (!state.user || !agentId || !chatId || document.hidden) return;
+  try {
+    const data = await api(`/api/agents/${encodeURIComponent(agentId)}/chats/${encodeURIComponent(chatId)}/processes`);
+    if (session === state.session && agentId === state.agentId && chatId === state.chatId) renderProcesses(data.processes);
+  } catch {
+    // the panel is a convenience: a failed poll keeps the last list
+  }
+}
+
+function startProcessPolling() {
+  const key = state.user && state.agentId && state.chatId ? chatKey(state.agentId, state.chatId) : null;
+  if (key !== processPanel.key) {  // another chat: start from an empty panel
+    processPanel.key = key;
+    processPanel.shown = "";
+    $("processes").hidden = true;
+    $("processes").removeAttribute("open");
+  }
+  if (!key) return;
+  pollProcesses();
+  if (!processPanel.timer) processPanel.timer = setInterval(pollProcesses, PROCESS_POLL_MS);
+}
+
 function ensureTaskPolling() {
   if (!state.user) return;
   if (taskPollRunning) {
@@ -5739,19 +5832,17 @@ function addMessage(role, parent = state.view ?? $("messages")) {
       el.insertBefore(node, body);
     }
   }
-  function renderAttachmentNames(attachments) {
+  // Attachments of a message: images, audio and video play right there; anything else shows its name.
+  function renderAttachmentNames(attachments, replace = false) {
     if (!attachments?.length) return;
     if (!attachmentBox) {
       attachmentBox = document.createElement("div");
       attachmentBox.className = "message-attachments";
       el.insertBefore(attachmentBox, body);
     }
-    attachmentBox.replaceChildren(...attachments.map((attachment) => {
-      const item = document.createElement("span");
-      item.className = "attachment-name";
-      item.textContent = attachment.name || attachment.modality || "attachment";
-      return item;
-    }));
+    const items = attachments.map((attachment) => attachmentView(attachment));
+    if (replace) attachmentBox.replaceChildren(...items);
+    else attachmentBox.append(...items);
   }
   const view = {
     el,
@@ -5759,9 +5850,11 @@ function addMessage(role, parent = state.view ?? $("messages")) {
       if (Array.isArray(chunk)) {
         const textParts = chunk.filter((part) => part.type === "text").map((part) => part.text);
         raw += textParts.join("");
-        renderAttachmentNames(chunk.filter((part) => part.type !== "text").map((part) => ({
-          name: part.name || part.type,
-        })));
+        renderAttachmentNames(chunk.filter((part) => part.type !== "text").map((part) => (
+          part.type === "image_url"
+            ? { name: part.name || "image", modality: "image", data_url: part.image_url?.url }
+            : { name: part.name || part.type }
+        )), true);
         if (textParts.join("").trim()) thinking = null;
         renderBody();
         return;
@@ -5770,7 +5863,7 @@ function addMessage(role, parent = state.view ?? $("messages")) {
       if (chunk.trim()) thinking = null;
       renderBody();
     },
-    attachments: renderAttachmentNames,
+    attachments: (items) => renderAttachmentNames(items),
     // Every reasoning burst is its own segment at its place in the timeline; chunks that follow it directly join it.
     thinking(chunk) {
       if (!thinking) {
@@ -6115,13 +6208,17 @@ function voiceStopTracks() {
   clearInterval(voice.timer);
   voice.recorder = voice.stream = voice.timer = null;
   $("mic").classList.remove("recording");
+  $("mic-time").hidden = true;
+  $("mic-time").textContent = "";
   $("mic").title = tr("Record a voice message");
   $("mic").setAttribute("aria-label", tr("Record a voice message"));
 }
 
 function voiceTick() {
   const seconds = Math.floor((Date.now() - voice.startedAt) / 1000);
-  $("mic").title = tr("Stop recording ({time})", { time: `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}` });
+  const time = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  $("mic-time").textContent = time;
+  $("mic").title = tr("Stop recording ({time})", { time });
 }
 
 async function voiceStart() {
@@ -6152,6 +6249,7 @@ async function voiceStart() {
   voice.recorder.start();
   voice.startedAt = Date.now();
   $("mic").classList.add("recording");
+  $("mic-time").hidden = false;
   $("mic").setAttribute("aria-label", tr("Stop recording"));
   voiceTick();
   voice.timer = setInterval(voiceTick, 1000);
@@ -6166,9 +6264,8 @@ $("mic").addEventListener("click", async () => {
     addMessage("assistant").error(err?.name === "NotAllowedError" ? new Error(tr("Microphone access was denied")) : err);
   }
 });
-$("file-input").addEventListener("change", async (event) => {
-  const files = [...event.target.files];
-  event.target.value = "";
+// Adds files to the message being written (the clip button and pasting share this): same type and size checks.
+async function addFiles(files) {
   try {
     const valid = files.map((file) => {
       if (!attachmentModality(file)) throw new Error(tr("{name}: only image, video, audio and PDF files are supported", { name: file.name }));
@@ -6180,9 +6277,39 @@ $("file-input").addEventListener("change", async (event) => {
     if (total > MAX_TOTAL_FILE_BYTES) throw new Error(tr("Attachments exceed the 25 MB total limit"));
     state.attachments.push(...await Promise.all(valid.map(readAttachment)));
     renderPendingAttachments();
+    updateSendButton();
   } catch (err) {
     addMessage("assistant").error(err);
   }
+}
+
+$("file-input").addEventListener("change", async (event) => {
+  const files = [...event.target.files];
+  event.target.value = "";
+  await addFiles(files);
+});
+
+// Ctrl+V of a screenshot or a copied file attaches it. Text always pastes as text: a copy from a spreadsheet
+// carries both its text and a picture of it, and the text is what the person wants.
+function pastedFiles(clipboard) {
+  if (!clipboard || clipboard.getData("text/plain")) return [];
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+  return [...clipboard.items]
+    .filter((item) => item.kind === "file")
+    .map((item) => item.getAsFile())
+    .filter(Boolean)
+    // browsers call every pasted screenshot "image.png": give each its own name
+    .map((file, index) => /^image\.\w+$/i.test(file.name)
+      ? new File([file], `pasted-${stamp}${index ? `-${index + 1}` : ""}.${file.name.split(".").pop()}`, { type: file.type })
+      : file);
+}
+
+$("input").addEventListener("paste", (event) => {
+  const files = pastedFiles(event.clipboardData);
+  if (!files.length) return;
+  event.preventDefault();
+  if ($("attach").disabled) return;  // no chat open, or the chat is switching models
+  addFiles(files);
 });
 
 $("composer").addEventListener("submit", async (e) => {

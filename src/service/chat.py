@@ -1284,7 +1284,7 @@ class ChatService:
                 "index": position,
                 **{
                     k: t[k] for k in (
-                        "role", "content", "ts", "reasoning", "actions", "timeline", "interrupted", "checkpoint",
+                        "role", "content", "ts", "reasoning", "actions", "timeline", "interrupted", "checkpoint", "media",
                         "associative_matches", "associative_skipped", "usage", "usage_report",
                         "associative_fragments", "associative_query",
                         "source", "task_ids",  # a wake turn: a subagent result, not written by the user
@@ -1510,6 +1510,14 @@ class ChatService:
             original = self._edit_target(conversations, chat_id, rewind_to)
             if not attachments:
                 attachments = self._stored_attachments(original.get("content"))
+        # audio and video are turned into text and frames for the model: keep the originals on the turn so the
+        # person can play them back (images already stay in the turn's content)
+        media = [
+            {k: a[k] for k in ("name", "modality", "mime_type", "data_url")}
+            for a in attachments if a["modality"] in ("audio", "video")
+        ]
+        if not media and rewind_to is not None and not attachments:
+            media = list(original.get("media") or [])
         text, attachments, notice = self._decompose_videos(user_id, agent_id, chat_id, text, attachments)
         text, attachments = self._transcribe_audio(
             user_id, agent_id, chat_id, text, attachments,
@@ -1519,7 +1527,10 @@ class ChatService:
             raise InputError("message is empty")
         slot = self._slot(user_id, agent_id)
         # `meta` (structured task brief / follow-up) is stored on the user turn; only the TaskManager may set it
-        run = _MessageRun(chat_id, text, attachments, stream, meta=dict(meta) if (meta and internal_task) else None,
+        run_meta = dict(meta) if (meta and internal_task) else {}
+        if media:
+            run_meta["media"] = media
+        run = _MessageRun(chat_id, text, attachments, stream, meta=run_meta or None,
                            channel=channel if channel in ("web", "telegram") else None)
         if notice:
             run.events.put(ChatEvent("notice", text=notice, generation_id=run.generation_id))
@@ -1564,6 +1575,35 @@ class ChatService:
             active.cancellation.cancel()
             return False
         return True
+
+    def list_processes(self, user_id: str, agent_id: str, chat_id: str) -> list[dict]:
+        """The chat's background processes that are still running (the web shows them above the message box)."""
+        self._owned_agent(user_id, agent_id)
+        self._require_chat(self._conversations(user_id, agent_id), chat_id)
+        registry = process_registry(DATA_DIR)
+        return [
+            {
+                "id": r["id"], "backend": r["backend"], "command": redact(r["command"])[:200],
+                "started": r["started"], "agent": r.get("agent"),
+            }
+            for r in registry.list(user_id, chat_id) if r["state"] == "running"
+        ]
+
+    def stop_process(self, user_id: str, agent_id: str, chat_id: str, process_id: str) -> None:
+        """Stop one of the chat's background processes (the person pressed Stop on it)."""
+        self._owned_agent(user_id, agent_id)
+        self._require_chat(self._conversations(user_id, agent_id), chat_id)
+        registry = process_registry(DATA_DIR)
+        try:
+            record = registry.get(user_id, process_id)
+        except ProcessError as exc:
+            raise InputError("that process does not exist") from exc
+        if record.get("chat_id") != chat_id:
+            raise InputError("that process does not exist")
+        try:
+            registry.stop(user_id, process_id)
+        except ProcessError as exc:
+            raise InputError("that process does not exist") from exc
 
     def list_approvals(self, user_id: str, agent_id: str, chat_id: str) -> list[dict]:
         """Approvals the chat's tools are waiting on (same payload as the `approval` event)."""
@@ -2076,8 +2116,18 @@ class ChatService:
                 language=language,
                 zdr=zdr_required(resolved.require_zdr, SPEECH_TO_TEXT.zdr),
             )
-            if transcript:
-                transcripts.append(transcript)
+            logger.info(
+                "transcribed audio '%s' (format=%s, mime=%s, %d bytes) with %s, language=%s: %d characters",
+                attachment["name"], attachment["format"], attachment.get("mime_type"),
+                len(encoded) * 3 // 4, transcription_model, language or "auto", len(transcript),
+            )
+            if not transcript:
+                logger.warning(
+                    "speech-to-text returned no text for audio '%s' (format=%s, %d bytes, model %s)",
+                    attachment["name"], attachment["format"], len(encoded) * 3 // 4, transcription_model,
+                )
+                raise InputError("no speech was detected in '{name}'", name=attachment["name"])
+            transcripts.append(transcript)
         if transcripts:
             text = "\n\n".join(part for part in [text.strip(), *(
                 self._transcription_text(transcript) for transcript in transcripts
