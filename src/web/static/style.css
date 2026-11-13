@@ -608,13 +608,14 @@ details.thinking { border-left: 2px solid var(--line); padding-left: 10px; }
 
 /* Composer: one card with the input and the chat options as compact chips */
 #composer-row { display: flex; align-items: flex-end; min-width: 0; margin: 0 var(--gutter) calc(14px + env(safe-area-inset-bottom)); gap: 6px; }
-#composer { flex: 1; min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "pend pend pend pend" "attach input controls send"; align-items: end; gap: 0 4px; margin: 0; padding: 4px 6px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--bg); box-shadow: 0 1px 3px #0000001f; }
+#composer { flex: 1; min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; grid-template-areas: "pend pend pend pend pend" "attach input controls mic send"; align-items: end; gap: 0 4px; margin: 0; padding: 4px 6px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--bg); box-shadow: 0 1px 3px #0000001f; }
 #composer:focus-within { border-color: var(--accent); }
 #composer:has(#input:focus-visible) { box-shadow: 0 0 0 1px var(--accent); }   /* one 2px ring in total with the border */
 #pending-attachments { grid-area: pend; flex-basis: auto; padding: 2px 4px 4px; }
 #pending-attachments:empty { display: none; }
 #input { grid-area: input; flex: none; width: 100%; min-height: 36px; max-height: 40vh; padding: 7px 6px; border: 0; border-radius: 0; background: transparent; outline: none; font-size: .9375rem; line-height: 1.5; }
 #attach { grid-area: attach; width: 36px; height: 36px; border-radius: 4px; }
+#mic { grid-area: mic; width: 36px; height: 36px; border-radius: 4px; }
 #send { grid-area: send; width: 36px; height: 36px; border-radius: 4px; }
 #chat-controls { grid-area: controls; flex-basis: auto; flex-wrap: nowrap; overflow: hidden; gap: 2px; min-width: 0; max-width: 100%; margin: 0 4px 0 0; padding: 0 0 3px; align-self: end; }
 #chat-controls > * { flex-shrink: 0; }
@@ -918,12 +919,12 @@ select.warning { border-color: var(--warn); color: var(--warn); }
 
 /* Narrow main column: the options drop to a second row under the input */
 @container main (max-width: 680px) {
-  #composer { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "pend pend pend" "attach input send" "controls controls controls"; }
+  #composer { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "pend pend pend pend" "attach input mic send" "controls controls controls controls"; }
   #chat-controls { margin: 0 0 0 36px; }
 }
 
 /* A multi-line message gets the whole width of the box; the options move under it (the class is set by app.js) */
-#composer.multiline { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "pend pend pend" "attach input send" ". controls controls"; }
+#composer.multiline { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "pend pend pend pend" "attach input mic send" ". controls controls controls"; }
 #composer.multiline #chat-controls { margin: 0; }
 
 /* Associative memory status: on the line of the author name, not inside the reply */
