@@ -10,6 +10,7 @@ import test_service_steering as steering
 from src.agent import compaction
 from src.agent.agent import Agent
 from src.config.models import CompactionConfig, ModelsConfig, ResolvedAgent
+from src.utils.i18n import InputError
 
 
 def _conversation(pairs: int, size: int) -> list[dict]:
@@ -41,6 +42,31 @@ class CompactionConfigTests(unittest.TestCase):
         tokens = CompactionConfig(mode="tokens", trigger=150_000, keep_recent=30_000)
         self.assertEqual(compaction.thresholds(tokens, 0), (150_000, 30_000))
         self.assertEqual(compaction.thresholds(tokens, 100_000), (90_000, 30_000))  # never past the hard limit
+
+
+class CompactArgumentTests(unittest.TestCase):
+    """`/compact [percent] [focus]`: a leading whole number is the share to keep, the rest is the focus."""
+
+    def test_parsing(self) -> None:
+        cases = {
+            "": (None, ""), "keep the figures": (None, "keep the figures"), "10": (10, ""), "10%": (10, ""),
+            "10 %": (10, ""), "10 keep the figures": (10, "keep the figures"), "  25%  focus here ": (25, "focus here"),
+            "1": (1, ""), "90": (90, ""), "10 20 30": (10, "20 30"), "keep 10 things": (None, "keep 10 things"),
+            "10x": (None, "10x"), "10.5": (None, "10.5"), "2026 plan": None, "-5": (None, "-5"),
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                if expected is None:
+                    with self.assertRaises(InputError):  # 2026 is a number out of range, not a focus
+                        compaction.parse_compact_args(text)
+                else:
+                    self.assertEqual(compaction.parse_compact_args(text), expected)
+
+    def test_out_of_range_is_an_error_that_names_the_range(self) -> None:
+        for text in ("0", "91", "100", "0%", "500 keep this"):
+            with self.subTest(text=text), self.assertRaises(InputError) as caught:
+                compaction.parse_compact_args(text)
+            self.assertEqual((caught.exception.values["low"], caught.exception.values["high"]), (1, 90))
 
 
 class SplitTests(unittest.TestCase):
@@ -177,31 +203,110 @@ class CompactionServiceTests(steering.SteeringFixture):
         self.assertEqual(agent._summary, self.agents[("user-one", "agent-one")]._summary)
         self.assertEqual(agent.messages[1]["role"], "user")
 
-    def test_manual_compact_on_a_short_chat_keeps_only_its_latest_part(self) -> None:
+    def test_manual_compact_keeps_the_latest_20_percent_of_the_conversation_by_default(self) -> None:
         for provider in self.providers.values():
-            provider.context_window.return_value = 1_000_000  # the normal tail would cover the whole chat
-        for i in range(5):
+            provider.context_window.return_value = 1_000_000  # far from any trigger: only the share counts
+        for i in range(10):
             self._say(f"m{i}")
         self.assertEqual(self.summaries, [])
         agent = self.agents[("user-one", "agent-one")]
         result = agent.compact(manual=True)
         self.assertIsNotNone(result)
-        self.assertTrue(result.small)
         self.assertEqual(len(self.summaries), 1)
         self.assertLess(result.tokens_after, result.tokens_before)
         self.assertEqual(agent.messages[1]["role"], "user")
-        self.assertLess(len(agent.messages), 11)
-        self.assertIn("m4", agent.messages[-2]["content"])  # the latest exchange stays
-        stored = [t for t in self._stored() if t["role"] == "compaction"]
-        self.assertTrue(stored[-1]["small"])
+        self.assertIn("m9", agent.messages[-2]["content"])  # the latest exchange stays
+        self.assertLessEqual(abs(result.kept_percent - 20), 10)  # whole exchanges, so about 20
+        self.assertEqual([t for t in self._stored() if t["role"] == "compaction"][-1]["kept_percent"], result.kept_percent)
 
-    def test_manual_compact_on_a_normal_chat_is_not_marked_small(self) -> None:
-        for i in range(5):
+    def test_the_share_is_an_argument_and_a_smaller_one_keeps_less(self) -> None:
+        for provider in self.providers.values():
+            provider.context_window.return_value = 1_000_000
+        for i in range(20):
             self._say(f"m{i}")
         agent = self.agents[("user-one", "agent-one")]
-        result = agent.compact(manual=True)
-        if result is not None:
-            self.assertFalse(result.small)
+        ten = agent.compact(manual=True, keep_percent=10)
+        self.assertLessEqual(ten.kept_percent, 15)
+        self.assertGreaterEqual(ten.kept_percent, 5)
+        for i in range(20, 40):
+            self._say(f"m{i}")
+        fifty = agent.compact(manual=True, keep_percent=50)
+        self.assertGreater(fifty.kept_percent, ten.kept_percent + 20)
+
+    def test_the_system_prompt_is_never_summarised(self) -> None:
+        for provider in self.providers.values():
+            provider.context_window.return_value = 1_000_000
+        for i in range(6):
+            self._say(f"m{i}")
+        agent = self.agents[("user-one", "agent-one")]
+        system = copy.deepcopy(agent.messages[0])
+        agent.compact(manual=True, keep_percent=10)
+        self.assertEqual(agent.messages[0], system)  # SOUL, memories, skills index, notices: byte for byte
+        self.assertNotIn(system["content"], self.summaries[-1][1]["content"])  # nor given to the summary model
+        context = agent._context()
+        self.assertEqual(context[0], system)
+        self.assertIn("[CONTEXT COMPACTED]", context[1]["content"])
+
+    def test_the_share_counts_the_conversation_not_the_fixed_part(self) -> None:
+        messages = [{"role": "system", "content": "s" * 80_000}]  # a large fixed prompt
+        for i in range(10):
+            messages += [{"role": "user", "content": "u" * 2_000}, {"role": "assistant", "content": "a" * 2_000}]
+        for share in (0.1, 0.2, 0.5):
+            cut = compaction.split(messages, 40_000, 0, force=True, keep_share=share, extra_chars=10_000)
+            self.assertLessEqual(abs(cut.kept_percent - share * 100), 10, share)
+            self.assertEqual(messages[cut.start]["role"], "user")
+
+    def test_a_tool_round_is_never_split_from_its_user_message(self) -> None:
+        messages = [{"role": "system", "content": "p"}]
+        for i in range(8):
+            messages.append({"role": "user", "content": f"q{i} " + "x" * 1_000})
+            for j in range(3):
+                messages.append({"role": "assistant", "content": "", "tool_calls": [{"id": f"{i}{j}", "function": {"name": "terminal", "arguments": "{}"}}]})
+                messages.append({"role": "tool", "tool_call_id": f"{i}{j}", "name": "terminal", "content": "r" * 1_500})
+            messages.append({"role": "assistant", "content": "done " + "y" * 500})
+        for share in (0.05, 0.1, 0.2, 0.35, 0.6):
+            cut = compaction.split(messages, 30_000, 0, force=True, keep_share=share)
+            self.assertEqual(messages[cut.start]["role"], "user", share)
+            self.assertIn(messages[cut.start - 1]["role"], ("assistant",), share)  # the part above ends after a whole answer
+
+    def test_manual_compact_does_not_depend_on_the_window_or_the_trigger(self) -> None:
+        for window in (40_000, 1_000_000):
+            with self.subTest(window=window):
+                for provider in self.providers.values():
+                    provider.context_window.return_value = window
+                self.compaction = CompactionConfig(model=None, mode="tokens", trigger=10_000_000, keep_recent=0)
+                self.summaries.clear()
+                for i in range(6):
+                    self._say(f"w{window}-{i}")
+                agent = self.agents[("user-one", "agent-one")]
+                result = agent.compact(manual=True)
+                self.assertIsNotNone(result)
+                self.assertLessEqual(abs(result.kept_percent - 20), 12)
+
+    def test_automatic_compaction_still_keeps_keep_recent_of_the_window(self) -> None:
+        cut = compaction.split(_conversation(10, 4_000), 20_000, 4_000)
+        self.assertGreater(cut.summarised_tokens, cut.tail_tokens)  # the window-sized tail, as before
+        self.assertIsNone(compaction.split(_conversation(2, 100), 200, 50))  # too little to summarise: skipped
+
+    def test_compact_command_takes_a_share_and_a_focus(self) -> None:
+        for provider in self.providers.values():
+            provider.context_window.return_value = 1_000_000
+        for i in range(12):
+            self._say(f"m{i}")
+        reply = self.service.compact_command("user-one", "agent-one", self.chat, "/compact 10 keep the numbers")
+        self.assertIn("Context compacted", reply)
+        self.assertRegex(reply, r"The latest \d+ % of the conversation stays word for word")
+        self.assertIn("keep the numbers", self.summaries[-1][1]["content"])
+        self.assertNotIn("10 keep", self.summaries[-1][1]["content"])  # the share is not part of the focus
+        kept = [t for t in self._stored() if t["role"] == "compaction"][-1]["kept_percent"]
+        self.assertLessEqual(kept, 16)
+
+    def test_a_share_out_of_range_is_refused_not_read_as_a_focus(self) -> None:
+        for text in ("/compact 0", "/compact 95", "/compact 100 %", "/compact 0%"):
+            with self.subTest(text=text), self.assertRaises(Exception) as caught:
+                self.service.compact_command("user-one", "agent-one", self.chat, text)
+            self.assertIn("between 1 and 90", str(caught.exception))
+        self.assertEqual(self.summaries, [])
 
     def test_the_previous_summary_goes_into_the_next_one(self) -> None:
         for i in range(14):
@@ -225,6 +330,18 @@ class CompactionServiceTests(steering.SteeringFixture):
         self.assertIn("tokens_before", dividers[0])
         self.assertIn("tokens_after", dividers[0])
 
+    def test_history_endpoint_carries_the_share_kept_by_a_manual_compact(self) -> None:
+        for provider in self.providers.values():
+            provider.context_window.return_value = 1_000_000
+        for i in range(10):
+            self._say(f"m{i}")
+        self.service.compact_command("user-one", "agent-one", self.chat, "/compact 10")
+        divider = [m for m in self.service.get_chat("user-one", "agent-one", self.chat)["messages"] if m["role"] == "compaction"][-1]
+        self.assertTrue(divider["manual"])
+        self.assertIsInstance(divider["kept_percent"], int)
+        self.assertLessEqual(divider["kept_percent"], 16)
+        self.assertNotIn("small", divider)
+
     def test_a_failing_summary_model_keeps_the_chat_working(self) -> None:
         def broken(messages, model, *, stream=True, cancellation=None, **kwargs):
             if not stream:
@@ -244,7 +361,7 @@ class CompactionServiceTests(steering.SteeringFixture):
             self._say(f"m{i}")
         self.assertEqual(self.summaries, [])
         reply = self.service.compact_command("user-one", "agent-one", self.chat, "/compact keep the numbers")
-        self.assertRegex(reply, r"^Context compacted: [\d.]+ → [\d.]+ tokens\.$")
+        self.assertRegex(reply, r"^Context compacted: [\d.]+ → [\d.]+ tokens\. The latest \d+ % of the conversation stays word for word\.( More than the 20 % asked.*)?$")
         self.assertEqual(len(self.summaries), 1)
         self.assertIn("keep the numbers", self.summaries[0][1]["content"])
         last = [t for t in self._stored() if t["role"] == "compaction"][-1]

@@ -231,19 +231,22 @@ index, so details can still be found with associative memory or the agent's memo
   for it. A turn that finds it due (for example after a long tool run) compacts first.
 - **What the model sees**: the system prompt, untouched; a system message that starts with `[CONTEXT COMPACTED]` with
   the notes; then the recent tail (`compaction.keep_recent`), verbatim, always starting at a user message.
-- **On demand**: `/compact` in the web chat or Telegram compacts the current chat now, whatever the trigger;
-  `/compact <focus>` tells the summary what to keep (for example `/compact keep the exact figures`). RECALL answers it
-  itself (it is not stored and never reaches the model) with the tokens before and after. It is refused while the chat
-  is replying; a message sent during a compaction waits for it. When the whole chat fits in the normal tail
-  (`keep_recent`, 20 % of the window by default, so a short chat on a large window never has anything to summarise),
-  `/compact` keeps only the latest 20 % of the chat as the tail and summarises everything before it; the answer and the
-  divider say it was a short chat. The last exchange is always kept.
+- **On demand**: `/compact` in the web chat or Telegram compacts the current chat now, whatever the trigger or the
+  window. It summarises the older part and keeps the latest **20 %** of the conversation's tokens word for word;
+  `/compact 10` (or `10%`) keeps the latest 10 % instead (1 to 90; anything else is refused, not taken as a focus), and
+  `/compact <focus>` or `/compact 10 <focus>` tells the summary what to keep (for example `/compact keep the exact
+  figures`). The share is of the conversation itself: the system prompt (SOUL, memories, skills index, notices) and the
+  tool definitions are never summarised, never counted and never touched. The tail opens on one of your messages, so a
+  message and the tool calls that answer it stay together; the share kept can therefore be a bit above or below the one
+  asked, and the answer says the real figure (and when it is well above). RECALL answers the command itself (it is not
+  stored and never reaches the model) with the tokens before and after. It is refused while the chat is replying; a
+  message sent during a compaction waits for it. The automatic compaction keeps `keep_recent` of the window as before.
 - **Settings** (per agent, `chat_config.compaction` in [agent.yaml](../reference/agent-yaml.md), web: Agents > Basic >
   Advanced): `enabled` (true), `mode` (`percent` of the model's window, or `tokens`), `trigger` (50), `keep_recent` (20)
   and `model` (`claude_subscription:haiku`, the user's own Claude login; null uses the chat's own model).
 - **Stored**: a `compaction` turn in the chat's JSONL with the notes and the tokens before and after; a reloaded chat
-  starts from the latest one. The web shows it as a divider with the tokens before and after (marked when it came from
-  `/compact`; a short-chat compaction says so).
+  starts from the latest one. The web shows it as a divider with the tokens before and after and the share kept (marked
+  when it came from `/compact`).
 - **After a restart**: a reloaded chat gives the model back its tool calls and their results, not only the text. Each stored
   assistant turn keeps its actions (name, arguments, result) and a timeline of text and tools; the context is rebuilt from
   them in order, from the latest compaction on, so a long task cut in two by a deploy keeps its thread. The stored result
