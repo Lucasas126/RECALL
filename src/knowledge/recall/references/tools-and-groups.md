@@ -11,7 +11,7 @@ Addresses are `source:path`, e.g. `mind_palace:notes/pets.md`.
 | `query_memory` | memory_read | semantic search of your index (mind palace, skills, conversations, indexed folders); `top_k` default 5; use keywords |
 | `search` | memory_read | literal case-insensitive search over readable sources; max 50 matches |
 | `list_memories` | memory_read | lists sources, or a source's entries |
-| `read` | memory_read | reads one `source:path`, optional line range |
+| `read` | memory_read | reads one `source:path`, optional line range; a PDF is read as its page text (`[Page N]`, no OCR) |
 | `list_tags` | memory_read | tags of markdown notes with counts |
 | `find_notes_by_tag` | memory_read | notes with any (default) or all of the tags |
 | `session_search` | memory_read | search inside past conversations, this one included; meaning by default, exact text if the query is in double quotes |
@@ -20,6 +20,7 @@ Addresses are `source:path`, e.g. `mind_palace:notes/pets.md`.
 | `edit` | memory_edit | replace one unique fragment |
 | `move` | memory_edit | move or rename within the allowed sources; errors on an existing destination unless `overwrite=true` |
 | `delete` | memory_edit | delete a file |
+| `make_pdf` | memory_edit | build a PDF from a structured spec (`title`, `elements`: heading, paragraph, bullets, numbered, table, image, spacer, pagebreak; `**bold**`, `*italic*`) and save it as a file: `path` (`<source>:<path>.pdf`, any source you may write; default `mind_palace:documents/<title>.pdf`; a taken name gets a number unless `overwrite=true`); it does not send it, use `send_file`; check the layout with `read` (PDFs read as page text); characters outside the standard fonts (arrows, check marks) are reported as a warning |
 | `web_search` | web | public web search (Tavily); 1-10 results, untrusted; never send secrets |
 | `automation_create` | automations | schedule something for later: exactly one of `at`, `every_minutes`, `cron`, `after_process`; you will run unattended when it fires; level assistant |
 | `automation_list` | automations | list your own automations: id, title, when, state, next run, last outcome |
@@ -82,7 +83,7 @@ Addresses are `source:path`, e.g. `mind_palace:notes/pets.md`.
 | Group | Tools |
 | --- | --- |
 | `memory_read` | `query_memory`, `search`, `list_memories`, `read`, `list_tags`, `find_notes_by_tag`, `session_search` |
-| `memory_edit` | `write`, `append`, `edit`, `move`, `delete` |
+| `memory_edit` | `write`, `append`, `edit`, `move`, `delete`, `make_pdf` |
 | `web` | `web_search`, `web_retrieve` |
 | `notify` | `notify_telegram` |
 | `files_send` | `send_file` |

@@ -17,6 +17,9 @@ class RecallDocsSource(Source):
     def write(self, rel_path: str, content: str) -> Path:
         raise PermissionError(f"source '{self.name}' holds the built-in docs and is read-only")
 
+    def write_bytes(self, rel_path: str, data: bytes) -> Path:
+        raise PermissionError(f"source '{self.name}' holds the built-in docs and is read-only")
+
     def delete(self, rel_path: str) -> None:
         raise PermissionError(f"source '{self.name}' holds the built-in docs and is read-only")
 

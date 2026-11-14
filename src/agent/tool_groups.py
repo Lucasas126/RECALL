@@ -11,7 +11,7 @@ TOOL_GROUP_CATALOG: Final[tuple[dict[str, str], ...]] = (
     {
         "id": "memory_edit",
         "name": "Memory read and edit",
-        "description": "Create, edit, move and delete memories.",
+        "description": "Create, edit, move and delete memories, and make PDF files.",
     },
     {
         "id": "web",
@@ -91,7 +91,7 @@ TOOL_GROUP_TOOLS: Final[dict[str, tuple[str, ...]]] = {
     "memory_read": (
         "query_memory", "search", "list_memories", "read", "list_tags", "find_notes_by_tag", "session_search",
     ),
-    "memory_edit": ("write", "append", "edit", "move", "delete"),
+    "memory_edit": ("write", "append", "edit", "move", "delete", "make_pdf"),
     "web": ("web_search", "web_retrieve"),
     "self": ("memory", "skill_view", "skill_manage", "soul_edit"),
     "folders_read": ("folder_list", "folder_read", "folder_search"),

@@ -110,6 +110,10 @@ class SourceRegistry:
         source, rel = self.resolve(address)
         return source.write(rel, content)
 
+    def write_bytes(self, address: str, data: bytes) -> Path:
+        source, rel = self.resolve(address)
+        return source.write_bytes(rel, data)
+
     def delete(self, address: str) -> None:
         source, rel = self.resolve(address)
         source.delete(rel)

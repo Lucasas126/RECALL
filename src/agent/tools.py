@@ -7,6 +7,7 @@ from src.agent.toolsets.delegate import build_delegate_tools
 from src.agent.toolsets.editing import build_edit_tools
 from src.agent.toolsets.automations import build_automation_tools
 from src.agent.toolsets.files_send import build_files_send_tools
+from src.agent.toolsets.pdf import build_pdf_tools
 from src.agent.toolsets.notify import build_notify_tools
 from src.agent.toolsets.memory import build_memory_tools
 from src.agent.toolsets.permissions import build_permission_tools
@@ -28,7 +29,7 @@ if TYPE_CHECKING:
 
 _ORDER = (
     "query_memory", "search", "list_memories", "list_tags", "find_notes_by_tag",
-    "session_search", "read", "write", "append", "edit", "move", "delete",
+    "session_search", "read", "write", "append", "edit", "move", "delete", "make_pdf",
     "memory", "skill_view", "skill_manage", "soul_edit",
     "folder_list", "folder_read", "folder_search",
     "folder_write", "folder_append", "folder_edit", "folder_move", "folder_delete",
@@ -83,7 +84,7 @@ def build_tools(
     if "memory_read" in selected:
         base_tools.extend((*build_memory_tools(agent), *build_tag_tools(agent), *build_session_tools(agent)))
     if "memory_edit" in selected:
-        base_tools.extend(build_edit_tools(agent))
+        base_tools.extend((*build_edit_tools(agent), *build_pdf_tools(agent)))
     if "self" in selected or skill_view:
         self_tools = build_self_tools(agent)
         base_tools.extend(self_tools if "self" in selected else [
