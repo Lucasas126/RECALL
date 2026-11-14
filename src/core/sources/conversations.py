@@ -58,6 +58,20 @@ class ChatReasoningEffort(BaseModel):
     effort: ReasoningEffort
 
 
+# `ConversationsSource._transcript_facts`: per transcript path, its (mtime_ns, size) and what `summary` read from it
+_FACTS: dict[str, tuple[tuple[int, int, int], tuple[str, int, str | None, float]]] = {}
+_FACTS_MAX = 2000
+
+
+def _is_blank(path: Path) -> bool:
+    """Whether a file holds only whitespace. A chat starts with a turn, so the first block settles it: no whole-file read."""
+    with open(path, "rb") as handle:
+        while block := handle.read(65536):
+            if block.strip():
+                return False
+    return True
+
+
 def _normalize_title(text: str) -> str:
     """Collapse whitespace, drop wrapping quotes and cap the length for display."""
     title = " ".join(text.split()).strip(" \"'`*")
@@ -518,7 +532,11 @@ class ConversationsSource(Source):
         for path in self.root.iterdir():
             if path.suffix != ".jsonl" or path.stem in kept or self._task_path(path.stem).is_file():
                 continue
-            if not path.read_text(encoding="utf-8").strip():
+            try:
+                empty = _is_blank(path)
+            except FileNotFoundError:
+                continue  # deleted meanwhile
+            if empty:
                 self.delete_chat(path.stem)
                 removed.append(path.stem)
         return removed
@@ -529,26 +547,40 @@ class ConversationsSource(Source):
         files = [p for p in self.root.iterdir() if p.suffix == ".jsonl" and p.stem not in hidden]
         return max(files, key=lambda p: p.stat().st_mtime).stem if files else None
 
+    def _transcript_facts(self, chat_id: str) -> tuple[str, int, str | None, float]:
+        """What `summary` needs from the transcript: the first user message's text, the number of turns, the last turn's
+        timestamp and the file's mtime. Reading and parsing a whole transcript for that is the cost of listing the chats,
+        so the result is kept until the file changes (mtime, size and inode)."""
+        path = self._path(chat_id)
+        info = path.stat()  # FileNotFoundError for a missing chat, as `load` raised
+        key = (info.st_mtime_ns, info.st_size, info.st_ino)  # the inode: a replaced file differs even within one clock tick
+        where = str(path)  # sources are built per request, so the cache lives at module level, by absolute path
+        cached = _FACTS.get(where)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        turns = self.load(chat_id)
+        first_user = next((t["content"] for t in turns if t.get("role") == "user"), "")
+        if isinstance(first_user, list):
+            first_user = next((part.get("text", "") for part in first_user if part.get("type") == "text"), "[attachment]")
+        facts = (first_user, len(turns), turns[-1].get("ts") if turns else None, info.st_mtime)
+        if len(_FACTS) >= _FACTS_MAX:
+            _FACTS.clear()  # bounded: the next listing refills it from the files
+        _FACTS[where] = (key, facts)
+        return facts
+
     def summary(self, chat_id: str, retention_days: int = DEFAULT_DISPOSABLE_RETENTION_DAYS) -> dict:
         """Chat metadata: title (user-chosen or generated, else first user message), turn count, last activity
         its `origin` (`web` when unmarked) and, for a disposable chat, `disposable` and the ISO time it will be removed (`expires_at`)."""
-        turns = self.load(chat_id)
+        first_user, count, last_ts, mtime = self._transcript_facts(chat_id)
         title = self.generated_title(chat_id)
         if title is None:
-            first_user = next((t["content"] for t in turns if t.get("role") == "user"), "")
-            if isinstance(first_user, list):
-                first_user = next(
-                    (part.get("text", "") for part in first_user if part.get("type") == "text"),
-                    "[attachment]",
-                )
             title = _normalize_title(first_user)
-        updated = turns[-1].get("ts") if turns else None
+        updated = last_ts
         if not updated:
-            mtime = self._path(chat_id).stat().st_mtime
             updated = datetime.fromtimestamp(mtime).astimezone().isoformat(timespec="seconds")
         disposable = self.is_disposable(chat_id)
         expires = self.expires_at(chat_id, retention_days).isoformat(timespec="seconds") if disposable else None
         return {
-            "id": chat_id, "title": title, "turns": len(turns), "updated": updated,
+            "id": chat_id, "title": title, "turns": count, "updated": updated,
             "disposable": disposable, "expires_at": expires, "origin": self.origin(chat_id),
         }

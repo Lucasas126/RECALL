@@ -2349,13 +2349,13 @@ function applyPreferences(preferences) {
   updateModelControls();
 }
 
-async function applyServerPreferences(preferences, session, request) {
+async function applyServerPreferences(preferences, session, request, models = true) {
   if (preferences.language === "es" && !state.translations) {
     state.translations = await api("/api/localization?language=es");
   }
   if (session === state.session && request === state.preferencesRequest && state.user) {
     applyPreferences(preferences);
-    await refreshChatModels(session, request);
+    if (models) await refreshChatModels(session, request);
   }
 }
 
@@ -2384,12 +2384,13 @@ async function refreshChatModels(session, preferencesRequest) {
   }
 }
 
-async function refreshPreferences() {
+// `models: false` leaves the open chat's models alone (opening another chat reads the new chat's own with the chat itself).
+async function refreshPreferences({ models = true } = {}) {
   if (state.settingsBusy && state.preferences) return state.preferences;
   const session = state.session;
   const request = ++state.preferencesRequest;
   const preferences = await api("/api/preferences", { cache: "no-store" });
-  await applyServerPreferences(preferences, session, request);
+  await applyServerPreferences(preferences, session, request, models);
   return preferences;
 }
 
@@ -3162,10 +3163,10 @@ async function openChat(chatId) {
   if (state.modelBusy) return;
   const session = state.session;
   const agentId = state.agentId;
-  await refreshPreferences();
-  if (session !== state.session || agentId !== state.agentId) return;
   const revision = ++state.chatModelRevision;
-  const data = await api(chatsUrl(`/${chatId}`));
+  // the preferences and the chat do not depend on each other, so they travel together (two round trips in series
+  // before anything is drawn were most of a chat switch on a slow link); the chat carries its own models
+  const [, data] = await Promise.all([refreshPreferences({ models: false }), api(chatsUrl(`/${chatId}`))]);
   if (session !== state.session || agentId !== state.agentId || revision !== state.chatModelRevision || state.modelBusy) return;
   state.chatId = chatId;
   state.chatInfo = data.chat;
@@ -3188,8 +3189,8 @@ async function openChat(chatId) {
   syncApprovals(agentId, chatId);
   ensureTaskPolling();  // task cards and wake replies of this chat
   startProcessPolling();
-  await refreshChats();
   $("input").focus();
+  await refreshChats();
 }
 
 async function deleteChat(chat) {
