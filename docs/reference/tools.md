@@ -80,6 +80,12 @@ The web **Agents** tab configures these groups for each agent:
   without them it returns an error the agent can read. At most 30 notices an hour per agent (counted in the running process, so a restart resets it) and 3500 characters each.
   Not built in a disposable chat (workers and tasks). No approval card: it only reaches the owner's own chat.
 
+<a id="automations"></a>
+- `automations` (level `assistant`): `automation_create`, `automation_list`, `automation_edit`, `automation_pause`, `automation_resume` and `automation_delete` schedule things the agent does
+  later ([automations](../user-guide/automations.md)). `automation_create(instruction, title, at | every_minutes | cron | after_process)` takes exactly one `when`; the agent and the owner are never
+  parameters, they come from the run, so an agent only sees and changes its own automations for its own user. When one fires the agent runs unattended (nobody can approve) and may use
+  `notify_telegram` and `send_file`. Not available in a disposable chat or an automation's own task, so a scheduled run cannot schedule more. At most 50 per user, 6 runs an hour each.
+
 <a id="files_send"></a>
 - `files_send` (level `reader`): `send_file(path, caption="")` hands the user a file the agent can **already read**. `path` is `<source>:<path>`, resolved by the same code
   as `read` and `folder_read`, so hidden entries, protected paths (keys, secrets, `.env`) and anything outside the agent's readable sources are refused exactly as there; the

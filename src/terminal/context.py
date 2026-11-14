@@ -45,6 +45,8 @@ class RunContext:
     permissions: Any = None
     # the `agents` tools' port (src/service/agent_admin.AgentAdmin); same rule
     agents: Any = None
+    # the `automations` tools' port (src/service/automations.AutomationService); None where it is not available
+    automations: Any = None
 
 
 _current: ContextVar[RunContext | None] = ContextVar("recall_terminal_run", default=None)

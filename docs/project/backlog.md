@@ -7,7 +7,7 @@ One list of ideas and planned work, with what is already done kept separate. Imp
 
 ### automation and behavior
 
-- **Automations** are being built in steps: the service (triggers `at`, `every`, `cron`, `process_end`; guards; catch-up) is done, see [automations](../user-guide/automations.md); still open: the agent tools (group `automations`, level `assistant`) and the web tab. Calendar and conversation events are out of scope.
+- **Automations** are being built in steps: the service (triggers `at`, `every`, `cron`, `process_end`; guards; catch-up) is done, see [automations](../user-guide/automations.md); the agent tools (group `automations`, level `assistant`) are done too; still open: the web tab. Calendar and conversation events are out of scope.
 - **Reminders and proactive messages**: a one-off message the agent sends while it works already exists (`notify_telegram`, see [done](#done)); what is planned is the agent *scheduling* a message ("remind me on Friday...") sent later through Telegram and shown in the web, reusing the dream scheduler. The agent schedules a message ("remind me on Friday...") sent later through Telegram and shown in the web, reusing the dream scheduler. First step towards automations.
 - **Automations**: rules and actions based on conversation or calendar events.
 - **Recall mode**: the agent enters its mind palace with a context trimmed to the last messages, searches and reads what it needs, and returns only the relevant information, dropping the retrieval process from its context. Complements [dream mode](../user-guide/dream.md): dreams write the palace, recall reads it cheaply.

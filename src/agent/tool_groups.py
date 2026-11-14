@@ -44,6 +44,11 @@ TOOL_GROUP_CATALOG: Final[tuple[dict[str, str], ...]] = (
         "description": "Send you a file the agent can already read (a note, a document, an image), in the web chat and on Telegram.",
     },
     {
+        "id": "automations",
+        "name": "Automations",
+        "description": "Schedule things for later: once, every N minutes, on a cron schedule or when a background process ends.",
+    },
+    {
         "id": "terminal",
         "name": "Terminal sandbox",
         "description": "Run commands and edit files in a sandbox, with your approval.",
@@ -96,6 +101,9 @@ TOOL_GROUP_TOOLS: Final[dict[str, tuple[str, ...]]] = {
     ),
     "notify": ("notify_telegram",),
     "files_send": ("send_file",),
+    "automations": (
+        "automation_create", "automation_list", "automation_edit", "automation_pause", "automation_resume", "automation_delete",
+    ),
     "terminal": (
         "terminal", "sandbox_read", "sandbox_write", "sandbox_patch", "sandbox_search",
         "process_start", "process_list", "process_read", "process_wait", "process_stop",
@@ -124,6 +132,7 @@ DISPOSABLE_BLOCKED_TOOLS: Final[frozenset[str]] = frozenset(
     | set(TOOL_GROUP_TOOLS["agents"])  # nor create, change or delete agents: same
     | set(TOOL_GROUP_TOOLS["notify"])  # nor write to the user's phone
     | set(TOOL_GROUP_TOOLS["files_send"])  # nor hand files to the user
+    | set(TOOL_GROUP_TOOLS["automations"])  # nor schedule anything: an automation's own task cannot create more automations
 )
 
 

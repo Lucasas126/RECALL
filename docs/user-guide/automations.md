@@ -1,7 +1,7 @@
 # Automations
 
-> **Status: the service is implemented; the agent tools and the web tab are the next steps** (see the [backlog](../project/backlog.md)).
-> Until then automations can only be created from code or tests, and nothing in the web UI shows them.
+> **Status: the service and the agent tools are implemented; the web tab is the next step** (see the [backlog](../project/backlog.md)).
+> You create and manage automations by asking an agent that holds the `automations` group; nothing in the web UI shows them yet.
 
 An automation is something an agent does later, without you in the chat: "every morning at 8, summarise my notes and message me",
 "on Friday at 9, remind me to call the bank", "when the build process ends, tell me how it went".
@@ -55,8 +55,19 @@ entry point as `python -m src.admin task run`). That means:
 The scheduler is a thread that checks every 30 seconds, started with the dream scheduler; its state is on disk, so it survives restarts.
 The service is `AutomationService` (`src/service/automations.py`), reachable as `ChatService.automations`.
 
+## Asking an agent
+
+Give the agent the `automations` tool group (level `assistant`) and say it in plain words: "remind me on Friday at 9 to call the bank",
+"every weekday at 8:30 tell me the three most important things in my notes", "when the build finishes, tell me how it went". The agent
+calls `automation_create`; it writes the instruction for its future self, because it will not have this chat when it fires. The tools are
+`automation_create`, `automation_list`, `automation_edit`, `automation_pause`, `automation_resume` and `automation_delete`
+([tools reference](../reference/tools.md#automations)).
+
+- An agent only sees and changes **its own** automations, for the user it works for. The owner and the agent are never parameters.
+- The tools are refused inside an automation's own run, so a scheduled run cannot create more schedules.
+- Pausing keeps the record; deleting removes it.
+
 ## Not built yet
 
-- **Agent tools** (`automation_create`, list, edit, pause, delete) in a new tool group, level `assistant`: the way you will say "remind me tomorrow at 8".
 - **A web tab** to see, pause, edit and delete automations and read their history.
 - Sending a result to a chat (today it stays in the task record and the agent can message you with `notify_telegram`).

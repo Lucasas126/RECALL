@@ -180,7 +180,8 @@ class DisposableToolTests(unittest.TestCase):
             | set(TOOL_GROUP_TOOLS["permissions"])  # nor change anyone's permissions
             | set(TOOL_GROUP_TOOLS["agents"])  # nor create, change or delete agents
             | set(TOOL_GROUP_TOOLS["notify"])  # nor write to the user's phone
-            | set(TOOL_GROUP_TOOLS["files_send"]),  # nor hand files to the user
+            | set(TOOL_GROUP_TOOLS["files_send"])  # nor hand files to the user
+            | set(TOOL_GROUP_TOOLS["automations"]),  # nor schedule anything
         )
 
     def test_a_disposable_chat_never_builds_the_terminal_tools(self) -> None:
