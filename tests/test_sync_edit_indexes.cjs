@@ -20,7 +20,7 @@ const run = async (bubbles, messages, windowed = null) => {
     async () => ({ messages, window: windowed }), (p) => p, () => true, () => false, { view },
     (el, index) => set.push([el.id, index]),
     (m) => m.source === "task" || m.source === "process",
-    () => "?limit=60",
+    () => "?limit=25",
   );
   await sync({ chatId: "c", agentId: "a" });
   return set;

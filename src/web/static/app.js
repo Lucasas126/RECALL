@@ -3802,8 +3802,8 @@ function attachmentView(attachment) {
 }
 
 // How many messages a chat opens with. The rest waits behind a bar at the top ("load earlier").
-const CHAT_PAGE = 60;
-const CHAT_MORE = 100;
+const CHAT_PAGE = 25;
+const CHAT_MORE = 25;
 
 // `?limit=` for a chat request: ask for as many messages as the open view already shows (never fewer than a page).
 function chatQuery(limit = CHAT_PAGE) {
