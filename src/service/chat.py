@@ -2270,7 +2270,7 @@ class ChatService:
                 run.cancellation, tasks=self._tasks, interactive=True,
                 learn_rules=lambda target, rules, chat=chat_id: self.learn_approval_rules(user_id, target, rules, chat_id=chat),
                 explain=(lambda payload: self.explain_approval(user_id, payload)) if APPROVAL_EXPLAIN.enabled else None,
-                permissions=self._permissions, agents=self._agent_admin,
+                permissions=self._permissions, agents=self._agent_admin, automations=self._automations,
             )
             if (mark := self._conversations(user_id, agent_id).task_mark(chat_id)) is not None:
                 self._tasks.bind_worker(context, mark)  # a worker's approvals are asked in its parent's chat
