@@ -46,8 +46,8 @@ test("errorInfo maps codes to actions and never invents one for unknown codes", 
     assert.equal(errorInfo(code).action, "choose-model", code);
   }
   const loggedOut = errorInfo("claude_not_logged_in");
-  assert.equal(loggedOut.command, "claude auth login");
-  assert.equal(loggedOut.action, "choose-model");  // a command is shown, never run by a button
+  assert.equal(loggedOut.command, undefined);  // the user signs in from Settings, Providers: no command to run
+  assert.equal(loggedOut.action, "open-providers");
   assert.equal(errorInfo("claude_no_own_login").command, undefined);  // nothing the user can run: the administrator sets it up
   assert.match(errorInfo("claude_no_own_login").hint, /administrator/);
   assert.equal(errorInfo("agent_busy").action, undefined);
