@@ -68,6 +68,11 @@ TOOL_GROUP_CATALOG: Final[tuple[dict[str, str], ...]] = (
         "name": "Manage agents",
         "description": "List, create, edit, rename and delete your agents (not their level, tool groups or rules), each change with your approval.",
     },
+    {
+        "id": "secrets",
+        "name": "Manage secrets",
+        "description": "List the names of the stored secrets and copy, rename or delete them without ever seeing a value, each change with your approval (admin only).",
+    },
 )
 
 TOOL_GROUP_IDS: Final[frozenset[str]] = frozenset(item["id"] for item in TOOL_GROUP_CATALOG)
@@ -86,6 +91,8 @@ PERMISSION_TOOLS: Final[tuple[str, ...]] = (*PERMISSION_READ_TOOLS, *PERMISSION_
 AGENT_READ_TOOLS: Final[tuple[str, ...]] = ("agent_list", "agent_get", "agent_templates")
 AGENT_CHANGE_TOOLS: Final[tuple[str, ...]] = ("agent_create", "agent_update", "agent_rename", "agent_delete")
 AGENT_TOOLS: Final[tuple[str, ...]] = (*AGENT_READ_TOOLS, *AGENT_CHANGE_TOOLS)
+
+SECRET_TOOLS: Final[tuple[str, ...]] = ("secret_list", "secret_copy", "secret_rename", "secret_delete")
 
 TOOL_GROUP_TOOLS: Final[dict[str, tuple[str, ...]]] = {
     "memory_read": (
@@ -111,6 +118,7 @@ TOOL_GROUP_TOOLS: Final[dict[str, tuple[str, ...]]] = {
     "delegate": ("task_start", "task_list", "task_result", "task_steer", "task_send", "task_stop", "task_wait"),
     "permissions": PERMISSION_TOOLS,
     "agents": AGENT_TOOLS,
+    "secrets": SECRET_TOOLS,
 }
 
 # the groups a parent may hand to a subagent (phase 1: read-only web access); memory, self, folders, terminal,
@@ -130,6 +138,7 @@ DISPOSABLE_BLOCKED_TOOLS: Final[frozenset[str]] = frozenset(
     | set(TOOL_GROUP_TOOLS["delegate"])  # nor can it launch tasks: this also gives depth 1 (children are disposable)
     | set(TOOL_GROUP_TOOLS["permissions"])  # nor change anyone's permissions: workers never hold that group
     | set(TOOL_GROUP_TOOLS["agents"])  # nor create, change or delete agents: same
+    | set(TOOL_GROUP_TOOLS["secrets"])  # nor touch a secret: nobody is there to approve it
     | set(TOOL_GROUP_TOOLS["notify"])  # nor write to the user's phone
     | set(TOOL_GROUP_TOOLS["files_send"])  # nor hand files to the user
     | set(TOOL_GROUP_TOOLS["automations"])  # nor schedule anything: an automation's own task cannot create more automations

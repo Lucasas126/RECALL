@@ -33,6 +33,7 @@ SERVICE_TEXT = {
     "terminal_ssh": "use a terminal on an ssh backend without root (tool group terminal; always asks)",
     "delegation_targets": "hand tasks to the user's other agents (delegation.targets)",
     "permissions": "view and adjust the levels, tool groups and approval rules of the SAME user's agents, itself included within its own level (tool group permissions; every change needs the user's approval; its own level only lower)",
+    "secrets": "list the NAMES of the stored secrets and copy, rename or delete them without ever seeing a value (tool group secrets; every change needs the user's approval; admin only)",
     "agents": "list, create, edit, rename and delete the SAME user's agents, never their level, tool groups or approval rules (tool group agents; every change needs the user's approval)",
     "terminal_local": "use the `local` terminal backend (a shell on the RECALL host)",
     "terminal_root": "use an ssh backend whose user is root",

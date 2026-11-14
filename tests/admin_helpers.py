@@ -21,7 +21,7 @@ CONFIG_TARGETS = (
 )
 DATA_TARGETS = (
     "src.admin.agents.DATA_DIR", "src.config.loader.DATA_DIR", "src.service.chat.DATA_DIR",
-    "src.core.sources.registry.DATA_DIR",
+    "src.core.sources.registry.DATA_DIR", "src.agent.toolsets.secrets.DATA_DIR",
 )
 USER_YAML = "id: user-a\nname: User A\nmax_level: admin\nprovider: {{name: ollama, api_key: USER_A_KEY_NAME}}\nagents: [bot]\npassword_hash: '{hash}'\n"
 

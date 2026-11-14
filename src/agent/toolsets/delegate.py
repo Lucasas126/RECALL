@@ -118,7 +118,7 @@ def delegate_notice(config: ResolvedAgent) -> str | None:
 
 
 # never handed to a worker by `inherit`: configuration, delegation and the agent's own persistent state
-INHERIT_EXCLUDED = frozenset({"delegate", "agents", "permissions", "self"})
+INHERIT_EXCLUDED = frozenset({"delegate", "agents", "permissions", "secrets", "self"})
 
 WORKER_PROMPT = (
     "You are a worker agent started by another agent to do one task. You cannot ask questions or talk to the user: "

@@ -29,6 +29,7 @@ GROUP_MIN_LEVEL: dict[str, Level] = {
     "delegate": SERVICE_MIN_LEVEL["delegate"],
     "permissions": SERVICE_MIN_LEVEL["permissions"],
     "agents": SERVICE_MIN_LEVEL["agents"],
+    "secrets": SERVICE_MIN_LEVEL["secrets"],
     "terminal": SERVICE_MIN_LEVEL["terminal_ssh"],
 }
 
@@ -95,6 +96,11 @@ def permissions_allowed(level: Level) -> bool:
 def agents_allowed(level: Level) -> bool:
     """Creating, editing, renaming and deleting the same user's agents (the `agents` group)."""
     return group_allowed(level, "agents")
+
+
+def secrets_allowed(level: Level) -> bool:
+    """Managing the names of the stored secrets, never their values (the `secrets` group)."""
+    return group_allowed(level, "secrets")
 
 
 def workers_allowed(level: Level) -> bool:
