@@ -25,6 +25,8 @@ class UserPreferences(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     show_thinking: bool = Field(default=True, strict=True)
+    # whether the agent's picture is shown large at the start of its replies in the web chat
+    show_agent_avatar: bool = Field(default=True, strict=True)
     language: Literal["en", "es"] = "en"
     agent_id: Annotated[str, Field(strict=True, pattern=r"^[A-Za-z0-9_-]{1,64}$")] | None = None
     default_llm_model: Annotated[str, Field(strict=True, min_length=1, max_length=256)] | None = None

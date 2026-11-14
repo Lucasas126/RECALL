@@ -85,7 +85,7 @@ from src.terminal.context import RunContext, run_context
 from src.utils.logger import get_logger
 from src.utils.media import VideoDecomposition, decompose_video
 from src.utils.pdf import extract_pdf_text, run_tesseract
-from src.utils.avatars import USER_KEY, Avatar, AvatarStore, normalise_image
+from src.utils.avatars import USER_KEY, Avatar, AvatarStore, normalise_avatar
 from src.utils.i18n import InputError, UserMessageError, error_message, message
 from src.web.auth import verify_password
 
@@ -753,9 +753,9 @@ class ChatService:
         self._avatars.delete(user_id, USER_KEY)
 
     def _store_avatar(self, user_id: str, key: str, data: bytes, url: str) -> dict:
-        png, has_alpha = normalise_image(data)
-        avatar = self._avatars.save(user_id, key, png)
-        return {"url": url, "has_alpha": has_alpha, "version": avatar.version}
+        picture = normalise_avatar(data)
+        avatar = self._avatars.save(user_id, key, picture.data, picture.media_type)
+        return {"url": url, "has_alpha": picture.has_alpha, "version": avatar.version}
 
     def _read_avatar(self, user_id: str, key: str, missing: str) -> tuple[Avatar, bytes]:
         avatar = self._avatars.get(user_id, key)
@@ -941,6 +941,7 @@ class ChatService:
             "limits": memory_limits().model_dump(mode="json"),
             "defaults": {
                 "show_thinking": True,
+                "show_agent_avatar": True,
                 "language": "es" if user.language.split("-", 1)[0] == "es" else "en",
                 "theme": "system",
                 "default_llm_model": user.models.chat,

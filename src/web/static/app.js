@@ -134,7 +134,7 @@ function renderVersion() {
 // ---- settings helpers (pure: no DOM, no state; tested without a browser)
 // The sections of the user settings dialog and the preferences each one holds (`connections` has none).
 const SETTINGS_SECTIONS = {
-  general: ["show_thinking", "language", "default_agent_id"],
+  general: ["show_thinking", "show_agent_avatar", "language", "default_agent_id"],
   models: ["default_llm_model", "default_stt_model", "stt_language"],
   chats: ["associative_max_matches", "disposable_retention_days"],
   telegram: ["orchestrator", "core_agent_id"],
@@ -508,6 +508,8 @@ function translateInterface() {
     ["task-dialog-banner-text", "Internal worker chat: read-only, not part of your chat list. Use Steer on the task card to correct it."],
     ["settings-thinking-label", "Show model thinking"],
     ["settings-thinking-hint", "Shows the model's reasoning above its replies in the chat."],
+    ["settings-agent-avatar-label", "Show the agent's picture in replies"],
+    ["settings-agent-avatar-hint", "Shows the agent's profile picture at the start of its replies in the chat. Agents without a picture are not affected."],
     ["settings-assoc-max-label", "Maximum associative memory matches"],
     ["settings-assoc-max-hint", "Most memory fragments suggested to the agent per message. The minimum similarity is set by the application, not by you."],
     ["settings-orchestrator-label", "Choose the agent automatically in Telegram"],
@@ -526,7 +528,7 @@ function translateInterface() {
     ["agent-avatar-free-hint", "For transparent PNGs: the image is shown as it is, without cropping."],
     ["settings-avatar-title", "Profile picture"], ["settings-avatar-upload", "Upload image"], ["settings-avatar-remove", "Remove"],
     ["settings-avatar-note", "Your profile picture is shown next to your name. It applies at once and needs no Save."],
-    ["settings-avatar-hint", "PNG, JPEG or WEBP, up to 2 MiB. Shown at 32 px."],
+    ["settings-avatar-hint", "PNG, JPEG, WEBP or GIF, up to 5 MiB. Shown at 32 px."],
     ["settings-avatar-free-label", "No circle or border"],
     ["settings-avatar-free-hint", "For transparent PNGs: the image is shown as it is, without cropping."],
     ["settings-theme-system", "System"], ["settings-theme-light", "Light"], ["settings-theme-dark", "Dark"],
@@ -818,8 +820,8 @@ function renderAgentOptions() {
 }
 
 // ---- profile pictures (avatarView and avatarFileProblem are DOM-free and unit-tested)
-const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
-const AVATAR_TYPES = ["image/png", "image/jpeg", "image/webp"];
+const AVATAR_MAX_BYTES = 5 * 1024 * 1024;
+const AVATAR_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 
 // What to draw for a user or an agent: the stored image (`?v=<version>` makes a new upload replace the cached one)
 // or, without one, the first letter of the name. `free` = shown as it is, without the circle and border.
@@ -829,9 +831,15 @@ function avatarView(avatar, name) {
   return { src: `${avatar.url}?v=${encodeURIComponent(avatar.version ?? "")}`, free: avatar.style === "free", letter };
 }
 
+// The big picture at the start of an assistant reply: null without an image, else what to draw.
+function messageAvatar(avatar) {
+  const view = avatarView(avatar, "");
+  return view.src ? { src: view.src, free: view.free } : null;
+}
+
 // A message template (with values) when the file cannot be uploaded, else null; the server checks again.
 function avatarFileProblem(file) {
-  if (!AVATAR_TYPES.includes(file.type)) return { template: "Use a PNG, JPEG or WEBP image.", values: {} };
+  if (!AVATAR_TYPES.includes(file.type)) return { template: "Use a PNG, JPEG, WEBP or GIF image.", values: {} };
   if (file.size > AVATAR_MAX_BYTES) return { template: "The image is larger than {limit} MiB.", values: { limit: AVATAR_MAX_BYTES / (1024 * 1024) } };
   return null;
 }
@@ -867,7 +875,7 @@ function renderAgentAvatarField() {
   renderAvatar($("agent-avatar-preview"), avatar && { ...avatar, style: $("agent-avatar-free").checked ? "free" : "circle" }, $("agent-name").value.trim());
   $("agent-avatar-upload").disabled = !saved;
   $("agent-avatar-remove").hidden = !avatar;
-  $("agent-avatar-hint").textContent = tr(saved ? "PNG, JPEG or WEBP, up to 2 MiB. Shown at 32 px." : "Save the agent first to add a profile picture.");
+  $("agent-avatar-hint").textContent = tr(saved ? "PNG, JPEG, WEBP or GIF, up to 5 MiB. Shown at 32 px." : "Save the agent first to add a profile picture.");
 }
 
 // Uploads (a File) or removes (null) a picture at once; returns whether it worked, the error shown in `errorElement`.
@@ -952,6 +960,10 @@ $("settings-avatar-free").addEventListener("change", async () => {
   }
 });
 // ---- end profile pictures
+
+function currentAgentAvatar() {
+  return state.user?.agents.find((a) => a.id === state.agentId)?.avatar ?? null;
+}
 
 function currentAgentName() {
   return state.user?.agents.find((a) => a.id === state.agentId)?.name ?? "";
@@ -2348,6 +2360,7 @@ function applyPreferences(preferences) {
   // application-wide size limits (settings.yaml) arrive with the preferences
   if (preferences.limits) $("agent-prompt").maxLength = preferences.limits.soul_chars;
   $("messages").classList.toggle("hide-thinking", !preferences.show_thinking);
+  $("messages").classList.toggle("hide-agent-avatar", preferences.show_agent_avatar === false);
   translateInterface();
   updateModelControls();
 }
@@ -2432,7 +2445,7 @@ const SETTINGS_KEYS = Object.values(SETTINGS_SECTIONS).flat();
 function settingsOriginalValues() {
   const saved = state.settingsOriginal;
   return {
-    show_thinking: saved.show_thinking, language: saved.language,
+    show_thinking: saved.show_thinking, show_agent_avatar: saved.show_agent_avatar, language: saved.language,
     default_llm_model: saved.default_llm_model, default_stt_model: saved.default_stt_model,
     stt_language: saved.stt_language ?? null,
     associative_max_matches: saved.associative_max_matches ?? prefDefault("associative_max_matches"),
@@ -2449,7 +2462,7 @@ function settingsCurrentValues() {
     return value === null ? prefDefault(key) : value; // an empty field means the default
   };
   return {
-    show_thinking: $("settings-thinking").checked, language: $("settings-language").value,
+    show_thinking: $("settings-thinking").checked, show_agent_avatar: $("settings-agent-avatar").checked, language: $("settings-language").value,
     default_llm_model: state.settingsModelDraft.default_llm_model, default_stt_model: state.settingsModelDraft.default_stt_model,
     stt_language: $("settings-stt-language").value || null,
     associative_max_matches: number("settings-assoc-max", "associative_max_matches"),
@@ -2514,6 +2527,7 @@ function fillSettings() {
     default_stt_model: state.preferences.default_stt_model,
   };
   $("settings-thinking").checked = state.preferences.show_thinking;
+  $("settings-agent-avatar").checked = state.preferences.show_agent_avatar;
   $("settings-language").value = state.preferences.language;
   const original = settingsOriginalValues();
   setNumberValue($("settings-assoc-max"), original.associative_max_matches);
@@ -3880,6 +3894,7 @@ function resetStreams() {
   $("settings-dialog").close();
   $("settings-save").disabled = false;
   $("messages").classList.toggle("hide-thinking", false);
+  $("messages").classList.toggle("hide-agent-avatar", false);
   state.modelCatalog = null;
   state.modelCatalogZdr = null;
   state.modelProviders = null;
@@ -6248,6 +6263,15 @@ function addMessage(role, parent = state.view ?? $("messages")) {
   let liveSteps = [];  // tool steps of this reply (state from toolStepsApply) and their DOM nodes, same indexes
   const liveNodes = [];
   let attachmentBox = null;
+  const picture = role === "assistant" ? messageAvatar(currentAgentAvatar()) : null;
+  if (picture) {
+    const image = element("img", { alt: "", draggable: false });
+    const badge = element("span", { className: "msg-avatar" }, image);
+    if (picture.free) badge.dataset.avatarStyle = "free";
+    image.addEventListener("error", () => badge.remove());
+    image.src = picture.src;
+    el.append(badge);
+  }
   el.append(body);
   parent.append(el);
   function renderOne(target, text) {
@@ -7868,6 +7892,7 @@ setupNumberFields();
 
 // user settings (defaults come from GET /api/preferences > defaults)
 checkboxRow("settings-thinking", () => prefDefault("show_thinking"));
+checkboxRow("settings-agent-avatar", () => prefDefault("show_agent_avatar"));
 registerRow("settings-theme", {
   getDefault: () => prefDefault("theme"), describe: (value) => optionText("settings-theme", value),
   read: () => $("settings-theme").value, write: (value) => { $("settings-theme").value = value; applyTheme(value); },

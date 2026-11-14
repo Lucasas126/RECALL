@@ -170,7 +170,7 @@ async def _read_upload(request: Request) -> bytes:
 
 
 def _avatar_response(request: Request, avatar, content: bytes) -> Response:
-    """The stored PNG with a revalidating cache: the browser asks every time and gets a 304 while it is unchanged."""
+    """The stored picture (PNG or animated WEBP) with a revalidating cache: the browser asks every time and gets a 304 while it is unchanged."""
     headers = {
         "X-Content-Type-Options": "nosniff",
         "Cache-Control": "private, max-age=0, must-revalidate",
@@ -178,7 +178,7 @@ def _avatar_response(request: Request, avatar, content: bytes) -> Response:
     }
     if avatar.etag in (tag.strip() for tag in request.headers.get("if-none-match", "").split(",")):
         return Response(status_code=304, headers=headers)
-    return Response(content, media_type="image/png", headers=headers)
+    return Response(content, media_type=avatar.media_type, headers=headers)
 
 
 def _sse(event: str, data, generation_id: str = "") -> str:

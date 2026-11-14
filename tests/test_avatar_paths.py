@@ -10,6 +10,7 @@ from src.core.sources.registry import SourceRegistry
 from src.utils.avatars import AVATARS_DIR, USER_KEY, AvatarStore
 
 PNG = b"\x89PNG\r\n\x1a\n-stand-in-"
+WEBP = b"RIFF\0\0\0\0WEBP-stand-in-"
 
 
 class AvatarStorePathTests(unittest.TestCase):
@@ -50,6 +51,31 @@ class AvatarStorePathTests(unittest.TestCase):
         folder = self.data / "user-a" / AVATARS_DIR
         folder.mkdir(parents=True)
         (folder / "bot.png").symlink_to(secret)
+        self.assertIsNone(self.store.get("user-a", "bot"))
+
+    def test_a_webp_picture_replaces_a_png_and_back_and_is_read_and_moved(self) -> None:
+        self.store.save("user-a", "bot", PNG)
+        avatar = self.store.save("user-a", "bot", WEBP, "image/webp")
+        self.assertEqual((avatar.path.name, avatar.media_type), ("bot.webp", "image/webp"))
+        self.assertFalse((self.data / "user-a" / ".avatars" / "bot.png").exists())
+        self.assertEqual(self.store.read(avatar), WEBP)
+        self.assertTrue(self.store.move("user-a", "bot", "robot"))
+        moved = self.store.get("user-a", "robot")
+        self.assertEqual((moved.path.name, moved.media_type), ("robot.webp", "image/webp"))
+        self.assertIsNone(self.store.get("user-a", "bot"))
+        again = self.store.save("user-a", "robot", PNG)
+        self.assertEqual((again.path.name, again.media_type), ("robot.png", "image/png"))
+        self.assertEqual(sorted(p.name for p in (self.data / "user-a" / ".avatars").iterdir()), ["robot.png"])
+        self.store.save("user-a", "robot", WEBP, "image/webp")
+        self.store.delete("user-a", "robot")
+        self.assertEqual(list((self.data / "user-a" / ".avatars").iterdir()), [])
+
+    def test_a_symlinked_webp_is_not_served(self) -> None:
+        secret = self.data / "secret.txt"
+        secret.write_text("secret", encoding="utf-8")
+        folder = self.data / "user-a" / AVATARS_DIR
+        folder.mkdir(parents=True)
+        (folder / "bot.webp").symlink_to(secret)
         self.assertIsNone(self.store.get("user-a", "bot"))
 
     def test_move_and_delete_stay_inside(self) -> None:

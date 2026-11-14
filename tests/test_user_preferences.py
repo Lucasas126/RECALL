@@ -36,12 +36,25 @@ class UserPreferencesStorageTests(unittest.TestCase):
     def test_missing_preferences_do_not_create_files(self) -> None:
         prefs = self.store.get("user-one")
         self.assertEqual(prefs.model_dump(), {
-            "show_thinking": True, "language": "en", "agent_id": None,
+            "show_thinking": True, "show_agent_avatar": True, "language": "en", "agent_id": None,
             "default_llm_model": None, "default_stt_model": None, "stt_language": None, "associative_max_matches": None, "disposable_retention_days": None,
             "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle",
         })
         self.assertEqual(prefs.model_fields_set, set())
         self.assertEqual(list(self.path.parent.iterdir()), [])
+
+    def test_show_agent_avatar_defaults_on_is_strict_and_partial_updates_keep_it(self) -> None:
+        self.assertIs(UserPreferences().show_agent_avatar, True)
+        for value in ("yes", 1, None):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                UserPreferences(show_agent_avatar=value)
+        self.store.update("user-one", UserPreferences(show_agent_avatar=False))
+        self.store.update("user-one", UserPreferences(language="es"))
+        prefs = self.store.get("user-one")
+        self.assertIs(prefs.show_agent_avatar, False)
+        self.assertEqual(prefs.language, "es")
+        self.store.update("user-one", UserPreferences(show_thinking=False))
+        self.assertIs(self.store.get("user-one").show_agent_avatar, False)
 
     def test_associative_max_matches_validation_and_legacy_files(self) -> None:
         for good in (1, 20, None):
@@ -148,7 +161,7 @@ class UserPreferencesStorageTests(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=3) as pool:
             list(pool.map(update, ("language", "show_thinking", "agent_id")))
         self.assertEqual(self.store.get("user-one").model_dump(), {
-            "show_thinking": False, "language": "es", "agent_id": "agent-b",
+            "show_thinking": False, "show_agent_avatar": True, "language": "es", "agent_id": "agent-b",
             "default_llm_model": None, "default_stt_model": None, "stt_language": None, "associative_max_matches": None, "disposable_retention_days": None,
             "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle",
         })
@@ -162,7 +175,7 @@ class UserPreferencesStorageTests(unittest.TestCase):
             for task in tasks:
                 task.result(timeout=60)
         self.assertEqual(self.store.get("user-one").model_dump(), {
-            "show_thinking": False, "language": "es", "agent_id": "agent-b",
+            "show_thinking": False, "show_agent_avatar": True, "language": "es", "agent_id": "agent-b",
             "default_llm_model": None, "default_stt_model": None, "stt_language": None, "associative_max_matches": None, "disposable_retention_days": None,
             "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle",
         })
@@ -246,7 +259,7 @@ class UserPreferencesWebTests(unittest.TestCase):
         response = self.client.get(self.url)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self._plain(response.json()), {
-            "show_thinking": True, "language": "es", "agent_id": "agent-a",
+            "show_thinking": True, "show_agent_avatar": True, "language": "es", "agent_id": "agent-a",
             "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo", "stt_language": None,
             "associative_max_matches": None, "disposable_retention_days": None,
             "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "orchestrator_default": False,
@@ -262,7 +275,7 @@ class UserPreferencesWebTests(unittest.TestCase):
         self.assertEqual(telegram.get_preferences("user-one"), response.json())
         telegram.update_preferences("user-one", UserPreferences(show_thinking=False))
         self.assertEqual(self._plain(self.client.get(self.url).json()), {
-            "show_thinking": False, "language": "en", "agent_id": "agent-b",
+            "show_thinking": False, "show_agent_avatar": True, "language": "en", "agent_id": "agent-b",
             "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo", "stt_language": None,
             "associative_max_matches": None, "disposable_retention_days": None,
             "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "orchestrator_default": False,
@@ -274,7 +287,7 @@ class UserPreferencesWebTests(unittest.TestCase):
         self.users["user-one"].language = "en-US"
         self.users["user-one"].agents.reverse()
         self.assertEqual(self._plain(self.client.get(self.url).json()), {
-            "show_thinking": False, "language": "en", "agent_id": "agent-b",
+            "show_thinking": False, "show_agent_avatar": True, "language": "en", "agent_id": "agent-b",
             "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo", "stt_language": None,
             "associative_max_matches": None, "disposable_retention_days": None,
             "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "orchestrator_default": False,
@@ -305,7 +318,7 @@ class UserPreferencesWebTests(unittest.TestCase):
         self.client.patch(self.url, json={"language": "en", "show_thinking": False, "agent_id": "agent-b"})
         login(self.client, "user-two")
         self.assertEqual(self._plain(self.client.get(self.url).json()), {
-            "show_thinking": True, "language": "en", "agent_id": "agent-c",
+            "show_thinking": True, "show_agent_avatar": True, "language": "en", "agent_id": "agent-c",
             "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo", "stt_language": None,
             "associative_max_matches": None, "disposable_retention_days": None,
             "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "orchestrator_default": False,
@@ -313,7 +326,7 @@ class UserPreferencesWebTests(unittest.TestCase):
         self.client.patch(self.url, json={"language": "es"})
         login(self.client, "user-one")
         self.assertEqual(self._plain(self.client.get(self.url).json()), {
-            "show_thinking": False, "language": "en", "agent_id": "agent-b",
+            "show_thinking": False, "show_agent_avatar": True, "language": "en", "agent_id": "agent-b",
             "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo", "stt_language": None,
             "associative_max_matches": None, "disposable_retention_days": None,
             "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "orchestrator_default": False,
@@ -326,7 +339,7 @@ class UserPreferencesWebTests(unittest.TestCase):
                 response = self.client.patch(self.url, json={"agent_id": agent, "show_thinking": False})
                 self.assertEqual(response.status_code, 404)
                 self.assertEqual(self._plain(self.service.get_preferences("user-one")), {
-                    "show_thinking": True, "language": "en", "agent_id": "agent-a",
+                    "show_thinking": True, "show_agent_avatar": True, "language": "en", "agent_id": "agent-a",
                     "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo", "stt_language": None,
             "associative_max_matches": None, "disposable_retention_days": None,
             "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "orchestrator_default": False,
@@ -364,6 +377,7 @@ class UserPreferencesWebTests(unittest.TestCase):
     def test_invalid_fields_and_coercions_are_rejected(self) -> None:
         for body in (
             {"show_thinking": "false"}, {"show_thinking": 0}, {"show_thinking": None},
+            {"show_agent_avatar": "yes"}, {"show_agent_avatar": 1}, {"show_agent_avatar": None},
             {"language": "fr"}, {"language": "es-ES"}, {"language": None},
             {"agent_id": "../agent-a"}, {"agent_id": "..\\agent-a"}, {"agent_id": ""},
             {"agent_id": 123}, {"user_id": "user-two"}, {"unexpected": True},
