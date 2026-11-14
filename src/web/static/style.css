@@ -1049,7 +1049,8 @@ html.resizing-sidebar #app { transition: none; }
 /* Agent editor: section list on the left (like the settings dialog), content scrolls on its own, actions are a footer of the
    layout instead of floating over the text. Nothing in the editor is sticky or overlaps. */
 #agents-view:has(#agent-editor:not([hidden])) { overflow: hidden; display: flex; flex-direction: column; flex-wrap: nowrap; }
-#agent-editor { flex: 1 1 auto; min-height: 0; max-width: 900px; display: grid; grid-template-columns: 180px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; gap: 10px 18px; }
+#agents-view:has(#agent-editor:not([hidden])) { --gutter: max(24px, calc((100% - 1180px) / 2)); }
+#agent-editor { flex: 1 1 auto; min-height: 0; max-width: none; display: grid; grid-template-columns: 200px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; gap: 12px 32px; }
 #agent-editor > h3 { grid-column: 1 / -1; }
 #agent-editor > .agent-tabs { grid-column: 1; grid-row: 2; flex-direction: column; gap: 4px; align-self: start; padding: 0; border-bottom: 0; }
 .agent-tabs button { padding: 8px 12px; margin: 0; border: 1px solid transparent; border-radius: var(--radius-sm); text-align: left; font-size: var(--s0); }
