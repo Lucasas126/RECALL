@@ -585,6 +585,7 @@ details.thinking { border-left: 2px solid var(--line); padding-left: 10px; }
 .attachment-image img, .attachment-video video { max-width: 100%; max-height: 260px; border-radius: 6px; display: block; }
 .attachment-audio audio { width: min(100%, 300px); height: 36px; }
 .attachment-label { font-size: .8em; color: var(--muted); }
+.agent-files { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 0; }
 .icon-btn:hover:not(:disabled) { color: var(--text); background: var(--raised); border-color: transparent; }
 #send { color: var(--on-accent); border-radius: 4px; }
 #send:hover:not(:disabled) { color: var(--on-accent); background: var(--accent-strong); }

@@ -24,6 +24,7 @@ class FakeAgent:
         self.sources = SourceRegistry({"notes": Source("notes", root, readable=readable)})
         self.outbox: list[dict] = []
         self._turn_files: list[dict] = []
+        self.config = SimpleNamespace(user_id="user-a", id="bot")
 
 
 class SendFileToolTests(unittest.TestCase):
@@ -65,7 +66,7 @@ class SendFileToolTests(unittest.TestCase):
             self.assertIn("total limit", self.send("notes:photo.png"))
 
     def test_the_path_is_the_only_input(self) -> None:
-        self.assertEqual(set(self.send.tool_spec["function"]["parameters"]["properties"]), {"path", "caption"})
+        self.assertEqual(set(self.send.tool_spec["function"]["parameters"]["properties"]), {"path", "caption", "telegram"})
 
     def test_modality_and_level(self) -> None:
         self.assertEqual([modality_of(m) for m in ("image/png", "audio/ogg", "video/mp4", "application/pdf", "text/plain")],
@@ -164,3 +165,47 @@ class EndToEndTests(unittest.TestCase):
         reloaded = self.case.reload()
         self.assertNotIn("base64", repr(reloaded.messages))
         self.assertNotIn("JVBER", repr(reloaded.messages))  # the base64 of "%PDF"
+
+
+class TelegramFromAnyChatTests(unittest.TestCase):
+    """`telegram=true` sends the file to the owner's Telegram on its own, whatever the chat is."""
+
+    def setUp(self) -> None:
+        from src.agent.toolsets import notify
+        notify._sent.clear()
+        self.addCleanup(notify._sent.clear)
+        directory = TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name).resolve()
+        (self.root / "note.md").write_text("hi", encoding="utf-8")
+        self.agent = FakeAgent(self.root)
+        self.notifier = Mock()
+        self.notifier.linked.return_value = True
+        self.send = build_files_send_tools(self.agent, lambda: self.notifier)[0]
+
+    def test_goes_to_telegram_and_is_not_attached_to_the_chat(self) -> None:
+        self.assertIn("sent note.md", self.send("notes:note.md", "for you", True))
+        self.notifier.send_file.assert_called_once_with("user-a", "note.md", b"hi", "document", "for you")
+        self.assertEqual(self.agent.outbox, [])
+
+    def test_the_default_still_attaches_to_the_chat_and_does_not_touch_telegram(self) -> None:
+        self.assertIn("queued", self.send("notes:note.md"))
+        self.notifier.send_file.assert_not_called()
+        self.assertEqual(len(self.agent.outbox), 1)
+
+    def test_errors_the_agent_can_read_and_the_shared_hourly_limit(self) -> None:
+        self.assertIn("no bot token", build_files_send_tools(self.agent, lambda: None)[0]("notes:note.md", "", True))
+        self.notifier.linked.return_value = False
+        self.assertIn("no Telegram account", self.send("notes:note.md", "", True))
+        self.notifier.linked.return_value = True
+        self.notifier.send_file.side_effect = RuntimeError("HTTP 500")
+        self.assertIn("did not accept", self.send("notes:note.md", "", True))
+        from src.agent.toolsets import notify
+        self.notifier.send_file.side_effect = None
+        for _ in range(notify.MAX_PER_HOUR):
+            self.send("notes:note.md", "", True)
+        self.assertIn("limit of 30", self.send("notes:note.md", "", True))
+
+    def test_the_tool_asks_for_one_file_at_a_time(self) -> None:
+        properties = self.send.tool_spec["function"]["parameters"]["properties"]
+        self.assertEqual(set(properties), {"path", "caption", "telegram"})

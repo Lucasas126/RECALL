@@ -3813,7 +3813,7 @@ function renderMessages(messages) {
       });
     }
     if (m.role === "assistant") {
-      if (m.media?.length) view.attachments(m.media);
+      if (m.media?.length) view.agentFiles(m.media);
       for (const step of historySteps(m)) {
         if (step.type === "reasoning") view.thinking(step.text);
         else if (step.type === "tool") view.action(step.action);
@@ -5868,8 +5868,23 @@ function addMessage(role, parent = state.view ?? $("messages")) {
     if (replace) attachmentBox.replaceChildren(...items);
     else attachmentBox.append(...items);
   }
+  // Files the agent hands over (`send_file`) sit in their own box at the very end of the turn: later steps and text are
+  // added above it, so it never scrolls out of sight. A person's own attachments stay above the message instead.
+  let agentFilesBox = null;
+  function renderAgentFiles(files) {
+    if (!files?.length) return;
+    if (!agentFilesBox) {
+      agentFilesBox = document.createElement("div");
+      agentFilesBox.className = "message-attachments agent-files";
+      el.append(agentFilesBox);
+      new MutationObserver(() => { if (el.lastElementChild !== agentFilesBox) el.append(agentFilesBox); })
+        .observe(el, { childList: true });
+    }
+    agentFilesBox.append(...files.map((file) => attachmentView(file)));
+  }
   const view = {
     el,
+    agentFiles: renderAgentFiles,
     text(chunk) {
       if (Array.isArray(chunk)) {
         const textParts = chunk.filter((part) => part.type === "text").map((part) => part.text);
@@ -5947,7 +5962,7 @@ function addMessage(role, parent = state.view ?? $("messages")) {
     // The final `tool` event: completes the step started above in place (same position, same open/closed state).
     action(a) {
       actionCount++;
-      if (a.files?.length) renderAttachmentNames(a.files);  // `send_file`: the files the agent hands over
+      if (a.files?.length) renderAgentFiles(a.files);  // `send_file`: the files the agent hands over
       const { steps, index } = toolStepsApply(liveSteps, "tool", a);
       const started = index < liveNodes.length;
       liveSteps = steps;

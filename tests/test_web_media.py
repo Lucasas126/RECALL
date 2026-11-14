@@ -72,3 +72,11 @@ class WebMediaStaticTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AgentFilesPlacementTests(unittest.TestCase):
+    def test_the_agent_files_box_stays_last_in_the_turn(self) -> None:
+        script = (_STATIC / "app.js").read_text(encoding="utf-8")
+        self.assertIn("function renderAgentFiles", script)
+        self.assertIn("el.lastElementChild !== agentFilesBox", script)
+        self.assertIn("view.agentFiles(m.media)", script)
