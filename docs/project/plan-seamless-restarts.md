@@ -124,6 +124,26 @@ At start-up, after the services are up, for each run journal left behind:
 4. **Page reconnect.** With the same setup, check whether `followReply` can join the resumed run (same
    `generation_id`) or needs a reload.
 
+## spike results
+
+### spike 1: detached ssh process (2026-11-14, `dev`)
+
+- `setsid nohup ... &` with the parent killed by SIGKILL: the child keeps running and writes its output and its
+  code file. Confirmed.
+- Today's ssh process (`setsid -w bash -c ...` through the container's `ssh` client), local `ssh` killed with
+  SIGKILL: a command that **does not print after the cut** survives and finishes (wrote its file 20 s later; the
+  pid file was removed at its end). A command that **keeps printing** dies at its next write (SIGPIPE on the
+  dead ssh channel): a 1 s ticker stopped at tick 5 of 20. So today processes survive only by luck.
+- Fix confirmed by the first test: redirect stdout/stderr to a log file on the target and detach stdin
+  (`> /tmp/recall-proc-<id>.log 2>&1 < /dev/null`), write the exit code to a file, follow by polling.
+- The record keeps state `exited, -9` when the local ssh dies even though the remote job goes on: the state must
+  come from the code file on the target, not from the local client.
+- Windows `pc` (Git Bash, MSYS 3.6.7): **no `setsid`**, only `nohup` and `disown`. Today's `process_argv`
+  (`setsid -w bash -c ...`) therefore cannot work there at all. `nohup bash -c '...' > log 2>&1 < /dev/null &
+  disown` survived the end of its ssh session and finished (8/8 ticks, code file written). Open: how to kill the
+  whole tree without a process group (`kill -- -pgid` under MSYS, or `taskkill /T /PID` on the Windows pid);
+  pick the launcher per backend (`setsid` when present, else `nohup` + `disown`).
+
 ## steps (after the spikes)
 
 1. Run journal + user turn first + timed checkpoints; tests.
