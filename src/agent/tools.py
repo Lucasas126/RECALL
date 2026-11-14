@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Callable
 
 from src.agent.toolsets.agents import build_agent_tools
+from src.agent.toolsets.secrets import build_secrets_tools
 from src.agent.toolsets.delegate import build_delegate_tools
 from src.agent.toolsets.editing import build_edit_tools
 from src.agent.toolsets.automations import build_automation_tools
@@ -43,6 +44,7 @@ _ORDER = (
     "agents_list", "agent_get_permissions", "permission_levels_help",
     "agent_set_level", "agent_set_tool_groups", "agent_add_rule", "agent_remove_rule", "agent_reset_rules",
     "agent_list", "agent_get", "agent_templates", "agent_create", "agent_update", "agent_rename", "agent_delete",
+    "secret_list", "secret_copy", "secret_rename", "secret_delete",
 )
 
 TOOL_ORDER = _ORDER  # every built-in tool name; MCP tools must not reuse one
@@ -112,6 +114,8 @@ def build_tools(
         base_tools.extend(build_permission_tools(restrict_config(agent.config)))
     if "agents" in selected:  # same: DISPOSABLE_BLOCKED_TOOLS
         base_tools.extend(build_agent_tools(restrict_config(agent.config)))
+    if "secrets" in selected:  # same: DISPOSABLE_BLOCKED_TOOLS
+        base_tools.extend(build_secrets_tools(restrict_config(agent.config)))
     tools_by_name = {
         func.tool_spec["function"]["name"]: func
         for func in base_tools

@@ -137,3 +137,32 @@ def delete_secret(name: str) -> None:
                 os.chmod(path, 0o600)
             except OSError:
                 pass
+
+
+def copy_secret(source: str, target: str) -> bool:
+    """Copy the file value of `source` to `target` (overwriting it); True when `target` already existed. Never returns a value."""
+    check_name(source)
+    check_name(target)
+    if source == target:
+        raise ValueError("source and target are the same variable")
+    value = read_secrets().get(source, "")
+    if not value.strip():
+        raise KeyError(source)
+    existed = target in read_secrets()
+    save_secret(target, value)
+    return existed
+
+
+def rename_secret(old: str, new: str) -> None:
+    """Move a value to a new name in the file; refuses to overwrite an existing `new`."""
+    check_name(old)
+    check_name(new)
+    if old == new:
+        raise ValueError("the names are the same")
+    values = read_secrets()
+    if old not in values:
+        raise KeyError(old)
+    if new in values:
+        raise FileExistsError(new)
+    save_secret(new, values[old])
+    delete_secret(old)

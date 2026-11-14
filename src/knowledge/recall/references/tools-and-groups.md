@@ -76,6 +76,10 @@ Addresses are `source:path`, e.g. `mind_palace:notes/pets.md`.
 | `agent_update` | agents | name, description, model, SOUL and any config key (also yourself) with a card; never above your level or the user's max, never your own level up |
 | `agent_rename` | agents | new id; data and picture move; never yourself |
 | `agent_delete` | agents | remove the configuration (data stays); never yourself or the last agent |
+| `secret_list` | secrets | NAMES in secrets.env, never a value |
+| `secret_copy` | secrets | copy a value to another name, unseen (card) |
+| `secret_rename` | secrets | move a value to a new name (card) |
+| `secret_delete` | secrets | remove one variable (card) |
 
 `folders_edit` includes the three read tools. Both folder groups need at least one folder in `folders`; with either, the generic memory tools can read the folders too, and with `folders_edit` write them (not in `read_only` folders).
 
@@ -96,6 +100,7 @@ Addresses are `source:path`, e.g. `mind_palace:notes/pets.md`.
 | `delegate` | `task_start`, `task_list`, `task_result`, `task_steer`, `task_send`, `task_stop`, `task_wait` (opt-in; needs the agent's `delegation` block, which gets defaults) |
 | `permissions` | `agents_list`, `agent_get_permissions`, `permission_levels_help`, `agent_set_level`, `agent_set_tool_groups`, `agent_add_rule`, `agent_remove_rule`, `agent_reset_rules` (operator; opt-in; each change needs the user's approval once; see `references/permissions.md`) |
 | `agents` | `agent_list`, `agent_get`, `agent_templates`, `agent_create`, `agent_update`, `agent_rename`, `agent_delete` (operator; opt-in; same user's agents; each change asks once and is audited; agents above your level are read-only; see `references/permissions.md`) |
+| `secrets` | `secret_list`, `secret_copy`, `secret_rename`, `secret_delete` (admin; opt-in; names only, never a value; each change asks once and is audited; new values: `set-secret` or Settings) |
 
 ## Dream-only tools
 

@@ -452,6 +452,7 @@ _SPANISH = {
     "Connect your own account for each service your agents can use. Every user connects separately.": "Conecta tu propia cuenta de cada servicio que pueden usar tus agentes. Cada usuario se conecta por separado.",
     "Sign-in opens in a browser on the computer running RECALL.": "El inicio de sesión se abre en un navegador del equipo donde se ejecuta RECALL.",
     "Providers": "Proveedores",
+    "list the NAMES of the stored secrets and copy, rename or delete them without ever seeing a value (tool group secrets; every change needs the user's approval; admin only)": "listar los NOMBRES de los secretos guardados y copiarlos, renombrarlos o borrarlos sin ver nunca un valor (grupo secrets; cada cambio necesita la aprobación del usuario; solo admin)",
     "OpenRouter": "OpenRouter",
     "API key": "Clave de API",
     "Save key": "Guardar clave",
