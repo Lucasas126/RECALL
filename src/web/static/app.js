@@ -4691,10 +4691,17 @@ function taskTrayRows(records, agentId, chatId, nowMs) {
     }));
 }
 
-// Keep polling while a task of the chat runs or its result is still on the way to the parent.
-function tasksNeedPolling(response) {
+// Keep polling while a task of the chat runs or its result is still on the way to the parent, or (`expectWakeUntil`,
+// ms) while the wake of a background process that just ended may still start.
+function tasksNeedPolling(response, expectWakeUntil = 0, nowMs = Date.now()) {
   const tasks = response?.tasks ?? [];
-  return tasks.some((task) => !taskIsFinal(task.status)) || Boolean(response?.pending_wake);
+  return tasks.some((task) => !taskIsFinal(task.status)) || Boolean(response?.pending_wake) || nowMs < expectWakeUntil;
+}
+
+// The ids of the previous process list that are not in the new one: processes that just finished.
+function finishedProcessIds(previous, current) {
+  const now = new Set(current ?? []);
+  return (previous ?? []).filter((id) => !now.has(id));
 }
 
 // A wake reply started in the open chat without a request of this page: attach to it (never when one is attached).
@@ -5033,7 +5040,9 @@ setInterval(() => { if (!document.hidden && !$("tasks-tray").hidden) renderTaskT
 
 // ---- background processes of the open chat: a collapsible line above the message box, each with Stop
 const PROCESS_POLL_MS = 3000;
-const processPanel = { timer: null, key: null, shown: "" };
+const processPanel = { timer: null, key: null, shown: "", ids: [] };
+const WAKE_GRACE_MS = 60000;  // after a process ends, the server needs a moment to start its wake reply
+let expectWakeUntil = 0;
 
 function processElapsed(started) {
   const seconds = Math.max(0, Math.floor(Date.now() / 1000 - started));
@@ -5080,7 +5089,14 @@ async function pollProcesses() {
   if (!state.user || !agentId || !chatId || document.hidden) return;
   try {
     const data = await api(`/api/agents/${encodeURIComponent(agentId)}/chats/${encodeURIComponent(chatId)}/processes`);
-    if (session === state.session && agentId === state.agentId && chatId === state.chatId) renderProcesses(data.processes);
+    if (session === state.session && agentId === state.agentId && chatId === state.chatId) {
+      renderProcesses(data.processes);
+      const ids = data.processes.map((p) => p.id);
+      const ended = finishedProcessIds(processPanel.ids, ids).length > 0;
+      processPanel.ids = ids;
+      if (ended) expectWakeUntil = Date.now() + WAKE_GRACE_MS;  // its wake reply is on the way: let the task poll find it
+      if (ended || ids.length) ensureTaskPolling();
+    }
   } catch {
     // the panel is a convenience: a failed poll keeps the last list
   }
@@ -5091,6 +5107,8 @@ function startProcessPolling() {
   if (key !== processPanel.key) {  // another chat: start from an empty panel
     processPanel.key = key;
     processPanel.shown = "";
+    processPanel.ids = [];
+    expectWakeUntil = 0;
     $("processes").hidden = true;
     $("processes").removeAttribute("open");
   }
@@ -5098,6 +5116,13 @@ function startProcessPolling() {
   pollProcesses();
   if (!processPanel.timer) processPanel.timer = setInterval(pollProcesses, PROCESS_POLL_MS);
 }
+
+// A tab that was hidden has throttled timers: look again at once when it comes back.
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden || !state.user) return;
+  pollProcesses();
+  ensureTaskPolling();
+});
 
 function ensureTaskPolling() {
   if (!state.user) return;
@@ -5124,7 +5149,7 @@ async function taskPoll() {
         refreshTaskCards();
         // a worker with a terminal grant asks its approvals in this chat: list them so the cards appear (and close)
         if (data.tasks.some((task) => !taskIsFinal(task.status) && (task.backends?.length || task.awaiting_approval))) syncApprovals(agentId, chatId);
-        again = tasksNeedPolling(data) || (data.tasks.length > 0 && data.active);
+        again = tasksNeedPolling(data, expectWakeUntil) || (data.tasks.length > 0 && data.active);
         if (!wakeAttaching && shouldAttachWake({ active: data.active, generating: isGenerating(agentId, chatId), current })) {
           await attachWake(agentId, chatId);
         }
