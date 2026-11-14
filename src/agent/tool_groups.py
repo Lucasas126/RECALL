@@ -109,6 +109,10 @@ TOOL_GROUP_TOOLS: Final[dict[str, tuple[str, ...]]] = {
 # MCP and `delegate` itself are never grantable
 DELEGATE_GRANTABLE_GROUPS: Final[tuple[str, ...]] = ("web",)
 
+# groups an *automation's* unattended task also keeps: it works while the owner is away, so it must be able to tell them
+# (`notify_telegram`) or hand them a file (`send_file`, here always to their Telegram). Nothing else is added.
+AUTOMATION_EXTRA_GROUPS: Final[tuple[str, ...]] = ("notify", "files_send")
+
 # tools that change the agent's own persistent state (memory, SOUL, skills, notes, user folders);
 # a disposable chat neither exposes nor runs them
 DISPOSABLE_BLOCKED_TOOLS: Final[frozenset[str]] = frozenset(
