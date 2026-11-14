@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 
 import httpx
 import telegramify_markdown
@@ -12,6 +13,27 @@ from src.utils.logger import get_logger
 logger = get_logger("telegram")
 
 BOT_TOKEN_ENV = "TELEGRAM_BOT_TOKEN"
+
+# A connection that never got as far as sending the request (reset, refused, no route, DNS or connect timeout) is tried
+# again a couple of times: from the server a fresh connection to Telegram sometimes fails (about 1 in 150, seen as
+# `ConnectError`) and works a moment later. An error AFTER the request went out (read timeout, a reply) is never
+# retried, since Telegram may already have delivered it and a second try would send it twice.
+CONNECT_RETRIES = 2
+CONNECT_RETRY_PAUSE = 0.7  # seconds, doubled each time
+
+
+def _post_with_retry(url: str, **kwargs) -> httpx.Response:
+    """`httpx.post`, tried again when the connection could not be made. Raises the last connection error."""
+    pause = CONNECT_RETRY_PAUSE
+    for attempt in range(CONNECT_RETRIES + 1):
+        try:
+            return httpx.post(url, **kwargs)
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            if attempt == CONNECT_RETRIES:
+                raise
+            time.sleep(pause)
+            pause *= 2
+    raise AssertionError("unreachable")  # the loop returns or raises
 
 
 def parse_allowed_users(raw: str) -> tuple[dict[int, str], list[str]]:
@@ -117,7 +139,7 @@ class TelegramNotifier:
 
     def _upload(self, method: str, field: str, chat_id: int, name: str, data: bytes, caption: str | None) -> httpx.Response:
         try:
-            return httpx.post(
+            return _post_with_retry(
                 f"https://api.telegram.org/bot{self._token}/{method}",
                 data={"chat_id": chat_id, **({"caption": caption} if caption else {})},
                 files={field: (name, data)}, timeout=max(self._timeout, 60.0),
@@ -127,7 +149,7 @@ class TelegramNotifier:
 
     def _post(self, payload: dict) -> httpx.Response:
         try:
-            return httpx.post(
+            return _post_with_retry(
                 f"https://api.telegram.org/bot{self._token}/sendMessage", json=payload, timeout=self._timeout,
             )
         except httpx.HTTPError as exc:

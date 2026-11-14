@@ -80,6 +80,7 @@ The web **Agents** tab configures these groups for each agent:
   a parameter, so an agent cannot write to anyone else. Use it for "tell me when you are done". It needs the server's bot token and the user linked in the Telegram allow-list;
   without them it returns an error the agent can read. At most 30 notices an hour per agent (counted in the running process, so a restart resets it) and 3500 characters each.
   Not built in a disposable chat (workers and tasks). No approval card: it only reaches the owner's own chat.
+  Messages and files reach Telegram over a fresh connection each time. A connection that cannot be opened (reset, refused, no route, connect timeout) is tried again twice, after 0.7 s and 1.4 s; an error after the request went out, or any answer from Telegram, is never retried, because Telegram may already have delivered it. After the retries the tool returns the error (`Telegram sendDocument failed: ConnectError`) and the hourly slot is given back.
 
 <a id="automations"></a>
 - `automations` (level `assistant`): `automation_create`, `automation_list`, `automation_edit`, `automation_pause`, `automation_resume` and `automation_delete` schedule things the agent does
