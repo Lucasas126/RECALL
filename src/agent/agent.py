@@ -94,6 +94,20 @@ _DREAM_TASKS_NOTICE = (
     "session does it and checks it off. Tell the user it is queued for the next dream."
 )
 
+_MEMORY_HABITS_NOTICE = (
+    "## Memory habits\n\n"
+    "MEMORY.md and USER.md are small and in every chat: keep only what you need in every chat, cannot get "
+    "with a tool, and is not about one chat. Never store versions, commands, lists of tools, task progress or "
+    "anything a tool can tell you; store where to look instead. Everything else goes to your mind palace "
+    "(`mind_palace:`), read through `INDEX.md`: one folder per project with its current state, one file per "
+    "decision with the reason, a dated journal, one topic per note, and a line in the index for each. Search "
+    "before writing and update instead of duplicating. If memory is full, move the detail to the palace and "
+    "leave a one-line pointer; do not delete to make room. The structure is yours: evolve it when it stops "
+    "serving you and say why in the journal. Verify with tools before stating a fact, and promise a follow-up "
+    "only when something will wake you; otherwise do it now or say you cannot. Your prompt is read when a chat "
+    "starts: changes to SOUL, memory and skills reach new chats."
+)
+
 _DISPOSABLE_NOTICE = (
     "## Disposable chat\n\n"
     "This is a disposable chat: nothing from it will be remembered. Your persistent memory, SOUL, skills, "
@@ -423,6 +437,8 @@ class Agent:
             blocks.append(_DISPOSABLE_NOTICE)
         elif self._task is None and "append" in self._tool_handlers and self.config.has_memory:
             blocks.append(_DREAM_TASKS_NOTICE)
+        if self._task is None and not self._disposable and "memory" in self._tool_handlers and self.config.has_memory:
+            blocks.append(_MEMORY_HABITS_NOTICE)
         if "task_start" in self._tool_handlers and (notice := delegate_notice(self.config)):
             blocks.append(notice)
         if "terminal" in self._tool_handlers and (notice := terminal_notice(self.config)):

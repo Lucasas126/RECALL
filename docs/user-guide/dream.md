@@ -59,7 +59,7 @@ list items; items checked as `- [x]` count as done.
 system prompt = `SOUL.md` + `MEMORY.md` + `USER.md` + skills index (name and
 description of each skill; the body is loaded on demand with `skill_view`) +
 up to 3 open items from `for_user.md` + current extra blocks (associative
-notice, dream tasks notice, MCP notes). dreams add the agent's dream prompt after the profile blocks.
+notice, dream tasks notice, memory habits notice, MCP notes). the memory habits notice (`_MEMORY_HABITS_NOTICE` in `src/agent/agent.py`) goes to every non-disposable chat of an agent that has memory and can write it: what belongs in `MEMORY.md` / `USER.md` and what in the palace, never deleting to make room, the palace structure being the agent's own to evolve. dreams add the agent's dream prompt after the profile blocks.
 the assembly lives in `src/agent/profile.py`; empty blocks are left out.
 
 files are read when a chat's agent is built: changes made by a dream take
@@ -237,7 +237,7 @@ for the next chats (see [memory index](memory.md#memory-index)).
 
 - review each pending chat; extract facts about the user, preferences,
   corrections, unfinished tasks, reusable procedures.
-- update `USER.md` / `MEMORY.md` (compact, durable facts only), create or
+- update `USER.md` / `MEMORY.md` (compact: only what is needed in every chat, cannot be fetched with a tool and is not about one chat; when full, move detail to the palace and leave a pointer, never delete to make room), create or
   improve skills for repeated procedures, write longer material to the palace.
 - adjust `SOUL.md` only for lasting changes in how to behave; small, explained.
 - look things up (palace, user folders, web) when it helps understand a topic the user
@@ -247,6 +247,7 @@ for the next chats (see [memory index](memory.md#memory-index)).
   stays open).
 - keep `for_user.md`: questions, ideas and findings to bring up with the user,
   with why. few, worthwhile, not intrusive; remove the ones already said.
+- upkeep after the work: merge duplicate notes, archive outdated ones, keep `INDEX.md` matching the folders, change nothing when the palace is already in good shape. a suggested palace layout (`projects/<name>/status.md`, `decisions/`, `journal/`, `reference/`) is offered as the agent's own to change.
 - append a journal entry: what was reviewed, what changed, what was learned.
 - mark each chat reviewed when done with it.
 

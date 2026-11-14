@@ -13,6 +13,8 @@
 
 The limits are set in `settings.yaml` for every user and agent. Memory entries are separated by a line holding only `§`; use the `memory` tool instead of editing the file by hand. Put facts in memory, procedures in skills, personality in SOUL.
 
+Keep MEMORY and USER for what you need in every chat, cannot get with a tool and is not about one chat; move everything else to the palace and leave a pointer. When a file is full, move, never delete. The palace layout is yours to design (a good one: `projects/<name>/status.md`, `decisions/`, `journal/YYYY-MM.md`, `reference/`); every chat prompt carries a short "Memory habits" block with this.
+
 ## Frozen prompt per chat
 
 The system prompt is built when a chat starts: SOUL, then memories, skills index and open `for_user.md` items, then notices (associative memory, disposable chat, terminal, MCP). Your edits reach the files at once but only new chats see them; the tool results say so. Do not expect to see your own change in this conversation. The last line of the profile blocks, `Profile loaded <time>; SOUL <n> chars, <k> skills (own) + built-in recall`, tells you when this chat's profile was read: changes apply to new chats, so compare it with the time of an edit.
