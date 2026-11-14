@@ -19,10 +19,11 @@ function harness({ preferencesDelay = 0, chatDelay = 0 } = {}) {
     state, log, wait,
     $: () => ({ hidden: true, focus() { log.push("focus"); } }),
     chatsUrl: (suffix = "") => `/api/agents/bot/chats${suffix}`,
+    chatQuery: () => "?limit=60",
     api: async (url) => {
       log.push(`start ${url}`);
       if (url === "/api/preferences") { await wait(preferencesDelay); log.push("end preferences"); return { language: "en" }; }
-      if (url.endsWith("/chat-1")) {
+      if (url.endsWith("/chat-1?limit=60")) {
         await wait(chatDelay);
         log.push("end chat");
         return { chat: { active: false }, messages: [{ role: "user", content: "hi" }], model: { id: "m" } };
@@ -49,8 +50,8 @@ test("the preferences and the chat are requested together, before either answers
   const { context, log } = harness({ preferencesDelay: 20, chatDelay: 20 });
   await context.openChat("chat-1");
   const starts = log.filter((entry) => entry.startsWith("start"));
-  assert.deepEqual(starts, ["start /api/preferences", "start /api/agents/bot/chats/chat-1"]);
-  assert.ok(log.indexOf("start /api/agents/bot/chats/chat-1") < log.indexOf("end preferences"), "the chat waited for the preferences");
+  assert.deepEqual(starts, ["start /api/preferences", "start /api/agents/bot/chats/chat-1?limit=60"]);
+  assert.ok(log.indexOf("start /api/agents/bot/chats/chat-1?limit=60") < log.indexOf("end preferences"), "the chat waited for the preferences");
 });
 
 test("opening a chat does not ask for the models of the chat it is leaving", async () => {

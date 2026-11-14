@@ -3166,7 +3166,7 @@ async function openChat(chatId) {
   const revision = ++state.chatModelRevision;
   // the preferences and the chat do not depend on each other, so they travel together (two round trips in series
   // before anything is drawn were most of a chat switch on a slow link); the chat carries its own models
-  const [, data] = await Promise.all([refreshPreferences({ models: false }), api(chatsUrl(`/${chatId}`))]);
+  const [, data] = await Promise.all([refreshPreferences({ models: false }), api(chatsUrl(`/${chatId}${chatQuery()}`))]);
   if (session !== state.session || agentId !== state.agentId || revision !== state.chatModelRevision || state.modelBusy) return;
   state.chatId = chatId;
   state.chatInfo = data.chat;
@@ -3181,7 +3181,7 @@ async function openChat(chatId) {
     else $("usage").hidden = true;
   } else {
     forgetApprovals(agentId, chatId);
-    renderMessages(data.messages);
+    renderMessages(data.messages, data.window);
     // a reply started elsewhere (another tab, an earlier page load) is still running: replay it and follow it live
     if (data.chat.active) followReply(agentId, chatId);
   }
@@ -3801,12 +3801,92 @@ function attachmentView(attachment) {
   return item;
 }
 
-function renderMessages(messages) {
+// How many messages a chat opens with. The rest waits behind a bar at the top ("load earlier").
+const CHAT_PAGE = 60;
+const CHAT_MORE = 100;
+
+// `?limit=` for a chat request: ask for as many messages as the open view already shows (never fewer than a page).
+function chatQuery(limit = CHAT_PAGE) {
+  return `?limit=${Math.max(CHAT_PAGE, limit)}`;
+}
+
+// The bar above the first drawn message: how many are left out and buttons to bring them in.
+function updateHistoryBar(container) {
+  container.querySelector(":scope > .history-bar")?.remove();
+  const { hidden, total } = container.history;
+  if (hidden <= 0) return;
+  const bar = document.createElement("div");
+  bar.className = "history-bar";
+  const label = document.createElement("span");
+  label.textContent = tr("{hidden} earlier messages not shown (of {total})", { hidden, total });
+  const more = document.createElement("button");
+  more.type = "button";
+  more.textContent = tr("Load {count} more", { count: Math.min(CHAT_MORE, hidden) });
+  more.addEventListener("click", () => loadEarlier(container, CHAT_MORE));
+  bar.append(label, more);
+  if (hidden > CHAT_MORE) {
+    const all = document.createElement("button");
+    all.type = "button";
+    all.textContent = tr("Load all");
+    all.addEventListener("click", () => loadEarlier(container, 5000));
+    bar.append(all);
+  }
+  container.prepend(bar);
+}
+
+// Loads older messages above the ones shown, keeping what the person is reading where it is.
+async function loadEarlier(container, count) {
+  const history = container.history;
+  if (history.loading || history.hidden <= 0 || container !== state.view) return;
+  history.loading = true;
+  const bar = container.querySelector(":scope > .history-bar");
+  bar?.querySelectorAll("button").forEach((button) => { button.disabled = true; });
+  const { agentId, chatId } = { agentId: state.agentId, chatId: state.chatId };
+  try {
+    const data = await api(chatsUrl(`/${chatId}?limit=${count}&before=${history.firstIndex}`));
+    if (container !== state.view || agentId !== state.agentId || chatId !== state.chatId) return;
+    const box = $("messages");
+    const keepFromBottom = box.scrollHeight - box.scrollTop;  // distance to the bottom stays: the new content grows above
+    const older = document.createElement("div");
+    older.className = "chat-view";
+    drawMessages(older, data.messages, { usage: false });
+    bar?.remove();
+    container.prepend(...older.childNodes);
+    history.hidden = data.window.hidden;
+    history.firstIndex = data.window.first_index ?? history.firstIndex;
+    history.total = data.window.total;
+    container.historyLimit += data.messages.length;
+    updateHistoryBar(container);
+    stuckToBottom = false;  // the observer must not jump to the end for content added at the top
+    box.scrollTop = box.scrollHeight - keepFromBottom;
+    updateJumpLatest();
+  } catch (err) {
+    bar?.querySelectorAll("button").forEach((button) => { button.disabled = false; });
+    addMessage("assistant", container).error(err);
+  } finally {
+    history.loading = false;
+  }
+}
+
+// The end of a long chat is drawn first: `window` (from the server: {total, hidden, first_index}) says how many earlier
+// messages are left out, and a bar above the first one loads them. `limit` is how many messages the view asks for again
+// when the chat is reloaded (after a reply, an edit, a followed run), so a longer history the user opened stays open.
+function renderMessages(messages, window = null, limit = CHAT_PAGE) {
   const container = document.createElement("div");
   container.className = "chat-view";
+  container.historyLimit = limit;
+  container.history = { hidden: window?.hidden ?? 0, total: window?.total ?? messages.length, firstIndex: window?.first_index ?? null, loading: false };
   state.view = container;
   $("messages").replaceChildren(container);
   $("usage").hidden = true;
+  drawMessages(container, messages, { usage: true });
+  updateHistoryBar(container);
+  scrollDown(true);
+}
+
+// Draws stored messages into `parent`. `usage: false` (older messages loaded later) leaves the usage readout alone: it
+// belongs to the latest reply.
+function drawMessages(container, messages, { usage }) {
   for (const m of messages) {
     if (isWakeMessage(m)) {  // a subagent result, not something the user wrote
       container.append(wakeBubble(m));
@@ -3837,6 +3917,7 @@ function renderMessages(messages) {
       if (m.media?.length) view.attachments(m.media);
     }
     if (m.interrupted) view.interrupted();
+    if (!usage) continue;
     if (m.usage_report) showUsage(m.usage_report);
     else if (m.role === "assistant" && m.usage?.in != null) {
       const output = m.usage.out == null ? "unknown" : m.usage.out;
@@ -3846,7 +3927,6 @@ function renderMessages(messages) {
       );
     }
   }
-  scrollDown(true);
 }
 
 // ------------------------------------------------------------------ editing earlier messages
@@ -3941,15 +4021,18 @@ function startEdit(el) {
 
 // Once a reply is stored, give the bubbles added live their stored index so they can be edited too.
 async function syncEditIndexes(request) {
-  const data = await api(chatsUrl(`/${request.chatId}`));
+  const data = await api(chatsUrl(`/${request.chatId}${chatQuery(state.view?.historyLimit)}`));
   if (!isCurrent(request) || isGenerating(request.agentId, request.chatId)) return;
   // pair user bubbles with the stored user messages in order; the assistant bubbles are left out of the count on
   // purpose: a stopped, steered or failed reply can leave more or fewer of them than stored turns, and a mismatch
   // there used to leave every edit button without its index until the page was reloaded
   const bubbles = [...state.view.querySelectorAll(":scope > .msg.user")];
   const stored = data.messages.filter((m) => m.role === "user" && !isWakeMessage(m));
-  if (bubbles.length !== stored.length) return;
-  bubbles.forEach((el, position) => {
+  // the window leaves out the START of the chat only: when it holds fewer messages than are drawn (a reply added since),
+  // the last ones still pair up, so count from the end
+  const skip = Math.max(0, bubbles.length - stored.length);
+  if (stored.length > bubbles.length || (data.window?.hidden === 0 && skip !== 0)) return;
+  bubbles.slice(skip).forEach((el, position) => {
     if (stored[position].index != null) setEditable(el, stored[position].index);
   });
 }
@@ -4885,12 +4968,12 @@ async function taskPoll() {
 async function attachWake(agentId, chatId) {
   wakeAttaching = true;
   try {
-    const data = await api(chatsUrl(`/${chatId}`));
+    const data = await api(chatsUrl(`/${chatId}${chatQuery(state.view?.historyLimit)}`));
     const current = agentId === state.agentId && chatId === state.chatId && !isGenerating(agentId, chatId);
     if (!current || !data.chat.active) return;
     state.chatInfo = data.chat;
     forgetApprovals(agentId, chatId);
-    renderMessages(data.messages);
+    renderMessages(data.messages, data.window, state.view?.historyLimit);
     followReply(agentId, chatId);
   } finally {
     wakeAttaching = false;
@@ -6615,7 +6698,8 @@ async function dispatchMessage(content, attachments, edit = null) {
           if (isCurrent(request)) {
             if (request.reloadAfter) {
               forgetApprovals(request.agentId, request.chatId);
-              renderMessages((await api(chatsUrl(`/${request.chatId}`))).messages);
+              const reloaded = await api(chatsUrl(`/${request.chatId}${chatQuery(state.view?.historyLimit)}`));
+              renderMessages(reloaded.messages, reloaded.window, state.view?.historyLimit);
               syncApprovals(request.agentId, request.chatId);
             }
             else await syncEditIndexes(request);
@@ -6756,13 +6840,13 @@ async function followReply(agentId, chatId, attempt = 0) {
     if (request.errored) return; // keep the error card visible
     if (afterFollow({ outcome, current: isCurrent(request), generating: false, active: false, attempt }) === "stop") return;
     // the run is over: show the saved chat, or follow the next run when a new message steered this one
-    const data = await api(chatsUrl(`/${chatId}`));
+    const data = await api(chatsUrl(`/${chatId}${chatQuery(state.view?.historyLimit)}`));
     const next = afterFollow({
       outcome, current: isCurrent(request), generating: isGenerating(agentId, chatId), active: data.chat.active, attempt,
     });
     if (next === "stop") return;
     forgetApprovals(agentId, chatId);
-    renderMessages(data.messages);
+    renderMessages(data.messages, data.window, state.view?.historyLimit);
     if (next === "follow") followReply(agentId, chatId, attempt + 1);
     else {
       updateBusy();
