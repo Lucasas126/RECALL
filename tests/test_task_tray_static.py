@@ -36,6 +36,12 @@ class TaskTrayStaticTests(unittest.TestCase):
         text_rule = re.search(r"^\.thinking-text \{[^}]*\}", css, re.M).group(0)
         self.assertNotIn("border-left", text_rule)  # a second line inside the first one looked doubled
 
+    def test_approval_jump_bar_only_shows_when_its_card_is_out_of_view(self) -> None:
+        self.assertIn("watchApprovalCards(", APP_JS)
+        self.assertRegex(APP_JS, r"bar\.hidden = pending\.every\(\(entry\) => approvalCardsSeen\.has\(entry\.nodes\.card\)\)")
+        css = (STATIC / "style.css").read_text(encoding="utf-8")
+        self.assertRegex(css, r"#approval-pending \{ align-self: center; margin: 6px 0 12px;")
+
     def test_texts_are_translated(self) -> None:
         catalog = messages("es")
         for text in ("1 subagent running", "{count} subagents running"):

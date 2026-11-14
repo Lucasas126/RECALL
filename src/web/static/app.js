@@ -5905,6 +5905,7 @@ function updateApprovalIndicator() {
   const pending = [...approvalEntries.values()].filter((entry) => approvalActive(entry.state)
     && entry.data.agent_id === state.agentId && entry.data.chat_id === state.chatId && entry.nodes?.card.isConnected);
   let bar = document.getElementById("approval-pending");
+  watchApprovalCards(pending.map((entry) => entry.nodes.card));
   if (!pending.length) {
     if (bar) bar.hidden = true;
     return;
@@ -5920,9 +5921,29 @@ function updateApprovalIndicator() {
     });
     $("messages-wrap").after(bar);
   }
-  bar.hidden = false;
+  bar.hidden = pending.every((entry) => approvalCardsSeen.has(entry.nodes.card));  // nothing to jump to when it is already on screen
   const label = approvalPendingLabel(pending.length);
   if (bar.textContent !== label) bar.textContent = label;
+}
+
+// Which pending approval cards are inside the visible part of the chat (so the jump bar is only shown for hidden ones).
+const approvalCardsSeen = new Set();
+let approvalCardsObserver = null;
+let approvalCardsWatched = new Set();
+
+function watchApprovalCards(cards) {
+  if (typeof IntersectionObserver === "undefined") return;
+  approvalCardsObserver ??= new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (entry.isIntersecting) approvalCardsSeen.add(entry.target);
+      else approvalCardsSeen.delete(entry.target);
+    }
+    updateApprovalIndicator();
+  }, { root: $("messages"), threshold: 0.3 });
+  const next = new Set(cards);
+  for (const card of approvalCardsWatched) if (!next.has(card)) { approvalCardsObserver.unobserve(card); approvalCardsSeen.delete(card); }
+  for (const card of next) if (!approvalCardsWatched.has(card)) approvalCardsObserver.observe(card);
+  approvalCardsWatched = next;
 }
 
 // Loads a chat's pending approvals: draws the missing cards (current chat only) and settles cards the server no longer lists.
