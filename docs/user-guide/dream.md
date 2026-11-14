@@ -77,7 +77,10 @@ watermark per chat:
 - a chat is **pending** when its number of turns is greater than
   `reviewed_until` (new chats start at 0). a chat that continues after being
   reviewed becomes pending again, with only the new part to read.
-- the dream lists pending chats (`dream_pending`), reads them
+- the dream lists pending chats (`dream_pending`) **most recent first** (by the time of the chat's last turn; each
+  entry also has `first_new_at` and `last_turn_at`), so what it reads first is the latest word on a subject: a bug
+  or a plan an older chat leaves open may be settled in a newer one, and the dream prompt tells the model to check
+  that before it saves something as open. reads them
   (`dream_read_chat`, returns only the unreviewed turns plus a little context;
   calling it again for the same chat continues with the next part, so a long
   chat is read to its end before it is marked) and calls
@@ -85,7 +88,7 @@ watermark per chat:
   captured by the session's last read of the chat, so messages that arrive
   during the dream stay pending.
 - a session that fails, hits its budget, times out or is cancelled leaves the
-  rest pending; oldest first next time.
+  rest pending; most recent first next time.
 - deleted chats are dropped from the state.
 - [disposable chats](memory.md#disposable-chats) are never pending and cannot be read
   by the dream; once converted to normal chats they start at turn 0 and are reviewed.
@@ -397,7 +400,7 @@ entry in `folders` and a `folders_read`/`folders_edit` tool group. `terminal` is
 - `modes: { dream, sleep }` in the old docs is replaced by `dream:`.
 - existing chats start pending (watermark 0) and stay where they are
   (`data/<user_id>/<agent_id>/conversations/`); the first dream may need several
-  sessions to catch up, oldest first.
+  sessions to catch up, most recent first.
 
 ## web API
 

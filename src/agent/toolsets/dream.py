@@ -23,7 +23,7 @@ def build_review_tools(
 
     @tool
     def dream_pending() -> str:
-        """List the chats with turns you have not reviewed yet, oldest first, with how many turns are new."""
+        """List the chats with turns you have not reviewed yet, the most recently active first, with how many turns are new."""
         items = queue.pending()
         if not items:
             return "nothing pending: every chat is reviewed."

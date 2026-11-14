@@ -68,7 +68,13 @@ class ReviewQueue:
         return {chat_id: int(entry.get("reviewed_until", 0)) for chat_id, entry in chats.items()}
 
     def pending(self) -> list[dict]:
-        """Pending chats, oldest unreviewed turn first: id, title, turn counts and first new turn time."""
+        """Pending chats, the one with the latest activity first: id, title, turn counts, first new turn time and last turn time.
+
+        Newest first so that a later conversation is read before an earlier one: what a chat says is a problem or a plan
+        may be settled in a later one, and a reader who has seen the end of the story does not note the early worry as open.
+        The order is by the time of the chat's LAST turn (a chat that started long ago and went on until yesterday is
+        recent), then by the time of its first new turn, newest first, and by id so equal times keep a fixed order.
+        """
         existing = set(self._conversations.chats(include_internal=True))  # a `remember` task chat is hidden but reviewable
         disposable = self._conversations.disposable_chats()
         stale = set(self._state.state()["chats"]) - existing
@@ -86,6 +92,7 @@ class ReviewQueue:
             if len(turns) <= reviewed:
                 continue
             first_new = turns[reviewed].get("ts") or ""
+            last = next((turn.get("ts") for turn in reversed(turns) if turn.get("ts")), "") or first_new
             items.append({
                 "chat_id": chat_id,
                 "title": self._conversations.summary(chat_id)["title"],
@@ -93,8 +100,9 @@ class ReviewQueue:
                 "reviewed_until": reviewed,
                 "new_turns": len(turns) - reviewed,
                 "first_new_at": first_new,
+                "last_turn_at": last,
             })
-        return sorted(items, key=lambda item: (item["first_new_at"], item["chat_id"]))
+        return sorted(items, key=lambda item: (item["last_turn_at"], item["first_new_at"], item["chat_id"]), reverse=True)
 
     def read(self, chat_id: str, max_turns: int = 40, context_turns: int = 2, after: int | None = None) -> dict:
         """The next unreviewed turns of a chat (at most `max_turns`) plus a few earlier turns for context.
