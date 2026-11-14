@@ -4676,13 +4676,20 @@ function taskPanelNeedsPolling(response) {
 }
 // ---- end task panel helpers
 
-// Pure: what the pill shows for the records of one chat. `previous` = running count of the last check, same chat.
-function taskIndicatorState(records, agentId, chatId, previous = 0) {
-  const own = [...records].filter((task) => task?.parent?.agent_id === agentId && task?.parent?.chat_id === chatId);
-  const running = own.filter((task) => !taskIsFinal(task.status));
-  if (running.length) return { show: "running", count: running.length, firstId: running[0].id };
-  if (previous > 0 && own.length) return { show: "done", count: 0, firstId: own[own.length - 1].id };
-  return { show: "none", count: 0, firstId: null };
+// Pure: one row per running task of the chat for the tray above the message box (oldest first).
+function taskTrayRows(records, agentId, chatId, nowMs) {
+  return [...records]
+    .filter((task) => task?.id && task?.status === "running" && task?.parent?.agent_id === agentId && task?.parent?.chat_id === chatId)
+    .sort((a, b) => (Date.parse(a.created_at) || 0) - (Date.parse(b.created_at) || 0))
+    .map((task) => ({
+      id: task.id,
+      title: String(task.title || task.goal || task.id).trim(),
+      goal: String(task.goal || task.title || task.id).trim(),
+      model: task.model || "",
+      elapsed: formatElapsed(taskElapsed(task, nowMs)),
+      startedMs: Date.parse(task.started_at) || null,
+      canOpenChat: Boolean(task.child?.chat_id),
+    }));
 }
 
 // Keep polling while a task of the chat runs or its result is still on the way to the parent.
@@ -4930,60 +4937,7 @@ function refreshTaskCards() {
     if (!card.isConnected) taskCards.delete(card);
     else refreshTaskCard(card);
   }
-  updateTaskIndicator();
-}
-
-// ---- task indicator: a header pill says how many tasks of the open chat still run, then "finished" for a while.
-const taskIndicator = { key: null, running: 0, doneTimer: null };
-
-// Wide screens show the sentence; phones show only the short form (count or check), the sentence goes to the tooltip.
-function setTaskIndicatorText(pill, text, short) {
-  $("chat-tasks-indicator-text").textContent = text;
-  pill.dataset.short = short;
-  pill.title = text;
-  pill.setAttribute("aria-label", text);
-}
-
-function updateTaskIndicator() {
-  const pill = $("chat-tasks-indicator");
-  if (!pill) return;
-  const key = chatKey(state.agentId, state.chatId);
-  if (taskIndicator.key !== key) {
-    clearTimeout(taskIndicator.doneTimer);
-    taskIndicator.doneTimer = null;
-    taskIndicator.key = key;
-    taskIndicator.running = 0;
-    pill.hidden = true;
-  }
-  if (taskListed !== key) return;
-  const view = taskIndicatorState(taskRecords.values(), state.agentId, state.chatId, taskIndicator.running);
-  taskIndicator.running = view.count;
-  pill._taskId = view.firstId;
-  if (view.show === "running") {
-    clearTimeout(taskIndicator.doneTimer);
-    taskIndicator.doneTimer = null;
-    pill.className = "running";
-    setTaskIndicatorText(pill, view.count === 1 ? tr("1 task running") : tr("{count} tasks running", { count: view.count }), String(view.count));
-    pill.hidden = false;
-  } else if (view.show === "done") {
-    pill.className = "done";
-    setTaskIndicatorText(pill, tr("Tasks finished"), "✓");
-    pill.hidden = false;
-    clearTimeout(taskIndicator.doneTimer);
-    taskIndicator.doneTimer = setTimeout(() => { pill.hidden = true; }, 15000);
-  } else if (!taskIndicator.doneTimer) {
-    pill.hidden = true;
-  }
-}
-
-// Clicking the pill brings the task's card into view (it may be far up in the chat).
-function scrollToTaskCard(taskId) {
-  const cards = [...taskCards].filter((card) => card.isConnected);
-  const card = cards.find((one) => one._taskId === taskId) ?? cards[cards.length - 1];
-  if (!card) return false;
-  if (card.tagName === "DETAILS") card.open = true;
-  card.scrollIntoView({ behavior: "smooth", block: "center" });
-  return true;
+  renderTaskTray();
 }
 
 function showTaskError(box, err) {
@@ -5017,6 +4971,72 @@ async function taskSteer(card, field, form, box) {
 
 // Polls the open chat's tasks every ~3 s while one runs or a result is on its way; a wake reply that started
 // without a request of this page is then attached to like a reply that runs after a reload.
+// ---- running subagent tasks of the open chat: a collapsible tray above the message box (fed by taskRecords)
+const taskTray = { shown: "", key: null };
+
+function renderTaskTray() {
+  const box = $("tasks-tray");
+  if (!box) return;
+  const key = chatKey(state.agentId, state.chatId);
+  if (taskTray.key !== key) {  // another chat: start from an empty tray
+    taskTray.key = key;
+    taskTray.shown = "";
+    box.removeAttribute("open");
+  }
+  const rows = taskListed === key ? taskTrayRows(taskRecords.values(), state.agentId, state.chatId, Date.now()) : [];
+  box.hidden = rows.length === 0;
+  const summary = box.querySelector("summary");
+  summary.textContent = rows.length === 1 ? tr("1 subagent running") : tr("{count} subagents running", { count: rows.length });
+  const signature = JSON.stringify(rows.map((row) => row.id));
+  if (signature === taskTray.shown) {  // same list: only the clocks change, so a half-typed steer is kept
+    for (const row of rows) {
+      const node = box.querySelector(`[data-task-id="${CSS.escape(row.id)}"] .task-tray-time`);
+      if (node) node.textContent = row.elapsed;
+    }
+    return;
+  }
+  taskTray.shown = signature;
+  box.querySelector("ul").replaceChildren(...rows.map((row) => {
+    const handle = { _taskId: row.id };
+    const error = element("div", { className: "task-error", hidden: true });
+    error.setAttribute("role", "alert");
+    const button = (text, className, handler) => {
+      const node = element("button", { type: "button", className, textContent: text });
+      node.addEventListener("click", handler);
+      return node;
+    };
+    const field = element("input", { type: "text", className: "task-steer-input", maxLength: 2000, placeholder: tr("Tell the worker what to change") });
+    field.setAttribute("aria-label", tr("Steer"));
+    const form = element("div", { className: "task-steer-form", hidden: true });
+    const send = button(tr("Send"), "primary task-steer-send", () => taskSteer(handle, field, form, error));
+    field.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.isComposing) {
+        event.preventDefault();
+        send.click();
+      }
+    });
+    form.append(field, send);
+    const stop = button(tr("Stop"), "secondary task-stop", () => taskStop(handle, error));
+    const steer = button(tr("Steer"), "secondary task-steer-toggle", () => {
+      form.hidden = !form.hidden;
+      if (!form.hidden) field.focus();
+    });
+    const open = button(tr("Open chat"), "secondary task-open", () => openTaskChat(row.id));
+    open.hidden = !row.canOpenChat;
+    const time = element("span", { className: "process-time task-tray-time", textContent: row.elapsed });
+    const item = element("li", { className: "task-tray-row" },
+      element("span", { className: "task-tray-title", textContent: row.title, title: row.goal }),
+      element("span", { className: "process-meta", textContent: row.model }),
+      time,
+      element("span", { className: "task-tray-actions" }, stop, steer, open),
+      form, error);
+    item.dataset.taskId = row.id;
+    return item;
+  }));
+}
+
+setInterval(() => { if (!document.hidden && !$("tasks-tray").hidden) renderTaskTray(); }, 1000);  // the clocks tick between polls
+
 // ---- background processes of the open chat: a collapsible line above the message box, each with Stop
 const PROCESS_POLL_MS = 3000;
 const processPanel = { timer: null, key: null, shown: "" };
@@ -5457,9 +5477,6 @@ $("tasks-open").addEventListener("click", () => {
 });
 $("tasks-close").addEventListener("click", () => $("tasks-dialog").close());
 $("assoc-close").addEventListener("click", () => $("assoc-dialog").close());
-$("chat-tasks-indicator").addEventListener("click", () => {
-  if (!scrollToTaskCard($("chat-tasks-indicator")._taskId)) $("tasks-open").click();
-});
 $("tasks-dialog").addEventListener("close", () => clearTimeout(taskPanel.timer));
 $("tasks-filter").addEventListener("click", (event) => {
   const button = event.target.closest("button[data-filter]");
@@ -6606,6 +6623,8 @@ $("messages").addEventListener("scroll", () => {
 // tool steps, thinking and text streaming in follow the bottom while stuck, otherwise show the button
 new MutationObserver(() => scrollDown()).observe($("messages"), { childList: true, subtree: true, characterData: true });
 $("jump-latest").addEventListener("click", () => scrollDown(true));
+// the box itself shrinks or grows when a tray above the composer (subagents, processes) opens or closes: stay at the end
+if (typeof ResizeObserver !== "undefined") new ResizeObserver(() => scrollDown()).observe($("messages"));
 
 // Phones: when the on-screen keyboard opens, some browsers shrink only the VISUAL viewport and scroll the page up, which
 // pushes the top bar (menu button, agent name) out of sight. Size the app to the visual viewport instead, and keep the
