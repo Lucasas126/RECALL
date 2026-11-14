@@ -130,6 +130,71 @@ class FollowServiceTests(steering.SteeringFixture):
         list(original)
 
 
+class ReloadWhileRunningTests(steering.SteeringFixture):
+    """A reply that is running has already saved a checkpoint (stored as interrupted). A reload loads the saved chat
+    and then attaches to the live stream, which replays the same work: the saved chat must not show it as well."""
+
+    def save_checkpoint(self) -> None:
+        self.sources[("user-one", "agent-one")].checkpoint(
+            self.chat, "Working on it", replace=True, actions=[{"name": "terminal", "arguments": {}, "result": "ok", "error": False}],
+        )
+
+    def messages(self) -> list[dict]:
+        return self.service.get_chat("user-one", "agent-one", self.chat)["messages"]
+
+    def test_the_checkpoint_of_a_running_reply_is_not_in_the_saved_chat(self) -> None:
+        started, release = self._gate("Original")
+        original = self._send("Original")
+        self.assertTrue(started.wait(2))
+        self.save_checkpoint()
+        data = self.service.get_chat("user-one", "agent-one", self.chat)
+        self.assertTrue(data["chat"]["active"])
+        self.assertEqual([m["role"] for m in data["messages"]], ["user"])
+        self.assertFalse(any(m.get("checkpoint") or m.get("interrupted") for m in data["messages"]))
+        release.set()
+        list(original)
+
+    def test_the_same_checkpoint_is_shown_once_the_reply_is_not_running(self) -> None:
+        events = list(self._send("Hello"))
+        self.assertEqual(events[-1].kind, "usage")
+        deadline = time.monotonic() + 2
+        while self.service.chat_active("user-one", "agent-one", self.chat):
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(0.01)
+        self.save_checkpoint()  # a restart left it behind: nobody is running it, so it is the saved state
+        last = self.messages()[-1]
+        self.assertEqual((last["role"], last["content"], last["checkpoint"], last["interrupted"]), ("assistant", "Working on it", True, True))
+
+    def test_only_a_checkpoint_is_hidden_and_only_while_running(self) -> None:
+        self.sources[("user-one", "agent-one")].append(self.chat, "assistant", "earlier, cut by a new message", interrupted=True)
+        started, release = self._gate("Original")
+        original = self._send("Original")
+        self.assertTrue(started.wait(2))
+        self.assertIn("earlier, cut by a new message", [m["content"] for m in self.messages()])  # interrupted, not a checkpoint
+        release.set()
+        list(original)
+
+    def test_the_final_reply_is_complete_after_the_run(self) -> None:
+        started, release = self._gate("Original")
+        original = self._send("Original")
+        self.assertTrue(started.wait(2))
+        self.save_checkpoint()
+        release.set()
+        list(original)
+        deadline = time.monotonic() + 2
+        while self.service.chat_active("user-one", "agent-one", self.chat):
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(0.01)
+        last = self.messages()[-1]
+        self.assertEqual(last["content"], "PartialAnswer: Original")
+        self.assertNotIn("interrupted", last)
+
+    def test_the_worker_chat_of_a_task_reads_the_same_way(self) -> None:
+        import inspect
+
+        self.assertIn("self.get_chat(", inspect.getsource(self.service.get_task_chat))
+
+
 class FollowApiTests(steering.SteeringFixture):
     def setUp(self) -> None:
         super().setUp()

@@ -1363,7 +1363,12 @@ class ChatService:
     def get_chat(self, user_id: str, agent_id: str, chat_id: str) -> dict:
         """A chat's summary and its user/assistant messages."""
         conversations = self._conversations(user_id, agent_id)
+        active = self.chat_active(user_id, agent_id, chat_id)  # asked BEFORE reading: a reply that ends meanwhile is read complete
         turns = self._load(conversations, chat_id)
+        if active and turns and turns[-1].get("checkpoint") is True:
+            # a reply is running: its checkpoint (what it has done so far, stored as `interrupted`) is replayed whole by the
+            # live stream the page attaches to next, so showing it here too would draw it twice and call it interrupted
+            turns = turns[:-1]
         messages = [
             {
                 # `index` is the turn's position in the stored file (tool turns count), the handle for edits
@@ -1386,7 +1391,7 @@ class ChatService:
         return {
             "chat": {
                 **conversations.summary(chat_id, self._retention_days(user_id)),
-                "active": self.chat_active(user_id, agent_id, chat_id),
+                "active": active,
             },
             "messages": messages,
             **self.get_chat_models(user_id, agent_id, chat_id),
