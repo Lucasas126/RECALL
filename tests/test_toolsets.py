@@ -16,7 +16,7 @@ class ToolsetRegistrationTests(unittest.TestCase):
         names = [spec["function"]["name"] for spec in specs]
         self.assertEqual(names, [
             "query_memory", "search", "list_memories", "list_tags", "find_notes_by_tag", "session_search",
-            "read", "write", "append", "edit", "move", "delete", "make_pdf",
+            "read", "view_image", "write", "append", "edit", "move", "delete", "make_pdf",
         ])
         self.assertEqual(set(handlers), set(names))
 
