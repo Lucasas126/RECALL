@@ -104,3 +104,12 @@ or rotated key works on the next message. Terminal output shown to an agent mask
 least 8 characters long. **Never paste a secret into a chat.** (A masked input card in the web UI is on the [backlog](../project/backlog.md).)
 `secret list` checks its own environment and the file: a key set only in the server's `.env` is hidden from commands run by an agent
 and may show as NOT SET.
+
+**Where to keep keys.** Variables in the server's `.env` are fixed when the container starts and are invisible to the tools below, so
+keys that people or an admin agent need to change (provider keys, search, the Telegram token) belong in `.config/secrets.env`, and
+`.env` keeps the deployment settings that are not secrets. Users can also set their own OpenRouter key in Settings, Providers
+(stored as `OPENROUTER_API_KEY_<USER>` in this file, checked before saving, never shown again).
+
+An agent of level `admin` can be given the opt-in `secrets` tool group (`secret_list`, `secret_copy`, `secret_rename`,
+`secret_delete`). It only handles `secrets.env`, by name: no tool takes, returns or logs a value, each change shows an approval card
+(once, never always) and is audited by name, and a new value is still entered by the person (`set-secret` or Settings).

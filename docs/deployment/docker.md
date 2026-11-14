@@ -161,7 +161,10 @@ host.
   to the environment of both services and restart them.
 - Credentials can also live in `.config/secrets.env` (inside the mounted config folder), written with
   `docker compose exec -it recall-web python -m src.admin set-secret NAME`; no restart is needed for those. The real
-  environment wins over the file.
+  environment wins over the file. Prefer the file for keys that change after the first run (provider, search, Telegram token):
+  a variable in `.env` needs a restart, cannot be seen or managed by an agent's `secrets` tools and must be removed from `.env`
+  to be overridden. To move one, add the line to `secrets.env` (mode 0600, owned by the container user), delete it from `.env`
+  and restart both services once; keep a copy of `.env` first.
 - `RECALL_BUILD`: build identifier baked into the image (not a runtime setting you edit). The `RECALL_BUILD` build
   argument of the `Dockerfile` is set to the commit sha by the publish workflow; without it no build is shown.
   The version comes from `pyproject.toml`, copied with the code. Where it shows: `GET /api/version`, the login form
