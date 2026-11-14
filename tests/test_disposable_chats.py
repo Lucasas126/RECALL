@@ -26,7 +26,7 @@ TERMINAL_TOOLS = {
     "terminal", "sandbox_read", "sandbox_write", "sandbox_patch", "sandbox_search",
     "process_start", "process_list", "process_read", "process_wait", "process_stop",
 }
-WRITE_TOOLS = {"write", "append", "edit", "move", "delete", "memory", "skill_manage", "soul_edit"}
+WRITE_TOOLS = {"write", "append", "edit", "move", "delete", "make_pdf", "memory", "skill_manage", "soul_edit"}
 
 
 def _age(source, chat_id: str, days: float) -> None:

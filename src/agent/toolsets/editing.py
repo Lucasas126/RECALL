@@ -94,8 +94,7 @@ def build_edit_tools(agent: Agent) -> list[Callable[..., str]]:
                 return f"error: {memory_path} is not a file"
             if target.exists(target_rel) and not overwrite:
                 return f"error: {new_path} already exists; pass overwrite=true to replace it"
-            content = source.read(rel)
-            destination = sources.write(new_path, content)
+            destination = sources.write_bytes(new_path, source.read_bytes(rel))  # bytes: PDFs and images move too
             source.delete(rel)
         mark_written(agent, memory_path)
         mark_written(agent, new_path)

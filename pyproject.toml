@@ -24,4 +24,5 @@ dependencies = [
     "pillow>=12",
     "pymupdf>=1.26,<2",
     "croniter>=7.0.0",
+    "reportlab>=5.1",
 ]

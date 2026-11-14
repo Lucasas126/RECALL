@@ -37,6 +37,17 @@ def scan_files(root: Path, exts: set[str] | None = None, base: Path | None = Non
     return found
 
 
+def pdf_text(data: bytes, name: str) -> str:
+    """The digital text of a PDF with a `[Page N]` marker per page (no OCR); tools read PDFs the agent or the user saved."""
+    import pymupdf
+
+    try:
+        with pymupdf.open(stream=data, filetype="pdf") as document:
+            return "\n\n".join(f"[Page {page.number + 1}]\n{page.get_text().strip() or '(no text)'}" for page in document)
+    except Exception as exc:
+        raise ValueError(f"{name} is not a readable PDF") from exc
+
+
 class Source:
     """A filesystem-backed data source with capability flags and a traversal guard."""
 
@@ -72,12 +83,27 @@ class Source:
             raise PermissionError(f"source '{self.name}' is not readable")
         return self.resolve(rel_path).read_text(encoding="utf-8")
 
+    def read_bytes(self, rel_path: str) -> bytes:
+        """The raw bytes of a file (for moves and binary files such as PDFs); `read` stays the text reader."""
+        if not self.readable:
+            raise PermissionError(f"source '{self.name}' is not readable")
+        return self.resolve(rel_path).read_bytes()
+
     def write(self, rel_path: str, content: str) -> Path:
         if not self.writable:
             raise PermissionError(f"source '{self.name}' is read-only")
         path = self.resolve(rel_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
+        return path
+
+    def write_bytes(self, rel_path: str, data: bytes) -> Path:
+        """Write a binary file the same way `write` writes text (same checks, parent folders created)."""
+        if not self.writable:
+            raise PermissionError(f"source '{self.name}' is read-only")
+        path = self.resolve(rel_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
         return path
 
     def delete(self, rel_path: str) -> None:

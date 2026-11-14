@@ -4,7 +4,7 @@ import re
 from typing import TYPE_CHECKING, Annotated, Callable, Optional
 
 from src.agent.tooling import tool
-from src.agent.toolsets.common import readable_sources
+from src.agent.toolsets.common import read_text, readable_sources
 from src.config.settings import INDEX_FILE_TYPES
 
 if TYPE_CHECKING:
@@ -126,9 +126,9 @@ def build_memory_tools(agent: Agent) -> list[Callable[..., str]]:
         memory_path: Annotated[str, "the 'source:path' address to read (e.g. 'mind_palace:notes/pets.md')"],
         lines: Annotated[Optional[list[int]], "optional [start, end] 1-based line range to return"] = None,
     ) -> str:
-        """Retrieve the content of a specific memory by its 'source:path' address.
+        """Retrieve the content of a specific memory by its 'source:path' address (a PDF is read as page text).
         Optionally limit the result to a [start, end] line range for large files."""
-        content = sources.read(memory_path)
+        content = read_text(sources, memory_path)
         if lines:
             rows = content.splitlines()
             start = max(1, lines[0])

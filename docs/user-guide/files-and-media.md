@@ -165,6 +165,15 @@ An agent can hand you a file and message you on Telegram, with two tool groups y
 - `notify` (level `assistant`): `notify_telegram` sends you a short message on Telegram, for example "tell me when you finish". It needs the bot token on the server and
   your user linked in `TELEGRAM_ALLOWED_USERS`; at most 30 an hour per agent.
 
+## pdf files made by the agent
+
+With the `memory_edit` group an agent has `make_pdf`: it describes the document (title, then headings, paragraphs, bullet and numbered lists, tables, images from a source it can read, spacers and page breaks; `**bold**` and `*italic*` work in the text) and RECALL lays it out and saves the PDF.
+
+- **Where it goes:** the agent can name the place as `<source>:<path>.pdf` in any source it may write (its mind palace, or a folder that is not read-only). Without a path it saves to `mind_palace:documents/<title>.pdf`. A name that is taken gets a number (`-2`, `-3`) unless the agent asks to overwrite. The agent can move the file afterwards with `move` or `folder_move`.
+- **Sending it to you:** `make_pdf` only saves the file; to receive it the agent also needs `files_send` (`send_file`).
+- **Reading it back:** `read` and `folder_read` return a PDF as text with a `[Page N]` marker per page (digital text, no OCR), which is how an agent checks what it made. The index does not read PDFs.
+- **Limits:** standard fonts only, so accents and the usual Western punctuation work but arrows, check marks and similar symbols cannot be drawn: the agent gets a warning naming them. At most 500 elements, 2000 table cells, 200,000 characters of text and 10 MB per file.
+
 ## speech-to-text
 
 Audio is always transcribed before the chat model is invoked. RECALL uses

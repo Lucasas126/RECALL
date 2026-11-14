@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.core.sources.base import Source
+from src.core.sources.base import Source, pdf_text
 from src.core.sources.registry import SourceRegistry
 
 
@@ -23,3 +23,11 @@ def readonly_error(sources: SourceRegistry, memory_path: str) -> str | None:
     if not source.writable:
         return f"error: source '{source.name}' is read-only here; write to mind_palace or to a folder you may edit"
     return None
+
+
+def read_text(sources: SourceRegistry, address: str) -> str:
+    """The text of a file; a PDF is read as its page text (the file itself is never rewritten from it)."""
+    if address.lower().endswith(".pdf"):
+        source, rel = sources.resolve(address)
+        return pdf_text(source.read_bytes(rel), rel)
+    return sources.read(address)

@@ -18,7 +18,7 @@ The web **Agents** tab configures these groups for each agent:
 
 - `memory_read`: `query_memory`, `search` (optional `path` prefix or glob such as `skills/github/` or `mind_palace/**/*.md`, `offset` and `limit` up to 200; the result gives the total and the next offset), `list_memories`, `read`, `list_tags`,
   `find_notes_by_tag` and `session_search` (searches inside your conversations, the current one included: meaning-based by default, exact text when the whole query is in double quotes; optional `limit`, `chat`, `include_current`).
-- `memory_edit`: `write`, `append`, `edit`, `move`, and `delete`.
+- `memory_edit`: `write`, `append`, `edit`, `move`, `delete` and `make_pdf`. `make_pdf(title, elements, path="", author="", page_size="a4", page_numbers=true, overwrite=false)` builds a PDF from a list of elements (heading, paragraph, bullets, numbered, table, image from a readable source, spacer, pagebreak) and saves it in a writable source (default `mind_palace:documents/<title>.pdf`); it never sends it, `send_file` does. `read` and `folder_read` return a PDF's page text; `move` and `folder_move` copy bytes, so binary files survive.
 - `web`: `web_search` and `web_retrieve`.
 - `self`: `memory` (add/patch/remove entries of `MEMORY.md` or `USER.md`, single
   or as an atomic `operations` batch, with the character limit checked on the
