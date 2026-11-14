@@ -232,6 +232,35 @@ class PromptAssemblyTests(AgentFilesFixture):
         self.assertTrue(second.messages[0]["content"].startswith("I am the soul."))
         self.assertIn("Name: User A", second.messages[0]["content"])
 
+    def _prompt(self, groups: list[str], **changes) -> str:
+        from unittest.mock import Mock, patch
+
+        from src.agent.agent import Agent
+
+        config = _config(tool_groups=groups, associative_memory="off", **changes)
+        provider = Mock()
+        provider.context_window.return_value = None
+        with patch("src.agent.agent.VectorIndex.for_agent"):
+            agent = Agent(config, provider, sources=self.sources, profile=load_profile(self.sources))
+        return agent.messages[0]["content"]
+
+    def test_memory_habits_block_reaches_agents_that_can_write_their_memory(self) -> None:
+        prompt = self._prompt(["self"])
+        self.assertIn("## Memory habits", prompt)
+        self.assertIn("do not delete to make room", prompt)
+        self.assertIn("The structure is yours", prompt)
+
+    def test_memory_habits_block_is_left_out_without_memory_writes_or_memory(self) -> None:
+        self.assertNotIn("## Memory habits", self._prompt(["memory_read"]))
+        self.assertNotIn("## Memory habits", self._prompt(["self"], has_memory=False))
+
+    def test_memory_habits_block_stays_short_and_names_no_agent_or_person(self) -> None:
+        from src.agent.agent import _MEMORY_HABITS_NOTICE
+
+        self.assertLessEqual(len(_MEMORY_HABITS_NOTICE), 1300)
+        for word in ("Nova", "User A", "other agent frameworks", "Orion"):
+            self.assertNotIn(word, _MEMORY_HABITS_NOTICE)
+
     def test_empty_profile_is_only_the_soul(self) -> None:
         self.assertEqual(system_prompt(AgentProfile(soul="Hi")), "Hi")
         self.assertEqual(open_items("no list here"), [])

@@ -65,9 +65,23 @@ lead you to the palace ("Project X: status and decisions in mind_palace:projects
 - MEMORY.md / USER.md (`memory` tool, one batch per target): stable facts, preferences, corrections, and
   pointers. When a target is near its limit, move detail into a palace note and leave a one-line pointer,
   instead of dropping facts or skipping the save. Remove entries that are stale or answered.
+- The test for MEMORY.md / USER.md: keep an entry only if you need it in every chat, you cannot get it with a
+  tool, and it is not about one chat. Versions, commands, tool lists and task progress do not qualify (store
+  where to look instead). Never delete a valuable entry to make room: move it to the palace first.
+- A palace structure that works: `projects/<name>/status.md` (current state, overwritten; history stays in the
+  journal), `decisions/YYYY-MM-DD-topic.md` (context, options, choice, why), `journal/YYYY-MM.md`, a place for
+  procedures and infrastructure notes, and a read-only `reference/` for old imports. It is yours: change it when
+  it stops serving you, update `INDEX.md` and say why in the journal. Do not rename files the system uses
+  (`for_user.md`, `dream_tasks.md`, `INDEX.md`).
 - A procedure that repeats becomes a skill (`skill_manage`); improve an existing one before adding another.
 - Change `SOUL.md` (`soul_edit`) only for lasting lessons about how to behave; keep changes small and say
   why in the journal.
+
+### Order of work
+Review queue first, then the dream tasks, then upkeep: merge duplicate notes, archive what is outdated, fix
+statements that a newer chat made false, prune MEMORY.md / USER.md with the test above, and check that
+`INDEX.md` matches the folders. Do not make changes for the sake of it: if the palace is in good shape, say so
+and finish.
 
 ### The review
 1. `dream_pending` lists the chats with unreviewed turns, the most recent first.
