@@ -16,7 +16,9 @@ from src.agent import associative
 from src.agent import compaction
 from src.agent.permissions_prompt import block_for
 from src.agent.profile import AgentProfile, load_profile, system_prompt
-from src.agent.tool_groups import DISPOSABLE_BLOCKED_TOOLS, TOOL_GROUP_TOOLS
+from src.agent.tool_groups import AUTOMATION_EXTRA_GROUPS, DISPOSABLE_BLOCKED_TOOLS, TOOL_GROUP_TOOLS
+
+AUTOMATION_EXTRA_TOOLS = tuple(name for group in AUTOMATION_EXTRA_GROUPS for name in TOOL_GROUP_TOOLS[group])
 from src.agent.tools import TOOL_ORDER, build_tools, chat_folder_options
 from src.agent.toolsets.delegate import delegate_notice, worker_prompt
 from src.agent.toolsets.agents import agents_notice
@@ -272,14 +274,18 @@ class Agent:
             self, TavilyClient.from_config(TAVILY), groups, config.allow, config.deny,
             skill_view=bool(self.profile.skills), disposable=self._disposable,
             worker_terminal=self._task is not None,
+            automation=bool(self._task is not None and self._task.automation),
         )
 
     def _blocked_tools(self) -> frozenset[str]:
         """Tools a disposable chat refuses. 'Excluded from learning' is not 'tools blocked': a task's worker keeps the
         terminal it was granted (every action still needs a manual approval); memory, self and folder edits stay blocked."""
+        blocked = DISPOSABLE_BLOCKED_TOOLS
         if self._task is not None and "terminal" in self._task.groups:
-            return DISPOSABLE_BLOCKED_TOOLS - frozenset(TOOL_GROUP_TOOLS["terminal"])
-        return DISPOSABLE_BLOCKED_TOOLS
+            blocked = blocked - frozenset(TOOL_GROUP_TOOLS["terminal"])
+        if self._task is not None and self._task.automation:  # an automation's task may message its owner
+            blocked = blocked - frozenset(AUTOMATION_EXTRA_TOOLS)
+        return blocked
 
     def _report_usage(self, api_usage) -> None:
         """Tell the usage hook (a task's token watchdog) what one model call used."""

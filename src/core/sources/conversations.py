@@ -110,6 +110,7 @@ class ChatTask(BaseModel):
     inherit: bool = False  # ephemeral worker started with `inherit`: the parent's approval mode on its backends (never `off`)
     title: str = ""  # the task's title, for attributing its approvals in the parent chat
     unattended: bool = False  # nobody watches: manual and dangerous actions are denied (phase 7 launches these)
+    automation: bool = False  # started by an automation: it may also message its owner (`notify`, `files_send`)
     kind: str = Field(default="ephemeral", pattern=r"^(ephemeral|agent)$")  # `agent`: an existing agent of the user runs it, with its own SOUL
     remember: bool = False  # agent kind only: an ordinary hidden chat (reviewable) whose agent may write its own memory
     # the level cap of the worker: the lower of the launching agent's level and the target's own; None = its own level

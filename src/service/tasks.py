@@ -35,7 +35,7 @@ from types import SimpleNamespace
 from src.agent.toolsets.delegate import (
     MAX_CONTEXT_CHARS, MAX_GOAL_CHARS, MAX_INSTRUCTIONS_CHARS, TaskError, TaskLimits, task_limits,
 )
-from src.agent.tool_groups import DEFAULT_TOOL_GROUPS, DELEGATE_GRANTABLE_GROUPS
+from src.agent.tool_groups import AUTOMATION_EXTRA_GROUPS, DEFAULT_TOOL_GROUPS, DELEGATE_GRANTABLE_GROUPS
 from src.config.ceiling import delegation_targets_allowed, group_allowed, worker_level, workers_allowed
 from src.config.levels import Level, effective_agent_level
 from src.config.settings import SUBAGENTS
@@ -799,6 +799,9 @@ class TaskManager:
             backends = list(target["backends"]) if "terminal" in target["groups"] and group_allowed(own, "terminal") else []
             if backends:
                 grant.append("terminal")
+        if trigger == "automation":  # the owner is away: the task may tell them (only if the agent holds the group)
+            held = set(self._agent_groups(user_id, agent_id))
+            grant.extend(g for g in AUTOMATION_EXTRA_GROUPS if g in held and group_allowed(own, g) and g not in grant)
         if (until := self.store.blocked_until(user_id)) is not None:
             raise TaskError(f"rate limit: the provider's plan limit was reached; no new tasks until {until:%H:%M}")
 
@@ -833,6 +836,7 @@ class TaskManager:
                 task_id=task_id, parent_agent_id=parent["agent_id"], parent_chat_id=parent["chat_id"], depth=1,
                 groups=grant, instructions=instructions, created_at=_now(), backends=backends, title=record["title"],
                 unattended=True, kind="agent" if target is not None else "ephemeral", remember=False, level=own,
+                automation=trigger == "automation",
             )
             chat_id = conversations.create(origin=_CHILD_ORIGIN, task=mark)
             if target is None and model.strip():

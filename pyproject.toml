@@ -23,4 +23,5 @@ dependencies = [
     "pytesseract>=0.3.13",
     "pillow>=12",
     "pymupdf>=1.26,<2",
+    "croniter>=7.0.0",
 ]

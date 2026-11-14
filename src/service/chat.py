@@ -62,6 +62,7 @@ from src.providers.tavily import TavilyClient
 from src.providers.telegram_notify import TelegramNotifier
 from src.service import providers as provider_settings
 from src.service.providers import CatalogCapability, ProviderAvailability
+from src.service.automations import AutomationDependencies, AutomationError, AutomationService
 from src.service.dream import (
     STATUS_EMOJI, STATUS_SUMMARY_CHARS, DreamDependencies, DreamManager, format_local_time, md_escape,
     parse_dream_command, summary_block,
@@ -418,6 +419,12 @@ class ChatService:
         self._approvals = ApprovalBroker(TERMINAL.approval_timeout_seconds)
         self._tasks = TaskManager(self, DATA_DIR, origins)  # subagent tasks launched by the `delegate` tools
         process_registry(DATA_DIR).subscribe_finish(self._wake_for_process)  # background terminal processes
+        self._automations = AutomationService(DATA_DIR, AutomationDependencies(
+            launch=lambda *args, **kwargs: self._tasks.launch_unattended(*args, **kwargs),
+            agent_exists=self._agent_exists,
+            process_state=self._process_state,
+        ))
+        process_registry(DATA_DIR).subscribe_finish(self._fire_process_automations)
 
     @staticmethod
     def _build_index(config: ResolvedAgent, sources: SourceRegistry) -> VectorIndex:
@@ -565,7 +572,36 @@ class ChatService:
             self._cleanup_thread.join(5)
             self._cleanup_thread = None
         self._dream.stop()
+        self._automations.stop()
         self._mcp.close()
+
+    def _agent_exists(self, user_id: str, agent_id: str) -> bool:
+        try:
+            self._owned_agent(user_id, agent_id)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _process_state(user_id: str, process_id: str) -> str | None:
+        try:
+            return process_registry(DATA_DIR).get(user_id, process_id)["state"]
+        except ProcessError:
+            return None
+
+    def _fire_process_automations(self, record: dict) -> None:
+        """A background process ended: start the automations waiting for it (a stopped process does not count)."""
+        if record.get("state") == "stopped":
+            return
+        try:
+            self._automations.process_ended(record["user"], record["id"])
+        except Exception:
+            logger.exception("process automations failed")
+
+    @property
+    def automations(self) -> AutomationService:
+        """Automations: things an agent does later, started as unattended tasks (see `src/service/automations.py`)."""
+        return self._automations
 
     def _wake_for_process(self, record: dict) -> None:
         """A background process ended: tell its chat (a wake turn), unless the agent itself stopped it or asked for silence."""
@@ -593,6 +629,7 @@ class ChatService:
         """Run scheduled dream sessions from this process (the web and Telegram processes both may)."""
         self.start_task_poller()
         self._dream.start_scheduler(interval_seconds)
+        self._automations.start()
         if self._cleanup_thread is None:  # hourly removal of expired disposable chats, beside the dream scheduler
             self._cleanup_stop.clear()
 
