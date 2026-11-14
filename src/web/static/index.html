@@ -78,7 +78,6 @@
           <span id="agent-chevron" aria-hidden="true">&#9662;</span>
           <select id="agent-select"></select>
         </div>
-        <button id="chat-tasks-indicator" type="button" hidden aria-live="polite"><span class="task-ind-dot" aria-hidden="true"></span><span id="chat-tasks-indicator-text"></span></button>
         <button id="chat-make-disposable" type="button" hidden><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span id="chat-make-disposable-text"></span></button>
       </header>
       <div id="disposable-banner" role="status" hidden>
@@ -90,6 +89,7 @@
         <div id="messages" role="log" aria-live="polite" aria-relevant="additions"></div>
         <button id="jump-latest" type="button" class="icon-btn" title="Jump to latest" aria-label="Jump to latest" hidden><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button>
       </div>
+      <details id="tasks-tray" hidden><summary></summary><ul></ul></details>
       <details id="processes" hidden><summary></summary><ul></ul></details>
       <div id="composer-row">
       <form id="composer">

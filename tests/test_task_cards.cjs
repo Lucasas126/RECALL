@@ -9,7 +9,7 @@ const source = readFileSync(path.join(__dirname, "..", "src", "web", "static", "
 const code = source.slice(source.indexOf("// ---- task cards: pure helpers"), source.indexOf("// ---- end task cards"));
 const context = vm.createContext({});
 vm.runInContext(
-  `${code}\nObject.assign(this, { taskStatusLabel, formatElapsed, taskElapsed, taskActionId, isTaskStartAction, taskCardState, isWakeMessage, wakeBubbleState, tasksNeedPolling, shouldAttachWake, taskIndicatorState });`,
+  `${code}\nObject.assign(this, { taskStatusLabel, formatElapsed, taskElapsed, taskActionId, isTaskStartAction, taskCardState, isWakeMessage, wakeBubbleState, tasksNeedPolling, shouldAttachWake });`,
   context,
 );
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -119,11 +119,3 @@ test("a wake reply is attached to only when the chat is generating and this page
   assert.equal(context.shouldAttachWake({ active: true, generating: false, current: false }), false);
 });
 
-test("the header pill counts running tasks of the open chat only, then says finished once", () => {
-  const mine = (id, status) => ({ id, status, parent: { agent_id: "a", chat_id: "c" } });
-  const other = { id: "x", status: "running", parent: { agent_id: "a", chat_id: "other" } };
-  assert.deepEqual(plain(context.taskIndicatorState([mine("1", "running"), mine("2", "done"), other], "a", "c")), { show: "running", count: 1, firstId: "1" });
-  assert.deepEqual(plain(context.taskIndicatorState([mine("1", "done"), mine("2", "failed")], "a", "c", 1)), { show: "done", count: 0, firstId: "2" });
-  assert.equal(context.taskIndicatorState([mine("1", "done")], "a", "c", 0).show, "none");
-  assert.equal(context.taskIndicatorState([other], "a", "c", 2).show, "none");
-});
