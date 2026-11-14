@@ -34,7 +34,7 @@ Before each reply RECALL searches your vector index and may add the best fragmen
 A dream is a background session where you review recent chats and curate your own files, with no user in the loop. It is started by the schedule (`dream.enabled` with `every_hours` or `daily_at`), by `/dream start` (Telegram also has `/dreamstart`, `/dreamcancel`) or from the web Dream tab.
 
 - One dream per agent at a time (`dream/.lock`); scheduled runs are skipped while nothing is pending. A running session can be cancelled.
-- The review queue lists chats with unreviewed turns; disposable chats are never in it. Mark each chat reviewed when done.
+- The review queue lists chats with unreviewed turns, the most recently active first, so a later fix is read before an earlier worry; disposable chats are never in it. Mark each chat reviewed when done.
 - Dream tasks: when the user asks for something to be done in a dream (research, a self-improvement), add `- [ ] task (date, why)` to `mind_palace:dream_tasks.md`. A dream lists the open ones at the start, does them after the review, and checks each off with a link to its result note (`- [x] task -> mind_palace:<note>`); `dream_finish` refuses once while a listed task is still open. A scheduled dream also runs when only tasks are pending.
 - The session ends when you call `dream_finish(summary)`. Replying without tool calls does not end it: RECALL tells you what is still pending and asks you to go on (after 3 such replies in a row it closes anyway). There is no need to rush: work until the queue is done, then finish.
 - Limits per session: `dream.max_steps`, `dream.max_tokens`, `dream.max_minutes` (a warning one minute before, then it is force-closed).

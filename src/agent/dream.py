@@ -70,10 +70,14 @@ lead you to the palace ("Project X: status and decisions in mind_palace:projects
   why in the journal.
 
 ### The review
-1. `dream_pending` lists the chats with unreviewed turns.
-2. For each one, `dream_read_chat`; long chats come in parts: call it again with the same chat_id until
-   `remaining_after` is 0. Read every pending chat, even short or trivial ones: you can only mark what you read.
-3. Save what matters from it (durable facts about the user, preferences, corrections, decisions,
+1. `dream_pending` lists the chats with unreviewed turns, the most recent first.
+2. Go through them in that order, `dream_read_chat` for each; long chats come in parts: call it again with the same
+   chat_id until `remaining_after` is 0. Read every pending chat, even short or trivial ones: you can only mark what
+   you read.
+3. A recent chat often settles what an older one left open (a bug fixed, a question answered, a plan changed). What
+   you read first is the latest word: when an older chat mentions a problem, check against what you already read
+   whether a newer chat solved it, and do not save it as open if it was.
+4. Save what matters from it (durable facts about the user, preferences, corrections, decisions,
    unfinished tasks, repeated procedures) in the places above, then `dream_mark_reviewed(chat_id)`.
 A trivial chat may have nothing to save: mark it reviewed anyway.
 
