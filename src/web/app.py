@@ -11,7 +11,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.sessions import SessionMiddleware
 
 from src.config.agents import AgentConflict, MaxLevelConflict, UnknownApprovalRule
@@ -31,6 +31,7 @@ from src.service.chat import (
     UnknownAgent,
     UnknownChat,
     UnknownTask,
+    UnknownAutomation,
     UnknownDreamSession,
     UnknownManagedUser,
     UnknownUser,
@@ -62,6 +63,36 @@ class MessageIn(BaseModel):
     attachments: list[ChatAttachment] = Field(default_factory=list)
     # rewind the chat to this stored turn (a user message) and answer `content` in its place
     edit_index: int | None = Field(default=None, strict=True, ge=0)
+
+
+class AutomationTriggerIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["at", "every", "cron", "process_end"]
+    at: str = Field(default="", max_length=40)
+    minutes: int = Field(default=0, ge=0, le=60 * 24 * 31)
+    cron: str = Field(default="", max_length=120)
+    process: str = Field(default="", max_length=20)
+
+    def stored(self) -> dict:
+        return {"kind": self.kind, "at": self.at, "minutes": self.minutes, "cron": self.cron, "process": self.process}
+
+
+class AutomationIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agent_id: str = Field(min_length=1, max_length=64)
+    instruction: str = Field(max_length=4000)
+    title: str = Field(default="", max_length=80)
+    trigger: AutomationTriggerIn
+
+
+class AutomationEditIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    instruction: Optional[str] = Field(default=None, max_length=4000)
+    title: Optional[str] = Field(default=None, max_length=80)
+    trigger: Optional[AutomationTriggerIn] = None
 
 
 class ModelIn(BaseModel):
@@ -234,6 +265,7 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     @app.exception_handler(UnknownAgent)
     @app.exception_handler(UnknownChat)
     @app.exception_handler(UnknownTask)
+    @app.exception_handler(UnknownAutomation)
     @app.exception_handler(ApprovalNotFound)
     @app.exception_handler(UnknownApprovalRule)
     @app.exception_handler(UnknownDreamSession)
@@ -688,6 +720,31 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
         return service.set_user_max_level(user_id, target_id, body.max_level)
 
     # ------------------------------------------------------------------ subagent tasks
+
+    @app.get("/api/automations")
+    def list_automations(user_id: str = Depends(current_user)):
+        return service.list_automations(user_id)
+
+    @app.post("/api/automations", status_code=201)
+    def create_automation(body: AutomationIn, user_id: str = Depends(current_user)):
+        return service.create_automation(user_id, body.agent_id, body.instruction, body.trigger.stored(), body.title)
+
+    @app.patch("/api/automations/{automation_id}")
+    def edit_automation(automation_id: str, body: AutomationEditIn, user_id: str = Depends(current_user)):
+        trigger = body.trigger.stored() if body.trigger is not None else None
+        return service.edit_automation(user_id, automation_id, instruction=body.instruction, title=body.title, trigger=trigger)
+
+    @app.post("/api/automations/{automation_id}/pause")
+    def pause_automation(automation_id: str, user_id: str = Depends(current_user)):
+        return service.set_automation_enabled(user_id, automation_id, False)
+
+    @app.post("/api/automations/{automation_id}/resume")
+    def resume_automation(automation_id: str, user_id: str = Depends(current_user)):
+        return service.set_automation_enabled(user_id, automation_id, True)
+
+    @app.delete("/api/automations/{automation_id}", status_code=204)
+    def delete_automation(automation_id: str, user_id: str = Depends(current_user)):
+        service.delete_automation(user_id, automation_id)
 
     @app.get("/api/tasks")
     def list_tasks(

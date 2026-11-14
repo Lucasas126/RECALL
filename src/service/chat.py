@@ -202,6 +202,10 @@ class UnknownTask(ServiceError):
     code = "unknown_task"
 
 
+class UnknownAutomation(ServiceError):
+    code = "unknown_automation"
+
+
 class AgentBusy(ServiceError):
     code = "agent_busy"
 
@@ -597,6 +601,39 @@ class ChatService:
             self._automations.process_ended(record["user"], record["id"])
         except Exception:
             logger.exception("process automations failed")
+
+    def list_automations(self, user_id: str) -> dict:
+        """The user's automations with their agent's name, newest first, for the web tab."""
+        self._user(user_id)
+        names = {agent["id"]: agent["name"] for agent in self.list_agents(user_id)}
+        records = [
+            {**record, "agent_name": names.get(record["agent_id"], record["agent_id"])}
+            for record in self._automations.list(user_id)
+        ]
+        return {"automations": sorted(records, key=lambda r: r["created_at"], reverse=True)}
+
+    def _own_automation(self, user_id: str, automation_id: str) -> dict:
+        self._user(user_id)
+        record = self._automations.store.get(user_id, automation_id)
+        if record is None:
+            raise UnknownAutomation("unknown automation: {automation_id}", automation_id=automation_id)
+        return record
+
+    def create_automation(self, user_id: str, agent_id: str, instruction: str, trigger: dict, title: str = "") -> dict:
+        self._owned_agent(user_id, agent_id)
+        return self._automations.create(user_id, agent_id, instruction, trigger, title=title, created_by="web")
+
+    def edit_automation(self, user_id: str, automation_id: str, **changes) -> dict:
+        self._own_automation(user_id, automation_id)
+        return self._automations.edit(user_id, automation_id, **changes)
+
+    def set_automation_enabled(self, user_id: str, automation_id: str, enabled: bool) -> dict:
+        self._own_automation(user_id, automation_id)
+        return self._automations.set_enabled(user_id, automation_id, enabled)
+
+    def delete_automation(self, user_id: str, automation_id: str) -> None:
+        self._own_automation(user_id, automation_id)
+        self._automations.delete(user_id, automation_id)
 
     @property
     def automations(self) -> AutomationService:
