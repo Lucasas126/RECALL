@@ -7,6 +7,7 @@ from src.agent.toolsets.delegate import build_delegate_tools
 from src.agent.toolsets.editing import build_edit_tools
 from src.agent.toolsets.automations import build_automation_tools
 from src.agent.toolsets.files_send import build_files_send_tools
+from src.agent.toolsets.images import build_image_tools
 from src.agent.toolsets.pdf import build_pdf_tools
 from src.agent.toolsets.notify import build_notify_tools
 from src.agent.toolsets.memory import build_memory_tools
@@ -29,7 +30,7 @@ if TYPE_CHECKING:
 
 _ORDER = (
     "query_memory", "search", "list_memories", "list_tags", "find_notes_by_tag",
-    "session_search", "read", "write", "append", "edit", "move", "delete", "make_pdf",
+    "session_search", "read", "view_image", "write", "append", "edit", "move", "delete", "make_pdf",
     "memory", "skill_view", "skill_manage", "soul_edit",
     "folder_list", "folder_read", "folder_search",
     "folder_write", "folder_append", "folder_edit", "folder_move", "folder_delete",
@@ -82,7 +83,7 @@ def build_tools(
     selected = [group for group in validate_tool_groups(tool_groups or []) if group_allowed(level, group)]
     base_tools = []
     if "memory_read" in selected:
-        base_tools.extend((*build_memory_tools(agent), *build_tag_tools(agent), *build_session_tools(agent)))
+        base_tools.extend((*build_memory_tools(agent), *build_tag_tools(agent), *build_session_tools(agent), *build_image_tools(agent)))
     if "memory_edit" in selected:
         base_tools.extend((*build_edit_tools(agent), *build_pdf_tools(agent)))
     if "self" in selected or skill_view:
@@ -100,8 +101,11 @@ def build_tools(
         base_tools.extend(build_files_send_tools(agent))
     if "notify" in selected and (not disposable or automation):  # a worker's hidden chat never writes to the user's phone; an automation's task does
         base_tools.extend(build_notify_tools(agent))
+    agent.terminal_sessions = None  # the terminal sessions by backend name, set below when the group is on
     if "terminal" in selected and (not disposable or worker_terminal):
-        base_tools.extend(build_terminal_tools(restrict_config(agent.config)))
+        terminal_tools = build_terminal_tools(restrict_config(agent.config))
+        base_tools.extend(terminal_tools)
+        agent.terminal_sessions = getattr(terminal_tools[0], "sessions", None) if terminal_tools else None
     if "delegate" in selected:  # a disposable chat (and so a task's own chat) never launches tasks: DISPOSABLE_BLOCKED_TOOLS
         base_tools.extend(build_delegate_tools(restrict_config(agent.config)))
     if "permissions" in selected:  # not in a disposable chat (workers and tasks): DISPOSABLE_BLOCKED_TOOLS

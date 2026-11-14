@@ -18,6 +18,7 @@ The web **Agents** tab configures these groups for each agent:
 
 - `memory_read`: `query_memory`, `search` (optional `path` prefix or glob such as `skills/github/` or `mind_palace/**/*.md`, `offset` and `limit` up to 200; the result gives the total and the next offset), `list_memories`, `read`, `list_tags`,
   `find_notes_by_tag` and `session_search` (searches inside your conversations, the current one included: meaning-based by default, exact text when the whole query is in double quotes; optional `limit`, `chat`, `include_current`).
+- `memory_read` also holds `view_image(path, pages="", max_edge=1024)`: it shows the model an image, or pages of a PDF (several pages as one contact sheet, at most 6), from a source or from a terminal backend (`<backend>:<path>`, with that backend's approval). The picture is downscaled to a JPEG, arrives as the next message (a tool result can only be text), is removed from the context at the user's next message, and is limited to 6 per message. It works only when the selected model declares image input.
 - `memory_edit`: `write`, `append`, `edit`, `move`, `delete` and `make_pdf`. `make_pdf(title, elements, path="", author="", page_size="a4", page_numbers=true, overwrite=false)` builds a PDF from a list of elements (heading, paragraph, bullets, numbered, table, image from a readable source, spacer, pagebreak) and saves it in a writable source (default `mind_palace:documents/<title>.pdf`); it never sends it, `send_file` does. `read` and `folder_read` return a PDF's page text; `move` and `folder_move` copy bytes, so binary files survive.
 - `web`: `web_search` and `web_retrieve`.
 - `self`: `memory` (add/patch/remove entries of `MEMORY.md` or `USER.md`, single
@@ -89,10 +90,10 @@ The web **Agents** tab configures these groups for each agent:
 <a id="files_send"></a>
 - `files_send` (level `reader`): `send_file(path, caption="")` hands the user a file the agent can **already read**. `path` is `<source>:<path>`, resolved by the same code
   as `read` and `folder_read`, so hidden entries, protected paths (keys, secrets, `.env`) and anything outside the agent's readable sources are refused exactly as there; the
-  tool opens no new access. A file from a terminal backend is not covered: that stays behind the terminal's own approval. Up to 10 MB a file and 25 MB a reply. The file is
+  tool opens no new access. `path` may also be `<backend>:<path>` for a file on one of the agent's terminal machines: it is fetched through that machine's session (base64 over the command's output, the size checked there first, nothing is transferred above the limit), so the approval rules, protected paths and audit trail of a file read apply, and a denied or unattended approval sends nothing. A source wins when a backend has the same name. Up to 10 MB a file and 25 MB a reply. The file is
   stored with the assistant turn (`media`, so it survives a reload; images, audio and video are previewed, anything else is a download) and, in a Telegram chat, sent as a
   photo, audio, video or document (a refused photo is retried as a document). The model's context only gets the short tool result, never the bytes. Not built in a disposable
-  chat (workers and tasks). No approval card: the user receives only what the agent could already read.
+  chat (workers and tasks). A source needs no approval card (the user receives only what the agent could already read); a backend file asks like a read there.
 
 <a id="agents"></a>
 - `agents` (level `operator`): create, edit, rename and delete the **same user's agents**, never another user's and never by a path. Results are JSON or `error: ...`;

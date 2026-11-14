@@ -6,7 +6,7 @@ TOOL_GROUP_CATALOG: Final[tuple[dict[str, str], ...]] = (
     {
         "id": "memory_read",
         "name": "Memory read-only",
-        "description": "Search, list and read the agent's sources.",
+        "description": "Search, list and read the agent's sources, and look at images and PDF pages.",
     },
     {
         "id": "memory_edit",
@@ -89,7 +89,7 @@ AGENT_TOOLS: Final[tuple[str, ...]] = (*AGENT_READ_TOOLS, *AGENT_CHANGE_TOOLS)
 
 TOOL_GROUP_TOOLS: Final[dict[str, tuple[str, ...]]] = {
     "memory_read": (
-        "query_memory", "search", "list_memories", "read", "list_tags", "find_notes_by_tag", "session_search",
+        "query_memory", "search", "list_memories", "read", "list_tags", "find_notes_by_tag", "session_search", "view_image",
     ),
     "memory_edit": ("write", "append", "edit", "move", "delete", "make_pdf"),
     "web": ("web_search", "web_retrieve"),

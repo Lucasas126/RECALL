@@ -195,6 +195,7 @@ def build_terminal_tools(
         session, error = pick(backend)
         return error or _search(session, pattern, path, glob, files)
 
+    terminal.sessions = sessions  # type: ignore[attr-defined]  # `send_file` and `view_image` fetch files through them
     tools = [terminal, sandbox_read, sandbox_write, sandbox_patch, sandbox_search,
              *build_process_tools(sessions, default, DATA_DIR, agent_id=config.id, user_id=config.user_id)]
     for func in tools:  # the schema lists the allowed names; a single backend needs no parameter at all

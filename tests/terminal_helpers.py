@@ -60,6 +60,7 @@ class FakeSandbox(FakeBackend):
     def __init__(self, files: dict[str, str] | None = None):
         super().__init__(self._serve)
         self.files = dict(files or {})
+        self.raw: dict[str, bytes] = {}  # binary files, served by the fetch snippet only
 
     @staticmethod
     def _path(command: str) -> str:
@@ -70,6 +71,15 @@ class FakeSandbox(FakeBackend):
 
     def _serve(self, command, cwd, timeout, stdin):
         path = self._path(command)
+        if "base64 <" in command:  # fetch whole file as bytes
+            import base64
+            if path not in self.raw and path not in self.files:
+                return Result(3)
+            limit = int(re.search(r'-gt (\d+)', command).group(1))
+            raw = self.raw.get(path, self.files.get(path, "").encode("utf-8"))
+            if len(raw) > limit:
+                return Result(6, f"{len(raw)}\n")
+            return Result(0, base64.b64encode(raw).decode() + "\n")
         if "mktemp" in command:  # write
             self.files[path] = (stdin or b"").decode("utf-8")
             return Result(0)

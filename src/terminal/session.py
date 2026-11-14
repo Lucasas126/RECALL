@@ -22,7 +22,7 @@ MAX_COMMAND_CHARS = 20_000
 
 # file tools that change files (kind `file_write`); `off` never lets them run unattended
 WRITE_TOOLS = frozenset({"sandbox_write", "sandbox_patch"})
-READ_TOOLS = frozenset({"sandbox_read", "sandbox_search"})
+READ_TOOLS = frozenset({"sandbox_read", "sandbox_search", "send_file", "view_image"})
 AUDIT_FAILED = "error: the action was not run because the terminal audit trail could not be written. Tell the user."
 
 DENIED_HINT = "Do not retry this action; tell the user what you wanted to do and why, and let them decide."

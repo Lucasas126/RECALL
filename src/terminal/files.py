@@ -144,6 +144,48 @@ def sandbox_read(session: TerminalSession, path: str, offset: int = 1, limit: in
     return text + footer
 
 
+# ---------------------------------------------------------------------- fetch (a whole file, as bytes)
+_TOO_BIG = 6
+
+
+def _readable_size(count: int) -> str:
+    return f"{count // 1024 // 1024} MiB" if count >= 1024 * 1024 else f"{max(1, count // 1024)} KiB"
+
+
+def fetch_bytes(session: TerminalSession, path: str, max_bytes: int, *, tool: str = "send_file") -> bytes:
+    """The raw bytes of a file on the backend (base64 over stdout, decoded here); ValueError with the reason when not.
+
+    Same approval and protected-path treatment as `sandbox_read` (the tool counts as a read for the rules). The size is
+    checked on the backend before anything is sent, so an oversized file is never transferred.
+    """
+    import base64
+    import binascii
+
+    path = _checked(session, tool, path)
+    script = "\n".join([
+        "f=" + shell_path(path),
+        f'[ -e "$f" ] || exit {_MISSING}',
+        f'[ -d "$f" ] && exit {_IS_DIR}',
+        'n=$(wc -c < "$f" | tr -d " ")',
+        f'if [ "$n" -gt {int(max_bytes)} ]; then echo "$n"; exit {_TOO_BIG}; fi',
+        "base64 < \"$f\" | tr -d '\\n\\r'",
+    ])
+    result, denial = _fetch(session, tool, f"fetch {path}", path, script)
+    if denial:
+        raise ValueError(denial)
+    if result.timed_out:
+        raise ValueError("error: reading the file timed out")
+    if result.exit_code == _TOO_BIG:
+        size = int((result.stdout.strip() or "0")) if result.stdout.strip().isdigit() else 0
+        raise ValueError(f"error: the file is {size // 1024} KiB; the limit is {_readable_size(max_bytes)}")
+    if result.exit_code != 0:
+        raise ValueError(_problem(result.exit_code, path, result.stderr))
+    try:
+        return base64.b64decode(result.stdout.strip(), validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError(f"error: could not decode {path} as received") from exc
+
+
 # ---------------------------------------------------------------------- write
 def _write_script(path: str) -> str:
     p = shell_path(path)

@@ -15,6 +15,7 @@ Addresses are `source:path`, e.g. `mind_palace:notes/pets.md`.
 | `list_tags` | memory_read | tags of markdown notes with counts |
 | `find_notes_by_tag` | memory_read | notes with any (default) or all of the tags |
 | `session_search` | memory_read | search inside past conversations, this one included; meaning by default, exact text if the query is in double quotes |
+| `view_image` | memory_read | look at an image or at pages of a PDF (`<source>:<path>` or `<backend>:<path>`; `pages` like `1-3,5`, several pages come as one contact sheet, at most 6; `max_edge` 256-2048 px): the picture is shown to you in the next message, downscaled, and removed from the context at the user's next message; only on models that accept images (otherwise it says so: use `read` for a PDF's text); at most 6 pictures per user message |
 | `write` | memory_edit | create or overwrite `source:path` |
 | `append` | memory_edit | append to a file (created if missing) |
 | `edit` | memory_edit | replace one unique fragment |
@@ -28,7 +29,7 @@ Addresses are `source:path`, e.g. `mind_palace:notes/pets.md`.
 | `automation_pause` | automations | pause one of your automations until you resume it |
 | `automation_resume` | automations | resume a paused automation; what it missed is not replayed |
 | `automation_delete` | automations | delete one of your automations for good |
-| `send_file` | files_send | hand the user a file you can already read (`<source>:<path>`), in the web chat and on Telegram; 10 MB a file; level reader |
+| `send_file` | files_send | hand the user a file you can already read: `<source>:<path>`, or `<backend>:<path>` for a file on one of your terminal machines (it goes through that machine's approval, like reading it); in the web chat and on Telegram; 10 MB a file; level reader |
 | `notify_telegram` | notify | a short Markdown message to the owner's own Telegram chat; 30 an hour; level assistant; send it last |
 | `web_retrieve` | web | read a public page as markdown, optional focus query; capped, untrusted |
 | `memory` | self | edit `MEMORY.md` (target `memory`) or `USER.md` (target `user`): add, patch, remove, or an atomic `operations` batch |
@@ -82,7 +83,7 @@ Addresses are `source:path`, e.g. `mind_palace:notes/pets.md`.
 
 | Group | Tools |
 | --- | --- |
-| `memory_read` | `query_memory`, `search`, `list_memories`, `read`, `list_tags`, `find_notes_by_tag`, `session_search` |
+| `memory_read` | `query_memory`, `search`, `list_memories`, `read`, `list_tags`, `find_notes_by_tag`, `session_search`, `view_image` |
 | `memory_edit` | `write`, `append`, `edit`, `move`, `delete`, `make_pdf` |
 | `web` | `web_search`, `web_retrieve` |
 | `notify` | `notify_telegram` |

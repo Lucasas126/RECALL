@@ -160,7 +160,7 @@ An agent can hand you a file and message you on Telegram, with two tool groups y
 
 - `files_send` (level `reader`): `send_file` sends a file the agent can already read, for example a note from your Obsidian folder. It shows in the web chat (images,
   audio and video are previewed, other files are a download link), is kept with the reply so it is still there after a reload, and, in a Telegram chat, arrives as a
-  photo, audio, video or document. Up to 10 MB a file and 25 MB a reply. It opens no new access: files from a terminal machine still need the terminal's approval card,
+  photo, audio, video or document. Up to 10 MB a file and 25 MB a reply. It opens no new access: a file on a terminal machine (`<machine>:<path>`) is fetched through the terminal and asks for the same approval card as reading it there,
   and if you are not there to answer it the send fails after the card's timeout and the agent is told.
 - `notify` (level `assistant`): `notify_telegram` sends you a short message on Telegram, for example "tell me when you finish". It needs the bot token on the server and
   your user linked in `TELEGRAM_ALLOWED_USERS`; at most 30 an hour per agent.
@@ -171,7 +171,7 @@ With the `memory_edit` group an agent has `make_pdf`: it describes the document 
 
 - **Where it goes:** the agent can name the place as `<source>:<path>.pdf` in any source it may write (its mind palace, or a folder that is not read-only). Without a path it saves to `mind_palace:documents/<title>.pdf`. A name that is taken gets a number (`-2`, `-3`) unless the agent asks to overwrite. The agent can move the file afterwards with `move` or `folder_move`.
 - **Sending it to you:** `make_pdf` only saves the file; to receive it the agent also needs `files_send` (`send_file`).
-- **Reading it back:** `read` and `folder_read` return a PDF as text with a `[Page N]` marker per page (digital text, no OCR), which is how an agent checks what it made. The index does not read PDFs.
+- **Reading it back:** `read` and `folder_read` return a PDF as text with a `[Page N]` marker per page (digital text, no OCR), and `view_image` lets a model that accepts images *look* at pages (one page, or up to 6 as a contact sheet), which is how an agent checks the layout of what it made. The picture is shrunk, shown to the model once and removed from its context at your next message; at most 6 per message. The index does not read PDFs.
 - **Limits:** standard fonts only, so accents and the usual Western punctuation work but arrows, check marks and similar symbols cannot be drawn: the agent gets a warning naming them. At most 500 elements, 2000 table cells, 200,000 characters of text and 10 MB per file.
 
 ## speech-to-text
