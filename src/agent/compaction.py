@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Optional
 
 from src.config.models import CompactionConfig
+from src.utils.i18n import InputError
 
 logger = logging.getLogger(__name__)
 
@@ -62,9 +64,37 @@ class Split:
     summarised_tokens: int
     tail_tokens: int
 
+    @property
+    def kept_percent(self) -> int:
+        """The share of the conversation (not the system prompt) that stays word for word, in whole percent."""
+        whole = self.summarised_tokens + self.tail_tokens
+        return round(self.tail_tokens * 100 / whole) if whole else 0
 
-# share of a short chat kept as the tail by a manual /compact when the normal tail would cover all of it
-SMALL_CHAT_KEEP_PERCENT = 20
+
+# a manual /compact keeps this share of the conversation's tokens as the tail unless told otherwise (`/compact 10`)
+MANUAL_KEEP_PERCENT = 20
+MIN_KEEP_PERCENT, MAX_KEEP_PERCENT = 1, 90
+# the first word of `/compact ...` is a share when it is a whole number, with or without `%`
+_SHARE_RE = re.compile(r"^(\d+)\s*%?(?=\s|$)\s*(.*)$", re.DOTALL)
+
+
+def parse_compact_args(arg: str) -> tuple[Optional[int], str]:
+    """Split what follows `/compact` into (percent to keep or None, focus for the notes).
+
+    `10`, `10%` and `10 keep the figures` start with a share; anything else is all focus. A number outside 1-90 is
+    refused instead of being read as part of the focus, so a mistyped share is not silently ignored.
+    """
+    arg = arg.strip()
+    found = _SHARE_RE.match(arg)
+    if found is None:
+        return None, arg
+    percent = int(found.group(1))
+    if not MIN_KEEP_PERCENT <= percent <= MAX_KEEP_PERCENT:
+        raise InputError(
+            "/compact keeps between {low} and {high} % of the chat: use a number in that range, or none for {default} %",
+            low=MIN_KEEP_PERCENT, high=MAX_KEEP_PERCENT, default=MANUAL_KEEP_PERCENT,
+        )
+    return percent, found.group(2).strip()
 
 
 @dataclass
@@ -75,7 +105,7 @@ class CompactionResult:
     model: str
     manual: bool
     approx: bool = True
-    small: bool = False  # manual /compact on a chat shorter than the normal tail: kept only its latest part
+    kept_percent: Optional[int] = None  # share of the conversation left word for word (the tail)
 
 
 def summary_message(summary: str) -> dict:
@@ -114,11 +144,15 @@ def thresholds(config: CompactionConfig, window: int) -> tuple[Optional[int], in
 
 def split(
     messages: list[dict], total_tokens: int, keep_tokens: int, *, force: bool = False, extra_chars: int = 0,
+    keep_share: Optional[float] = None,
 ) -> Optional[Split]:
     """Pick the start of the tail: about `keep_tokens` of the most recent messages, starting on a user message.
 
     `messages[0]` is the system prompt (never summarised). Token weights are the real total spread by characters;
     `extra_chars` is context outside `messages` that counts toward the total (the current summary, tool definitions).
+    `keep_share` (0-1) replaces `keep_tokens` with that share of the conversation's own tokens, the system prompt,
+    the summary and the tool definitions left out. The tail opens on a user message, so a message and the tool rounds
+    that answer it stay together and the tail can be larger than asked, never smaller.
     Returns None when there is too little before the tail to be worth a summary (any amount when `force`).
     """
     rest = messages[1:]
@@ -127,7 +161,9 @@ def split(
     chars = [message_chars(m) for m in rest]
     system_chars = message_chars(messages[0])
     per_char = total_tokens / max(1, system_chars + extra_chars + sum(chars))
-    if not force:
+    if keep_share is not None:
+        keep_tokens = sum(chars) * per_char * keep_share
+    elif not force:
         keep_tokens = max(keep_tokens, _MIN_TAIL_TOKENS)
     acc, boundary = 0.0, len(rest)
     for i in range(len(rest) - 1, -1, -1):
@@ -207,7 +243,7 @@ def record(result: CompactionResult, covers_until: int) -> dict:
         "tokens_after": result.tokens_after,
         "model": result.model,
         "manual": result.manual or None,
-        "small": result.small or None,
+        "kept_percent": result.kept_percent,
     }
 
 

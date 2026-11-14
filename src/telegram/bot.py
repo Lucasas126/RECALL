@@ -198,7 +198,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/dreamstart — Start a dream session now\n"
         "/dreamcancel — Stop the running dream session\n"
         "/help — Show this help\n"
-        + message(language, "/compact — Summarize the older part of this chat now; /compact <focus> says what to keep\n")
+        + message(language, "/compact — Summarize the older part of this chat now, keeping its latest 20 %; /compact 10 keeps 10 %, /compact <focus> says what to keep\n")
         + message(language, "/usage — Claude plan usage (session and week)\n")
         + message(language, "/tasks — Subagent tasks of this chat, with a Stop button\n"
                             "/task — /task <id> shows a task; /task <id> <text> corrects a running one\n")
@@ -2425,7 +2425,7 @@ def build_application(
         BotCommand("dream", "Dream status: last session, schedule, pending chats"),
         BotCommand("dreamstart", "Start a dream session now"),
         BotCommand("dreamcancel", "Stop the running dream session"),
-        BotCommand("compact", "Summarize the older part of this chat: /compact [focus]"),
+        BotCommand("compact", "Summarize the older part of this chat: /compact [percent] [focus]"),
         BotCommand("usage", "Claude plan usage: session and week"),
         BotCommand("tasks", "Subagent tasks of this chat"),
         BotCommand("task", "Show or correct a subagent task: /task <id> [text]"),
