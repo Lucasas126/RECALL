@@ -498,6 +498,13 @@ function translateInterface() {
   for (const [id, text] of [
     ["settings-title", "User settings"], ["settings-save", "Save settings"],
     ["tasks-title", "Tasks"], ["tasks-empty", "No tasks to show."],
+    ["tasks-tab-tasks", "Tasks"], ["tasks-tab-automations", "Automations"],
+    ["automations-hint", "Things an agent does later. Ask an agent that has the Automations tool group, or create one here."],
+    ["automation-new", "New automation"], ["automations-empty", "No automations yet."],
+    ["automation-agent-label", "Agent"], ["automation-title-label", "Title"], ["automation-instruction-label", "Instruction"],
+    ["automation-kind-label", "When"], ["automation-minutes-label", "Minutes"], ["automation-cron-label", "Cron"],
+    ["automation-at-label", "Date and time"], ["automation-process-label", "Process id"],
+    ["automation-note", "Times are in Europe/Madrid."], ["automation-save", "Save"], ["automation-cancel", "Cancel"],
     ["task-dialog-banner-text", "Internal worker chat: read-only, not part of your chat list. Use Steer on the task card to correct it."],
     ["settings-thinking-label", "Show model thinking"],
     ["settings-thinking-hint", "Shows the model's reasoning above its replies in the chat."],
@@ -668,6 +675,11 @@ function translateInterface() {
     document.querySelector(`#tasks-filter [data-filter="${filter}"]`).textContent = tr(text);
   }
   $("tasks-filter").setAttribute("aria-label", tr("Filter tasks"));
+  $("tasks-tabs").setAttribute("aria-label", tr("Tasks and automations"));
+  const kindLabels = { every: "Every N minutes", cron: "On a cron schedule", at: "Once, at a date and time", process_end: "When a background process ends" };
+  for (const option of $("automation-kind").options) option.textContent = tr(kindLabels[option.value]);
+  $("automation-title").placeholder = tr("Short name (optional)");
+  $("automation-instruction").placeholder = tr("What the agent must do when it fires. It will not have this screen: be specific.");
   $("new-disposable-chat").title = tr("New disposable chat");
   $("new-disposable-chat").setAttribute("aria-label", tr("New disposable chat"));
   syncNavToggles();
@@ -5212,6 +5224,192 @@ $("tasks-filter").addEventListener("click", (event) => {
   renderTaskPanel();
 });
 // ---- end task panel (DOM)
+
+// ---- automations panel: a second tab of the tasks dialog
+const automationPanel = { items: [], loaded: false, editing: null, timer: null };
+
+// Pure: the trigger sentence shown in a row, from a stored trigger.
+function automationWhen(trigger) {
+  if (!trigger) return "";
+  if (trigger.kind === "every") {
+    const minutes = trigger.minutes;
+    return minutes % 60 === 0 ? tr("every {n} h", { n: minutes / 60 }) : tr("every {n} min", { n: minutes });
+  }
+  if (trigger.kind === "cron") return tr("cron {expr}", { expr: trigger.cron });
+  if (trigger.kind === "at") return tr("once, {when}", { when: String(trigger.at).replace("T", " ").slice(0, 16) });
+  return tr("when process {id} ends", { id: trigger.process });
+}
+
+// Pure: the status shown on the badge (a paused record keeps its stored status, `active`).
+function automationBadge(record) {
+  if (record.status === "active" && !record.enabled) return "paused";
+  return record.status;
+}
+
+// Pure: the trigger object the API expects, from the form fields (the date-time input has no zone: it is Madrid time).
+function automationTriggerFromForm(fields) {
+  if (fields.kind === "every") return { kind: "every", minutes: Number(fields.minutes) || 0 };
+  if (fields.kind === "cron") return { kind: "cron", cron: String(fields.cron || "").trim() };
+  if (fields.kind === "at") return { kind: "at", at: String(fields.at || "") };
+  return { kind: "process_end", process: String(fields.process || "").trim() };
+}
+
+function automationLocalTime(value) {
+  if (!value) return "—";
+  const when = new Date(value);
+  return Number.isNaN(when.getTime()) ? value : when.toLocaleString(state.preferences?.language === "es" ? "es-ES" : undefined, { dateStyle: "short", timeStyle: "short" });
+}
+
+function automationRow(record) {
+  const badge = element("span", { className: `task-badge ${automationBadge(record)}`, textContent: tr(automationBadge(record)) });
+  const title = element("strong", { className: "tasks-row-title", textContent: record.title });
+  const bits = [record.agent_name, automationWhen(record.trigger)];
+  if (record.next_run && record.enabled && record.status === "active") bits.push(tr("next {when}", { when: automationLocalTime(record.next_run) }));
+  if (record.last_run) bits.push(tr("last {when}", { when: automationLocalTime(record.last_run) }));
+  bits.push(tr("{count} runs", { count: record.runs }));
+  const meta = element("div", { className: "tasks-row-meta" }, element("span", { textContent: bits.join(" · ") }));
+  const error = element("div", { className: "task-error", hidden: true });
+  error.setAttribute("role", "alert");
+  const button = (text, handler) => {
+    const node = element("button", { type: "button", className: "secondary", textContent: text });
+    node.addEventListener("click", handler);
+    return node;
+  };
+  const act = (path, options = { method: "POST" }) => async () => {
+    error.hidden = true;
+    try { await api(`/api/automations/${record.id}${path}`, options); } catch (err) { showTaskError(error, err); return; }
+    automationPanelRefresh();
+  };
+  const actions = element("div", { className: "task-actions" });
+  if (record.status === "active") {
+    actions.append(record.enabled ? button(tr("Pause"), act("/pause")) : button(tr("Resume"), act("/resume")));
+  }
+  actions.append(
+    button(tr("Edit"), () => automationFormOpen(record)),
+    button(tr("Delete"), () => { if (window.confirm(tr("Delete this automation?"))) act("", { method: "DELETE" })(); }),
+  );
+  const row = element("li", { className: "tasks-row automation-row" }, element("div", { className: "tasks-row-head" }, badge, title), meta, actions, error);
+  row.dataset.enabled = String(record.enabled);
+  row.dataset.id = record.id;
+  if (record.history?.length) {
+    const details = element("details", {}, element("summary", { textContent: tr("History") }));
+    const list = element("ul", { className: "automation-history" });
+    for (const entry of [...record.history].reverse()) {
+      list.append(element("li", { textContent: `${automationLocalTime(entry.at)} · ${entry.outcome}` }));
+    }
+    details.append(list);
+    row.append(details);
+  }
+  return row;
+}
+
+function renderAutomationPanel() {
+  const list = $("automations-list");
+  list.replaceChildren(...automationPanel.items.map(automationRow));
+  $("automations-empty").hidden = automationPanel.items.length > 0 || !automationPanel.loaded;
+}
+
+async function automationPanelRefresh() {
+  if (!$("tasks-dialog").open || !state.user || $("automations-pane").hidden) return;
+  clearTimeout(automationPanel.timer);
+  try {
+    const data = await api("/api/automations");
+    automationPanel.items = data.automations;
+    automationPanel.loaded = true;
+    renderAutomationPanel();
+    $("tasks-error").hidden = true;
+  } catch (err) {
+    showTaskError($("tasks-error"), err);
+  }
+  if ($("tasks-dialog").open && !$("automations-pane").hidden) automationPanel.timer = setTimeout(automationPanelRefresh, 10000);
+}
+
+function automationKindChanged() {
+  const kind = $("automation-kind").value;
+  for (const name of ["every", "cron", "at", "process"]) {
+    $(`automation-field-${name}`).hidden = name !== (kind === "process_end" ? "process" : kind);
+  }
+}
+
+function automationFormOpen(record = null) {
+  automationPanel.editing = record;
+  const agents = state.user?.agents ?? [];
+  $("automation-agent").replaceChildren(...agents.map((agent) => element("option", { value: agent.id, textContent: agent.name })));
+  $("automation-agent").disabled = Boolean(record);
+  $("automation-agent").value = record?.agent_id ?? state.agentId ?? agents[0]?.id ?? "";
+  $("automation-title").value = record?.title ?? "";
+  $("automation-instruction").value = record?.instruction ?? "";
+  const trigger = record?.trigger ?? { kind: "every", minutes: 60 };
+  $("automation-kind").value = trigger.kind;
+  $("automation-minutes").value = trigger.minutes ?? 60;
+  $("automation-cron").value = trigger.cron ?? "";
+  $("automation-at").value = trigger.kind === "at" ? String(trigger.at).slice(0, 16) : "";
+  $("automation-process").value = trigger.process ?? "";
+  $("automation-error").hidden = true;
+  automationKindChanged();
+  $("automation-form").hidden = false;
+  $("automation-instruction").focus();
+}
+
+function automationTabShow(tab) {
+  const automations = tab === "automations";
+  $("automations-pane").hidden = !automations;
+  $("tasks-filter").hidden = automations;
+  $("tasks-empty").hidden = automations || ($("tasks-empty").hidden && true);
+  $("tasks-list").hidden = automations;
+  for (const button of document.querySelectorAll("#tasks-tabs button")) {
+    const on = button.dataset.tab === tab;
+    button.classList.toggle("active", on);
+    button.setAttribute("aria-pressed", String(on));
+  }
+  if (automations) {
+    clearTimeout(taskPanel.timer);
+    automationPanelRefresh();
+  } else {
+    clearTimeout(automationPanel.timer);
+    taskPanelRefresh();
+  }
+}
+
+$("tasks-tabs").addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-tab]");
+  if (button) automationTabShow(button.dataset.tab);
+});
+$("automation-kind").addEventListener("change", automationKindChanged);
+$("automation-new").addEventListener("click", () => automationFormOpen(null));
+$("automation-cancel").addEventListener("click", () => { $("automation-form").hidden = true; });
+$("automation-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const fields = {
+    kind: $("automation-kind").value, minutes: $("automation-minutes").value, cron: $("automation-cron").value,
+    at: $("automation-at").value, process: $("automation-process").value,
+  };
+  const trigger = automationTriggerFromForm(fields);
+  const record = automationPanel.editing;
+  $("automation-error").hidden = true;
+  try {
+    if (record) {
+      await api(`/api/automations/${record.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ instruction: $("automation-instruction").value, title: $("automation-title").value, trigger }),
+      });
+    } else {
+      await api("/api/automations", {
+        method: "POST",
+        body: JSON.stringify({ agent_id: $("automation-agent").value, instruction: $("automation-instruction").value, title: $("automation-title").value, trigger }),
+      });
+    }
+  } catch (err) {
+    showTaskError($("automation-error"), err);
+    return;
+  }
+  $("automation-form").hidden = true;
+  automationPanelRefresh();
+});
+// the dialog always opens on the tasks tab, and closing it stops the automation refresh
+$("tasks-open").addEventListener("click", () => automationTabShow("tasks"));
+$("tasks-dialog").addEventListener("close", () => clearTimeout(automationPanel.timer));
+// ---- end automations panel
 // ---- end task cards: DOM
 
 function approvalInitialState() {

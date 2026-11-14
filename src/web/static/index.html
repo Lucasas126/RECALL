@@ -922,6 +922,41 @@
       <h2 id="tasks-title">Tasks</h2>
       <button id="tasks-close" type="button" class="icon-btn" title="Close" aria-label="Close"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
     </div>
+    <div id="tasks-tabs" class="tasks-filter" role="tablist" aria-label="Tasks and automations">
+      <button type="button" class="secondary" role="tab" data-tab="tasks" aria-pressed="true" id="tasks-tab-tasks">Tasks</button>
+      <button type="button" class="secondary" role="tab" data-tab="automations" aria-pressed="false" id="tasks-tab-automations">Automations</button>
+    </div>
+    <div id="automations-pane" hidden>
+      <div class="automations-bar">
+        <p id="automations-hint" class="model-note">Things an agent does later. Ask an agent that has the Automations tool group, or create one here.</p>
+        <button id="automation-new" type="button" class="primary">New automation</button>
+      </div>
+      <form id="automation-form" hidden>
+        <label><span id="automation-agent-label">Agent</span> <select id="automation-agent"></select></label>
+        <label><span id="automation-title-label">Title</span> <input id="automation-title" type="text" maxlength="80" placeholder="Short name (optional)"></label>
+        <label><span id="automation-instruction-label">Instruction</span> <textarea id="automation-instruction" rows="3" maxlength="4000" placeholder="What the agent must do when it fires. It will not have this screen: be specific."></textarea></label>
+        <label><span id="automation-kind-label">When</span>
+          <select id="automation-kind">
+            <option value="every">Every N minutes</option>
+            <option value="cron">On a cron schedule</option>
+            <option value="at">Once, at a date and time</option>
+            <option value="process_end">When a background process ends</option>
+          </select>
+        </label>
+        <label id="automation-field-every"><span id="automation-minutes-label">Minutes</span> <input id="automation-minutes" type="number" min="5" max="44640" value="60"></label>
+        <label id="automation-field-cron" hidden><span id="automation-cron-label">Cron</span> <input id="automation-cron" type="text" maxlength="120" placeholder="30 8 * * mon-fri"></label>
+        <label id="automation-field-at" hidden><span id="automation-at-label">Date and time</span> <input id="automation-at" type="datetime-local"></label>
+        <label id="automation-field-process" hidden><span id="automation-process-label">Process id</span> <input id="automation-process" type="text" maxlength="20" placeholder="p1a2b3c4d"></label>
+        <p id="automation-note" class="model-note">Times are in Europe/Madrid.</p>
+        <div id="automation-error" class="task-error" role="alert" hidden></div>
+        <div class="task-actions">
+          <button id="automation-save" type="submit" class="primary">Save</button>
+          <button id="automation-cancel" type="button" class="secondary">Cancel</button>
+        </div>
+      </form>
+      <p id="automations-empty" class="model-note" hidden>No automations yet.</p>
+      <ul id="automations-list"></ul>
+    </div>
     <div id="tasks-filter" class="tasks-filter" role="group" aria-label="Filter tasks">
       <button type="button" class="secondary" data-filter="all" aria-pressed="true">All</button>
       <button type="button" class="secondary" data-filter="running" aria-pressed="false">Running</button>

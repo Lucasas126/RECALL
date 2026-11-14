@@ -1,7 +1,6 @@
 # Automations
 
-> **Status: the service and the agent tools are implemented; the web tab is the next step** (see the [backlog](../project/backlog.md)).
-> You create and manage automations by asking an agent that holds the `automations` group; nothing in the web UI shows them yet.
+> **Status: implemented** (service, agent tools and the web tab).
 
 An automation is something an agent does later, without you in the chat: "every morning at 8, summarise my notes and message me",
 "on Friday at 9, remind me to call the bank", "when the build process ends, tell me how it went".
@@ -67,7 +66,18 @@ calls `automation_create`; it writes the instruction for its future self, becaus
 - The tools are refused inside an automation's own run, so a scheduled run cannot create more schedules.
 - Pausing keeps the record; deleting removes it.
 
+## The web tab
+
+The Tasks dialog (the clock button in the side panel) has a second tab, **Automations**. It lists every automation of your agents, newest first:
+a badge (*active*, *paused*, *done*, *failed*), the agent, when it fires, the next and last run, how many runs, and a collapsible **History** with the
+last 20 outcomes (started, skipped and why, could not start). Each row has **Pause** or **Resume**, **Edit** and **Delete**. **New automation** opens a form:
+the agent, an optional title, the instruction, and *when* (every N minutes, a cron schedule, once at a date and time, or when a background process ends).
+Times are Europe/Madrid. The list refreshes every 10 seconds while the tab is open. Editing keeps the agent; to move one to another agent, create a new one.
+
+The same operations are an API, all scoped to the signed-in user (another user's id answers `404`):
+`GET /api/automations`, `POST /api/automations`, `PATCH /api/automations/<id>`, `POST /api/automations/<id>/pause`, `.../resume`, `DELETE /api/automations/<id>`
+([API](../reference/api.md#automations)).
+
 ## Not built yet
 
-- **A web tab** to see, pause, edit and delete automations and read their history.
 - Sending a result to a chat (today it stays in the task record and the agent can message you with `notify_telegram`).

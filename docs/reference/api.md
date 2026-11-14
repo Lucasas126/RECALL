@@ -310,6 +310,19 @@ Errors: `401` no session, `404` unknown task (`code: "unknown_task"`) or a task 
 
 The chat list also returns, per chat, `unread` (a reply finished and the chat was not opened since; stored as `<chat_id>.unread.json` next to the chat), `pending_approvals` (count) and `processes` (count). The web UI shows a blinking dot while the agent works or a background process runs, and a steady dot for an unread reply or a pending approval. Server restarts keep this state, and so do other devices.
 
+<a id="automations"></a>
+## Automations
+
+All routes need the session and only ever see the session user's automations; another user's id answers `404` like an unknown one. A rejected value is `400` with a readable message; an unknown field is `422`.
+
+| route | what it does |
+| --- | --- |
+| `GET /api/automations` | `{automations: [...]}`, newest first; each record has `id`, `agent_id`, `agent_name`, `title`, `instruction`, `trigger`, `enabled`, `status` (`active`, `done`, `failed`), `next_run`, `last_run`, `runs` and the last 20 `history` entries |
+| `POST /api/automations` | create (`201`): `{agent_id, instruction, title?, trigger: {kind, at \| minutes \| cron \| process}}`; the agent must be the user's own |
+| `PATCH /api/automations/<id>` | change `instruction`, `title` and/or `trigger` |
+| `POST /api/automations/<id>/pause`, `.../resume` | pause or resume (resuming never replays what was missed) |
+| `DELETE /api/automations/<id>` | delete (`204`) |
+
 ## Editing after Stop
 
 The web UI gives every user bubble its stored index once a reply has ended, so it can be edited. It pairs the user bubbles on screen with the stored user messages
