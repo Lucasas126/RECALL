@@ -57,6 +57,18 @@ script, so no inline script is needed). Fonts (Fraunces, Inter, Geist Mono) are 
 to any other site; their licence (SIL Open Font License 1.1) is in `static/fonts/LICENSES.md`. The login art (arch and capital) lives in
 `static/art/`; `static/art/README.md` lists each slot, its size and how to swap it.
 
+## providers
+
+The **Providers** tab holds what each provider needs from you:
+
+- **Claude subscription**: shows whether you are signed in (and your plan). *Sign in* or *Sign in again* gives a link; open
+  it, sign in to Claude and paste the code. Use it when the login expires. Needs `claude_config_dir` (see
+  [Claude subscription](claude-subscription.md)). The chat error "Claude Code is not logged in" has an *Open Settings* button
+  that opens this tab.
+- **OpenRouter**: set your own API key. It is checked with OpenRouter before saving, stored under a variable of yours
+  alone (`OPENROUTER_API_KEY_<USER>`) in `secrets.env` and never shown again; only your `user.yaml` is pointed at it. *Remove
+  key* deletes it. Changes apply at once.
+
 ## users (administrators only)
 
 The **Users** section of the settings dialog lists every user of the installation: name and id, maximum level (`max_level`, as a badge),

@@ -118,7 +118,8 @@ provider is not available fails with `provider not available: <provider>: <what 
 fix>`: choosing it in a picker or the Dream tab is refused with the same message in
 the user's language, and a reply, dream or chat title that needs it later reports
 it (a missing OpenRouter key variable, or Claude Code's own "not installed" /
-"run `claude auth login`" error). RECALL never logs in to Claude from the web; the
+"run `claude auth login`" error). A user signs in (or renews an expired login) from Settings, Providers: RECALL runs
+`claude auth login` for that user's own folder only and passes on the pasted code; the
 status check only learns whether the CLI is logged in (the account e-mail is never
 passed on). The one credential read is the access token of the plan usage
 indicator, see [plan usage](../user-guide/claude-subscription.md#plan-usage).
