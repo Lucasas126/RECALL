@@ -182,11 +182,14 @@ Thinking visibility, last-used and default agent selection and English/Spanish o
 notices/errors are implemented in both channels.
 
 ```json
-{"show_thinking": false, "language": "es", "agent_id": "aria"}
+{"show_thinking": false, "show_agent_avatar": true, "language": "es", "agent_id": "aria"}
 ```
 
 - `show_thinking`: a display preference, defaulting to `true`. It does not
   disable model reasoning or delete saved reasoning.
+- `show_agent_avatar`: a display preference, defaulting to `true`. When `false`
+  the web chat does not draw the agent's large picture at the start of its
+  replies; the small picture in the chat header is not affected.
 - `language`: `en` or `es` for RECALL-generated alerts/errors, not model replies
   or third-party error text. Without an override, Spanish user YAML language
   codes resolve to `es`; other codes resolve to `en`.
@@ -270,7 +273,7 @@ holds what each setting follows when nothing is saved, for the Settings dialog's
 | `associative_max_matches` | `{default, min, max}`: `associative_memory.top_n` from `settings.yaml`, bounds 1-20 |
 | `disposable_retention_days` | `{default, min, max}`: 30, bounds 1-365 |
 | `orchestrator` | `orchestrator.enabled` from `settings.yaml` |
-| `show_thinking`, `theme` | `true`, `"system"` (browser only) |
+| `show_thinking`, `show_agent_avatar`, `theme` | `true`, `true`, `"system"` (browser only) |
 | `default_agent_id` | `null` (the first agent) |
 | `core_agent_id` | `null` (the default agent) |
 | `avatar_style` | `"circle"` |

@@ -43,11 +43,11 @@ class AvatarMarkupTests(unittest.TestCase):
         self.assertIn('id="user-avatar"', INDEX_HTML)
         self.assertIn('id="agent-avatar"', INDEX_HTML)
 
-    def test_file_inputs_accept_only_png_jpeg_and_webp(self) -> None:
+    def test_file_inputs_accept_only_png_jpeg_webp_and_gif(self) -> None:
         for dom_id in ("agent-avatar-file", "settings-avatar-file"):
             tag = re.search(rf'<input id="{dom_id}"[^>]*>', INDEX_HTML).group(0)
             self.assertIn('type="file"', tag)
-            self.assertIn('accept="image/png,image/jpeg,image/webp"', tag)
+            self.assertIn('accept="image/png,image/jpeg,image/webp,image/gif"', tag)
             self.assertIn("hidden", tag)
 
     def test_the_agent_block_is_in_the_basic_panel_and_the_settings_block_in_the_form(self) -> None:
@@ -73,6 +73,31 @@ class AvatarMarkupTests(unittest.TestCase):
 
 
 class AvatarTranslationTests(unittest.TestCase):
+    def test_show_agent_avatar_setting_is_wired_and_hides_the_big_picture(self) -> None:
+        for dom_id in ("settings-agent-avatar", "settings-agent-avatar-label", "settings-agent-avatar-hint"):
+            with self.subTest(id=dom_id):
+                self.assertEqual(len(re.findall(rf'\bid="{dom_id}"', INDEX_HTML)), 1)
+        self.assertIn('general: ["show_thinking", "show_agent_avatar", "language"', APP_JS)
+        self.assertIn('show_agent_avatar: saved.show_agent_avatar', APP_JS)
+        self.assertIn('show_agent_avatar: $("settings-agent-avatar").checked', APP_JS)
+        self.assertIn('$("settings-agent-avatar").checked = state.preferences.show_agent_avatar', APP_JS)
+        self.assertIn('checkboxRow("settings-agent-avatar", () => prefDefault("show_agent_avatar"))', APP_JS)
+        self.assertIn('classList.toggle("hide-agent-avatar", preferences.show_agent_avatar === false)', APP_JS)
+        self.assertIn("#messages.hide-agent-avatar .msg-avatar { display: none; }", STYLE_CSS)
+        self.assertIn("#messages:not(.hide-agent-avatar) .msg.assistant:has(> .msg-avatar) { display: flow-root", STYLE_CSS)
+        self.assertNotIn("\n.msg.assistant:has(> .msg-avatar)", STYLE_CSS)
+
+    def test_show_agent_avatar_texts_are_translated(self) -> None:
+        body = APP_JS[APP_JS.index("function translateInterface()"):]
+        body = body[:body.index("\n}\n")]
+        pairs = re.findall(r'\[\s*"(settings-agent-avatar-[a-z]+)"\s*,\s*"((?:[^"\\]|\\.)*)"\s*\]', body)
+        self.assertEqual([dom_id for dom_id, _ in pairs], ["settings-agent-avatar-label", "settings-agent-avatar-hint"])
+        catalog = messages("es")
+        for _, text in pairs:
+            self.assertIn(text, catalog)
+            self.assertNotEqual(catalog[text], text)
+        self.assertEqual(catalog["Show the agent's picture in replies"], "Mostrar la imagen del agente en las respuestas")
+
     def test_every_new_static_text_has_a_spanish_translation(self) -> None:
         body = APP_JS[APP_JS.index("function translateInterface()"):]
         body = body[:body.index("\n}\n")]
@@ -86,9 +111,9 @@ class AvatarTranslationTests(unittest.TestCase):
     def test_texts_built_by_the_script_and_the_server_errors_are_translated(self) -> None:
         catalog = messages("es")
         for text in (
-            "Use a PNG, JPEG or WEBP image.", "The image is larger than {limit} MiB.",
-            "The image is larger than {side} x {side} pixels.", "The file is not a valid PNG, JPEG or WEBP image.",
-            "PNG, JPEG or WEBP, up to 2 MiB. Shown at 32 px.", "Save the agent first to add a profile picture.",
+            "Use a PNG, JPEG, WEBP or GIF image.", "The image is larger than {limit} MiB.",
+            "The image is larger than {side} x {side} pixels.", "The file is not a valid PNG, JPEG, WEBP or GIF image.",
+            "PNG, JPEG, WEBP or GIF, up to 5 MiB. Shown at 32 px.", "Save the agent first to add a profile picture.",
             "This agent has no profile picture.", "You have no profile picture.", "This agent id cannot have a profile picture.",
             "Could not save the profile picture; check the data folder permissions.",
             "Could not remove the profile picture; check the data folder permissions.",
@@ -111,6 +136,17 @@ class AvatarScriptTests(unittest.TestCase):
         body = body[: body.index("\n}\n")]
         self.assertIn("state.user.agents = me.agents", body)
         self.assertIn("renderAgentBanner()", body)
+
+    def test_assistant_replies_start_with_the_big_picture_only_for_assistant_bubbles(self) -> None:
+        body = APP_JS[APP_JS.index("function addMessage("):]
+        body = body[: body.index("function renderOne(")]
+        self.assertIn('role === "assistant" ? messageAvatar(currentAgentAvatar())', body)
+        self.assertIn('className: "msg-avatar"', body)
+        self.assertNotIn("innerHTML", body)
+        for rule in (".msg-avatar {", "display: flow-root", ".msg-avatar img", '[data-avatar-style="free"]'):
+            with self.subTest(rule=rule):
+                self.assertIn(rule, STYLE_CSS)
+        self.assertRegex(STYLE_CSS, r"@media \(max-width: 600px\) \{ \.msg-avatar \{ height: 3\.5em")
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_app_js_parses(self) -> None:

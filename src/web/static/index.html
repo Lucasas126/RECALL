@@ -172,9 +172,9 @@
                   <div class="agent-actions">
                     <button id="agent-avatar-upload" type="button">Upload image</button>
                     <button id="agent-avatar-remove" type="button" hidden>Remove</button>
-                    <input id="agent-avatar-file" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+                    <input id="agent-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
                   </div>
-                  <p id="agent-avatar-hint" class="model-note">PNG, JPEG or WEBP, up to 2 MiB. Shown at 32 px.</p>
+                  <p id="agent-avatar-hint" class="model-note">PNG, JPEG, WEBP or GIF, up to 5 MiB. Shown at 32 px.</p>
                   <label class="model-filter"><input id="agent-avatar-free" type="checkbox"> <span id="agent-avatar-free-label">No circle or border</span></label>
                   <p id="agent-avatar-free-hint" class="model-note">For transparent PNGs: the image is shown as it is, without cropping.</p>
                   <p id="agent-avatar-error" class="error" role="alert"></p>
@@ -692,6 +692,14 @@
             </div>
             <div class="setting-row">
               <div class="setting-main">
+                <label class="model-filter"><input id="settings-agent-avatar" type="checkbox"> <span id="settings-agent-avatar-label">Show the agent's picture in replies</span></label>
+                <p id="settings-agent-avatar-hint" class="model-note">Shows the agent's profile picture at the start of its replies in the chat. Agents without a picture are not affected.</p>
+              </div>
+              <div class="setting-control"><button type="button" class="icon-btn setting-reset">↺</button></div>
+              <p class="setting-default model-note"></p>
+            </div>
+            <div class="setting-row">
+              <div class="setting-main">
                 <label for="settings-theme" id="settings-theme-label">Theme</label>
                 <p id="settings-theme-hint" class="model-note">Applied at once and remembered in this browser only.</p>
               </div>
@@ -765,9 +773,9 @@
                   <div class="agent-actions">
                     <button id="settings-avatar-upload" type="button">Upload image</button>
                     <button id="settings-avatar-remove" type="button" hidden>Remove</button>
-                    <input id="settings-avatar-file" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+                    <input id="settings-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
                   </div>
-                  <p id="settings-avatar-hint" class="model-note">PNG, JPEG or WEBP, up to 2 MiB. Shown at 32 px.</p>
+                  <p id="settings-avatar-hint" class="model-note">PNG, JPEG, WEBP or GIF, up to 5 MiB. Shown at 32 px.</p>
                   <label class="model-filter"><input id="settings-avatar-free" type="checkbox"> <span id="settings-avatar-free-label">No circle or border</span></label>
                   <p id="settings-avatar-free-hint" class="model-note">For transparent PNGs: the image is shown as it is, without cropping.</p>
                   <p id="settings-avatar-error" class="error" role="alert"></p>

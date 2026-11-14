@@ -6,7 +6,7 @@ across the top on narrow screens); only one section shows at a time.
 
 | Section | Settings |
 | --- | --- |
-| General | show model thinking; your **Profile picture**; theme and accent colour (**Appearance**, this browser only, applied at once); language of alerts and errors; **Default agent** (the agent new chats open with when you do not pick one, and the Telegram router's fallback when it is unsure and no core agent is set; empty means the first agent in your list) |
+| General | show model thinking; show the agent's picture in replies (on by default); your **Profile picture**; theme and accent colour (**Appearance**, this browser only, applied at once); language of alerts and errors; **Default agent** (the agent new chats open with when you do not pick one, and the Telegram router's fallback when it is unsure and no core agent is set; empty means the first agent in your list) |
 | Models | default LLM model and default speech-to-text model (the model picker) |
 | Chats & memory | maximum associative memory matches (1-20); days to keep disposable chats (1-365) |
 | Telegram | choose the agent automatically (the orchestrator) and the core agent used when it is unsure (empty: *Same as default agent*) |
@@ -16,8 +16,9 @@ across the top on narrow screens); only one section shows at a time.
 ## profile picture
 
 **Settings > General > Profile picture** sets your own picture, shown instead of the first letter of your name at the bottom of the left
-panel (32 px). **Upload image** takes a PNG, JPEG or WEBP file of up to 2 MiB and 4096 x 4096 pixels; the server turns it into a PNG of at
-most 256 px on its longest side (EXIF rotation applied, metadata removed; SVG and GIF are refused). **Remove** goes back to the letter.
+panel (32 px). **Upload image** takes a PNG, JPEG, WEBP or GIF file of up to 5 MiB and 4096 x 4096 pixels; the server turns it into a PNG of at
+most 256 px on its longest side (EXIF rotation applied, metadata removed; SVG is refused). An animated GIF, WEBP or APNG stays animated: it is
+stored as an animated WEBP of at most 100 frames, each of at most 256 px. **Remove** goes back to the letter.
 **No circle or border** shows the image as it is, with no circle, border or background (meant for transparent PNGs); without it the image
 is cropped to fill the accent-bordered circle. Like Appearance, these apply at once and do not count as unsaved changes; the style is
 saved as `avatar_style` in `preferences.json`. The file is `data/<user>/.avatars/_user.png`. Agents get their own picture in the
@@ -31,7 +32,7 @@ by `GET /api/preferences` in a `defaults` object; see the [preferences API](../r
 
 A setting you never changed is stored as nothing, and a reset stores nothing again: it saves `null` for the associative matches, the
 disposable days, the orchestrator switch, the default agent, the core agent and the default models, so they keep following the application (or your
-`user.yaml` models) if the default changes later. Theme, language and show model thinking always hold a value, so a reset puts the
+`user.yaml` models) if the default changes later. Theme, language, show model thinking and show the agent's picture always hold a value, so a reset puts the
 default value back. The theme and the accent colour are kept in the browser and apply immediately; the other settings are applied by **Save settings**.
 
 ## numbers, saving and leaving

@@ -49,7 +49,7 @@ message. Errors render as a dismissable card (`role="alert"`) in the transcript,
 
 | code | raised when | web action |
 | --- | --- | --- |
-| `invalid_image`, `image_too_large`, `unsupported_image_type` | a profile picture upload is not a usable PNG/JPEG/WEBP (400), is over 2 MiB (413) or has another `Content-Type` (415); see [profile pictures](#profile-pictures) | the message is shown under the upload button |
+| `invalid_image`, `image_too_large`, `unsupported_image_type` | a profile picture upload is not a usable PNG/JPEG/WEBP/GIF (400), is over 5 MiB (413) or has another `Content-Type` (415); see [profile pictures](#profile-pictures) | the message is shown under the upload button |
 | `no_agents` | the user has no agents (HTTP 404) | Create an agent (opens the new-agent form); the chat shows an empty state instead |
 | `unknown_agent`, `unknown_chat` | the agent/chat does not exist or is not the user's | `unknown_chat`: Start a new chat |
 | `missing_api_key` | the provider's API key variable is not set on the server | Choose another model |
@@ -108,22 +108,23 @@ user's is a `404` (`unknown_agent`) before anything is read. An agent never sees
 | method | route | result |
 | --- | --- | --- |
 | `PUT` | `/api/agents/<agent_id>/avatar` | stores the picture of the agent; `200` `{"url", "has_alpha", "version"}` |
-| `GET` | `/api/agents/<agent_id>/avatar` | the stored PNG; `404` (`no_avatar`) when there is none |
+| `GET` | `/api/agents/<agent_id>/avatar` | the stored picture, `image/png` or `image/webp` (animated); `404` (`no_avatar`) when there is none |
 | `DELETE` | `/api/agents/<agent_id>/avatar` | removes it (`204`, also when there was none) |
 | `PUT` / `GET` / `DELETE` | `/api/me/avatar` | the same for the user's own picture |
 
-`PUT` takes the **raw image bytes** as the body (no multipart) with `Content-Type: image/png`, `image/jpeg` or `image/webp`. The declared type is only
-checked against that list: the bytes are decoded with Pillow and the format is decided by their content. Limits: 2 MiB of body and 4096 x 4096
-pixels (checked from the header, before decoding). The stored file is a PNG of at most 256 px on its longest side, with the EXIF rotation applied,
-the first frame only and no metadata. `url` is the route to `GET` (add `?v=<version>`), `has_alpha` is true when some pixel is transparent, and
+`PUT` takes the **raw image bytes** as the body (no multipart) with `Content-Type: image/png`, `image/jpeg`, `image/webp` or `image/gif`. The declared type is only
+checked against that list: the bytes are decoded with Pillow and the format is decided by their content. Limits: 5 MiB of body and 4096 x 4096
+pixels (checked from the header, before decoding). The stored file is a PNG of at most 256 px on its longest side, with the EXIF rotation applied
+and no metadata. An animation (GIF, animated WEBP or APNG) is kept as an animated WEBP with its frame durations and loop count, resized frame by
+frame; only the first 100 frames are kept, and one whose frames x width x height exceed 64 million pixels is refused (`invalid_image`). `url` is the route to `GET` (add `?v=<version>`), `has_alpha` is true when some pixel is transparent, and
 `version` changes with every upload. `GET` answers `Content-Type: image/png`, `X-Content-Type-Options: nosniff`,
 `Cache-Control: private, max-age=0, must-revalidate` and an `ETag`; a request with a matching `If-None-Match` gets `304`.
 
 | status | code | when |
 | --- | --- | --- |
-| `400` | `invalid_image` | not a decodable PNG, JPEG or WEBP (SVG, GIF, text, truncated files) or more than 4096 pixels on a side |
-| `413` | `image_too_large` | more than 2 MiB (refused while reading, without buffering the rest) |
-| `415` | `unsupported_image_type` | the `Content-Type` is not `image/png`, `image/jpeg` or `image/webp` |
+| `400` | `invalid_image` | not a decodable PNG, JPEG, WEBP or GIF (SVG, text, truncated files) or more than 4096 pixels on a side |
+| `413` | `image_too_large` | more than 5 MiB (refused while reading, without buffering the rest) |
+| `415` | `unsupported_image_type` | the `Content-Type` is not `image/png`, `image/jpeg`, `image/webp` or `image/gif` |
 | `404` | `no_avatar`, `unknown_agent` | `GET` without a picture; an agent the user does not own |
 | `400` | none | the agent id `_user` (the file name of the user's own picture) cannot have a picture |
 | `500` | `avatar_storage` | the file could not be written, moved or removed |
@@ -133,7 +134,7 @@ have `avatar`, and `GET /api/me` / `POST /api/login` have the user's own `avatar
 is the saved style, `circle` or `free`. The agent's style is its `avatar_style` field ([agent.yaml](agent-yaml.md#avatar_style)); the user's is the
 `avatar_style` preference ([preferences](user-yaml.md#preferences-api)). `avatar` is read-only information, not an agent field: a body read with `GET` and sent back with `PUT` is accepted and its `avatar` is ignored (only `avatar_style` is saved).
 
-Files live in `data/<user_id>/.avatars/<agent_id>.png` and `_user.png`, outside every agent's data folder, so the `agent:` source, the
+Files live in `data/<user_id>/.avatars/<agent_id>.png` and `_user.png` (`.webp` instead when the picture is animated), outside every agent's data folder, so the `agent:` source, the
 folder tools and the memory tools cannot list or write them.
 
 ## Disposable chats

@@ -24,6 +24,13 @@ def image_bytes(fmt: str = "PNG", size=(64, 48), colour=(10, 120, 200, 255)) -> 
     return out.getvalue()
 
 
+def animated_gif() -> bytes:
+    frames = [Image.new("RGB", (40, 30), colour) for colour in ((255, 0, 0), (0, 255, 0), (0, 0, 255))]
+    out = io.BytesIO()
+    frames[0].save(out, format="GIF", save_all=True, append_images=frames[1:], duration=80, loop=0)
+    return out.getvalue()
+
+
 class AvatarFixture(AdminFixture):
     def setUp(self) -> None:
         super().setUp()
@@ -80,6 +87,29 @@ class AgentAvatarTests(AvatarFixture):
         self.assertEqual(self.put(self.owner, "/api/agents/bot/avatar", image_bytes("JPEG"), "image/jpeg").status_code, 200)
         self.assertEqual(self.put(self.owner, "/api/agents/bot/avatar", image_bytes("WEBP"), "image/webp").status_code, 200)
 
+    def test_an_animated_gif_is_served_as_webp_and_replaces_a_png_and_back(self) -> None:
+        folder = self.data_dir / "user-a" / ".avatars"
+        self.put(self.owner, "/api/agents/bot/avatar")
+        self.assertTrue((folder / "bot.png").is_file())
+        response = self.put(self.owner, "/api/agents/bot/avatar", animated_gif(), "image/gif")
+        self.assertEqual(response.status_code, 200, response.text)
+        got = self.owner.get("/api/agents/bot/avatar")
+        self.assertEqual(got.headers["content-type"], "image/webp")
+        self.assertEqual(got.headers["x-content-type-options"], "nosniff")
+        self.assertEqual(Image.open(io.BytesIO(got.content)).n_frames, 3)
+        self.assertTrue((folder / "bot.webp").is_file())
+        self.assertFalse((folder / "bot.png").exists())
+        again = self.owner.get("/api/agents/bot/avatar", headers={"If-None-Match": got.headers["etag"]})
+        self.assertEqual(again.status_code, 304)
+        self.put(self.owner, "/api/agents/bot/avatar")
+        self.assertEqual(self.owner.get("/api/agents/bot/avatar").headers["content-type"], "image/png")
+        self.assertTrue((folder / "bot.png").is_file())
+        self.assertFalse((folder / "bot.webp").exists())
+        self.put(self.owner, "/api/me/avatar", animated_gif(), "image/gif")
+        self.assertEqual(self.owner.get("/api/me/avatar").headers["content-type"], "image/webp")
+        self.assertEqual(self.owner.delete("/api/agents/bot/avatar").status_code, 204)
+        self.assertFalse((folder / "bot.png").exists())
+
     def test_no_picture_is_a_404_and_delete_removes_it(self) -> None:
         self.assertEqual(self.owner.get("/api/agents/bot/avatar").status_code, 404)
         self.put(self.owner, "/api/agents/bot/avatar")
@@ -89,17 +119,17 @@ class AgentAvatarTests(AvatarFixture):
         self.assertEqual(self.owner.delete("/api/agents/bot/avatar").status_code, 204)  # idempotent
 
     def test_error_codes_and_spanish_messages(self) -> None:
-        wrong = self.put(self.owner, "/api/agents/bot/avatar", image_bytes("GIF"), "image/gif")
+        wrong = self.put(self.owner, "/api/agents/bot/avatar", b"<svg/>", "image/svg+xml")
         self.assertEqual((wrong.status_code, wrong.json()["code"]), (415, "unsupported_image_type"))
         garbage = self.put(self.owner, "/api/agents/bot/avatar", b"not an image")
         self.assertEqual((garbage.status_code, garbage.json()["code"]), (400, "invalid_image"))
-        gif_as_png = self.put(self.owner, "/api/agents/bot/avatar", image_bytes("GIF"), "image/png")
-        self.assertEqual((gif_as_png.status_code, gif_as_png.json()["code"]), (400, "invalid_image"))
-        big = self.put(self.owner, "/api/agents/bot/avatar", b"\0" * (2 * 1024 * 1024 + 1))
+        svg_as_png = self.put(self.owner, "/api/agents/bot/avatar", b"<svg/>", "image/png")
+        self.assertEqual((svg_as_png.status_code, svg_as_png.json()["code"]), (400, "invalid_image"))
+        big = self.put(self.owner, "/api/agents/bot/avatar", b"\0" * (5 * 1024 * 1024 + 1))
         self.assertEqual((big.status_code, big.json()["code"]), (413, "image_too_large"))
         self.owner.patch("/api/preferences", json={"language": "es"})
         spanish = self.put(self.owner, "/api/agents/bot/avatar", b"x")
-        self.assertEqual(spanish.json()["detail"], messages("es")["The file is not a valid PNG, JPEG or WEBP image."])
+        self.assertEqual(spanish.json()["detail"], messages("es")["The file is not a valid PNG, JPEG, WEBP or GIF image."])
         self.assertEqual(spanish.json()["code"], "invalid_image")
         self.assertFalse((self.data_dir / "user-a" / ".avatars" / "bot.png").exists())
 
@@ -267,7 +297,7 @@ class UserAvatarTests(AvatarFixture):
         self.assertEqual(self.anonymous.delete("/api/me/avatar").status_code, 401)
         self.assertEqual(self.put(self.owner, "/api/me/avatar", b"x", "text/plain").status_code, 415)
         self.assertEqual(self.put(self.owner, "/api/me/avatar", b"x").status_code, 400)
-        self.assertEqual(self.put(self.owner, "/api/me/avatar", b"\0" * (2 * 1024 * 1024 + 1)).status_code, 413)
+        self.assertEqual(self.put(self.owner, "/api/me/avatar", b"\0" * (5 * 1024 * 1024 + 1)).status_code, 413)
 
     def test_the_style_is_a_validated_preference_shown_in_me(self) -> None:
         self.assertEqual(self.owner.get("/api/preferences").json()["avatar_style"], "circle")

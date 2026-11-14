@@ -16,8 +16,8 @@ class FakeElement {
 }
 const context = vm.createContext({ document: { createElement: (tag) => new FakeElement(tag) } });
 vm.runInContext(
-  [constant("AVATAR_MAX_BYTES"), constant("AVATAR_TYPES"), take("avatarView"), take("avatarFileProblem"), take("renderAvatar"),
-    "this.avatarView = avatarView; this.avatarFileProblem = avatarFileProblem; this.renderAvatar = renderAvatar;"].join("\n"),
+  [constant("AVATAR_MAX_BYTES"), constant("AVATAR_TYPES"), take("avatarView"), take("messageAvatar"), take("avatarFileProblem"), take("renderAvatar"),
+    "this.avatarView = avatarView; this.messageAvatar = messageAvatar; this.avatarFileProblem = avatarFileProblem; this.renderAvatar = renderAvatar;"].join("\n"),
   context,
 );
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -49,13 +49,13 @@ test("a url outside the API is never used as an image source", () => {
   }
 });
 
-test("only png, jpeg and webp up to 2 MiB pass the client check", () => {
-  for (const type of ["image/png", "image/jpeg", "image/webp"]) assert.equal(context.avatarFileProblem({ type, size: 1000 }), null);
-  assert.equal(context.avatarFileProblem({ type: "image/png", size: 2 * 1024 * 1024 }), null);
-  assert.deepEqual(plain(context.avatarFileProblem({ type: "image/png", size: 2 * 1024 * 1024 + 1 })),
-    { template: "The image is larger than {limit} MiB.", values: { limit: 2 } });
-  for (const type of ["image/gif", "image/svg+xml", "", "text/plain"]) {
-    assert.deepEqual(plain(context.avatarFileProblem({ type, size: 10 })), { template: "Use a PNG, JPEG or WEBP image.", values: {} });
+test("only png, jpeg, webp and gif up to 5 MiB pass the client check", () => {
+  for (const type of ["image/png", "image/jpeg", "image/webp", "image/gif"]) assert.equal(context.avatarFileProblem({ type, size: 1000 }), null);
+  assert.equal(context.avatarFileProblem({ type: "image/png", size: 5 * 1024 * 1024 }), null);
+  assert.deepEqual(plain(context.avatarFileProblem({ type: "image/png", size: 5 * 1024 * 1024 + 1 })),
+    { template: "The image is larger than {limit} MiB.", values: { limit: 5 } });
+  for (const type of ["image/svg+xml", "", "text/plain"]) {
+    assert.deepEqual(plain(context.avatarFileProblem({ type, size: 10 })), { template: "Use a PNG, JPEG, WEBP or GIF image.", values: {} });
   }
 });
 
@@ -81,4 +81,12 @@ test("a picture that fails to load falls back to the letter, without the free st
   element.children[0].listeners.error();
   assert.deepEqual(plain(element.children), ["Z"]);
   assert.equal(element.dataset.avatarStyle, undefined);
+});
+
+test("the picture at the start of a reply: nothing without an avatar, else the url and the style", () => {
+  assert.equal(context.messageAvatar(null), null);
+  assert.equal(context.messageAvatar(undefined), null);
+  assert.equal(context.messageAvatar({ url: "https://evil.example/a.png", version: "1" }), null);
+  assert.deepEqual(plain(context.messageAvatar({ url: "/api/agents/bot/avatar", version: "7", style: "circle" })), { src: "/api/agents/bot/avatar?v=7", free: false });
+  assert.deepEqual(plain(context.messageAvatar({ url: "/api/agents/bot/avatar", version: "7", style: "free" })), { src: "/api/agents/bot/avatar?v=7", free: true });
 });
