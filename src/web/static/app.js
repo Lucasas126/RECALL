@@ -1,7 +1,6 @@
 const $ = (id) => document.getElementById(id);
 // inline line icons (currentColor); constants only, never built from user data
 const ICONS = {
-  tool: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><polyline points=\"4 17 10 11 4 5\"/><line x1=\"12\" y1=\"19\" x2=\"20\" y2=\"19\"/></svg>",
   clock: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 7v5l3 2\"/></svg>",
   alert: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 7.5v5.5\"/><path d=\"M12 16.5h.01\"/></svg>",
   send: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M12 19V5\"/><path d=\"m5 12 7-7 7 7\"/></svg>",
@@ -4761,10 +4760,7 @@ function actionStep(action) {
   item.className = "action" + (action.error ? " failed" : "") + (action.pending ? " running" : "");
   const summary = document.createElement("summary");
   summary.title = info.full;
-  const icon = document.createElement("span");
-  icon.className = "action-icon";
-  icon.innerHTML = ICONS.tool;
-  summary.append(icon, Object.assign(document.createElement("span"), { className: "action-name", textContent: info.name }));
+  summary.append(Object.assign(document.createElement("span"), { className: "action-name", textContent: info.name }));
   if (info.backend) summary.append(Object.assign(document.createElement("span"), { className: "action-backend", textContent: info.backend }));
   summary.append(Object.assign(document.createElement("span"), { className: "action-args", textContent: info.line }));
   if (action.pending) {
@@ -4857,15 +4853,13 @@ function taskCardStep(action) {
   card.dataset.tool = "task_start";
   card.dataset.command = "";
   const summary = document.createElement("summary");
-  const icon = element("span", { className: "action-icon" });
-  icon.innerHTML = ICONS.tool;
   const title = element("span", { className: "action-name task-title" });
   const target = element("span", { className: "action-backend task-target" });
   const badge = element("span", { className: "task-badge" });
   badge.setAttribute("role", "status");
   const tokens = element("span", { className: "action-args task-tokens" });
   const activity = element("span", { className: "task-activity", hidden: true });
-  summary.append(icon, title, target, badge, tokens, activity);
+  summary.append(title, target, badge, tokens, activity);
   const result = element("div", { className: "action-block task-result-block" });
   const resultLabel = element("div", { className: "action-label", textContent: tr("Result") });
   const resultText = element("pre");
