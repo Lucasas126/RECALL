@@ -326,7 +326,7 @@ details.thinking[open] > summary::before { content: "\25BE"; }
 .thinking-label { flex: none; }
 .thinking-preview { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 details.thinking[open] .thinking-preview { display: none; }
-.thinking-text { white-space: pre-wrap; word-break: break-word; max-height: var(--tool-block-max); overflow-y: auto; margin-top: 4px; padding-left: 14px; border-left: 2px solid var(--line); }
+.thinking-text { white-space: pre-wrap; word-break: break-word; max-height: var(--tool-block-max); overflow-y: auto; margin-top: 4px; }
 details.action { margin: 0 0 12px; font: 400 var(--s-1)/1.4 var(--sans); color: var(--muted); min-width: 0; }
 details.action > summary { cursor: pointer; display: flex; align-items: center; flex-wrap: wrap; row-gap: 2px; gap: 8px; min-height: 32px; min-width: 0; padding: 4px 0; list-style: none; border-radius: 6px; }
 details.action > summary::-webkit-details-marker { display: none; }
@@ -591,7 +591,7 @@ button.link:hover:not(:disabled) { color: var(--text); background: none; text-de
 #model-dialog, #settings-dialog, #task-dialog, #tasks-dialog { background: var(--panel); box-shadow: var(--shadow); }
 dialog input, dialog select, dialog textarea { background: var(--bg); }
 .body a { text-underline-offset: 2px; }
-details.thinking { border-left: 2px solid var(--line); padding-left: 10px; }
+details.thinking { border-left: 2px solid var(--line); padding-left: 10px; display: flow-root; }  /* flow-root: the box sits beside the floated agent picture, so its line and text follow each other */
 .model-choice { background: var(--bg); }
 .model-choice:hover:not(:disabled) { background: var(--raised); }
 .model-choice[aria-pressed="true"] { background: var(--accent-soft); }

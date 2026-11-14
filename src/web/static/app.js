@@ -4984,8 +4984,10 @@ function renderTaskTray() {
   const signature = JSON.stringify(rows.map((row) => row.id));
   if (signature === taskTray.shown) {  // same list: only the clocks change, so a half-typed steer is kept
     for (const row of rows) {
-      const node = box.querySelector(`[data-task-id="${CSS.escape(row.id)}"] .task-tray-time`);
-      if (node) node.textContent = row.elapsed;
+      const item = box.querySelector(`[data-task-id="${CSS.escape(row.id)}"]`);
+      if (!item) continue;
+      item.querySelector(".task-tray-time").textContent = row.elapsed;
+      item.querySelector(".task-open").hidden = !row.canOpenChat;  // the worker chat appears a moment after the task starts
     }
     return;
   }

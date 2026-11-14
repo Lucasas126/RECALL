@@ -26,6 +26,16 @@ class TaskTrayStaticTests(unittest.TestCase):
         # opening or closing a tray above the composer resizes #messages: the view must stay at the end, not behind the tray
         self.assertRegex(APP_JS, r'new ResizeObserver\(\(\) => scrollDown\(\)\)\.observe\(\$\("messages"\)\)')
 
+    def test_open_chat_button_is_updated_when_the_list_does_not_change(self) -> None:
+        # the worker chat id appears a moment after the task starts: the clock-only update must also show the button
+        self.assertIn('item.querySelector(".task-open").hidden = !row.canOpenChat', APP_JS)
+
+    def test_reasoning_has_one_line_that_follows_its_text_beside_the_picture(self) -> None:
+        css = (STATIC / "style.css").read_text(encoding="utf-8")
+        self.assertRegex(css, r"details\.thinking \{ border-left: 2px solid var\(--line\); padding-left: 10px; display: flow-root;")
+        text_rule = re.search(r"^\.thinking-text \{[^}]*\}", css, re.M).group(0)
+        self.assertNotIn("border-left", text_rule)  # a second line inside the first one looked doubled
+
     def test_texts_are_translated(self) -> None:
         catalog = messages("es")
         for text in ("1 subagent running", "{count} subagents running"):
