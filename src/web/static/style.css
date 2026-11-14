@@ -720,11 +720,7 @@ details.thinking { border-left: 2px solid var(--line); padding-left: 10px; }
 .connections { gap: 8px; }
 .connections p { margin: 0; }
 /* Agent editor: four tabs, keep them on one row */
-.agent-tabs button { padding-inline: 6px; }
-.agent-form > .agent-actions { position: sticky; bottom: 0; padding: 10px 0; background: var(--bg); }
 /* Agent editor: dream mode panels (Soul & memory, Dream, Dream sessions) */
-.agent-tabs { flex-wrap: wrap; }
-.agent-tabs button { flex: 1 1 auto; }
 .agent-form-body { display: flex; flex-direction: column; gap: 12px; }
 #dream-form { display: flex; flex-direction: column; gap: 12px; }
 #dream-form[hidden] { display: none; }
@@ -821,7 +817,6 @@ details.thinking { border-left: 2px solid var(--line); padding-left: 10px; }
    the free height between its lines, so the form floated down and moved whenever a panel changed height. */
 #agents-view { scrollbar-gutter: stable; align-content: flex-start; }
 #agent-error:empty, #agent-status:empty { display: none; }
-.agent-tabs { position: sticky; top: 0; z-index: 2; background: var(--bg); }
 .agent-advanced > summary { cursor: pointer; color: var(--muted); padding: 4px 0; }
 .agent-advanced[open] > summary { margin-bottom: 10px; }
 .agent-advanced > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
@@ -1050,3 +1045,26 @@ html.resizing-sidebar #app { transition: none; }
 .usage-bar > span[data-level="high"] { background: #e07a3f; }
 .usage-bar > span[data-level="crit"] { background: #d9534f; }
 @media (max-width: 640px) { #claude-usage-body { min-width: 110px; } }
+
+/* Agent editor: section list on the left (like the settings dialog), content scrolls on its own, actions are a footer of the
+   layout instead of floating over the text. Nothing in the editor is sticky or overlaps. */
+#agents-view:has(#agent-editor:not([hidden])) { overflow: hidden; display: flex; flex-direction: column; flex-wrap: nowrap; }
+#agent-editor { flex: 1 1 auto; min-height: 0; max-width: 900px; display: grid; grid-template-columns: 180px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; gap: 10px 18px; }
+#agent-editor > h3 { grid-column: 1 / -1; }
+#agent-editor > .agent-tabs { grid-column: 1; grid-row: 2; flex-direction: column; gap: 4px; align-self: start; padding: 0; border-bottom: 0; }
+.agent-tabs button { padding: 8px 12px; margin: 0; border: 1px solid transparent; border-radius: var(--radius-sm); text-align: left; font-size: var(--s0); }
+.agent-tabs button[aria-pressed="true"] { background: var(--panel); border-color: var(--accent); color: var(--text); }
+.agent-tabs .tab-split { margin-top: 8px; position: relative; }
+.agent-tabs .tab-split::before { content: ""; position: absolute; left: 12px; right: 12px; top: -6px; border-top: 1px solid var(--line); }
+.agent-main { grid-column: 2; grid-row: 2; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; padding-right: 4px; display: flex; flex-direction: column; gap: 12px; }
+#agent-editor > .agent-form-actions { grid-column: 1 / -1; grid-row: 3; padding: 10px 0 max(10px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+#agent-editor > .agent-form-actions #agent-delete { margin-left: auto; }
+@media (max-width: 800px) {
+  #agent-editor { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 8px; }
+  #agent-editor > .agent-tabs { grid-row: 2; flex-direction: row; overflow-x: auto; padding-bottom: 4px; border-bottom: 1px solid var(--line); scrollbar-width: none; }
+  .agent-tabs button { flex: 0 0 auto; padding: 6px 10px; font-size: var(--s-1); white-space: nowrap; }
+  .agent-tabs .tab-split { margin-top: 0; }
+  .agent-tabs .tab-split::before { display: none; }
+  .agent-main { grid-column: 1; grid-row: 3; }
+  #agent-editor > .agent-form-actions { grid-row: 4; }
+}
