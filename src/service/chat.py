@@ -1360,8 +1360,17 @@ class ChatService:
                 logger.warning("disposable chat cleanup failed for %s/%s", user_id, agent_id, exc_info=True)
         return removed
 
-    def get_chat(self, user_id: str, agent_id: str, chat_id: str) -> dict:
-        """A chat's summary and its user/assistant messages."""
+    def get_chat(
+        self, user_id: str, agent_id: str, chat_id: str, *, limit: int | None = None, before: int | None = None,
+    ) -> dict:
+        """A chat's summary and its user/assistant messages.
+
+        Without `limit` every message comes back. With it, only the last `limit` ones (or, with `before`, the `limit` that
+        end right before that stored index; `before` alone means everything before it), so a client can show the end of a
+        long chat first and fetch older messages on demand. `window` says what the answer leaves out:
+        `{total, hidden, first_index}` (`total` and `hidden` count the user and assistant messages; `first_index` is the
+        stored index of the first message returned, the `before` of the next request, null for an empty answer).
+        """
         conversations = self._conversations(user_id, agent_id)
         active = self.chat_active(user_id, agent_id, chat_id)  # asked BEFORE reading: a reply that ends meanwhile is read complete
         turns = self._load(conversations, chat_id)
@@ -1369,6 +1378,16 @@ class ChatService:
             # a reply is running: its checkpoint (what it has done so far, stored as `interrupted`) is replayed whole by the
             # live stream the page attaches to next, so showing it here too would draw it twice and call it interrupted
             turns = turns[:-1]
+        shown = [position for position, t in enumerate(turns) if t.get("role") in ("user", "assistant", "compaction")]
+        everything = shown
+        if before is not None:
+            shown = [position for position in shown if position < before]
+        chosen = shown if limit is None else shown[max(0, len(shown) - limit):]
+        spoken = lambda positions: sum(1 for position in positions if turns[position].get("role") != "compaction")
+        window = {
+            "total": spoken(everything), "hidden": spoken(shown[: len(shown) - len(chosen)]),
+            "first_index": chosen[0] if chosen else None,
+        }
         messages = [
             {
                 # `index` is the turn's position in the stored file (tool turns count), the handle for edits
@@ -1385,8 +1404,7 @@ class ChatService:
                     if t.get(k) is not None
                 },
             }
-            for position, t in enumerate(turns)
-            if t.get("role") in ("user", "assistant", "compaction")
+            for position, t in ((position, turns[position]) for position in chosen)
         ]
         return {
             "chat": {
@@ -1394,6 +1412,7 @@ class ChatService:
                 "active": active,
             },
             "messages": messages,
+            "window": window,
             **self.get_chat_models(user_id, agent_id, chat_id),
         }
 

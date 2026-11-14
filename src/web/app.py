@@ -518,8 +518,11 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
         return service.set_chat_disposable(user_id, agent_id, chat_id, body.disposable)
 
     @app.get("/api/agents/{agent_id}/chats/{chat_id}")
-    def get_chat(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):
-        return service.get_chat(user_id, agent_id, chat_id)
+    def get_chat(
+        agent_id: str, chat_id: str, limit: Optional[int] = Query(None, ge=1, le=5000), before: Optional[int] = Query(None, ge=0),
+        user_id: str = Depends(current_user),
+    ):
+        return service.get_chat(user_id, agent_id, chat_id, limit=limit, before=before)
 
     @app.get("/api/agents/{agent_id}/chats/{chat_id}/models")
     def get_chat_models(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):
