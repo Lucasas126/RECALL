@@ -57,6 +57,9 @@ from src.providers.ollama import OllamaUnavailable
 from src.providers.openrouter import OpenRouterProvider
 from src.providers.claude_subscription import claude_subscription_provider
 from src.providers.claude_subscription.login import login_allowed, resolved_settings
+from src.config import user_keys
+from src.providers.claude_subscription import signin as claude_signin
+from src.providers.claude_subscription.status import cli_status
 from src.providers.claude_subscription.usage import fetch_usage, reset_in
 from src.providers.provider import get_provider
 from src.providers.tavily import TavilyClient
@@ -1253,6 +1256,49 @@ class ChatService:
         self._require_chat(self._conversations(user_id, agent_id), chat_id)
         self.cancel_chat_run(user_id, agent_id, chat_id)
         return {"status": "stopping"}
+
+    def openrouter_key_status(self, user_id: str) -> dict:
+        """Whether the user has an OpenRouter key and whether it is their own (never the value)."""
+        user = self._user(user_id)
+        return user_keys.key_state(user.id, user.openrouter_settings().api_key)
+
+    def openrouter_key_save(self, user_id: str, key: str) -> dict:
+        user = self._user(user_id)
+        user_keys.save_user_key(user.id, key)
+        self._availability.forget()
+        return self.openrouter_key_status(user_id)
+
+    def openrouter_key_remove(self, user_id: str) -> dict:
+        user = self._user(user_id)
+        user_keys.remove_user_key(user.id)
+        self._availability.forget()
+        return self.openrouter_key_status(user_id)
+
+    def claude_login_status(self, user_id: str) -> dict:
+        """Login state of the user's own Claude login folder (never reads the credential files)."""
+        user = self._user(user_id)
+        if not login_allowed(user.id, user.claude_subscription):
+            return {"available": False, "reason": "no_own_login"}
+        status = cli_status(resolved_settings(user.id, user.claude_subscription))
+        return {"available": True, "cli_found": status["cli_found"], "logged_in": status["logged_in"],
+                "subscription": status.get("subscription")}
+
+    def claude_login_start(self, user_id: str) -> dict:
+        user = self._user(user_id)
+        return claude_signin.start(user.id, resolved_settings(user.id, user.claude_subscription))
+
+    def claude_login_code(self, user_id: str, code: str) -> dict:
+        user = self._user(user_id)
+        claude = resolved_settings(user.id, user.claude_subscription)
+        status = claude_signin.submit(user.id, code, claude)
+        with self._usage_lock:
+            self._usage_cache.pop(user_id, None)
+        self._availability.forget()
+        return {"logged_in": status["logged_in"], "subscription": status.get("subscription")}
+
+    def claude_login_cancel(self, user_id: str) -> dict:
+        claude_signin.cancel(self._user(user_id).id)
+        return {"status": "cancelled"}
 
     def claude_usage(self, user_id: str) -> dict:
         """Plan usage (session and week, in percent) of the user's Claude login; cached for a minute."""

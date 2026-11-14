@@ -120,3 +120,20 @@ def save_secret(name: str, value: str) -> None:
             os.chmod(path, 0o600)
         except OSError:
             pass
+
+
+def delete_secret(name: str) -> None:
+    """Remove one pair from the file, keeping the other lines and comments (nothing happens when it is absent)."""
+    check_name(name)
+    path = secrets_file()
+    if not path.exists():
+        return
+    with exclusive_file_lock(path.with_name(path.name + ".lock")):
+        lines = path.read_text(encoding="utf-8").splitlines()
+        kept = [line for line in lines if not ((m := _LINE_RE.match(line)) and m.group(1) == name and not line.lstrip().startswith("#"))]
+        if len(kept) != len(lines):
+            atomic_write_text(path, "\n".join(kept) + ("\n" if kept else ""))
+            try:
+                os.chmod(path, 0o600)
+            except OSError:
+                pass

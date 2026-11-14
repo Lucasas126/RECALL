@@ -674,6 +674,7 @@
         <button id="settings-tab-chats" type="button" data-section="chats" aria-pressed="false"><span id="settings-tab-chats-text" class="settings-tab-text">Chats &amp; memory</span><span class="settings-dot" hidden></span></button>
         <button id="settings-tab-telegram" type="button" data-section="telegram" aria-pressed="false"><span id="settings-tab-telegram-text" class="settings-tab-text">Telegram</span><span class="settings-dot" hidden></span></button>
         <button id="settings-tab-connections" type="button" data-section="connections" aria-pressed="false"><span id="settings-tab-connections-text" class="settings-tab-text">Connections</span></button>
+        <button id="settings-tab-providers" type="button" data-section="providers" aria-pressed="false"><span id="settings-tab-providers-text" class="settings-tab-text">Providers</span></button>
         <button id="settings-tab-users" type="button" data-section="users" aria-pressed="false" hidden><span id="settings-tab-users-text" class="settings-tab-text">Users</span></button>
       </nav>
       <div class="settings-body">
@@ -897,6 +898,33 @@
           <p id="connections-browser-note" class="model-note">Sign-in opens in a browser on the computer running RECALL.</p>
           <ul id="connection-list"></ul>
           <p id="connections-error" class="error" role="alert"></p>
+        </section>
+        <section id="providers-section" class="connections settings-section" aria-labelledby="settings-tab-providers" hidden>
+          <h3 id="providers-title">Providers</h3>
+          <div id="openrouter-key" class="avatar-block" hidden>
+            <h3 id="openrouter-key-title">OpenRouter</h3>
+            <p id="openrouter-key-state" class="model-note" role="status"></p>
+            <label for="openrouter-key-input" id="openrouter-key-label" class="model-note">API key</label>
+            <input id="openrouter-key-input" type="password" autocomplete="off" spellcheck="false" maxlength="600">
+            <button id="openrouter-key-save" type="button">Save key</button>
+            <button id="openrouter-key-remove" type="button" hidden>Remove key</button>
+            <p id="openrouter-key-error" class="error" role="alert"></p>
+          </div>
+          <div id="claude-login" class="avatar-block" hidden>
+            <h3 id="claude-login-title">Claude subscription</h3>
+            <p id="claude-login-state" class="model-note" role="status"></p>
+            <div id="claude-login-actions">
+              <button id="claude-login-start" type="button">Sign in</button>
+            </div>
+            <div id="claude-login-step" hidden>
+              <p id="claude-login-step-note" class="model-note">Open the link, sign in to Claude, then paste the code it shows.</p>
+              <p><a id="claude-login-link" href="#" target="_blank" rel="noopener noreferrer">Open Claude sign-in</a></p>
+              <input id="claude-login-code" type="text" autocomplete="off" spellcheck="false" aria-labelledby="claude-login-step-note">
+              <button id="claude-login-send" type="button">Send code</button>
+              <button id="claude-login-cancel" type="button">Cancel</button>
+            </div>
+            <p id="claude-login-error" class="error" role="alert"></p>
+          </div>
         </section>
         <section id="users-admin" class="connections settings-section" aria-labelledby="settings-tab-users" hidden>
           <h3 id="users-title">Users</h3>

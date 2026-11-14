@@ -539,7 +539,8 @@ function translateInterface() {
     ["settings-stt-language-auto", "Auto-detect"],
     ["settings-tab-general-text", "General"], ["settings-tab-models-text", "Models"],
     ["settings-tab-chats-text", "Chats & memory"], ["settings-tab-telegram-text", "Telegram"],
-    ["settings-tab-connections-text", "Connections"],
+    ["settings-tab-connections-text", "Connections"], ["settings-tab-providers-text", "Providers"], ["providers-title", "Providers"], ["openrouter-key-title", "OpenRouter"], ["openrouter-key-label", "API key"],
+    ["openrouter-key-save", "Save key"], ["openrouter-key-remove", "Remove key"],
     ["model-zdr-text", "ZDR only (OpenRouter)"],
     ["agent-label", "Agent"], ["chat-model-label", "Chat model"], ["chat-effort-text", "Reasoning effort"],
     ["model-inherit", "Use user default"],
@@ -656,6 +657,8 @@ function translateInterface() {
     ["connections-title", "Connections"],
     ["connections-note", "Connect your own account for each service your agents can use. Every user connects separately."],
     ["connections-browser-note", "Sign-in opens in a browser on the computer running RECALL."],
+    ["claude-login-title", "Claude subscription"], ["claude-login-step-note", "Open the link, sign in to Claude, then paste the code it shows."],
+    ["claude-login-link", "Open Claude sign-in"], ["claude-login-send", "Send code"], ["claude-login-cancel", "Cancel"],
   ]) $(id).textContent = tr(text);
   $("settings-nav").setAttribute("aria-label", tr("Settings sections"));
   renderAgentsEmpty();
@@ -735,7 +738,7 @@ function httpError(body, status) {
 }
 
 // Title, hint and optional action for an error `code`; null when the code is unknown (the plain message is shown).
-// Actions: create-agent, choose-model, new-chat, open-settings; `command` is shown as text, never run.
+// Actions: create-agent, choose-model, new-chat, open-settings, open-providers; `command` is shown as text, never run.
 function errorInfo(code) {
   const chooseModel = { action: "choose-model", label: tr("Choose another model") };
   switch (code) {
@@ -756,8 +759,8 @@ function errorInfo(code) {
         hint: tr("Ask the administrator to set up your own Claude login folder, or use another model."), ...chooseModel };
     case "claude_not_logged_in":
       return { title: tr("Claude Code is not logged in"),
-        hint: tr("Run this command on the computer running RECALL, then send your message again:"),
-        command: "claude auth login", ...chooseModel };
+        hint: tr("Sign in again in Settings, Providers, then send your message again."),
+        action: "open-providers", label: tr("Open Settings") };
     case "provider_unavailable":
       return { title: tr("The model's provider is not available"),
         hint: tr("Check the provider's status in the model picker, or use another model."), ...chooseModel };
@@ -2477,21 +2480,25 @@ function updateSettingsUi() {
 }
 
 function showSettingsSection(name) {
-  const users = name === "users" && isAdministrator(state.user);  // the Users section is outside the settings form, like Connections
-  const view = settingsSectionView(users ? "connections" : name);
+  const users = name === "users" && isAdministrator(state.user);  // Users and Providers sit outside the settings form, like Connections
+  const providers = name === "providers";
+  const outside = users || providers;
+  const view = settingsSectionView(outside ? "connections" : name);
   for (const tab of $("settings-nav").querySelectorAll("button")) {
-    tab.setAttribute("aria-pressed", String(users ? tab.dataset.section === "users" : view[tab.dataset.section]?.pressed === true));
+    tab.setAttribute("aria-pressed", String(outside ? tab.dataset.section === (users ? "users" : "providers") : view[tab.dataset.section]?.pressed === true));
   }
   for (const section of Object.keys(view)) {
     if (section === "connections") continue;
     $(`settings-section-${section}`).hidden = view[section].hidden;
   }
   $("users-admin").hidden = !users;
-  if (users) {
+  $("providers-section").hidden = !providers;
+  if (outside) {
     $("settings-form").hidden = true;
     $("connections").hidden = true;
     stopConnectionsPoll();
-    loadUsersAdmin();
+    if (users) loadUsersAdmin();
+    else { loadClaudeLogin(); loadOpenRouterKey(); }
     return;
   }
   $("settings-form").hidden = !view.connections.hidden;
@@ -2806,6 +2813,126 @@ function favoritesOf(provider) {
 }
 
 // ------------------------------------------------------------------ mcp connections
+
+// ---- OpenRouter key (Settings, Providers): the key goes to the server and is never shown again
+function renderOpenRouterKey(report, error = "") {
+  const box = $("openrouter-key");
+  box.hidden = !report;
+  $("openrouter-key-error").textContent = error;
+  if (!report) return;
+  $("openrouter-key-state").textContent = !report.configured ? tr("No key set")
+    : report.own ? tr("Your own key is set") : tr("A key shared through the server is in use");
+  $("openrouter-key-remove").hidden = !report.own;
+}
+async function loadOpenRouterKey(error = "") {
+  const session = state.session;
+  try {
+    const report = await api("/api/openrouter/key", { cache: "no-store" });
+    if (session === state.session) renderOpenRouterKey(report, error);
+  } catch {
+    if (session === state.session) renderOpenRouterKey(null);
+  }
+}
+$("openrouter-key-save").addEventListener("click", async () => {
+  const key = $("openrouter-key-input").value.trim();
+  if (!key) return;
+  $("openrouter-key-save").disabled = true;
+  let error = "";
+  try {
+    await api("/api/openrouter/key", { method: "PUT", body: JSON.stringify({ key }) });
+  } catch (err) {
+    error = err.message;
+  } finally {
+    $("openrouter-key-save").disabled = false;
+  }
+  if (!error) $("openrouter-key-input").value = "";
+  await loadOpenRouterKey(error);
+});
+$("openrouter-key-remove").addEventListener("click", async () => {
+  let error = "";
+  try { await api("/api/openrouter/key", { method: "DELETE" }); } catch (err) { error = err.message; }
+  await loadOpenRouterKey(error);
+});
+$("openrouter-key-input").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") { event.preventDefault(); $("openrouter-key-save").click(); }
+});
+// ---- end OpenRouter key
+
+// ---- Claude subscription sign-in (Settings, Connections)
+let claudeLoginBusy = false;
+function claudeLoginMessage(err) {
+  return err?.message || tr("Claude Code login unknown");
+}
+function renderClaudeLogin(report, error = "") {
+  const box = $("claude-login");
+  box.hidden = !report?.available;
+  $("claude-login-error").textContent = error;
+  if (!report?.available) return;
+  const step = !$("claude-login-step").hidden;
+  let text = tr("Claude Code login unknown");
+  if (report.logged_in === true) text = report.subscription ? tr("Connected ({plan})", { plan: report.subscription }) : tr("Connected");
+  else if (report.logged_in === false) text = tr("Not signed in");
+  $("claude-login-state").textContent = text;
+  $("claude-login-start").textContent = report.logged_in ? tr("Sign in again") : tr("Sign in");
+  $("claude-login-start").disabled = claudeLoginBusy || !report.cli_found;
+  $("claude-login-actions").hidden = step;
+}
+async function loadClaudeLogin(error = "") {
+  const session = state.session;
+  try {
+    const report = await api("/api/claude/login", { cache: "no-store" });
+    if (session === state.session) renderClaudeLogin(report, error);
+  } catch {
+    if (session === state.session) renderClaudeLogin(null);
+  }
+}
+function closeClaudeLoginStep() {
+  $("claude-login-step").hidden = true;
+  $("claude-login-code").value = "";
+  $("claude-login-link").removeAttribute("href");
+}
+$("claude-login-start").addEventListener("click", async () => {
+  claudeLoginBusy = true;
+  $("claude-login-start").disabled = true;
+  $("claude-login-error").textContent = "";
+  try {
+    const { url } = await api("/api/claude/login/start", { method: "POST" });
+    $("claude-login-link").href = url;
+    $("claude-login-step").hidden = false;
+    $("claude-login-actions").hidden = true;
+    $("claude-login-code").focus();
+  } catch (err) {
+    $("claude-login-error").textContent = claudeLoginMessage(err);
+  } finally {
+    claudeLoginBusy = false;
+    $("claude-login-start").disabled = false;
+  }
+});
+$("claude-login-send").addEventListener("click", async () => {
+  const code = $("claude-login-code").value.trim();
+  if (!code) return;
+  $("claude-login-send").disabled = true;
+  let error = "";
+  try {
+    await api("/api/claude/login/code", { method: "POST", body: JSON.stringify({ code }) });
+  } catch (err) {
+    error = claudeLoginMessage(err);
+  } finally {
+    $("claude-login-send").disabled = false;
+  }
+  closeClaudeLoginStep();
+  await loadClaudeLogin(error);
+  if (!error) { refreshClaudeUsage() }
+});
+$("claude-login-cancel").addEventListener("click", async () => {
+  closeClaudeLoginStep();
+  try { await api("/api/claude/login/start", { method: "DELETE" }); } catch { /* nothing waits any more */ }
+  loadClaudeLogin();
+});
+$("claude-login-code").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") { event.preventDefault(); $("claude-login-send").click(); }
+});
+// ---- end Claude subscription sign-in
 
 async function loadConnections() {
   const session = state.session;
@@ -6357,6 +6484,9 @@ async function runErrorAction(action) {
     await newChat();
   } else if (action === "open-settings") {
     $("settings-open").click();
+  } else if (action === "open-providers") {
+    $("settings-open").click();
+    showSettingsSection("providers");
   }
 }
 

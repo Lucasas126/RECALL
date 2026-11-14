@@ -95,6 +95,14 @@ class AutomationEditIn(BaseModel):
     trigger: Optional[AutomationTriggerIn] = None
 
 
+class OpenRouterKeyIn(BaseModel):
+    key: str = Field(max_length=600)
+
+
+class ClaudeLoginCode(BaseModel):
+    code: str = Field(max_length=600)
+
+
 class ModelIn(BaseModel):
     model_id: FavoriteModelId
     zdr: bool | None = Field(default=None, strict=True)  # None follows the user's policy
@@ -657,6 +665,34 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     @app.post("/api/agents/{agent_id}/chats/{chat_id}/read")
     def mark_chat_read(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):
         return service.mark_chat_read(user_id, agent_id, chat_id)
+
+    @app.get("/api/openrouter/key")
+    def openrouter_key_status(user_id: str = Depends(current_user)):
+        return service.openrouter_key_status(user_id)
+
+    @app.put("/api/openrouter/key")
+    def openrouter_key_save(body: OpenRouterKeyIn, user_id: str = Depends(current_user)):
+        return service.openrouter_key_save(user_id, body.key)
+
+    @app.delete("/api/openrouter/key")
+    def openrouter_key_remove(user_id: str = Depends(current_user)):
+        return service.openrouter_key_remove(user_id)
+
+    @app.get("/api/claude/login")
+    def claude_login_status(user_id: str = Depends(current_user)):
+        return service.claude_login_status(user_id)
+
+    @app.post("/api/claude/login/start")
+    def claude_login_start(user_id: str = Depends(current_user)):
+        return service.claude_login_start(user_id)
+
+    @app.post("/api/claude/login/code")
+    def claude_login_code(body: ClaudeLoginCode, user_id: str = Depends(current_user)):
+        return service.claude_login_code(user_id, body.code)
+
+    @app.delete("/api/claude/login/start")
+    def claude_login_cancel(user_id: str = Depends(current_user)):
+        return service.claude_login_cancel(user_id)
 
     @app.get("/api/claude/usage")
     def claude_usage(user_id: str = Depends(current_user)):
