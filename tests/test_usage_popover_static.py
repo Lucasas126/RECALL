@@ -26,6 +26,11 @@ class UsagePopoverTests(unittest.TestCase):
         self.assertIn('event.key === "Escape"', JS)
         self.assertIn('setClaudeUsageOpen($("claude-usage-body").hidden)', JS)
 
+    def test_dots_button_keeps_one_line_height_on_touch_screens(self) -> None:
+        # the touch rule gives every button min-height 44px; the dots must opt out and keep their tap area with borders
+        self.assertRegex(CSS, r"#claude-usage-toggle \{ display: flex; min-height: 0; min-width: 0;")
+        self.assertRegex(CSS, r"@media \(pointer: coarse\) \{ #claude-usage-toggle \{ min-height: 0;[^}]*margin: -6px 0;")
+
     def test_old_folded_state_is_gone(self) -> None:
         self.assertNotIn("usage-chevron", CSS + HTML)
         self.assertNotIn('localStorage.setItem("claude-usage-open"', JS)
