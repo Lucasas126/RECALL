@@ -8156,7 +8156,7 @@ function renderClaudeUsage(report) {
   const box = $("claude-usage");
   const windows = report?.available ? report.windows : [];
   box.hidden = !windows.length;
-  if (!windows.length) return;
+  if (!windows.length) return setClaudeUsageOpen(false);
   const body = $("claude-usage-body");
   body.replaceChildren();
   for (const dot of box.querySelectorAll(".usage-dot")) dot.dataset.level = "";
@@ -8187,22 +8187,19 @@ async function refreshClaudeUsage() {
     renderClaudeUsage(null);
   }
 }
-// collapsed: the dots button opens it; open: the text itself is the toggle (no separate button column)
+// the dots open a floating panel above them; a click outside, Escape or the dots again close it
 function setClaudeUsageOpen(open) {
   $("claude-usage-body").hidden = !open;
-  $("claude-usage-toggle").hidden = open;
   $("claude-usage-toggle").setAttribute("aria-expanded", String(open));
-  $("claude-usage-body").setAttribute("aria-expanded", String(open));
-  try { localStorage.setItem("claude-usage-open", open ? "1" : "0"); } catch { /* storage may be blocked */ }
 }
-$("claude-usage-toggle").addEventListener("click", () => setClaudeUsageOpen(true));
-$("claude-usage-body").addEventListener("click", () => setClaudeUsageOpen(false));
-$("claude-usage-body").addEventListener("keydown", (event) => {
-  if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setClaudeUsageOpen(false); }
+$("claude-usage-toggle").addEventListener("click", () => setClaudeUsageOpen($("claude-usage-body").hidden));
+document.addEventListener("pointerdown", (event) => {
+  if (!$("claude-usage-body").hidden && !$("claude-usage").contains(event.target)) setClaudeUsageOpen(false);
 });
-try {
-  if (localStorage.getItem("claude-usage-open") === "1") setClaudeUsageOpen(true);
-} catch { /* storage may be blocked */ }
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !$("claude-usage-body").hidden) { setClaudeUsageOpen(false); $("claude-usage-toggle").focus(); }
+});
+try { localStorage.removeItem("claude-usage-open"); } catch { /* storage may be blocked */ }
 usageTimer = setInterval(() => { if (!document.hidden) refreshClaudeUsage(); }, USAGE_REFRESH_MS);
 
 // the chat list shows which chats are working, waiting for an approval or have an unread answer: keep it current

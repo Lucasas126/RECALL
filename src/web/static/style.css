@@ -438,7 +438,9 @@ details.msg.task-wake { align-self: flex-start; padding: 6px 12px; border-style:
   .task-card > summary { flex-wrap: wrap; white-space: normal; }
   .task-steer-form { flex-direction: column; }
 }
-#usage { padding: 1px var(--gutter); color: var(--muted); font: 12px/1.3 var(--mono); }
+#usage { flex: 1; min-width: 0; padding: 1px 0; color: var(--muted); font: 12px/1.3 var(--mono); }
+#under-composer { display: flex; align-items: flex-start; gap: 6px; margin: 0 var(--gutter); padding-bottom: calc(4px + env(safe-area-inset-bottom)); }
+#under-composer:not(:has(> :not([hidden]))) { display: none; }
 #processes { margin: 0 var(--gutter) 6px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 5px; background: var(--raised); color: var(--muted); font-size: 13px; }
 #processes summary { cursor: pointer; }
 #processes summary::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: var(--accent); animation: mic-pulse 1.4s ease-in-out infinite; }
@@ -656,8 +658,7 @@ details.thinking { border-left: 2px solid var(--line); padding-left: 10px; displ
 
 /* Composer: one card with the input and the chat options as compact chips */
 #composer-row { display: flex; align-items: stretch; min-width: 0; margin: 0 var(--gutter) calc(14px + env(safe-area-inset-bottom)); gap: 6px; }
-#composer-row:has(+ #usage:not([hidden])) { margin-bottom: 2px; }   /* the debug strip sits right under the box */
-#usage:not([hidden]) { padding-bottom: calc(4px + env(safe-area-inset-bottom)); }
+#composer-row:has(+ #under-composer > :not([hidden])) { margin-bottom: 2px; }   /* the strip with the debug usage and the Claude dots sits right under the box */
 #composer { flex: 1; min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; grid-template-areas: "pend pend pend pend pend" "attach input controls mic send"; align-items: end; gap: 0 4px; margin: 0; padding: 4px 6px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--bg); box-shadow: 0 1px 3px #0000001f; }
 #composer:focus-within { border-color: var(--accent); }
 #composer:has(#input:focus-visible) { box-shadow: 0 0 0 1px var(--accent); }   /* one 2px ring in total with the border */
@@ -1018,30 +1019,26 @@ html.resizing-sidebar #app { transition: none; }
 #agent-level-message:empty { display: none; }
 
 
-/* Claude plan usage: a strip to the right of the composer; folded it shows one dot per window, unfolded the bars */
-#claude-usage { flex: none; display: flex; flex-direction: row; align-items: stretch; gap: 0; padding: 0; overflow: visible; min-height: 0; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--bg); color: var(--muted); font: 12px/1.3 var(--mono); }
+/* Claude plan usage: two dots at the right end of the row under the composer; they open a floating panel above them (it covers the chat, it never pushes it) */
+#claude-usage { position: relative; flex: none; margin-left: auto; color: var(--muted); font: 12px/1.3 var(--mono); }
 #claude-usage[hidden] { display: none; }
-#claude-usage-toggle { display: flex; flex-direction: row; align-items: center; justify-content: center; align-self: stretch; gap: 0; padding: 0 10px; margin: 0; border: 0; background: transparent; color: inherit; cursor: pointer; border-radius: 5px; }
-#claude-usage-toggle:hover { background: var(--raised); color: var(--text); }
+#claude-usage-toggle { display: flex; align-items: center; padding: 3px 8px; margin: 0; border: 0; border-radius: 5px; background: transparent; color: inherit; cursor: pointer; }
+#claude-usage-toggle:hover, #claude-usage-toggle[aria-expanded="true"] { background: var(--raised); color: var(--text); }
 #claude-usage-dots { display: flex; flex-direction: row; gap: 5px; }
-#claude-usage-toggle[hidden] { display: none; }
 .usage-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); opacity: .5; }
 .usage-dot[data-level="ok"] { background: var(--ok); opacity: 1; }
 .usage-dot[data-level="warn"] { background: #e0b341; opacity: 1; }
 .usage-dot[data-level="high"] { background: #e07a3f; opacity: 1; }
 .usage-dot[data-level="crit"] { background: #d9534f; opacity: 1; }
-.usage-chevron { display: none; }  /* the dots alone sit centred; the whole strip is the toggle */
-#claude-usage-toggle[aria-expanded="true"] .usage-chevron { transform: rotate(180deg); }
-#claude-usage-body { display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 3px 8px; min-width: 150px; text-align: center; cursor: pointer; }
+#claude-usage-body { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 30; display: flex; flex-direction: column; gap: 8px; width: 210px; max-width: calc(100vw - 2 * var(--gutter)); padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--raised); box-shadow: 0 6px 24px rgba(0, 0, 0, .35);  overflow: visible; }
 #claude-usage-body[hidden] { display: none; }
-.usage-row .usage-head { display: flex; justify-content: center; align-items: baseline; gap: 8px; color: var(--text); }
+.usage-row .usage-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; color: var(--text); }
 .usage-row .usage-reset { color: var(--muted); font-size: 11px; }
-.usage-bar { height: 4px; margin: 2px 0 0; border-radius: 3px; background: var(--shade); overflow: hidden; }
+.usage-bar { height: 4px; margin: 4px 0 0; border-radius: 3px; background: var(--shade); overflow: hidden; }
 .usage-bar > span { display: block; height: 100%; width: 0; border-radius: 3px; background: var(--ok); }
 .usage-bar > span[data-level="warn"] { background: #e0b341; }
 .usage-bar > span[data-level="high"] { background: #e07a3f; }
 .usage-bar > span[data-level="crit"] { background: #d9534f; }
-@media (max-width: 640px) { #claude-usage-body { min-width: 110px; } }
 
 /* Agent editor: section list on the left (like the settings dialog), content scrolls on its own, actions are a footer of the
    layout instead of floating over the text. Nothing in the editor is sticky or overlaps. */
