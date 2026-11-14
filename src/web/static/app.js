@@ -4691,10 +4691,17 @@ function taskTrayRows(records, agentId, chatId, nowMs) {
     }));
 }
 
-// Keep polling while a task of the chat runs or its result is still on the way to the parent.
-function tasksNeedPolling(response) {
+// Keep polling while a task of the chat runs or its result is still on the way to the parent, or (`expectWakeUntil`,
+// ms) while the wake of a background process that just ended may still start.
+function tasksNeedPolling(response, expectWakeUntil = 0, nowMs = Date.now()) {
   const tasks = response?.tasks ?? [];
-  return tasks.some((task) => !taskIsFinal(task.status)) || Boolean(response?.pending_wake);
+  return tasks.some((task) => !taskIsFinal(task.status)) || Boolean(response?.pending_wake) || nowMs < expectWakeUntil;
+}
+
+// The ids of the previous process list that are not in the new one: processes that just finished.
+function finishedProcessIds(previous, current) {
+  const now = new Set(current ?? []);
+  return (previous ?? []).filter((id) => !now.has(id));
 }
 
 // A wake reply started in the open chat without a request of this page: attach to it (never when one is attached).
@@ -4984,8 +4991,10 @@ function renderTaskTray() {
   const signature = JSON.stringify(rows.map((row) => row.id));
   if (signature === taskTray.shown) {  // same list: only the clocks change, so a half-typed steer is kept
     for (const row of rows) {
-      const node = box.querySelector(`[data-task-id="${CSS.escape(row.id)}"] .task-tray-time`);
-      if (node) node.textContent = row.elapsed;
+      const item = box.querySelector(`[data-task-id="${CSS.escape(row.id)}"]`);
+      if (!item) continue;
+      item.querySelector(".task-tray-time").textContent = row.elapsed;
+      item.querySelector(".task-open").hidden = !row.canOpenChat;  // the worker chat appears a moment after the task starts
     }
     return;
   }
@@ -5033,7 +5042,9 @@ setInterval(() => { if (!document.hidden && !$("tasks-tray").hidden) renderTaskT
 
 // ---- background processes of the open chat: a collapsible line above the message box, each with Stop
 const PROCESS_POLL_MS = 3000;
-const processPanel = { timer: null, key: null, shown: "" };
+const processPanel = { timer: null, key: null, shown: "", ids: [] };
+const WAKE_GRACE_MS = 60000;  // after a process ends, the server needs a moment to start its wake reply
+let expectWakeUntil = 0;
 
 function processElapsed(started) {
   const seconds = Math.max(0, Math.floor(Date.now() / 1000 - started));
@@ -5080,7 +5091,14 @@ async function pollProcesses() {
   if (!state.user || !agentId || !chatId || document.hidden) return;
   try {
     const data = await api(`/api/agents/${encodeURIComponent(agentId)}/chats/${encodeURIComponent(chatId)}/processes`);
-    if (session === state.session && agentId === state.agentId && chatId === state.chatId) renderProcesses(data.processes);
+    if (session === state.session && agentId === state.agentId && chatId === state.chatId) {
+      renderProcesses(data.processes);
+      const ids = data.processes.map((p) => p.id);
+      const ended = finishedProcessIds(processPanel.ids, ids).length > 0;
+      processPanel.ids = ids;
+      if (ended) expectWakeUntil = Date.now() + WAKE_GRACE_MS;  // its wake reply is on the way: let the task poll find it
+      if (ended || ids.length) ensureTaskPolling();
+    }
   } catch {
     // the panel is a convenience: a failed poll keeps the last list
   }
@@ -5091,6 +5109,8 @@ function startProcessPolling() {
   if (key !== processPanel.key) {  // another chat: start from an empty panel
     processPanel.key = key;
     processPanel.shown = "";
+    processPanel.ids = [];
+    expectWakeUntil = 0;
     $("processes").hidden = true;
     $("processes").removeAttribute("open");
   }
@@ -5098,6 +5118,13 @@ function startProcessPolling() {
   pollProcesses();
   if (!processPanel.timer) processPanel.timer = setInterval(pollProcesses, PROCESS_POLL_MS);
 }
+
+// A tab that was hidden has throttled timers: look again at once when it comes back.
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden || !state.user) return;
+  pollProcesses();
+  ensureTaskPolling();
+});
 
 function ensureTaskPolling() {
   if (!state.user) return;
@@ -5124,7 +5151,7 @@ async function taskPoll() {
         refreshTaskCards();
         // a worker with a terminal grant asks its approvals in this chat: list them so the cards appear (and close)
         if (data.tasks.some((task) => !taskIsFinal(task.status) && (task.backends?.length || task.awaiting_approval))) syncApprovals(agentId, chatId);
-        again = tasksNeedPolling(data) || (data.tasks.length > 0 && data.active);
+        again = tasksNeedPolling(data, expectWakeUntil) || (data.tasks.length > 0 && data.active);
         if (!wakeAttaching && shouldAttachWake({ active: data.active, generating: isGenerating(agentId, chatId), current })) {
           await attachWake(agentId, chatId);
         }
@@ -5903,6 +5930,7 @@ function updateApprovalIndicator() {
   const pending = [...approvalEntries.values()].filter((entry) => approvalActive(entry.state)
     && entry.data.agent_id === state.agentId && entry.data.chat_id === state.chatId && entry.nodes?.card.isConnected);
   let bar = document.getElementById("approval-pending");
+  watchApprovalCards(pending.map((entry) => entry.nodes.card));
   if (!pending.length) {
     if (bar) bar.hidden = true;
     return;
@@ -5918,9 +5946,29 @@ function updateApprovalIndicator() {
     });
     $("messages-wrap").after(bar);
   }
-  bar.hidden = false;
+  bar.hidden = pending.every((entry) => approvalCardsSeen.has(entry.nodes.card));  // nothing to jump to when it is already on screen
   const label = approvalPendingLabel(pending.length);
   if (bar.textContent !== label) bar.textContent = label;
+}
+
+// Which pending approval cards are inside the visible part of the chat (so the jump bar is only shown for hidden ones).
+const approvalCardsSeen = new Set();
+let approvalCardsObserver = null;
+let approvalCardsWatched = new Set();
+
+function watchApprovalCards(cards) {
+  if (typeof IntersectionObserver === "undefined") return;
+  approvalCardsObserver ??= new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (entry.isIntersecting) approvalCardsSeen.add(entry.target);
+      else approvalCardsSeen.delete(entry.target);
+    }
+    updateApprovalIndicator();
+  }, { root: $("messages"), threshold: 0.3 });
+  const next = new Set(cards);
+  for (const card of approvalCardsWatched) if (!next.has(card)) { approvalCardsObserver.unobserve(card); approvalCardsSeen.delete(card); }
+  for (const card of next) if (!approvalCardsWatched.has(card)) approvalCardsObserver.observe(card);
+  approvalCardsWatched = next;
 }
 
 // Loads a chat's pending approvals: draws the missing cards (current chat only) and settles cards the server no longer lists.

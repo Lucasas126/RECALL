@@ -9,7 +9,7 @@ const source = readFileSync(path.join(__dirname, "..", "src", "web", "static", "
 const code = source.slice(source.indexOf("// ---- task cards: pure helpers"), source.indexOf("// ---- end task cards"));
 const context = vm.createContext({});
 vm.runInContext(
-  `${code}\nObject.assign(this, { taskStatusLabel, formatElapsed, taskElapsed, taskActionId, isTaskStartAction, taskCardState, isWakeMessage, wakeBubbleState, tasksNeedPolling, shouldAttachWake });`,
+  `${code}\nObject.assign(this, { taskStatusLabel, formatElapsed, taskElapsed, taskActionId, isTaskStartAction, taskCardState, isWakeMessage, wakeBubbleState, tasksNeedPolling, finishedProcessIds, shouldAttachWake });`,
   context,
 );
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -110,6 +110,10 @@ test("polling continues while a task runs or a wake is pending, and stops otherw
   assert.equal(context.tasksNeedPolling({ tasks: [{ status: "done" }], pending_wake: true }), true);
   assert.equal(context.tasksNeedPolling({ tasks: [{ status: "done" }, { status: "failed" }], pending_wake: false }), false);
   assert.equal(context.tasksNeedPolling({ tasks: [] }), false);
+  // grace window after a background process ended: its wake reply may still start
+  assert.equal(context.tasksNeedPolling({ tasks: [] }, 2000, 1000), true);
+  assert.equal(context.tasksNeedPolling({ tasks: [] }, 2000, 2000), false);
+  assert.equal(context.tasksNeedPolling({ tasks: [] }, 0, 1000), false);
 });
 
 test("a wake reply is attached to only when the chat is generating and this page follows nothing", () => {
@@ -119,3 +123,9 @@ test("a wake reply is attached to only when the chat is generating and this page
   assert.equal(context.shouldAttachWake({ active: true, generating: false, current: false }), false);
 });
 
+
+test("finishedProcessIds lists the processes gone from the list", () => {
+  assert.deepEqual(Array.from(context.finishedProcessIds(["a", "b"], ["b", "c"])), ["a"]);
+  assert.deepEqual(Array.from(context.finishedProcessIds([], ["a"])), []);
+  assert.deepEqual(Array.from(context.finishedProcessIds(undefined, undefined)), []);
+});
