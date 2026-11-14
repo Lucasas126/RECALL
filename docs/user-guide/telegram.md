@@ -73,6 +73,12 @@ one follows. A tap after that answers "This option expired.". The pending
 message, including downloaded attachments, is kept in memory only during the
 wait.
 
+An empty chat is deleted when the chat list is refreshed (for example by the web
+UI open in a browser), which can happen between creating a chat and sending the
+first message. If the bot finds its chat gone when it sends a message, it creates
+a new chat with the same agent (your saved preferences stay as they are) and
+sends the message there, so you do not see an error.
+
 ### Telegram orchestrator (automatic agent choice)
 
 When the orchestrator is on, a message that starts a **new chat** (the first ever, or after the idle time) is sent

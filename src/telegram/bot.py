@@ -43,7 +43,7 @@ from src.config.settings import ORCHESTRATOR, TELEGRAM_ALLOWED_USERS_ENV, TELEGR
 from src.providers.catalog import CatalogUnavailable
 from src.providers.ollama import is_ollama_cloud
 from src.providers.telegram_notify import parse_allowed_users
-from src.service.chat import ChatEvent, ChatService, RouteDecision, ServiceError
+from src.service.chat import ChatEvent, ChatService, RouteDecision, ServiceError, UnknownChat
 from src.utils.logger import get_logger
 from src.terminal.approvals import ApprovalForbidden
 from src.utils.i18n import InputError, UserMessageError, error_message, message
@@ -1918,6 +1918,14 @@ def _agent_name(service: ChatService, user_id: str, agent_id: str) -> str:
         return agent_id
 
 
+def _release_busy(state: "TelegramBotState", key: tuple[str, str, str]) -> None:
+    left = state.busy.get(key, 1) - 1
+    if left > 0:
+        state.busy[key] = left
+    else:
+        state.busy.pop(key, None)
+
+
 async def _send_generation(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -1944,11 +1952,28 @@ async def _send_generation(
         language = preferences["language"]
         agent_name = _agent_name(state.service, user_id, agent_id)
         # Sending may transcribe audio first; keep that blocking work off the event loop.
-        events = await asyncio.to_thread(
-            state.service.send,
-            user_id, agent_id, chat_id, text,
-            stream=True, attachments=attachments, channel="telegram",
-        )
+        try:
+            events = await asyncio.to_thread(
+                state.service.send,
+                user_id, agent_id, chat_id, text,
+                stream=True, attachments=attachments, channel="telegram",
+            )
+        except UnknownChat:
+            # the empty chat was pruned before its first message (e.g. by a chat listing): start a fresh one
+            logger.warning("Telegram chat %s no longer exists; answering in a new chat", chat_id)
+            created = await asyncio.to_thread(state.service.create_chat, user_id, agent_id, origin="telegram")
+            session.chat_id = created["id"]  # same agent, the saved preference stays as it is
+            state.reply_hosts.pop((chat.id, user_id, agent_id, chat_id), None)
+            _release_busy(state, busy_key)
+            chat_id = created["id"]
+            busy_key = (user_id, agent_id, chat_id)
+            state.busy[busy_key] = 1
+            stream.attach(state, (chat.id, user_id, agent_id, chat_id), content)
+            events = await asyncio.to_thread(
+                state.service.send,
+                user_id, agent_id, chat_id, text,
+                stream=True, attachments=attachments, channel="telegram",
+            )
         while True:
             has_event, event = await _next_event(events)
             if not has_event:
@@ -2001,11 +2026,7 @@ async def _send_generation(
             message(language, "Generation failed: {error}", error=error_message(language, exc)), [],
         )])
     finally:
-        left = state.busy.get(busy_key, 1) - 1
-        if left > 0:
-            state.busy[busy_key] = left
-        else:
-            state.busy.pop(busy_key, None)
+        _release_busy(state, busy_key)
 
 
 # ---------------------------------------------------------------------------------------------- subagent tasks
