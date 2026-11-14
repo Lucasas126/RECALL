@@ -3024,11 +3024,28 @@ async function refreshChats() {
         li.append(rename);
       }
       li.append(del);
-      li.addEventListener("click", () => openChatFromList(chat));
+      li.addEventListener("click", async () => {
+        if (state.modelBusy || state.settingsBusy) return;
+        highlightChat(chat.agent_id, chat.id);  // at once: the list is redrawn only after the chat and a second request
+        try {
+          await openChatFromList(chat);
+        } catch (err) {
+          highlightChat(state.agentId, state.chatId);  // it did not open: the list goes back to the chat that is
+          throw err;
+        }
+      });
       items.push(li);
       return items;
     })
   );
+}
+
+// Marks one chat of the sidebar as the open one without redrawing the list (a click shows at once, before the chat loads).
+function highlightChat(agentId, chatId) {
+  for (const li of $("chat-list").children) {
+    const del = li.querySelector(".del");
+    if (del) li.classList.toggle("active", del.dataset.agent === agentId && del.dataset.chat === chatId);
+  }
 }
 
 // the date group a chat belongs to in the sidebar, from the day of its last activity (local time)
