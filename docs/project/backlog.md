@@ -33,6 +33,12 @@ One list of ideas and planned work, with what is already done kept separate. Imp
 - **Image and graph generation** (possibly through an MCP server). PDF creation is [done](#done) (`make_pdf`); still open for PDFs: designed documents with covers and photos, form filling and OCR of scans on the way in.
 - **Remote MCP servers** (streamable HTTP); Node.js and the Google Calendar sign-in in the Docker image ([MCP](../user-guide/mcp.md#runtime-behavior)).
 
+### web and tests
+
+- **Chat loading, next steps**: gzip for the JSON answers; keep files the agent sent (`media[].data_url`, base64) out of the chat payload and serve them by URL (a 28-message chat weighs 1.3 MB, 870 KB of it files); fewer requests per chat switch (`/api/chats`, approvals, tasks and processes are still separate calls, and the chat list is also polled); lighter bubbles for tool steps and reasoning, since the cost left in a long chat is the number of DOM nodes.
+- **Node tests**: `tests/test_model_sorting.cjs` fails on a clean checkout (its page stub lacks `matchMedia`, `window`, `MutationObserver`, `location` and more, each one added reveals the next; a generic stub or a real DOM such as jsdom would end that), and the Python suite does not run the `.cjs` files, so failures there go unnoticed; wire them into the check run before a release.
+- **PDF follow-ups**: designed documents (covers, photos) as a skill, a way to merge, split or fill PDF forms, an end-to-end check with a real model (does `make_pdf` look good, does a model receive the `view_image` picture; Ollama is unchecked), and `view_image` for formats Pillow cannot read.
+
 ### usage and data
 
 - **Cost control**: spend per user, agent and day (building on `src/agent/usage.py`), shown in the web UI, optional monthly caps and a separate cap for dreams.
