@@ -106,6 +106,10 @@ names the variables (never their values). Remove them to use the login.
    `docker compose exec -it recall-web sh -c 'CLAUDE_CONFIG_DIR=/app/.config/<user_id>/claude-login claude auth login'`
    and `claude_config_dir: /app/.config/<user_id>/claude-login`. See
    [deployment](../deployment/docker.md#claude-subscription-logins).
+   **From the web**: once the folder exists in `claude_config_dir`, each user can sign in or renew an expired login in
+   Settings, **Providers**, **Claude subscription**: *Sign in* gives a link, open it, sign in to Claude and paste the
+   code it shows. The status there is read with `claude auth status`; the login always uses the user's own folder, one
+   sign-in at a time, and it is dropped after 5 minutes without a code. The link and the code are never logged.
 3. Pick Claude in the model picker: its **Claude subscription** tab becomes
    selectable once `claude` is found and logged in (see
    [providers](models-and-providers.md#providers)); until then the tab is disabled and says why.

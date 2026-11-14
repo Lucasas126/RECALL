@@ -41,6 +41,7 @@ approval/sandbox split, Meta's *Agents Rule of Two*, OWASP LLM06 (excessive agen
 | `automations`: schedule things for later for the owner | no | no | yes | yes | yes | yes |
 | `permissions`: view and adjust levels and rules of the same user's agents, up to the user's `max_level` | no | no | no | no | yes | yes |
 | `agents`: list, create, edit, rename and delete the same user's agents (never their level, groups or rules) | no | no | no | no | yes | yes |
+| `secrets`: list the NAMES in `secrets.env` and copy, rename or delete variables, never seeing a value | no | no | no | no | no | yes |
 | act on other users' agents, data and settings; admin CLI | no | no | no | no | no | yes |
 | dreams / unattended runs | no | read only | see [dream table](#dream-mode) | see table | see table | see table |
 
@@ -372,3 +373,9 @@ them, the dream toolset does not use them) and the individually chosen tools of 
 | 8 (done) | `agents` tool group and the guide template rebased on it ([implemented](#implemented-step-8-the-agents-tool-group); `tests/test_agents_tool*.py`). |
 | 6 (done) | Web UI and admin CLI: level selector capped by `max_level`, rule editor, admin screen; see [implemented](#implemented-step-6-web-ui-and-admin-screen). |
 | 7 (done) | Final documentation and the remaining-gaps list (this page, the [security notes](../deployment/security.md#permission-levels) and the [backlog](../project/backlog.md#permission-level-follow-ups)). |
+
+### Implemented: the `secrets` tool group
+
+- **Why.** The `local` terminal refuses `secrets.env` to every agent (`src/terminal/protected.py`), so a prompt injection cannot read a key. An admin still needs to reorganise keys (give a user a variable of their own, rename one). The group does it without lifting that rule.
+- **Group.** `secrets`, minimum level `admin`; opt-in. Tools: `secret_list` (names and whether each has a value), `secret_copy`, `secret_rename` (refuses to overwrite) and `secret_delete`. No tool takes, returns or logs a value, and a value is never in a card, a result or the audit line (names only). New values stay with the user (`set-secret`, or Settings, Providers).
+- **Approval.** Every change shows a card with *Approve once* and *Deny*; no wider scope applies. An unwritable audit file stops the change. Not built in dreams, scheduled tasks or workers, and never inherited by a worker.

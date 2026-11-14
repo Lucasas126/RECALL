@@ -84,7 +84,7 @@ content is data) plus the user's approval of every command. Risks to weigh: prom
 the agent run something harmful or read secrets; an approval clicked without reading; data leaving through the open network.
 Mitigations: keep `approvals: manual` (the default) and read each card; give such an agent only to a user you trust with the
 whole installation; run a dedicated container (or a separate RECALL deployment) with only that user when other users must stay
-isolated; restrict the container's egress; keep backups of `.config/`. Values stored in `secrets.env` are masked in terminal
+isolated; restrict the container's egress; keep backups of `.config/`. An admin agent may hold the opt-in `secrets` tool group to copy, rename or delete variables by name, never seeing a value (one approval card each). Values stored in `secrets.env` are masked in terminal
 output as a safety net, not as a guarantee.
 
 **Agents that manage permissions.** The `permissions` tool group (level `operator`) lets an agent change the level, tool groups and approval

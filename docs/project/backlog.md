@@ -5,6 +5,8 @@ One list of ideas and planned work, with what is already done kept separate. Imp
 
 ## planned
 
+- **Secrets for admin agents** are done: the opt-in `secrets` group (admin only) lists names and copies, renames or deletes variables without ever seeing a value, one approval card each. Setting a new value stays with the user (`set-secret` or Settings, Providers).
+
 ### automation and behavior
 
 - **Automations** are being built in steps: the service (triggers `at`, `every`, `cron`, `process_end`; guards; catch-up) is done, see [automations](../user-guide/automations.md); the agent tools (group `automations`, level `assistant`) and the web tab (a second tab of the Tasks dialog) are done too. Left for later: sending a result to a chat. Calendar and conversation events are out of scope.
