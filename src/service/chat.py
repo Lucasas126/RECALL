@@ -16,6 +16,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.agent import compaction
 from src.agent.agent import Agent, embeddings_provider, main_provider, model_provider
 from src.agent.tools import chat_folder_options
 from src.agent.dream import DEFAULT_DREAM_PROMPT
@@ -354,6 +355,7 @@ class _MessageRun:
     blocks: Optional[list[str]] = None  # a wake turn's task blocks: later results merge into a queued wake
     frame: Optional[Callable[[list[str]], str]] = None  # composes `text` from `blocks`
     compact: Optional[str] = None  # a `/compact` run: its instructions ("" for none); not a reply
+    compact_percent: Optional[int] = None  # a `/compact N` run: the share of the conversation to keep (None = 20)
     block_runs: Optional[list[list[str]]] = None  # the task runs each block of `blocks` reports (to drop a block already read)
     generation_id: str = field(default_factory=lambda: uuid4().hex)
     cancellation: CancellationToken = field(default_factory=CancellationToken)
@@ -1399,7 +1401,7 @@ class ChatService:
                         "associative_fragments", "associative_query",
                         "source", "task_ids",  # a wake turn: a subagent result, not written by the user
                         "task_brief", "task_message",  # a worker chat's first message / follow-up, structured for the UI
-                        "tokens_before", "tokens_after", "manual", "small",  # a compaction turn: the divider shows the reduction
+                        "tokens_before", "tokens_after", "manual", "kept_percent",  # a compaction turn: the divider shows the reduction
                     )
                     if t.get(k) is not None
                 },
@@ -2529,9 +2531,10 @@ class ChatService:
     # ------------------------------------------------------------------ manual compaction
 
     def compact_command(self, user_id: str, agent_id: str, chat_id: str, text: str) -> str | None:
-        """Answer `/compact [instructions]` for the chat; None when `text` is not that command.
+        """Answer `/compact [percent] [instructions]` for the chat; None when `text` is not that command.
 
-        Runs the compaction now, whatever the trigger, with the optional instructions as a focus for the notes.
+        Runs the compaction now, whatever the trigger, keeping the latest `percent` (default 20) of the conversation's
+        tokens word for word, with the optional instructions as a focus for the notes.
         It runs on the chat's worker like a reply, so messages sent meanwhile wait behind it (and do not cancel it).
         Refused while the chat has an active or queued reply; the answer is not stored and never reaches the model.
         """
@@ -2543,7 +2546,8 @@ class ChatService:
         self._require_chat(conversations, chat_id)
         if conversations.is_task_chat(chat_id):
             raise InputError("this is an internal task chat: steer the task instead")
-        run = _MessageRun(chat_id, "", [], False, compact=(match.group("arg") or "").strip())
+        percent, focus = compaction.parse_compact_args(match.group("arg") or "")  # InputError for a share out of range
+        run = _MessageRun(chat_id, "", [], False, compact=focus, compact_percent=percent)
         run.cancellation.finish()  # a message sent meanwhile queues behind the compaction instead of steering it
         slot = self._slot(user_id, agent_id)
         with slot.state:
@@ -2595,7 +2599,7 @@ class ChatService:
         if not agent.config.has_memory:
             return message(language, "This agent keeps no conversation history, so there is nothing to compact.")
         try:
-            result = agent.compact(manual=True, instructions=run.compact or "")
+            result = agent.compact(manual=True, instructions=run.compact or "", keep_percent=run.compact_percent)
         except Exception as exc:
             logger.exception("manual compaction failed for %s/%s/%s", user_id, agent_id, run.chat_id)
             return message(language, "Compaction failed: {error}", error=str(exc)[:300])
@@ -2605,8 +2609,14 @@ class ChatService:
             language, "Context compacted: {before} → {after} tokens.",
             before=_thousands(result.tokens_before), after=_thousands(result.tokens_after),
         )
-        if result.small:
-            text += " " + message(language, "The chat is short, so only its latest 20 % was kept.")
+        asked = run.compact_percent or compaction.MANUAL_KEEP_PERCENT
+        if result.kept_percent is not None:
+            text += " " + message(language, "The latest {kept} % of the conversation stays word for word.", kept=result.kept_percent)
+            if result.kept_percent > asked + 5:
+                text += " " + message(
+                    language, "More than the {asked} % asked: a message and the tool calls that answer it are kept together.",
+                    asked=asked,
+                )
         return text
 
     # ------------------------------------------------------------------ dream mode and own files

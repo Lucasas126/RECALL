@@ -1178,11 +1178,15 @@ class Agent:
         trigger, _ = compaction.thresholds(self.config.compaction, self._max_context or 0)
         return trigger is not None and self._context_tokens() >= trigger
 
-    def compact(self, *, manual: bool = False, instructions: str = "") -> Optional[compaction.CompactionResult]:
+    def compact(
+        self, *, manual: bool = False, instructions: str = "", keep_percent: Optional[int] = None,
+    ) -> Optional[compaction.CompactionResult]:
         """Summarise the older part of the context with the summary model; None when there is nothing to do.
 
-        The system prompt and a recent tail stay as they are; the summary (merged with the previous one) replaces
-        the rest and a `compaction` turn records it in the chat. Raises when the summary model fails.
+        The system prompt (SOUL, memories, skills, notices) and the tool definitions are never touched; a recent tail
+        stays word for word; the summary (merged with the previous one) replaces the rest and a `compaction` turn
+        records it in the chat. Automatic compaction keeps `keep_recent` of the window; a manual one keeps
+        `keep_percent` (default 20) of the conversation's tokens. Raises when the summary model fails.
         """
         if not self.config.has_memory or (not manual and not self.compaction_due()):
             return None
@@ -1192,12 +1196,11 @@ class Agent:
         total = self._context_tokens()
         extra = len(compaction.summary_message(self._summary)["content"]) if self._summary else 0
         extra += len(json.dumps(self._tool_specs)) if self._tool_specs else 0
-        cut = compaction.split(self.messages, total, keep, force=manual, extra_chars=extra)
-        small = False
-        if cut is None and manual:
-            # a short chat fits entirely in the normal tail: keep only its latest 20 % and summarise the rest
-            cut = compaction.split(self.messages, total, total * compaction.SMALL_CHAT_KEEP_PERCENT // 100, force=True, extra_chars=extra)
-            small = cut is not None
+        if manual:  # on demand: a fixed share of the conversation, whatever the window and the trigger
+            share = (keep_percent or compaction.MANUAL_KEEP_PERCENT) / 100
+            cut = compaction.split(self.messages, total, 0, force=True, extra_chars=extra, keep_share=share)
+        else:
+            cut = compaction.split(self.messages, total, keep, extra_chars=extra)
         if cut is None:
             return None
         older, tail = self.messages[1:cut.start], self.messages[cut.start:]
@@ -1210,7 +1213,7 @@ class Agent:
             summary = compaction.summarise(provider, model, text, zdr=zdr)
         previous = len(compaction.summary_message(self._summary)["content"]) // 4 if self._summary else 0
         after = max(0, total - cut.summarised_tokens - previous) + len(compaction.summary_message(summary)["content"]) // 4
-        result = compaction.CompactionResult(summary, total, after, model, manual, small=small)
+        result = compaction.CompactionResult(summary, total, after, model, manual, kept_percent=cut.kept_percent)
         users_in_tail = sum(1 for m in tail if m.get("role") == "user")
         history = self.sources.conversations().load(self.chat_id)
         covers = compaction.covers_until(history, users_in_tail)
