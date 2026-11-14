@@ -341,12 +341,15 @@ Focused regression checks (no configured providers or private data required):
 ```shell
 uv run python -m unittest discover -s tests -p "test_*.py" -v
 node --check src/web/static/app.js
-node --test tests/test_model_sorting.cjs
+for f in tests/*.cjs; do node --test "$f"; done
 ```
 
-The Node checks cover model ordering, capability matching and selector state
-(favorites toggle, active-filter counts, collapsed filters and session reset).
-Keyboard navigation and responsive layout still require a browser check.
+The Node tests run pieces of `src/web/static/app.js` without a browser (model ordering and selector state, the
+card and live-step state, opening a chat, the "load earlier" bar, the edit indexes). The Python suite does not run
+them, so run them by hand. `tests/test_model_sorting.cjs` currently fails on a clean checkout (its page stub lacks
+what the page now touches while loading: `matchMedia`, `window`, `MutationObserver`, `location` and more); the other
+files pass. Keyboard navigation, scrolling and responsive layout need a real browser: a headless Chromium driving a
+local instance with seeded chats is enough to measure chat switching and to reproduce reload bugs.
 
 ## first approach: internal capabilities only
 
