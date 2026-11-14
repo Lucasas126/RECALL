@@ -97,6 +97,34 @@ class TelegramNotifier:
             sent += 1
         return sent
 
+    def send_file(self, user_id: str, name: str, data: bytes, modality: str, caption: str | None = None) -> int:
+        """Send one file to every Telegram chat linked to the user (photo, audio, video or document by type).
+
+        A photo or video Telegram refuses is retried as a plain document. Returns how many chats got it.
+        """
+        method, field = {"image": ("sendPhoto", "photo"), "audio": ("sendAudio", "audio"), "video": ("sendVideo", "video")}.get(
+            modality, ("sendDocument", "document"),
+        )
+        sent = 0
+        for chat_id in self._chats.get(user_id, []):
+            response = self._upload(method, field, chat_id, name, data, caption)
+            if response.status_code != 200 and method != "sendDocument":
+                response = self._upload("sendDocument", "document", chat_id, name, data, caption)
+            if response.status_code != 200:
+                raise RuntimeError(f"Telegram {method} failed with HTTP {response.status_code}")
+            sent += 1
+        return sent
+
+    def _upload(self, method: str, field: str, chat_id: int, name: str, data: bytes, caption: str | None) -> httpx.Response:
+        try:
+            return httpx.post(
+                f"https://api.telegram.org/bot{self._token}/{method}",
+                data={"chat_id": chat_id, **({"caption": caption} if caption else {})},
+                files={field: (name, data)}, timeout=max(self._timeout, 60.0),
+            )
+        except httpx.HTTPError as exc:
+            raise RuntimeError(f"Telegram {method} failed: {type(exc).__name__}") from None
+
     def _post(self, payload: dict) -> httpx.Response:
         try:
             return httpx.post(
