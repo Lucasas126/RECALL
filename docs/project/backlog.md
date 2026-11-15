@@ -61,7 +61,7 @@ Moved here from the private notes of the RECALL agent so there is one list.
 - **Seamless restarts**: resume a generation cut by a restart, detached ssh processes, graceful stop ([plan](plan-seamless-restarts.md); nothing is built yet).
 - **Approval fatigue**: built-in read-only allow rules for remote backends (today the fallback is always "ask" and rules come only from the user, agent and installation layers).
 - **Web slash commands**: accept `/dreamstart` and `/dreamcancel` (Telegram-only aliases today; the web parser in `app.js` only knows `/dream start`).
-- **`prune_empty`** can delete an empty Telegram chat in the gap before its first message (guarded for pending and active chats only; confirm the Telegram flow).
+- **`prune_empty`** deletes an empty Telegram chat before its first message (confirmed in the code, 2026-11-15): `/new` creates an empty chat (`bot.py` `_create_session_chat`), and the next `create_chat` or any `list_chats` without `keep` for the same agent prunes it, because only pending and active chats are kept (`_kept_chats` in `chat.py`); the bot itself calls `list_chats` without `keep`. Fix: keep the session's current chat, or do not prune chats younger than a few minutes.
 - **Mobile**: the Dream sessions table scrolls sideways, so the "Duration" column is cut; the Dream and Folders tabs have not been reviewed on a phone.
 - **Tests**: review of the suite (about 2300 tests, about 180 s: cut redundant ones, fix long-failing ones) and run `tests/*.cjs` in CI (see Node tests above).
 - **Tool ergonomics**: `memory` could infer `patch` when `old_text` is given without `action` (it errors with "give an action"); an address without a colon (`mind_palace/x.md`) could suggest `mind_palace:x.md` in the error.
@@ -74,8 +74,8 @@ Not built yet, in the order they matter (see the [known gaps](../architecture/pe
 - **Outbound network control**: a domain allowlist for `web`/`web_retrieve` and egress rules for the terminal sandbox; the largest remaining exfiltration channel.
 - **Dream extras**: MCP read-only tools and `sandbox_read`/`sandbox_search` on disposable sandboxes. The limited read-only delegate is [done](#done) (`dream.delegate`, off by default; [dream](../user-guide/dream.md)).
 - **Folder and MCP actions through the rule engine** (deletes, moves, non-read-only MCP tools), with approval cards that do not assume a command.
-- **Per-user path isolation**, **session revocation on demotion**, **login throttle** and a **CSRF token**.
-- **Audit of every write** (files, memory, self), not only terminal and permission changes; **budgets** per agent.
+- **Per-user path isolation**, **session revocation on demotion** (today a lowered `max_level` applies on the next request but the session lives on), **login throttle** (`/api/login` has none) and a **CSRF token** (only the `SameSite=strict` cookie today).
+- **Audit of every write** (files, memory, self), not only terminal commands and approval-rule changes; **budgets** per agent.
 - **Outbound messages to third parties** as their own service, never below operator.
 
 ## From the replica report (2026-11-05)
