@@ -36,6 +36,7 @@ GROUP_MIN_LEVEL: dict[str, Level] = {
 # reading the agent's own skills is how a skill is used at all, so it is never level-gated
 ALWAYS_ALLOWED_TOOLS: frozenset[str] = frozenset({"skill_view"})
 DREAM_REVIEW_TOOLS: tuple[str, ...] = ("dream_pending", "dream_read_chat", "dream_mark_reviewed", "dream_finish")
+DREAM_DELEGATE_TOOL = "dream_delegate"  # read-only chat-reading workers of a dream
 
 
 def _tool_min_levels() -> dict[str, Level]:
@@ -203,7 +204,7 @@ class DreamCapabilities:
     mcp_read_only: bool         # read-only MCP tools; the dream does not build them yet
     sandbox_read: bool          # sandbox_read / sandbox_search on disposable backends; the dream does not build them yet
     terminal_exec: bool = False  # never: no exec, sandbox_write or sandbox_patch in a dream
-    limited_delegate: bool = False  # planned (read-only workers), not built in this step
+    limited_delegate: bool = False  # read-only chat-reading workers (also needs the group and `dream.delegate`)
     handoff: bool = False       # never: no tasks for other agents
     permissions: bool = False   # never
     agents: bool = False        # never: no creating, editing or deleting agents
@@ -220,6 +221,7 @@ def dream_capabilities(level: Level) -> DreamCapabilities:
         web=level >= SERVICE_MIN_LEVEL["web"],
         mcp_read_only=level >= SERVICE_MIN_LEVEL["mcp"],
         sandbox_read=level >= SERVICE_MIN_LEVEL["terminal_ssh"],
+        limited_delegate=level >= SERVICE_MIN_LEVEL["delegate"],
     )
 
 
@@ -238,6 +240,8 @@ def dream_allowed_tools(level: Level) -> frozenset[str]:
         names.update(TOOL_GROUP_TOOLS["folders_read"])
     if caps.web:
         names.update(TOOL_GROUP_TOOLS["web"])
+    if caps.limited_delegate:
+        names.add(DREAM_DELEGATE_TOOL)
     return frozenset(names)
 
 

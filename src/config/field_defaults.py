@@ -39,7 +39,7 @@ def agent_defaults() -> dict[str, dict[str, dict[str, Any]]]:
         )),
         "dream": _specs(DreamConfig, (
             "enabled", "every_hours", "daily_at", "model", "reasoning_effort", "max_steps", "max_tokens",
-            "max_minutes", "notify_telegram",
+            "max_minutes", "notify_telegram", "delegate", "delegate_model",
         )),
         "compaction": _specs(CompactionConfig, ("enabled", "mode", "trigger", "keep_recent", "model")),
         "terminal": _specs(AgentTerminalConfig, ("timeout_seconds", "max_output_chars")),

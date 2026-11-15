@@ -21,7 +21,7 @@ class FieldDefaultsTests(unittest.TestCase):
                     self.assertEqual(spec["default"], info.default)
                     self.assertEqual(spec, field_spec(model, name))
         self.assertEqual(defaults["dream"]["max_steps"], {"default": 60, "min": 1, "max": 500})
-        self.assertEqual(defaults["dream"]["max_tokens"], {"default": 500_000, "min": 1000, "max": 10_000_000})
+        self.assertEqual(defaults["dream"]["max_tokens"], {"default": 500_000, "min": 0, "max": 100_000_000})
         self.assertEqual(defaults["dream"]["max_minutes"], {"default": 5, "min": 1, "max": 120})
         self.assertNotIn("conversation_messages_retained", defaults["chat_config"])
         self.assertEqual(defaults["compaction"]["trigger"], {"default": 50, "min": 1, "max": 10_000_000})

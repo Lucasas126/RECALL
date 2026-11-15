@@ -632,7 +632,7 @@ function translateInterface() {
     ["dream-effort-label", "Reasoning effort"], ["dream-effort-none", "No reasoning request"],
     ["dream-max-steps-label", "Maximum steps"], ["dream-max-steps-hint", "Model calls per session."],
     ["dream-max-tokens-label", "Maximum tokens"],
-    ["dream-max-tokens-hint", "Input plus output tokens per session."],
+    ["dream-max-tokens-hint", "Input plus output tokens per session; 0 = no cap."],
     ["dream-max-minutes-label", "Maximum minutes"],
     ["dream-max-minutes-hint", "Time limit per session. One minute before it the agent is told to wrap up; at the limit the session is closed."],
     ["dream-cancel", "Cancel dream"],
@@ -649,7 +649,11 @@ function translateInterface() {
     ["dream-prompt-legend", "Dream prompt"],
     ["dream-prompt-hint", "Empty uses the built-in prompt, shown as the placeholder."],
     ["dream-prompt-copy", "Edit a copy of the default"], ["dream-prompt-reset", "Reset to default"],
-    ["dream-notify-label", "Notify me on Telegram when a session ends"], ["dream-save", "Save dream settings"],
+    ["dream-notify-label", "Notify me on Telegram when a session ends"],
+    ["dream-delegate-label", "Read long chats with read-only workers"],
+    ["dream-delegate-model-label", "Worker model"], ["dream-delegate-model-browse", "Browse"],
+    ["dream-delegate-model-hint", "Model of the reading workers, e.g. a cheaper one. Empty uses the dream's model."],
+    ["dream-delegate-hint", "Needs the Delegate tool group and level collaborator or higher. Worker tokens count toward the session."], ["dream-save", "Save dream settings"],
     ["dream-status-title", "Dream status"], ["dream-sessions-title", "Dream sessions"],
     ["dream-col-date", "Date"], ["dream-col-trigger", "Trigger"], ["dream-col-status", "Status"],
     ["dream-col-chats", "Chats reviewed"], ["dream-col-duration", "Duration"], ["dream-col-tokens", "Tokens"],
@@ -666,6 +670,7 @@ function translateInterface() {
   renderAgentAvatarField();
   refreshRows();
   $("dream-model").placeholder = tr("Your chat model");
+  $("dream-delegate-model").placeholder = tr("The dream's model");
   $("agent-model").placeholder = tr("Your default model");
   $("agent-delegation-model").placeholder = tr("The model of the chat");
   for (const [id, text] of [
@@ -2739,6 +2744,7 @@ function rememberProvider(id) {
 function currentModelReference() {
   switch (state.modelTarget) {
     case "dream-llm": return $("dream-model").value.trim() || state.preferences?.default_llm_model;
+    case "dream-worker-llm": return $("dream-delegate-model").value.trim() || undefined;
     case "agent-llm": return $("agent-model").value.trim() || state.preferences?.default_llm_model;
     case "agent-worker-llm": return $("agent-delegation-model").value.trim() || undefined;
     case "default-llm": return state.settingsModelDraft?.default_llm_model;
@@ -3400,12 +3406,13 @@ function updateModelControls() {
   const zdrApplies = state.modelProvider === "openrouter" || state.modelProvider === ANY_PROVIDER;
   $("model-zdr-label").hidden = !zdrApplies;
   $("model-zdr").disabled = state.modelBusy || state.modelLoading || state.modelTarget !== "chat-llm";
-  const fieldTarget = state.modelTarget === "dream-llm" || state.modelTarget === "agent-llm" || state.modelTarget === "agent-worker-llm";
+  const fieldTarget = ["dream-llm", "dream-worker-llm", "agent-llm", "agent-worker-llm"].includes(state.modelTarget);
   $("model-inherit").hidden = state.modelTarget.startsWith("default-");
   $("model-inherit").disabled = fieldTarget ? state.modelBusy : (!state.chatId || state.busy || state.modelBusy);
   // in a chat the entry falls back to the agent's default when it has one; elsewhere it empties the field
   $("model-inherit").textContent = tr(state.modelTarget === "chat-llm" && state.agentDefaultModel
-    ? "Use agent default" : state.modelTarget === "agent-worker-llm" ? "Use chat model" : "Use user default");
+    ? "Use agent default" : state.modelTarget === "agent-worker-llm" ? "Use chat model"
+      : state.modelTarget === "dream-worker-llm" ? "Use the dream's model" : "Use user default");
   renderSettingsModels();
   $("model-zdr-warning").hidden = $("model-zdr").checked || !zdrApplies || !state.user?.require_zdr;
   renderProviderTabs();
@@ -3550,6 +3557,7 @@ function renderModelList() {
     choose.disabled = !available || (state.busy && state.modelTarget === "chat-llm") || state.modelBusy;
     let selected = state.model?.id;
     if (state.modelTarget === "dream-llm") selected = $("dream-model").value.trim();
+    else if (state.modelTarget === "dream-worker-llm") selected = $("dream-delegate-model").value.trim();
     else if (state.modelTarget === "agent-llm") selected = $("agent-model").value.trim();
     else if (state.modelTarget === "agent-worker-llm") selected = $("agent-delegation-model").value.trim();
     else if (state.modelTarget.startsWith("default-")) {
@@ -3685,9 +3693,9 @@ async function selectModel(modelId, provider = state.modelProvider) {
   const stt = target.endsWith("-stt");
   if (state.modelBusy || (state.modelLoading && modelId !== null)) return;
   if (modelId !== null && state.modelProvider) rememberProvider(state.modelProvider);
-  if (target === "dream-llm") {
+  if (target === "dream-llm" || target === "dream-worker-llm") {
     // only fills the Dream tab's field; Save dream settings stores it
-    $("dream-model").value = modelId ?? "";
+    $(target === "dream-llm" ? "dream-model" : "dream-delegate-model").value = modelId ?? "";
     refreshRows($("dream-form"));
     $("model-dialog").close();
     return;
@@ -3747,7 +3755,7 @@ function openModelPicker(target) {
   const defaultSelection = target.startsWith("default-");
   const stt = target.endsWith("-stt");
   if (state.modelBusy || !state.user) return;
-  if (target === "dream-llm") {
+  if (target === "dream-llm" || target === "dream-worker-llm") {
     if (!state.dream?.agentId) return;
   } else if (target === "agent-llm" || target === "agent-worker-llm") {
     if ($("agent-editor").hidden || state.agentForm.busy) return;
@@ -3772,6 +3780,7 @@ function openModelPicker(target) {
   $("model-title").textContent = tr(stt ? "Speech-to-text models" : "Models");
   let subtitle = "Choose a model for this chat.";
   if (target === "dream-llm") subtitle = "Choose the model for this agent's dreams. Use user default leaves the field empty.";
+  else if (target === "dream-worker-llm") subtitle = "Choose the model of the dream's reading workers. Use the dream's model clears the field.";
   else if (target === "agent-llm") subtitle = "Choose the default model for this agent. Use user default clears the field.";
   else if (target === "agent-worker-llm") subtitle = "Choose the default model of this agent's workers. Use chat model clears the field.";
   else if (defaultSelection) {
@@ -7450,7 +7459,10 @@ function fillDreamSettings(settings) {
   $("dream-prompt").value = dream.prompt;
   $("dream-prompt").placeholder = settings.default_prompt;
   $("dream-notify").checked = dream.notify_telegram;
+  $("dream-delegate").checked = Boolean(dream.delegate);
+  $("dream-delegate-model").value = dream.delegate_model ?? "";
   $("dream-model-browse").disabled = !state.user;
+  $("dream-delegate-model-browse").disabled = !state.user;
   syncDreamScheduleInputs();
   refreshRows($("dream-form"));
 }
@@ -7484,6 +7496,8 @@ function dreamSettingsBody() {
       tools: ["web", "folders"].filter((tool) => $(`dream-tool-${tool}`).checked),
       prompt: $("dream-prompt").value.trim() ? $("dream-prompt").value : "",
       notify_telegram: $("dream-notify").checked,
+      delegate: $("dream-delegate").checked,
+      delegate_model: $("dream-delegate-model").value.trim() || null,
     },
   };
 }
@@ -7938,6 +7952,7 @@ $("dream-prompt-reset").addEventListener("click", () => {
   $("dream-prompt").value = "";
 });
 $("dream-model-browse").addEventListener("click", () => openModelPicker("dream-llm"));
+$("dream-delegate-model-browse").addEventListener("click", () => openModelPicker("dream-worker-llm"));
 $("agent-model-browse").addEventListener("click", () => openModelPicker("agent-llm"));
 $("agent-delegation-model-browse").addEventListener("click", () => openModelPicker("agent-worker-llm"));
 $("dream-form").addEventListener("submit", saveDreamSettings);
@@ -8055,12 +8070,17 @@ registerRow("dream-model", {
   getDefault: dreamDefault("model"), describe: () => tr("the agent's model, else yours"),
   read: () => $("dream-model").value.trim() || null, write: (value) => { $("dream-model").value = value ?? ""; },
 });
+registerRow("dream-delegate-model", {
+  getDefault: dreamDefault("delegate_model"), describe: () => tr("the dream's model"),
+  read: () => $("dream-delegate-model").value.trim() || null, write: (value) => { $("dream-delegate-model").value = value ?? ""; },
+});
 selectRow("dream-effort", dreamDefault("reasoning_effort"));
 numberRow("dream-max-steps", () => agentDefaultSpec("dream.max_steps"), () => "");
 numberRow("dream-max-tokens", () => agentDefaultSpec("dream.max_tokens"), () => "");
 numberRow("dream-max-minutes", () => agentDefaultSpec("dream.max_minutes"), () => "");
 numberSpecs.set("dream-every-hours", () => agentDefaultSpec("dream.every_hours"));
 checkboxRow("dream-notify", dreamDefault("notify_telegram"));
+checkboxRow("dream-delegate", dreamDefault("delegate"));
 registerRow("dream-schedule-row", {
   // manual-only is the default whenever the model has neither an interval nor a time of day
   getDefault: () => (state.agentDefaults && agentDefault("dream.every_hours") == null && agentDefault("dream.daily_at") == null

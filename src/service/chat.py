@@ -450,6 +450,9 @@ class ChatService:
         return DreamDependencies(
             resolve_agent=load_agent,
             provider=lambda config: model_provider(config, config.dream.model or config.models.chat),
+            worker_provider=lambda config: (
+                model_provider(config, config.dream.delegate_model) if config.dream.delegate_model else None
+            ),
             index=lambda config, sources: self._index_factory(config, sources),
             web_client=lambda: TavilyClient.from_config(TAVILY),
             agents=self._all_agents,
@@ -2838,9 +2841,11 @@ class ChatService:
     ) -> dict:
         """Save the dream block; idle cached chats pick them up when rebuilt."""
         user = self._owned_agent(user_id, agent_id)
-        if dream.model is not None and dream.model != self._agent_config(user_id, agent_id).dream.model:
-            provider, _ = provider_settings.canonical_reference(user, dream.model)
-            self._availability.require(user, provider, "chat")
+        saved = self._agent_config(user_id, agent_id).dream
+        for model, before in ((dream.model, saved.model), (dream.delegate_model, saved.delegate_model)):
+            if model is not None and model != before:
+                provider, _ = provider_settings.canonical_reference(user, model)
+                self._availability.require(user, provider, "chat")
         slot = self._slot(user_id, agent_id)
         with slot.lock:
             config = self._agent_config(user_id, agent_id)

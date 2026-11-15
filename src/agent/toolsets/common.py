@@ -4,6 +4,45 @@ from src.core.sources.base import Source, pdf_text
 from src.core.sources.registry import SourceRegistry
 
 
+READ_MAX_CHARS = 40_000  # most text one read returns; a longer file comes with a note on how to continue
+READ_LINE_CHARS = 2_000  # longest line shown; a longer one (a chat turn in a .jsonl, minified data) is cut
+
+
+def cap_text(content: str, lines: list[int] | None = None) -> str:
+    """The requested lines of a file, capped so one read never floods the model's context.
+
+    Lines longer than `READ_LINE_CHARS` are cut with a marker; once the output reaches `READ_MAX_CHARS` it stops at
+    the last whole line and a note says which lines were shown and how to ask for the next ones."""
+    rows = content.splitlines()
+    total = len(rows)
+    start = max(1, lines[0]) if lines else 1
+    end = min(total, lines[1] if lines and len(lines) > 1 else (start if lines else total))
+    out: list[str] = []
+    size = 0
+    cut_lines = 0
+    last = start - 1
+    for number in range(start, end + 1):
+        row = rows[number - 1]
+        if len(row) > READ_LINE_CHARS:
+            row = f"{row[:READ_LINE_CHARS]} …[line {number} cut: {len(row)} chars]"
+            cut_lines += 1
+        if out and size + len(row) + 1 > READ_MAX_CHARS:
+            break
+        out.append(row)
+        size += len(row) + 1
+        last = number
+    text = "\n".join(out)
+    notes = []
+    if last < end:
+        notes.append(
+            f"output capped at {READ_MAX_CHARS} chars: showed lines {start}-{last} of {total}; "
+            f"continue with lines=[{last + 1}, {min(end, last + 200)}]"
+        )
+    if cut_lines:
+        notes.append(f"{cut_lines} long line(s) cut at {READ_LINE_CHARS} chars")
+    return f"{text}\n…[{'; '.join(notes)}]" if notes else text
+
+
 def readable_sources(sources: SourceRegistry, source: str) -> list[Source]:
     """Return readable sources, optionally restricted to one source name."""
     names = [source] if source else sources.names()

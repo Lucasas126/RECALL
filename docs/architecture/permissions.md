@@ -289,7 +289,7 @@ Nobody answers approvals in a dream, so every `ask` becomes `deny`.
 | MCP | read-only tools (ceiling) | level >= L3; off by default |
 | `terminal`: exec, `sandbox_write`, `sandbox_patch` | no | |
 | `terminal`: `sandbox_read`, `sandbox_search` | read only | level >= L4, disposable sandbox backends only |
-| `delegate`: limited workers | configurable, off by default | level >= L3; read-only workers (`memory_read`, `folders_read`, `web` if the dream has it), no terminal, no writes, no handoff; lower limits than a chat; set in the agent's `dream` block; results return to the dream, which does the writing |
+| `delegate`: limited workers | configurable, off by default | level >= L3; read-only workers (`memory_read`, `folders_read`, `web` if the dream has it), no terminal, no writes, no handoff; lower limits than a chat; set in the agent's `dream` block (`dream.delegate`, built as `dream_delegate`: workers read pending chats); results return to the dream, which does the writing |
 | `delegate`: hand tasks to other agents | no | |
 | `permissions`, `agents`, other users, admin | no | |
 
@@ -366,7 +366,7 @@ them, the dream toolset does not use them) and the individually chosen tools of 
 | --- | --- |
 | 0 | This specification (done with this page). |
 | 1 (done) | Schema: `max_level` (required, admin only), agent `level`, validation, effective levels. No migration code: the project is in development. |
-| 2 (done, except the dream limited delegate and the prompt block) | Ceiling enforcement in one module (`src/config/ceiling.py`): when tools are built (chats, workers, dreams), at dispatch, on config save and on load. Still to do: the `permissions` prompt block and skill page, and the limited dream delegate. |
+| 2 (done, except the prompt block) | Ceiling enforcement in one module (`src/config/ceiling.py`): when tools are built (chats, workers, dreams), at dispatch, on config save and on load. Still to do: the `permissions` prompt block and skill page, and the limited dream delegate. |
 | 3 (done) | Rule engine (`src/terminal/rules.py`): layers, deny/ask/allow, matching, the three legacy modes as a per-backend shorthand, the blanket-allow guardrail, audit fields. Terminal and file tools only; see [implemented](#implemented-step-3). |
 | 4 (done) | Approvals with memory: once / session / always for this agent, web and Telegram, audit. |
 | 5 (done) | `permissions` tool group and a permission-manager agent template; escalation tests (`tests/test_permissions_tool_*.py`). |

@@ -152,7 +152,19 @@ every session has a wall-clock limit, `dream.max_minutes` (default 5, 1–120).
   reviewed, then call `dream_finish` with a short summary; otherwise the session
   is closed.
   it is traced as `wrap_up_warning` and its time is `timing.warning_at`. a
-  separate, also one-time, token warning comes at 80% of `max_tokens`.
+  separate, also one-time, token warning comes at 80% of `max_tokens` (none when
+  `max_tokens` is 0, no cap).
+- **context compaction**: a long session can outgrow the model's context window
+  (many chats read in one context). when the next call's context passes about 55%
+  of the window (200k tokens when the provider does not know it), RECALL appends a
+  one-time message: the older part will be compacted after the next step, so save
+  now what you learned and mark the chats you finished. on the step after that (or
+  at once past 80%), the dream model writes notes on everything between the opening
+  message and the latest step; they replace that part, appended to the opening with
+  the exact review progress (chats marked, chats read up to which turn, chats still
+  pending), which RECALL keeps outside the context. if the notes fail, the part is
+  dropped and the progress note alone stays. traced as `compaction_warning` and
+  `compacted` (tokens before and after); the summary call counts toward the budget.
 - **deadline**: the session is force-closed with status `timed_out`. the close
   never interrupts a tool call: a tool that is running when the deadline passes
   finishes, its result is traced, the remaining tool calls of that reply are
@@ -194,6 +206,15 @@ read (scoped to the agent, existing guards apply):
   enabled **and** the agent also holds `folders_read` or `folders_edit` in its
   `tool_groups` (see [user folders](#user-folders))
 - web search / retrieve when `web` is in `dream.tools`
+- `dream_delegate(chat_ids, focus)` when `dream.delegate` is true, the agent holds the `delegate` group and its
+  level is `collaborator` or higher: up to 6 pending chats per call, 3 workers at a time. Each worker reads one
+  chat to its end in a fresh context with `dream.delegate_model` (empty: the dream's model; a cheaper model such as
+  a Haiku fits this reading work) (tools: the chat in parts, plus the dream's memory
+  read tools and web if the dream has it; never a write, a mark or a task) and returns structured notes with turn
+  numbers (facts and preferences, decisions, project state at the end, procedures and lessons, open questions,
+  where to save). The dream gets them as untrusted data, saves what matters and marks the chats; the position each
+  worker reached counts as read. Limits per worker: 40 model calls and 400k tokens; worker tokens count toward
+  `max_tokens`. Traced as `delegate_started` / `delegate_finished`
 - never a terminal: dreams have no terminal tools. `dream.tools: [terminal]` and
   `terminal.allow_in_dream` are configuration errors (read-only sandbox variants
   are planned)
@@ -373,11 +394,13 @@ dream:
   model: null                # null = the agent's default chat model, else the user's
   reasoning_effort: medium
   max_steps: 60
-  max_tokens: 500000         # total input+output for the session
+  max_tokens: 500000         # total input+output for the session; 0 = no cap
   max_minutes: 5             # wall-clock limit; wrap-up warning 1 minute before, then force-closed
   tools: [folders]           # optional read groups: folders (needs a folder read group), web (opt-in)
   prompt: ""                 # empty = built-in default
   notify_telegram: false     # "dream session completed" + where to see it in the web
+  delegate: false            # read-only chat-reading workers (needs the delegate group, level collaborator+)
+  delegate_model: null       # model of those workers; null = the dream's model
 folders: []                  # user folders, edited in the agent's Folders tab (see [files and media](files-and-media.md) and [memory](memory.md))
 ```
 
@@ -394,7 +417,7 @@ at once. scheduled runs are skipped while nothing is pending.
 `tools` defaults to `[folders]`; web is opt-in and needs Tavily; folders needs at least one
 entry in `folders` and a `folders_read`/`folders_edit` tool group. `terminal` is rejected.
 `reasoning_effort: null` sends no reasoning request. `max_steps` is 1–500 and
-`max_tokens` 1000–10000000, `max_minutes` 1–120; limits are 100–50000 chars.
+`max_tokens` 0 (no cap) or 1000–100000000, `max_minutes` 1–120; limits are 100–50000 chars.
 
 ## migration
 

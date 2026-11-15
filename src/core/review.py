@@ -8,6 +8,7 @@ from src.core.sources.dream import DreamStateSource
 from src.utils.i18n import InputError
 
 TURN_CHARS = 4000  # longest turn text shown to a dream; longer turns are cut
+PART_CHARS = 40_000  # most turn text in one part of a chat; the next part starts where this one stopped
 
 
 def _turn_text(content: object) -> str:
@@ -119,8 +120,17 @@ class ReviewQueue:
         turns = self._conversations.load(chat_id)
         stored = min(self.watermarks().get(chat_id, 0), len(turns))
         reviewed = min(max(stored, after or 0), len(turns))
-        end = min(len(turns), reviewed + max(1, max_turns))
         start = max(0, reviewed - context_turns)
+        context = [render_turn(index + 1, turns[index]) for index in range(start, reviewed)]
+        shown: list[dict] = []
+        size = sum(len(turn["content"]) for turn in context)
+        for index in range(reviewed, min(len(turns), reviewed + max(1, max_turns))):
+            turn = render_turn(index + 1, turns[index])
+            if shown and size + len(turn["content"]) > PART_CHARS:
+                break  # the part is full: the rest comes in the next call
+            shown.append(turn)
+            size += len(turn["content"])
+        end = reviewed + len(shown)
         return {
             "chat_id": chat_id,
             "title": self._conversations.summary(chat_id)["title"],
@@ -129,8 +139,8 @@ class ReviewQueue:
             "read_from": reviewed + 1 if end > reviewed else end,
             "read_until": end,
             "remaining_after": len(turns) - end,
-            "context": [render_turn(index + 1, turns[index]) for index in range(start, reviewed)],
-            "turns": [render_turn(index + 1, turns[index]) for index in range(reviewed, end)],
+            "context": context,
+            "turns": shown,
         }
 
     def mark_reviewed(self, chat_id: str, until: int, now: datetime | None = None) -> int:

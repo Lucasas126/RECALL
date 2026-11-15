@@ -577,7 +577,7 @@
               <div class="setting-row">
                 <div class="setting-main">
                   <label for="dream-max-tokens" id="dream-max-tokens-label">Maximum tokens</label>
-                  <p id="dream-max-tokens-hint" class="model-note">Input plus output tokens per session.</p>
+                  <p id="dream-max-tokens-hint" class="model-note">Input plus output tokens per session; 0 = no cap.</p>
                 </div>
                 <div class="setting-control"><input id="dream-max-tokens" type="text" inputmode="numeric" autocomplete="off" data-number data-unit="tokens" data-step="10000" required><button type="button" class="icon-btn setting-reset">↺</button></div>
                 <p class="setting-default model-note"></p>
@@ -615,6 +615,22 @@
                 <label class="model-filter"><input id="dream-notify" type="checkbox"> <span id="dream-notify-label">Notify me on Telegram when a session ends</span></label>
               </div>
               <div class="setting-control"><button type="button" class="icon-btn setting-reset">↺</button></div>
+              <p class="setting-default model-note"></p>
+            </div>
+            <div class="setting-row">
+              <div class="setting-main">
+                <label class="model-filter"><input id="dream-delegate" type="checkbox"> <span id="dream-delegate-label">Read long chats with read-only workers</span></label>
+                <p id="dream-delegate-hint" class="model-note">Needs the Delegate tool group and level collaborator or higher. Worker tokens count toward the session.</p>
+              </div>
+              <div class="setting-control"><button type="button" class="icon-btn setting-reset">↺</button></div>
+              <p class="setting-default model-note"></p>
+            </div>
+            <div class="setting-row wide">
+              <div class="setting-main">
+                <label for="dream-delegate-model" id="dream-delegate-model-label">Worker model</label>
+                <p id="dream-delegate-model-hint" class="model-note">Model of the reading workers, e.g. a cheaper one. Empty uses the dream's model.</p>
+              </div>
+              <div class="setting-control"><input id="dream-delegate-model" maxlength="256" placeholder="The dream's model" autocomplete="off"><button id="dream-delegate-model-browse" type="button">Browse</button><button type="button" class="icon-btn setting-reset">↺</button></div>
               <p class="setting-default model-note"></p>
             </div>
             <p id="dream-error" class="error" role="alert"></p>
