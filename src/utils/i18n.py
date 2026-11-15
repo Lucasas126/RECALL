@@ -251,6 +251,7 @@ _SPANISH = {
     "This removes the {count} messages after it.": "Esto elimina los {count} mensajes posteriores.",
     "Interrupted by a new message": "Interrumpido por un mensaje nuevo",
     "Stopped by you": "Detenido por ti",
+    "Drop files to attach them": "Suelta los archivos para adjuntarlos",
     "Interrupted": "Interrumpido",
     "Generating…": "Generando…",
     "Record a voice message": "Grabar un mensaje de voz",

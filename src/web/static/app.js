@@ -669,6 +669,7 @@ function translateInterface() {
   renderAgentAvatarField();
   refreshRows();
   $("dream-model").placeholder = tr("Your chat model");
+  $("chat-view").dataset.dropLabel = tr("Drop files to attach them");
   $("dream-delegate-model").placeholder = tr("The dream's model");
   $("agent-model").placeholder = tr("Your default model");
   $("agent-delegation-model").placeholder = tr("The model of the chat");
@@ -6877,7 +6878,7 @@ $("mic").addEventListener("click", async () => {
     addMessage("assistant").error(err?.name === "NotAllowedError" ? new Error(tr("Microphone access was denied")) : err);
   }
 });
-// Adds files to the message being written (the clip button and pasting share this): same type and size checks.
+// Adds files to the message being written (the clip button, pasting and dropping share this): same type and size checks.
 async function addFiles(files) {
   try {
     const valid = files.map((file) => {
@@ -6924,6 +6925,41 @@ $("input").addEventListener("paste", (event) => {
   if ($("attach").disabled) return;  // no chat open, or the chat is switching models
   addFiles(files);
 });
+
+// Dragging files onto the chat attaches them, like the clip button and pasting. The chat area shows a frame
+// while files are over it; text or links dragged around the page are left to the browser.
+{
+  const zone = $("chat-view");
+  let depth = 0;  // dragenter/dragleave fire for every child: count them so the frame does not flicker
+  const carriesFiles = (event) => [...(event.dataTransfer?.types ?? [])].includes("Files");
+  const clear = () => { depth = 0; zone.classList.remove("drop-target"); };
+  zone.addEventListener("dragenter", (event) => {
+    if (!carriesFiles(event)) return;
+    event.preventDefault();
+    depth += 1;
+    if (!$("attach").disabled) zone.classList.add("drop-target");
+  });
+  zone.addEventListener("dragover", (event) => {
+    if (!carriesFiles(event)) return;
+    event.preventDefault();  // without it the browser opens the file instead of dropping it here
+    event.dataTransfer.dropEffect = $("attach").disabled ? "none" : "copy";
+  });
+  zone.addEventListener("dragleave", (event) => {
+    if (!carriesFiles(event)) return;
+    depth = Math.max(0, depth - 1);
+    if (!depth) zone.classList.remove("drop-target");
+  });
+  zone.addEventListener("drop", (event) => {
+    if (!carriesFiles(event)) return;
+    event.preventDefault();
+    clear();
+    if ($("attach").disabled) return;  // no chat open, or the chat is switching models
+    const files = [...event.dataTransfer.files];
+    if (files.length) addFiles(files);
+    $("input").focus();
+  });
+  window.addEventListener("dragend", clear);
+}
 
 $("composer").addEventListener("submit", async (e) => {
   e.preventDefault();
