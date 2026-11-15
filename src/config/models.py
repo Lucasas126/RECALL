@@ -712,7 +712,6 @@ class DreamConfig(BaseModel):
     daily_at: Optional[str] = Field(default=None, pattern=_DAILY_AT)
     model: Optional[str] = Field(default=None, strict=True, min_length=1, max_length=256)  # None = user's chat model
     reasoning_effort: Optional[ReasoningEffort] = "medium"  # None sends no reasoning request
-    max_steps: int = Field(default=60, ge=1, le=500, strict=True)
     max_tokens: int = Field(default=500_000, ge=0, le=100_000_000, strict=True)  # input + output per session; 0 = no cap
     max_minutes: int = Field(default=5, ge=1, le=120, strict=True)  # wall-clock limit; then the session is force-closed
     tools: list[DreamToolGroup] = Field(default_factory=lambda: ["folders"])
@@ -722,6 +721,14 @@ class DreamConfig(BaseModel):
     delegate: bool = Field(default=False, strict=True)
     # model of those workers (e.g. a cheaper one); None = the dream's model
     delegate_model: Optional[str] = Field(default=None, strict=True, min_length=1, max_length=256)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _removed_max_steps(cls, data: object) -> object:
+        # legacy: model calls are only counted now (a metric), never capped; old agent files still carry the key
+        if isinstance(data, dict) and "max_steps" in data:
+            data = {key: value for key, value in data.items() if key != "max_steps"}
+        return data
 
     @field_validator("delegate_model")
     @classmethod

@@ -20,7 +20,6 @@ class FieldDefaultsTests(unittest.TestCase):
                     info = model.model_fields[name]
                     self.assertEqual(spec["default"], info.default)
                     self.assertEqual(spec, field_spec(model, name))
-        self.assertEqual(defaults["dream"]["max_steps"], {"default": 60, "min": 1, "max": 500})
         self.assertEqual(defaults["dream"]["max_tokens"], {"default": 500_000, "min": 0, "max": 100_000_000})
         self.assertEqual(defaults["dream"]["max_minutes"], {"default": 5, "min": 1, "max": 120})
         self.assertNotIn("conversation_messages_retained", defaults["chat_config"])
@@ -30,7 +29,6 @@ class FieldDefaultsTests(unittest.TestCase):
 
     def test_bounds_are_enforced_by_the_models(self) -> None:
         for model, name, valid, invalid in (
-            (DreamConfig, "max_steps", (1, 500), (0, 501)),
             (DreamConfig, "every_hours", (1, 720), (0, 721)),
             (ChatConfig, "reasoning_tokens", (1,), (0,)),
         ):

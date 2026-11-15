@@ -44,7 +44,6 @@ dream:                               # background self-review sessions (see drea
   daily_at: "04:00"                  # once a day at this local time; setting both is invalid
   model: null                        # null = the user's chat model
   reasoning_effort: medium
-  max_steps: 60                      # model calls per session
   max_tokens: 500000                 # input + output tokens per session
   max_minutes: 5                     # wall-clock limit (1-120); wrap-up warning 1 minute before
   tools: [folders]                   # optional read groups for dreams: folders (default; also needs a folder read group), web (opt-in); `terminal` is rejected

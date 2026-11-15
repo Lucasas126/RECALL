@@ -65,7 +65,7 @@ Search results look stale or empty: in the agent's Folders tab check the index s
 - `dream.enabled` is false: only manual starts work. A schedule needs `every_hours` or `daily_at` (not both).
 - Scheduled runs are skipped while no chat is pending review, and while another session holds `dream/.lock` ("a dream is already running").
 - The schedule is checked every minute by whichever process (web or Telegram) is running; with both stopped nothing runs.
-- A session ends as `budget_exhausted` or `timed_out` when it hits `dream.max_steps`, `dream.max_tokens` or `dream.max_minutes`; the summary in Dream sessions says which.
+- A session ends as `budget_exhausted` or `timed_out` when it hits `dream.max_tokens` or `dream.max_minutes`; the summary in Dream sessions says which.
 - Disposable chats are never reviewed.
 
 ## Memory full

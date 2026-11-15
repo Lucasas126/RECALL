@@ -74,7 +74,6 @@ MCP entry fields: `tools` (list; omitted means all of the server's tools), `read
 | `dream.daily_at` | local `HH:MM` once a day |
 | `dream.model` | empty uses the chat model the agent resolves to |
 | `dream.reasoning_effort` | medium |
-| `dream.max_steps` | model calls per session (60) |
 | `dream.max_tokens` | in + out per session (500000; 0 = no cap) |
 | `dream.delegate` | read-only chat-reading workers in dreams (false; needs `delegate` group, collaborator+) |
 | `dream.delegate_model` | model of those workers (null = the dream's model) |

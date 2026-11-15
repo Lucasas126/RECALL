@@ -107,7 +107,7 @@ class DreamCompactionTests(DreamFixture):
         summary = self.runner(provider, max_tokens=0).run()
         self.assertEqual(summary["status"], "completed")
         self.assertNotIn("wrap_up_warning", [event["type"] for event in self.events()])
-        self.assertIn("no token cap", provider.calls[0]["messages"][1]["content"])
+        self.assertNotIn("tokens:", provider.calls[0]["messages"][1]["content"])  # no cap, nothing announced
 
     def test_plan_keeps_system_opening_and_latest_step(self) -> None:
         messages = [
