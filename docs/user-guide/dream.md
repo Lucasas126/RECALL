@@ -196,7 +196,9 @@ every session has a wall-clock limit, `dream.max_minutes` (default 5, 1–120).
 read (scoped to the agent, existing guards apply):
 - `dream_pending`, `dream_read_chat` (at most 40 new turns per call, plus 2
   turns of context; long chats are read in parts, each call continuing the
-  last), `dream_mark_reviewed`, `dream_finish` (ends the session)
+  last; with `from_turn` it rereads any chat, also one already reviewed, from
+  that turn, and nothing is marked), `dream_mark_reviewed`, `dream_finish`
+  (ends the session)
 - the memory read tools (`query_memory`, `search`, `list_memories`, `read`,
   tags) over the palace, conversations and `agent:` files. [Disposable
   chats](memory.md#disposable-chats) and subagent task chats are not listed,
@@ -206,8 +208,9 @@ read (scoped to the agent, existing guards apply):
   enabled **and** the agent also holds `folders_read` or `folders_edit` in its
   `tool_groups` (see [user folders](#user-folders))
 - web search / retrieve when `web` is in `dream.tools`
-- `dream_delegate(chat_ids, focus)` when `dream.delegate` is true, the agent holds the `delegate` group and its
-  level is `collaborator` or higher: up to 6 pending chats per call, 3 workers at a time. Each worker reads one
+- `dream_delegate(chat_ids, focus, from_turn)` when `dream.delegate` is true, the agent holds the `delegate` group and its
+  level is `collaborator` or higher: up to 6 pending chats per call, 3 workers at a time (with `from_turn`, any
+  chats, also reviewed ones, reread from that turn; nothing to mark afterwards). Each worker reads one
   chat to its end in a fresh context with `dream.delegate_model` (empty: the dream's model; a cheaper model such as
   a Haiku fits this reading work) (tools: the chat in parts, plus the dream's memory
   read tools and web if the dream has it; never a write, a mark or a task) and returns structured notes with turn

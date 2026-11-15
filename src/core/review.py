@@ -105,13 +105,19 @@ class ReviewQueue:
             })
         return sorted(items, key=lambda item: (item["last_turn_at"], item["first_new_at"], item["chat_id"]), reverse=True)
 
-    def read(self, chat_id: str, max_turns: int = 40, context_turns: int = 2, after: int | None = None) -> dict:
+    def read(
+        self, chat_id: str, max_turns: int = 40, context_turns: int = 2, after: int | None = None,
+        from_turn: int | None = None,
+    ) -> dict:
         """The next unreviewed turns of a chat (at most `max_turns`) plus a few earlier turns for context.
 
         `after` continues a read in parts: the part starts after that turn (never before the stored
         watermark), so a long chat can be read to its end before it is marked. `read_until` is the
         watermark to store once these turns are reviewed; turns that arrive later, or that did not fit,
         stay pending.
+
+        `from_turn` (1-based) rereads a chat from that turn, ignoring the watermark, also when the chat is
+        already reviewed: the part says `reread: true` and its `read_until` must not be stored.
         """
         if not self._conversations.exists_chat(chat_id):
             raise FileNotFoundError(f"chat not found: {chat_id}")
@@ -119,7 +125,10 @@ class ReviewQueue:
             raise InputError("chat {chat_id} is disposable and is not reviewed", chat_id=chat_id)
         turns = self._conversations.load(chat_id)
         stored = min(self.watermarks().get(chat_id, 0), len(turns))
-        reviewed = min(max(stored, after or 0), len(turns))
+        if from_turn is not None:
+            reviewed = min(max(from_turn - 1, after or 0, 0), len(turns))
+        else:
+            reviewed = min(max(stored, after or 0), len(turns))
         start = max(0, reviewed - context_turns)
         context = [render_turn(index + 1, turns[index]) for index in range(start, reviewed)]
         shown: list[dict] = []
@@ -141,6 +150,7 @@ class ReviewQueue:
             "remaining_after": len(turns) - end,
             "context": context,
             "turns": shown,
+            **({"reread": True} if from_turn is not None else {}),
         }
 
     def mark_reviewed(self, chat_id: str, until: int, now: datetime | None = None) -> int:

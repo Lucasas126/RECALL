@@ -97,13 +97,17 @@ class WorkerBudget:
             self.spent += tokens
 
 
-def _read_tool(queue: ReviewQueue, chat_id: str, state: dict):
+def _read_tool(queue: ReviewQueue, chat_id: str, state: dict, reread_from: Optional[int] = None):
     @tool
     def read_chat_part(
         max_turns: Annotated[int, "how many turns to return (default 40); the part also stops at about 40k chars"] = 40,
     ) -> str:
         """Read the next part of the chat you were given. Call it again until 'remaining_after' is 0."""
-        part = queue.read(chat_id, max_turns=max(1, min(max_turns, 200)), after=state.get("read_until"))
+        if reread_from is not None:  # a reviewed chat: start at that turn, then continue part by part
+            part = queue.read(chat_id, max_turns=max(1, min(max_turns, 200)), after=state.get("read_until"),
+                              from_turn=reread_from)
+        else:
+            part = queue.read(chat_id, max_turns=max(1, min(max_turns, 200)), after=state.get("read_until"))
         state["read_until"] = part["read_until"]
         state["finished"] = part["remaining_after"] == 0
         if not part["turns"]:
@@ -116,12 +120,12 @@ def _read_tool(queue: ReviewQueue, chat_id: str, state: dict):
 def run_worker(
     *, provider, model: str, zdr: bool, agent_name: str, queue: ReviewQueue, chat_id: str, start_after: Optional[int],
     tools: list, focus: str, index: str, budget: WorkerBudget, stop: Callable[[], bool],
-    call_tool: Callable[[dict, str, dict], tuple[str, bool]],
+    call_tool: Callable[[dict, str, dict], tuple[str, bool]], reread_from: Optional[int] = None,
 ) -> WorkerOutcome:
     """One worker: read `chat_id` to its end with a fresh context and return its notes."""
     outcome = WorkerOutcome(chat_id=chat_id)
     state: dict = {"read_until": start_after, "finished": False}
-    funcs = [_read_tool(queue, chat_id, state), *tools]
+    funcs = [_read_tool(queue, chat_id, state, reread_from), *tools]
     specs = [func.tool_spec for func in funcs]
     handlers = {func.tool_spec["function"]["name"]: func for func in funcs}
     system = WORKER_PROMPT.format(
@@ -195,11 +199,15 @@ def run_workers(chat_ids: list[str], one: Callable[[str], WorkerOutcome]) -> lis
         return list(pool.map(one, chat_ids))
 
 
-def report(outcomes: list[WorkerOutcome]) -> str:
+def report(outcomes: list[WorkerOutcome], reread: bool = False) -> str:
     """What the dream gets back: per chat, the notes and whether it may mark the chat reviewed."""
     parts = []
     for item in outcomes:
-        if item.finished:
+        if reread:  # an already reviewed chat: there is nothing to mark
+            status = ("reread to its end" if item.finished else
+                      f"reread up to turn {item.read_until} ({item.error or 'stopped early'})" if item.read_until else
+                      f"not read ({item.error or 'no part read'})") + "; nothing to mark, save what matters"
+        elif item.finished:
             status = "read to its end: after saving what matters, call dream_mark_reviewed for it"
         elif item.read_until:
             status = (f"read only up to turn {item.read_until} ({item.error or 'stopped early'}); marking it now "
