@@ -758,7 +758,10 @@ details.thinking { border-left: 2px solid var(--line); padding-left: 10px; displ
 .agent-panel dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; margin: 0; }
 .agent-panel dt { color: var(--muted); }
 .agent-panel dd { margin: 0; overflow-wrap: anywhere; }
-.dream-last-summary { display: block; color: var(--muted); font-size: .9em; }
+.dream-last-summary-wrap { display: block; }
+.dream-last-summary { display: block; color: var(--muted); font-size: .9em; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dream-last-summary.clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
+.dream-summary-toggle { font-size: .85em; }
 .dream-running { color: var(--ok); font-weight: 600; }
 #dream-start-status:empty { display: none; }
 .table-scroll { overflow-x: auto; }

@@ -729,6 +729,8 @@ _SPANISH = {
     "Trace": "Traza",
     "The trace is empty.": "La traza está vacía.",
     "Step {step}": "Paso {step}",
+    "Show more": "Ver más",
+    "Show less": "Ver menos",
     "Reasoning only (hide tools)": "Solo razonamiento (ocultar herramientas)",
     "in {input} · out {output} tokens": "entrada {input} · salida {output} tokens",
     "Arguments": "Argumentos",

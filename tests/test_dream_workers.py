@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 import unittest
+from unittest.mock import patch
 
 from src.agent.dream import DreamRunner, delegation_allowed
 from src.config.models import AgentConfig, DreamConfig, ModelsConfig, ResolvedAgent
@@ -26,6 +27,7 @@ class RoutedProvider:
         self.worker_reply = worker_reply
         self.lock = threading.Lock()
         self.worker_calls: list[list[dict]] = []
+        self.closing = "never called"
         self.dream_calls: list[list[dict]] = []
 
     def context_window(self, model):
@@ -36,6 +38,10 @@ class RoutedProvider:
             with self.lock:
                 self.worker_calls.append(messages)
             last = messages[-1]
+            if last.get("role") == "user" and "budget is used up" in str(last.get("content")):
+                self.closing = kwargs.get("tools")  # the closing call must not offer tools
+                return {"response": "## Notes so far\n- read up to the limit (turn 2)",
+                        "usage": {"prompt_tokens": 100, "completion_tokens": 20}}
             if last.get("role") == "tool":
                 part = json.loads(last["content"])
                 if part["remaining_after"] > 0:
@@ -171,6 +177,19 @@ class DreamWorkerTests(DreamFixture):
         self.runner(provider, _config(delegate=True)).run()
         result = next(m for m in provider.dream_calls[1] if m.get("role") == "tool")["content"]
         self.assertTrue(result.startswith("error: chat not found"))
+
+    def test_a_worker_stopped_by_its_token_limit_still_writes_notes(self) -> None:
+        chat = self.chat("I moved to Valencia", "Noted", "And I like tea", "OK", "bye", "ciao")
+        provider = RoutedProvider([{"tool_calls": [_call("d1", "dream_delegate", chat_ids=[chat])]}, _finish("done")])
+        with patch("src.agent.dream_workers.WORKER_MAX_TOKENS", 150):  # two reading steps, then the limit
+            self.runner(provider, _config(delegate=True)).run()
+        report = next(m for m in provider.dream_calls[1] if m.get("role") == "tool")["content"]
+        self.assertIn("read up to the limit (turn 2)", report)
+        self.assertNotIn("(no notes)", report)
+        self.assertIn("token limit", report)
+        self.assertIsNone(provider.closing)
+        last = provider.worker_calls[-1][-1]["content"]
+        self.assertIn("budget is used up", last)  # the closing call was made, without tools
 
     def test_only_pending_chats_can_be_delegated(self) -> None:
         provider = RoutedProvider([{"tool_calls": [_call("d1", "dream_delegate", chat_ids=["nope"])]}, _finish("done")])

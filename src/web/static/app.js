@@ -7594,6 +7594,22 @@ function scheduleText(schedule) {
   return schedule.enabled ? plan : tr("{plan} (schedule disabled)", { plan });
 }
 
+// a dream summary: three lines, then "Show more" opens the whole text in place
+function expandableSummary(text) {
+  const box = element("span", { className: "dream-last-summary clamped", textContent: text });
+  const wrap = element("span", { className: "dream-last-summary-wrap" }, box);
+  requestAnimationFrame(() => {
+    if (box.scrollHeight <= box.clientHeight + 1) { box.classList.remove("clamped"); return; }
+    const more = element("button", { type: "button", className: "link dream-summary-toggle", textContent: tr("Show more") });
+    more.addEventListener("click", () => {
+      const open = box.classList.toggle("clamped") === false;
+      more.textContent = open ? tr("Show less") : tr("Show more");
+    });
+    wrap.append(more);
+  });
+  return wrap;
+}
+
 function renderDreamStatus(status) {
   const last = status.last_session;
   let lastValue = tr("No dream sessions yet.");
@@ -7602,7 +7618,7 @@ function renderDreamStatus(status) {
     open.addEventListener("click", () => openDreamSession(last.id));
     lastValue = element("span", {}, open);
     const summary = (last.summary ?? "").split(/\s+/).join(" ").trim();
-    if (summary) lastValue.append(element("span", { className: "dream-last-summary", textContent: summary.length > 300 ? `${summary.slice(0, 299)}…` : summary }));
+    if (summary) lastValue.append(expandableSummary(summary));
   }
   let running = status.running
     ? tr("Running since {date}", { date: formatDate(status.last_started_at) })
