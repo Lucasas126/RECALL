@@ -115,6 +115,18 @@ class ReviewQueueTests(DreamFixture):
         self.assertEqual(self.queue.mark_reviewed(chat_id, 2), 4)
         self.assertEqual(self.queue.pending()[0]["new_turns"], 6)
 
+    def test_from_turn_rereads_a_reviewed_chat_without_touching_its_watermark(self) -> None:
+        chat_id = self.chat(*[f"m{n}" for n in range(6)])
+        self.queue.mark_reviewed(chat_id, 6)
+        part = self.queue.read(chat_id, max_turns=4, from_turn=1)
+        self.assertEqual([turn["n"] for turn in part["turns"]], [1, 2, 3, 4])
+        self.assertEqual((part["read_until"], part["remaining_after"], part["reread"]), (4, 2, True))
+        following = self.queue.read(chat_id, from_turn=part["read_until"] + 1)
+        self.assertEqual([turn["n"] for turn in following["turns"]], [5, 6])
+        self.assertEqual(self.queue.watermarks()[chat_id], 6)  # a reread moves nothing
+        self.assertEqual(self.queue.pending(), [])
+        self.assertNotIn("reread", self.queue.read(chat_id))
+
     def test_a_part_stops_at_the_char_budget_and_the_next_one_continues(self) -> None:
         from src.core.review import PART_CHARS, TURN_CHARS
         chat_id = self.chat(*["w" * TURN_CHARS for _ in range(30)])
@@ -329,6 +341,25 @@ class DreamFinishTests(DreamFixture):
         self.assertEqual((summary["status"], summary["steps"], summary["summary"]), ("completed", 3, "bye"))
         self.assertEqual(len(_events_of(self.state, "continue_nudge")), 2)
         self.assertEqual(len(_events_of(self.state, "idle_closed")), 1)
+
+    def test_dream_read_chat_rereads_a_reviewed_chat_and_marks_nothing(self) -> None:
+        chat_id = self.chat(*[f"turn {n}" for n in range(1, 6)])
+        self.queue.mark_reviewed(chat_id, 5)
+        provider = ScriptedProvider([
+            {"tool_calls": [_call("c1", "dream_read_chat", chat_id=chat_id, max_turns=3, from_turn=1)]},
+            {"tool_calls": [_call("c2", "dream_read_chat", chat_id=chat_id, max_turns=3, from_turn=4)]},
+            {"tool_calls": [_call("c3", "dream_mark_reviewed", chat_id=chat_id)]},
+            _finish("ok"),
+        ])
+        summary = self.runner(provider).run()
+        results = [e for e in _events_of(self.state, "tool_result") if e["name"] in ("dream_read_chat", "dream_mark_reviewed")]
+        first, second = (json.loads(results[0]["result"]), json.loads(results[1]["result"]))
+        self.assertEqual([turn["n"] for turn in first["turns"]], [1, 2, 3])
+        self.assertIn("from_turn=4", first["note"])
+        self.assertEqual([turn["n"] for turn in second["turns"]], [4, 5])
+        self.assertIn("end of the chat", second["note"])
+        self.assertTrue(results[2]["result"].startswith("error: read"))  # a reread is never marked
+        self.assertEqual(summary["chats_reviewed"], [])
 
     def test_long_chats_are_read_in_parts_and_marked_to_the_end(self) -> None:
         chat_id = self.chat(*[f"turn {n}" for n in range(1, 6)])

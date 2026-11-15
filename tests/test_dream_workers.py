@@ -146,6 +146,32 @@ class DreamWorkerTests(DreamFixture):
             self.assertIn("Custom dream prompt.", system)
             self.assertEqual("### Reading workers" in system, allowed)
 
+    def test_workers_reread_reviewed_chats_from_a_turn_and_nothing_is_marked(self) -> None:
+        chat = self.chat("I moved to Valencia", "Noted", "And I like tea", "OK", "bye", "ciao")
+        self.queue.mark_reviewed(chat, 6)
+        provider = RoutedProvider([
+            {"tool_calls": [_call("d1", "dream_delegate", chat_ids=[chat], from_turn=3)]},
+            {"tool_calls": [_call("m1", "dream_mark_reviewed", chat_id=chat)]},
+            _finish("done"),
+        ])
+        summary = self.runner(provider, _config(delegate=True)).run()
+        parts = [json.loads(m["content"]) for call in provider.worker_calls for m in call if m.get("role") == "tool"]
+        self.assertEqual(parts[0]["turns"][0]["n"], 3)
+        self.assertEqual(sorted({turn["n"] for part in parts for turn in part["turns"]}), [3, 4, 5, 6])
+        report = next(m for m in provider.dream_calls[1] if m.get("role") == "tool")["content"]
+        self.assertIn("reread to its end; nothing to mark", report)
+        tool_results = [m["content"] for m in provider.dream_calls[-1] if m.get("role") == "tool"]
+        self.assertTrue(tool_results[1].startswith("error: read"))  # the mark after the reread is refused
+        self.assertEqual(summary["chats_reviewed"], [])
+        self.assertEqual(self.queue.watermarks()[chat], 6)
+
+    def test_a_reread_needs_an_existing_chat(self) -> None:
+        provider = RoutedProvider([{"tool_calls": [_call("d1", "dream_delegate", chat_ids=["nope"], from_turn=1)]},
+                                   _finish("done")])
+        self.runner(provider, _config(delegate=True)).run()
+        result = next(m for m in provider.dream_calls[1] if m.get("role") == "tool")["content"]
+        self.assertTrue(result.startswith("error: chat not found"))
+
     def test_only_pending_chats_can_be_delegated(self) -> None:
         provider = RoutedProvider([{"tool_calls": [_call("d1", "dream_delegate", chat_ids=["nope"])]}, _finish("done")])
         self.runner(provider, _config(delegate=True)).run()

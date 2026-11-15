@@ -96,9 +96,10 @@ and finish.
 2. Go through them in that order, `dream_read_chat` for each; long chats come in parts: call it again with the same
    chat_id until `remaining_after` is 0. Read every pending chat, even short or trivial ones: you can only mark what
    you read. One chat at a time: finish, save and mark one before you open the next.
-   `read` on a `conversations:` file also works (to look again at a chat already reviewed, for example), but it is
-   not the main path: it does not count as reading for the queue, a chat file can be huge, and `read` returns at
-   most about 40k characters per call, so use `lines` ranges and follow the note at the end of a capped result.
+   To look again at a chat already reviewed (a dream task may ask you to reread chats), call `dream_read_chat`
+   with `from_turn` (1 = the start) and continue from the part's `read_until` + 1 until `remaining_after` is 0: it
+   shows clean, whole turns and nothing is marked. Do not read `conversations:` files with `read`: their lines
+   are raw records cut at 2000 characters, with attachment data, so you would miss text and waste tokens.
 3. A recent chat often settles what an older one left open (a bug fixed, a question answered, a plan changed). What
    you read first is the latest word: when an older chat mentions a problem, check against what you already read
    whether a newer chat solved it, and do not save it as open if it was.
@@ -139,7 +140,9 @@ and where, and what you learned; then call `dream_finish(summary)` with a short 
 DELEGATE_GUIDE = """\
 ### Reading workers
 `dream_delegate(chat_ids, focus)` hands pending chats to read-only workers. Each one reads one chat to its end in a
-fresh context and returns notes; you keep your own context for thinking and writing.
+fresh context and returns notes; you keep your own context for thinking and writing. With `from_turn` (1 = the
+start) the workers reread chats that are already reviewed (nothing to mark afterwards): the best way to reread
+long chats.
 - When: chats that are long (many turns or `new_turns`, or parts full of tool output) or many chats at once. Short
   chats are cheaper to read yourself.
 - How: give 2-3 chats per call (at most 6); add a `focus` when you know what matters (a project, a decision you
@@ -586,20 +589,29 @@ class DreamRunner:
         def dream_delegate(
             chat_ids: Annotated[list[str], f"pending chats to hand out (at most {dream_workers.MAX_CHATS_PER_CALL})"],
             focus: Annotated[str, "optional: what the workers should look for in particular"] = "",
+            from_turn: Annotated[Optional[int], "optional: reread these chats from this turn (1 = the start), also "
+                                                "chats already reviewed; nothing is marked"] = None,
         ) -> str:
             """Hand pending chats to read-only workers: each reads one chat to its end in a fresh context and
             returns notes (facts, decisions, project state, lessons, with turn numbers). Use it for long chats so
             your own context stays free. Workers cannot write or mark: save what matters from their notes, then
-            call dream_mark_reviewed for each chat they read to its end. Their tokens count toward your budget."""
+            call dream_mark_reviewed for each chat they read to its end. With from_turn they reread any chat
+            (also reviewed ones) and there is nothing to mark. Their tokens count toward your budget."""
             ids = list(dict.fromkeys(str(chat).strip() for chat in chat_ids if str(chat).strip()))
             if not ids:
                 return "error: give at least one chat_id from dream_pending"
             if len(ids) > dream_workers.MAX_CHATS_PER_CALL:
                 return f"error: at most {dream_workers.MAX_CHATS_PER_CALL} chats per call"
-            pending = {item["chat_id"] for item in runner._queue.pending()}
-            unknown = [chat for chat in ids if chat not in pending]
-            if unknown:
-                return f"error: not pending (see dream_pending): {', '.join(unknown)}"
+            reread = from_turn is not None
+            if reread:
+                missing = [chat for chat in ids if not runner._queue._conversations.exists_chat(chat)]
+                if missing:
+                    return f"error: chat not found: {', '.join(missing)}"
+            else:
+                pending = {item["chat_id"] for item in runner._queue.pending()}
+                unknown = [chat for chat in ids if chat not in pending]
+                if unknown:
+                    return f"error: not pending (see dream_pending; to reread a reviewed chat pass from_turn): {', '.join(unknown)}"
             cap = runner.config.dream.max_tokens
             budget = dream_workers.WorkerBudget(cap=cap, used=used)
             index = runner._palace_index()
@@ -615,14 +627,15 @@ class DreamRunner:
                     provider=runner._worker_provider or runner.provider, model=runner.worker_model,
                     zdr=runner.config.require_zdr and not is_claude_subscription(runner.worker_model),
                     agent_name=runner.config.name or runner.config.id, queue=runner._queue, chat_id=chat_id,
-                    start_after=read_until.get(chat_id), tools=list(worker_handlers.values()), focus=focus,
-                    index=index, budget=budget, stop=lambda: runner._check_stop() is not None, call_tool=call,
+                    start_after=None if reread else read_until.get(chat_id), tools=list(worker_handlers.values()),
+                    focus=focus, index=index, budget=budget, stop=lambda: runner._check_stop() is not None, call_tool=call,
+                    reread_from=max(1, int(from_turn)) if reread else None,
                 )
 
             runner._event("delegate_started", steps_ref(), chats=ids, model=runner.worker_model)
             outcomes = dream_workers.run_workers(ids, one)
             for item in outcomes:
-                if item.read_until:
+                if item.read_until and not reread:  # a reread never moves the review queue
                     read_until[item.chat_id] = max(read_until.get(item.chat_id, 0), item.read_until)
                 runner._event(
                     "delegate_finished", steps_ref(), chat_id=item.chat_id, finished=item.finished,
@@ -630,7 +643,7 @@ class DreamRunner:
                     tokens=item.tokens_in + item.tokens_out, error=item.error,
                 )
             worker_tokens["spent"] = worker_tokens.get("spent", 0) + budget.spent
-            return dream_workers.report(outcomes)
+            return dream_workers.report(outcomes, reread=reread)
 
         return dream_delegate
 
