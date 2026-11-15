@@ -55,6 +55,35 @@ class VoiceMessageServiceTests(models_tests.ModelFixture):
         self.assertIn("5 characters", line)
 
 
+class SentPdfServiceTests(models_tests.ModelFixture):
+    _PDF = {
+        "modality": "document", "name": "informe.pdf", "mime_type": "application/pdf", "format": "pdf",
+        "data_url": "data:application/pdf;base64," + "QUJD" * 12,
+    }
+
+    def _send_pdf(self, **extra):
+        with patch("src.service.chat.extract_pdf_text") as extract:
+            extract.return_value.render.return_value = "page text"
+            return list(self.service.send("user-one", "agent-one", self.chat, "mira", attachments=[dict(self._PDF)], **extra))
+
+    def test_sent_pdf_stays_on_the_turn_so_it_can_be_opened_again(self) -> None:
+        self._send_pdf()
+        turn = self.service.get_chat("user-one", "agent-one", self.chat)["messages"][0]
+        self.assertIn("page text", turn["content"])  # the model still gets the text
+        self.assertEqual(turn["media"], [{
+            "name": "informe.pdf", "modality": "document", "mime_type": "application/pdf",
+            "data_url": self._PDF["data_url"],
+        }])
+
+    def test_editing_the_message_keeps_the_pdf(self) -> None:
+        self._send_pdf()
+        with patch("src.service.chat.extract_pdf_text") as extract:
+            extract.return_value.render.return_value = "page text"
+            list(self.service.send("user-one", "agent-one", self.chat, "mira otra vez", rewind_to=0))
+        turn = self.service.get_chat("user-one", "agent-one", self.chat)["messages"][0]
+        self.assertEqual([m["name"] for m in turn["media"]], ["informe.pdf"])
+
+
 class WebMediaStaticTests(unittest.TestCase):
     def test_attachments_play_in_the_message_and_recording_shows_the_time(self) -> None:
         script = (_STATIC / "app.js").read_text(encoding="utf-8")

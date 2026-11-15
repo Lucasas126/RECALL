@@ -3944,6 +3944,7 @@ function attachmentView(attachment) {
   const download = !kind && attachment.data_url && attachment.modality === "document";  // a file the agent sent
   const item = document.createElement(kind ? "div" : download ? "a" : "span");
   item.className = "attachment-name" + (kind ? ` attachment-${kind}` : "");
+  if (download && (attachment.mime_type === "application/pdf" || /\.pdf$/i.test(label))) item.classList.add("attachment-pdf");
   item._attachment = attachment;
   if (!kind) {
     item.textContent = label;
@@ -3966,6 +3967,55 @@ function attachmentView(attachment) {
   }
   return item;
 }
+
+// The viewer: an image opens large (click to zoom to full size), a PDF opens in the page; both can be downloaded.
+let viewerUrl = null;
+
+async function openViewer({ kind, src, name }) {
+  const dialog = $("viewer-dialog");
+  const body = $("viewer-body");
+  body.classList.remove("zoomed");
+  $("viewer-title").textContent = name || "";
+  let href = src;
+  if (kind === "pdf") {  // a data: URL is not allowed in a frame everywhere; a blob: URL of the same bytes is
+    try { href = URL.createObjectURL(await (await fetch(src)).blob()); viewerUrl = href; } catch { href = src; }
+    body.replaceChildren(element("iframe", { src: href, title: name || "PDF" }));
+  } else {
+    const image = element("img", { src, alt: name || "" });
+    image.addEventListener("click", () => body.classList.toggle("zoomed"));
+    body.replaceChildren(image);
+  }
+  const download = $("viewer-download");
+  download.href = href;
+  download.download = name || (kind === "pdf" ? "document.pdf" : "image");
+  if (!dialog.open) dialog.showModal();
+}
+
+function closeViewer() {
+  $("viewer-dialog").close();
+}
+
+$("viewer-close").addEventListener("click", closeViewer);
+$("viewer-dialog").addEventListener("click", (event) => { if (event.target === $("viewer-dialog")) closeViewer(); });
+$("viewer-dialog").addEventListener("close", () => {
+  $("viewer-body").replaceChildren();
+  if (viewerUrl) { URL.revokeObjectURL(viewerUrl); viewerUrl = null; }
+});
+
+// one listener for every picture and PDF in the messages (sent attachments, files from the agent, markdown images)
+$("messages").addEventListener("click", (event) => {
+  const image = event.target.closest(".attachment-image img, .msg .body img");
+  if (image && !image.closest("a")) {
+    event.preventDefault();
+    openViewer({ kind: "image", src: image.currentSrc || image.src, name: image.alt || image.closest(".attachment-image")?.querySelector(".attachment-label")?.textContent });
+    return;
+  }
+  const pdf = event.target.closest("a.attachment-pdf");
+  if (pdf) {
+    event.preventDefault();
+    openViewer({ kind: "pdf", src: pdf.href, name: pdf.download });
+  }
+});
 
 // How many messages a chat opens with. The rest waits behind a bar at the top ("load earlier").
 const CHAT_PAGE = 25;

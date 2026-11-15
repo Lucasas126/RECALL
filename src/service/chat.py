@@ -1668,16 +1668,19 @@ class ChatService:
             if is_task_chat:
                 raise InputError("this is an internal task chat: steer the task instead")
         attachments = [ChatAttachment.model_validate(item).model_dump() for item in (attachments or [])]
+        kept_documents: list[dict] = []
         if rewind_to is not None:
             original = self._edit_target(conversations, chat_id, rewind_to)
             if not attachments:
                 attachments = self._stored_attachments(original.get("content"))
-        # audio and video are turned into text and frames for the model: keep the originals on the turn so the
-        # person can play them back (images already stay in the turn's content)
+                # a PDF only lives on the turn as `media` (the model gets its text): an edit keeps it
+                kept_documents = [m for m in original.get("media") or [] if m.get("modality") == "document"]
+        # audio, video and PDFs are turned into text and frames for the model: keep the originals on the turn so the
+        # person can play or open them back (images already stay in the turn's content)
         media = [
             {k: a[k] for k in ("name", "modality", "mime_type", "data_url")}
-            for a in attachments if a["modality"] in ("audio", "video")
-        ]
+            for a in attachments if a["modality"] in ("audio", "video", "document")
+        ] + kept_documents
         if not media and rewind_to is not None and not attachments:
             media = list(original.get("media") or [])
         text, attachments, notice = self._decompose_videos(user_id, agent_id, chat_id, text, attachments)
