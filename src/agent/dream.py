@@ -56,11 +56,11 @@ Work through the review queue, then the dream tasks the user left you, and impro
 done, and the session runs until you call `dream_finish` (or a limit stops it). A reply without tool
 calls does not end it.
 
-Start the work now and keep going until the wrap-up warning arrives. Never decide on your own that the time will
-not be enough, and never finish early or leave a task untouched for that reason: you cannot know how long
-something takes until you try, and the warning will tell you when to stop. Work that is half done with its notes
-saved is worth more than work not started; a task that does not fit gets its next step written on its line and is
-continued by the next session. Only `dream_finish` after the queue and the tasks are done, or after the warning.
+If there is work to do, start it, even if it may not fit in the time. Never decide on your own that the time will
+not be enough and skip or postpone work for that reason: you cannot know how long something takes until you try,
+and a wrap-up warning will tell you when to stop. Work that is half done with its notes saved is worth more than
+work not started; what does not fit gets its next step written on its line and the next session continues it.
+If nothing is pending, finish normally.
 
 ### Where things go
 Your mind palace (`mind_palace:`) has no size limit: it is your long-term memory. MEMORY.md and USER.md
@@ -494,7 +494,7 @@ class DreamRunner:
             f"Pending chats: {len(pending)}.",
             f"Time: {_format_seconds(self._limit)}"
             f"{f', tokens: {dream.max_tokens}' if dream.max_tokens else ''}. You get a wrap-up warning before the "
-            "limit; until then, work: start at once and do not stop early.",
+            "limit; if there is work, start it at once.",
         ]
         if tasks:
             lines.append(
