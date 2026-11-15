@@ -589,6 +589,7 @@ class Agent:
             if cancellation is not None:
                 cancellation.raise_if_cancelled()
         except GenerationCancelled:
+            self._cancellation = cancellation
             self.messages.append({"role": "user", "content": self._stamped(user_content, ts, channel)})
             self._log_turn("user", user_content, ts=ts, **dict(meta or {}, channel=channel))
             self._remember_interrupted("", "")
@@ -604,6 +605,7 @@ class Agent:
         if not continuation:
             self._guard_context()
         self._refresh_mcp_tools()
+        self._cancellation = cancellation  # the interrupted turn records why it stopped
         if stream:
             return self._stream(cancellation)
         if cancellation is not None:
@@ -1046,6 +1048,9 @@ class Agent:
         }
         if interrupted:
             extra["interrupted"] = True
+            reason = getattr(getattr(self, "_cancellation", None), "reason", None)
+            if reason:
+                extra["interrupted_by"] = reason
         if api_usage:
             extra["usage"] = {"in": api_usage.get("prompt_tokens"), "out": api_usage.get("completion_tokens")}
             if (cache := usage.cache_tokens(api_usage)) is not None:

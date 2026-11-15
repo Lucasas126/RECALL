@@ -4132,7 +4132,7 @@ function drawMessages(container, messages, { usage }) {
       view.text(m.content);
       if (m.media?.length) view.attachments(m.media);
     }
-    if (m.interrupted) view.interrupted();
+    if (m.interrupted) view.interrupted(null, m.interrupted_by);
     if (!usage) continue;
     if (m.usage_report) showUsage(m.usage_report);
     else if (m.role === "assistant" && m.usage?.in != null) {
@@ -6576,7 +6576,7 @@ function addMessage(role, parent = state.view ?? $("messages")) {
       if (index >= 0) steps[index].before(node);
       else el.append(node);
     },
-    interrupted(snapshot = null) {
+    interrupted(snapshot = null, reason = snapshot?.reason) {
       this.settleMemory();
       this.settleSteps();
       if (snapshot) {
@@ -6592,7 +6592,7 @@ function addMessage(role, parent = state.view ?? $("messages")) {
         const note = document.createElement("div");
         note.className = "interruption";
         note.setAttribute("role", "status");
-        note.textContent = tr("Interrupted by a new message");
+        note.textContent = reason === "stopped" ? tr("Stopped by you") : reason === "replaced" ? tr("Interrupted by a new message") : tr("Interrupted");
         el.append(note);
       }
     },
