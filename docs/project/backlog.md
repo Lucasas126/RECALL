@@ -21,9 +21,8 @@ One list of ideas and planned work, with what is already done kept separate. Imp
 
 - **RECALL knowledge, phase 2** (the admin pages `admin-cli`, `recipes` and `security-for-admins` are done): reference pages for Telegram, models and providers, MCP, more recipes (step-by-step fixes) and the user documentation, added to `src/knowledge/recall/` ([RECALL knowledge](../user-guide/recall-knowledge.md) is phase 1).
 - **Read access to docs and source for agents**: let an agent read `docs/` and the code to answer deeper questions. `docs/` is not in the Docker image today; remove it from `.dockerignore` first.
-- **Agent-proposed config edits with approval cards**: an agent proposes a change to its own yaml (a tool group, a limit) and the user approves or rejects it in a card, like terminal approvals, instead of editing files by hand.
 - **File tools v2** for every source: paginated reads with line numbers and text extraction for PDF/Office files; regex content search and glob file search; `patch` (unique find-and-replace with tolerant matching, returning a diff); a stale-write guard.
-- **Terminal follow-ups** (phase 1 is [done](#done)): a background `process` tool (start, poll, wait, kill); LLM-assisted smart approvals (a small model classifies borderline commands instead of the pattern lists); a per-chat "always allow" for a command or pattern; a Docker backend that creates a per-agent sandbox container itself.
+- **Terminal follow-ups** (phase 1 and the background `process` tools are [done](#done)): LLM-assisted smart approvals (a small model classifies borderline commands instead of the pattern lists); a per-chat "always allow" for a command or pattern; a Docker backend that creates a per-agent sandbox container itself.
 - **Terminal multi-backend follow-ups**: an agent may use several backends (sandbox, the user's own PC over Windows OpenSSH); still open: a Windows-native backend without Git Bash, a per-chat "always allow" per backend, wake-on-LAN/availability check before a PC call.
 - **Approval rules for folders and MCP**: route destructive folder operations (`folder_delete`, `folder_move`, memory delete/move on user folders) and non-read-only MCP tools through the [approval rules](../user-guide/terminal.md#approval-rules) with the tool kinds `folder_write` and `mcp_call` (default: folder writes allow except delete/move ask, MCP read-only allow, other MCP ask). Today they never ask. Needs the engine called from the folder and MCP handlers (they have no terminal session), approval cards for actions with no command or backend, and a decision for unattended contexts (Telegram, CLI) that now would deny. The engine's `Action` and `evaluate` are ready for it.
 - **Approvals form: inherit the layer defaults**: the Agents tab always writes the per-backend `approvals`, which pins the shorthand and hides the `default` of the user and installation rule lists; add an "inherit" choice.
@@ -32,7 +31,7 @@ One list of ideas and planned work, with what is already done kept separate. Imp
 - **Stronger isolation for the local terminal backend**: protected paths ([done](../user-guide/terminal.md#protected-paths-local-backend)) refuse SSH keys, `secrets.env`, `.env` files, login credentials and `/proc/*/environ` for file tools exactly and for commands by scanning, but the command scan is best effort (obfuscated paths, hard links and agent-written programs bypass it) and the RECALL user can still read everything else (`user.yaml`, other users' `data/`). Options, strongest first: run the guide's commands as a separate OS user (a `sudo -u recall-guide` wrapper or `su`) that cannot read `.config/keys`, `secrets.env` or other users' folders; run them in a separate container that mounts only what the guide needs (`python -m src.admin` over a socket or a narrow volume); make the key files readable only by a different user than the one the agent shell runs as and have the SSH backend use a small helper; extend the refused list to other users' `data/` once per-user path limits exist.
 - **Server admin agent** for the home Proxmox server, built on the terminal feature: Proxmox API through an MCP server, SSH as a dedicated sudo user, read-only commands free and state changes approved by the user, its own agent only for the owner, an audit log, read-only dreams for health review. Risk: AdGuard on that server is the DHCP/DNS of the whole home network.
 - **Image and graph generation** (possibly through an MCP server). PDF creation is [done](#done) (`make_pdf`); still open for PDFs: designed documents with covers and photos, form filling and OCR of scans on the way in.
-- **Remote MCP servers** (streamable HTTP); Node.js and the Google Calendar sign-in in the Docker image ([MCP](../user-guide/mcp.md#runtime-behavior)).
+- **Remote MCP servers** (streamable HTTP, not built; Node.js is already in the image for the Claude CLI, `npx` is left out on purpose) and the Google Calendar sign-in in the Docker image ([MCP](../user-guide/mcp.md#runtime-behavior)).
 
 ### web and tests
 
@@ -53,6 +52,20 @@ One list of ideas and planned work, with what is already done kept separate. Imp
 - Optional voice replies (TTS) in Telegram, per agent.
 - Remove unnecessary messages from the settings and configuration selectors to keep the interface clean.
 - A global `defaults.yaml` merged under `user.yaml` and agent files, and a channel to user index in a `ConfigStore` ([agent.yaml](../reference/agent-yaml.md#loading)).
+
+### maintenance and workflow (checked against the code on 2026-11-15)
+
+Moved here from the private notes of the RECALL agent so there is one list.
+
+- **Releases**: a `scripts/release.sh X.Y.Z` (bump `pyproject.toml` and `uv.lock`, check the tag does not exist, draft notes from `git log`) and a CI check that the two versions match. Today `docker-publish.yml` only compares the release tag with `pyproject.toml`; releases are done by hand.
+- **Seamless restarts**: resume a generation cut by a restart, detached ssh processes, graceful stop ([plan](plan-seamless-restarts.md); nothing is built yet).
+- **Approval fatigue**: built-in read-only allow rules for remote backends (today the fallback is always "ask" and rules come only from the user, agent and installation layers).
+- **Web slash commands**: accept `/dreamstart` and `/dreamcancel` (Telegram-only aliases today; the web parser in `app.js` only knows `/dream start`).
+- **`prune_empty`** can delete an empty Telegram chat in the gap before its first message (guarded for pending and active chats only; confirm the Telegram flow).
+- **Mobile**: the Dream sessions table scrolls sideways, so the "Duration" column is cut; the Dream and Folders tabs have not been reviewed on a phone.
+- **Tests**: review of the suite (about 2300 tests, about 180 s: cut redundant ones, fix long-failing ones) and run `tests/*.cjs` in CI (see Node tests above).
+- **Tool ergonomics**: `memory` could infer `patch` when `old_text` is given without `action` (it errors with "give an action"); an address without a colon (`mind_palace/x.md`) could suggest `mind_palace:x.md` in the error.
+- **Version in the prompt**: the system prompt tells the agent when its profile was loaded but not the running version (`/api/version` exists, no agent tool reads it).
 
 ### permission level follow-ups
 
@@ -83,6 +96,7 @@ Skills imported from other agent systems:
 
 ## done
 
+- Agent-proposed config edits: `agent_update` and the permission tools change an agent's configuration through an approval card with a diff ([permissions](../architecture/permissions.md)).
 - Automations: service, agent tools (group `automations`) and web tab ([automations](../user-guide/automations.md)); dream `dream.delegate` read-only chat readers ([dream](../user-guide/dream.md)).
 - Slow chats and duplicated streaming on reload (bugs reported 2026-11-14): a reply that is still running no longer shows its saved checkpoint next to the live stream (it was drawn twice and marked interrupted); the chat list keeps what it read from each transcript until the file changes instead of parsing all of them on every request; opening a chat asks for the preferences and the chat together and no longer repeats the models request; a long chat opens with its last 25 messages and a bar to load earlier ones (`GET .../chats/{id}?limit=&before=`, `window` in the answer). Measured with Chromium on 29 real chats over a simulated Tailscale link (80 ms, 40 Mbit/s): median switch 334 ms to 147 ms, p90 599 ms to 397 ms. Clicking a chat in the sidebar now marks it as the open one at once; before, the mark waited for the chat to load and for a second request that redraws the list (about 100 ms locally, 210 ms over a Tailscale-like link, longer for big chats). Still open: gzip, keeping sent files out of the chat payload, and fewer requests per switch (`/api/chats`, approvals, tasks and processes are still separate calls).
 - `view_image` (group `memory_read`): the agent looks at an image or at pages of a PDF (a source or a terminal backend, one page or a contact sheet of up to 6), downscaled to a JPEG and shown as the next message, removed from the context at the user's next message, 6 per message, only for models that declare image input. `send_file` takes `<backend>:<path>` (fetched through the terminal session, with its approval and audit).
