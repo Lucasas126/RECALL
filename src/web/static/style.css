@@ -22,7 +22,8 @@
   --art-plinth: url("/static/art/plinth.svg");
   --art-render: pixelated;                      /* set to pixelated when the files are MagicaVoxel PNGs */
   --orn-a: .16; --orn-arch-a: .45;
-  --art-capital-a: .65;                         /* the capital is dimmed on the dark theme only (see the light theme) */
+  --art-capital-a: .65;                         /* the capital is drawn at 65% on both themes so the logo above it stays at full strength */
+  --art-capital-filter: brightness(.5);         /* ...and at half brightness on the dark theme only (the light theme sets none) */
 }
 :root {
   color-scheme: dark;
@@ -32,7 +33,7 @@
   --ok: #7fc79a; --shade: #ededed26; --backdrop: #000a; --shadow: 0 6px 24px #0007, 0 1px 2px #0008;
 }
 :root[data-theme="light"] {
-  color-scheme: light; --orn-a: .1; --art-capital-a: 1;
+  color-scheme: light; --orn-a: .1; --art-capital-filter: none;
   --bg: #fafaf8; --panel: #ffffff; --raised: #ebebe6; --line: #dcdcd6; --line-strong: #8a8a84; --side: #f4f4f1; --code-bg: #f3f3ef;
   --text: #161616; --muted: #4a4a45; --accent: #b0205e; --accent-strong: #8d1a4b; --on-accent: #ffffff;
   --accent-soft: #f7e9ef; --danger: #b42318; --warn: #7a5a00; --warn-bg: #fbf1d3; --warn-line: #d3b24f;
@@ -40,7 +41,7 @@
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) {
-    color-scheme: light; --orn-a: .1; --art-capital-a: 1;
+    color-scheme: light; --orn-a: .1; --art-capital-filter: none;
     --bg: #fafaf8; --panel: #ffffff; --raised: #ebebe6; --line: #dcdcd6; --line-strong: #8a8a84; --side: #f4f4f1; --code-bg: #f3f3ef;
     --text: #161616; --muted: #4a4a45; --accent: #b0205e; --accent-strong: #8d1a4b; --on-accent: #ffffff;
     --accent-soft: #f7e9ef; --danger: #b42318; --warn: #7a5a00; --warn-bg: #fbf1d3; --warn-line: #d3b24f;
@@ -89,7 +90,7 @@ button.link { background: none; border: none; color: var(--muted); padding: 0; }
 .login-arch { position: absolute; inset: 0; z-index: -1; pointer-events: none; background: var(--art-login-arch) center / 100% 100% no-repeat; image-rendering: var(--art-render); opacity: var(--orn-arch-a); }   /* the side strokes run straight to the bottom edge of the box: the arch is closed visually, no base line */
 .login-art { display: flex; flex-direction: column; align-items: center; gap: 0; margin-bottom: 8px; pointer-events: none; }
 .art-capital { --u: 1px; position: relative; margin-top: 48px; width: calc(94 * var(--u)); height: calc(92 * var(--u)); flex: none; }
-.art-capital::before { content: ""; position: absolute; inset: 0; background: var(--art-capital) center / 100% 100% no-repeat; image-rendering: var(--art-render); opacity: var(--art-capital-a); }   /* dimmed to 65% on the dark theme so the logo above it stays at full strength; full strength on the light one */   /* hand-drawn 94x92 sprite shown at an integer scale (1 art px = --u) */
+.art-capital::before { content: ""; position: absolute; inset: 0; background: var(--art-capital) center / 100% 100% no-repeat; image-rendering: var(--art-render); opacity: var(--art-capital-a); filter: var(--art-capital-filter); }   /* the PNG is the full-brightness render: the dark theme halves it (as the old sprite had it baked in), the light theme shows it as is */   /* hand-drawn 94x92 sprite shown at an integer scale (1 art px = --u) */
 .art-capital .brand-logo { position: absolute; left: 50%; top: -58px; width: 64px; height: 54px; margin-left: -32px; image-rendering: var(--art-render); }   /* the 32x27 logo at 2x (pixelated), levitating above the capital: its bottom edge hovers just above the centre of the top face */
 #login-form { display: flex; flex-direction: column; gap: 10px; width: 100%; text-align: center; }
 #login-form h1 { margin: 0; font: 350 var(--s4)/1 var(--serif); letter-spacing: .22em; text-indent: .22em; font-variation-settings: "SOFT" 40, "WONK" 0; }
