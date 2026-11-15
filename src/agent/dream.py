@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from time import monotonic, perf_counter
 from typing import Callable, Literal, Optional, Protocol
 
+from src.agent import compaction, dream_compaction
 from src.agent.permissions_prompt import block_for
 from src.agent.profile import (
     DREAM_TASKS_FILE, FOR_USER_FILE, MAX_DREAM_TASKS, AgentProfile, load_profile, open_items, system_prompt,
@@ -432,7 +433,8 @@ class DreamRunner:
             f"Journal for this month: mind_palace:{journal}",
             *self._file_notes(journal),
             f"Pending chats: {len(pending)}.",
-            f"Budget: {dream.max_steps} model calls, {dream.max_tokens} tokens, "
+            f"Budget: {dream.max_steps} model calls, "
+            f"{f'{dream.max_tokens} tokens' if dream.max_tokens else 'no token cap'}, "
             f"{_format_seconds(self._limit)} of time. You get a wrap-up warning before the time or tokens run out; until "
             "then, take the time the work needs.",
         ]
@@ -448,6 +450,84 @@ class DreamRunner:
             lines.append("No chat is pending; do the dream tasks, curate your palace, memories and skills, then "
                          "write the journal.")
         return "\n".join(lines)
+
+    def _context_window(self) -> int:
+        try:
+            window = self.provider.context_window(self.model)
+        except Exception:  # an unknown window must not stop the session
+            window = None
+        return int(window) if window else dream_compaction.DEFAULT_WINDOW
+
+    def _context_tokens(self, messages: list[dict], compact: dict, last_input: int) -> int:
+        """The context size of the next call: the last real input count plus an estimate of what was added since."""
+        added = max(0, dream_compaction.context_chars(messages) - compact["chars_at_call"])
+        if not last_input:
+            return int(dream_compaction.context_chars(messages) / dream_compaction.CHARS_PER_TOKEN)
+        return last_input + int(added / dream_compaction.CHARS_PER_TOKEN)
+
+    def _compaction_due(self, messages: list[dict], compact: dict, last_input: int) -> bool:
+        """Warn once past WARN_PERCENT (the model gets one step to save); compact on the step after the warning,
+        or at once past FORCE_PERCENT."""
+        used = self._context_tokens(messages, compact, last_input)
+        percent = used * 100 // compact["window"]
+        if compact["warned_at"] is not None and len(messages) > compact["warned_at"] + 1:
+            return dream_compaction.plan(messages) is not None
+        if percent >= dream_compaction.FORCE_PERCENT:
+            return dream_compaction.plan(messages) is not None
+        if compact["warned_at"] is None and percent >= dream_compaction.WARN_PERCENT:
+            text = dream_compaction.warning_message(percent)
+            messages.append({"role": "user", "content": text})
+            compact["warned_at"] = len(messages)
+            self._event("compaction_warning", None, context_tokens=used, window=compact["window"], text=text)
+        return False
+
+    def _compact(
+        self, messages: list[dict], compact: dict, read_until: dict[str, int], reviewed: list[str], step: int,
+    ) -> list[dict]:
+        """Replace the older part of the session with notes written by the dream model; on failure, drop it and
+        keep only the exact review progress."""
+        cut = dream_compaction.plan(messages)
+        if cut is None:
+            return messages
+        before = self._context_tokens(messages, compact, 0)
+        older = messages[2:cut.tail_start]
+        previous = dream_compaction.earlier_notes(messages[1])
+        text = compaction.transcript(older, previous)
+        notes, failed = "", None
+        try:
+            result = self.provider.invoke(
+                [{"role": "system", "content": dream_compaction.DREAM_SUMMARY_PROMPT}, {"role": "user", "content": text}],
+                self.model, stream=False, reasoning=False, tools=None, zdr=self.config.require_zdr,
+            )
+            notes = (result.get("response") or "").strip() if isinstance(result, dict) else ""
+            usage = (result or {}).get("usage") or {} if isinstance(result, dict) else {}
+            compact["tokens_in"] = usage.get("prompt_tokens") or len(text) // 4
+            compact["tokens_out"] = usage.get("completion_tokens") or len(notes) // 4
+            if not notes:
+                failed = "the summary model returned no notes"
+        except Exception as exc:  # the session goes on with the progress note alone
+            logger.exception("dream session %s: compaction summary failed", self.session_id)
+            failed = f"{type(exc).__name__}: {exc}"
+        if failed:
+            notes = previous or "(the notes of the earlier part could not be written; check the journal and the palace)"
+        progress = dream_compaction.progress_note(read_until, reviewed, self._safe_pending_list())
+        opening = dream_compaction.original_opening(messages[1])
+        new = dream_compaction.compacted_messages([messages[0], opening, *messages[2:]], cut, notes, progress)
+        compact["warned_at"] = None
+        compact["count"] += 1
+        compact["chars_at_call"] = 0
+        after = int(dream_compaction.context_chars(new) / dream_compaction.CHARS_PER_TOKEN)
+        self._event(
+            "compacted", step, tokens_before=before, tokens_after=after, number=compact["count"],
+            summarised_messages=len(older), error=failed,
+        )
+        return new
+
+    def _safe_pending_list(self) -> list[dict]:
+        try:
+            return self._queue.pending()
+        except Exception:
+            return []
 
     def _check_stop(self) -> StopReason | None:
         """Stop when the deadline passed or another process asked for a cancel; returns the stop reason."""
@@ -473,7 +553,7 @@ class DreamRunner:
             seconds = max(0, int(remaining))
             return "time", _time_left(seconds), {"seconds_left": seconds}
         max_tokens = self.config.dream.max_tokens
-        if "tokens" not in warned and (
+        if max_tokens and "tokens" not in warned and (
             tokens >= max_tokens * _WRAP_UP_TOKEN_SHARE or tokens + _WRAP_UP_TOKEN_STEPS * last_input >= max_tokens
         ):
             return "tokens", f"the session has used {tokens} of its {max_tokens} tokens", {
@@ -575,6 +655,7 @@ class DreamRunner:
                 {"role": "user", "content": self._opening(pending, tasks)},
             ]
             warned: set[str] = set()
+            compact: dict = {"window": self._context_window(), "warned_at": None, "chars_at_call": 0, "count": 0}
             last_input = 0
             idle = 0  # consecutive replies without tool calls
             while True:
@@ -586,7 +667,7 @@ class DreamRunner:
                         message=f"{_STOP_MESSAGES[reason]}, session closed before the next model call",
                     )
                     break
-                if steps >= dream.max_steps or tokens_in + tokens_out >= dream.max_tokens:
+                if steps >= dream.max_steps or (dream.max_tokens and tokens_in + tokens_out >= dream.max_tokens):
                     status = "budget_exhausted"
                     break
                 due = self._wrap_up_due(warned, tokens_in + tokens_out, last_input)
@@ -598,6 +679,11 @@ class DreamRunner:
                     if kind == "time":
                         warning_at = self._now()
                     self._event("wrap_up_warning", steps + 1, reason=kind, text=text, **data)
+                if self._compaction_due(messages, compact, last_input):
+                    messages = self._compact(messages, compact, read_until, reviewed, steps)
+                    tokens_in += compact.pop("tokens_in", 0)
+                    tokens_out += compact.pop("tokens_out", 0)
+                    last_input = 0  # the next count is estimated from the new, shorter context
                 token = self._stop.begin_call()
                 if token is None:
                     continue  # a stop arrived after the check above; the loop top records it
@@ -626,6 +712,7 @@ class DreamRunner:
                 tokens_in += step_in
                 tokens_out += step_out
                 last_input = step_in
+                compact["chars_at_call"] = dream_compaction.context_chars(messages)
                 self._event("usage", steps, input_tokens=step_in, output_tokens=step_out)
                 if reasoning:
                     self._event("reasoning", steps, text=reasoning)

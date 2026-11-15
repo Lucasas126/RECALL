@@ -713,11 +713,18 @@ class DreamConfig(BaseModel):
     model: Optional[str] = Field(default=None, strict=True, min_length=1, max_length=256)  # None = user's chat model
     reasoning_effort: Optional[ReasoningEffort] = "medium"  # None sends no reasoning request
     max_steps: int = Field(default=60, ge=1, le=500, strict=True)
-    max_tokens: int = Field(default=500_000, ge=1_000, le=10_000_000, strict=True)  # input + output per session
+    max_tokens: int = Field(default=500_000, ge=0, le=100_000_000, strict=True)  # input + output per session; 0 = no cap
     max_minutes: int = Field(default=5, ge=1, le=120, strict=True)  # wall-clock limit; then the session is force-closed
     tools: list[DreamToolGroup] = Field(default_factory=lambda: ["folders"])
     prompt: str = Field(default="", max_length=20000)  # empty = built-in default
     notify_telegram: bool = Field(default=False, strict=True)
+
+    @field_validator("max_tokens")
+    @classmethod
+    def _token_cap_is_off_or_sensible(cls, value: int) -> int:
+        if 0 < value < 1_000:
+            raise ValueError("dream.max_tokens must be 0 (no cap) or at least 1000")
+        return value
 
     @field_validator("tools")
     @classmethod

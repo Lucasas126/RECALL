@@ -329,7 +329,7 @@ _SPANISH = {
     "Lets the agent call tools; the groups below choose which.": "Permite al agente llamar a herramientas; los grupos de abajo eligen cuáles.",
     "Reset the whole schedule": "Restablecer toda la programación",
     "Model calls per session.": "Llamadas al modelo por sesión.",
-    "Input plus output tokens per session.": "Tokens de entrada más salida por sesión.",
+    "Input plus output tokens per session; 0 = no cap.": "Tokens de entrada más salida por sesión; 0 = sin límite.",
     "Time limit per session. One minute before it the agent is told to wrap up; at the limit the session is closed.": "Límite de tiempo por sesión. Un minuto antes se avisa al agente de que termine; al llegar al límite la sesión se cierra.",
     "Maximum associative memory matches": "Máximo de coincidencias de memoria asociativa",
     "Leave empty to use the application default. The minimum similarity is set by the application, not by you.": "Déjalo vacío para usar el valor predeterminado de la aplicación. La similitud mínima la fija la aplicación, no tú.",

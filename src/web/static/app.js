@@ -632,7 +632,7 @@ function translateInterface() {
     ["dream-effort-label", "Reasoning effort"], ["dream-effort-none", "No reasoning request"],
     ["dream-max-steps-label", "Maximum steps"], ["dream-max-steps-hint", "Model calls per session."],
     ["dream-max-tokens-label", "Maximum tokens"],
-    ["dream-max-tokens-hint", "Input plus output tokens per session."],
+    ["dream-max-tokens-hint", "Input plus output tokens per session; 0 = no cap."],
     ["dream-max-minutes-label", "Maximum minutes"],
     ["dream-max-minutes-hint", "Time limit per session. One minute before it the agent is told to wrap up; at the limit the session is closed."],
     ["dream-cancel", "Cancel dream"],

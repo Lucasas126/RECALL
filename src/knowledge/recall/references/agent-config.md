@@ -75,7 +75,7 @@ MCP entry fields: `tools` (list; omitted means all of the server's tools), `read
 | `dream.model` | empty uses the chat model the agent resolves to |
 | `dream.reasoning_effort` | medium |
 | `dream.max_steps` | model calls per session (60) |
-| `dream.max_tokens` | in + out per session (500000) |
+| `dream.max_tokens` | in + out per session (500000; 0 = no cap) |
 | `dream.max_minutes` | wall-clock limit, 1-120 (5) |
 | `dream.tools` | extra read groups: `folders` (default; needs a folder read group), `web` (opt-in) |
 | `dream.prompt` | empty uses the built-in prompt |
