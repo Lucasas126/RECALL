@@ -10,8 +10,7 @@ One list of ideas and planned work, with what is already done kept separate. Imp
 ### automation and behavior
 
 - **Automations** are being built in steps: the service (triggers `at`, `every`, `cron`, `process_end`; guards; catch-up) is done, see [automations](../user-guide/automations.md); the agent tools (group `automations`, level `assistant`) and the web tab (a second tab of the Tasks dialog) are done too. Left for later: sending a result to a chat. Calendar and conversation events are out of scope.
-- **Reminders and proactive messages**: a one-off message the agent sends while it works already exists (`notify_telegram`, see [done](#done)); what is planned is the agent *scheduling* a message ("remind me on Friday...") sent later through Telegram and shown in the web, reusing the dream scheduler. The agent schedules a message ("remind me on Friday...") sent later through Telegram and shown in the web, reusing the dream scheduler. First step towards automations.
-- **Automations**: rules and actions based on conversation or calendar events.
+- **Reminders and proactive messages**: a one-off message the agent sends while it works exists (`notify_telegram`, see [done](#done)) and an agent can schedule work for later with the `automations` tools (see above). Still open: a scheduled message delivered straight to Telegram and shown in the web without running the agent ("sending a result to a chat" in the automations item).
 - **Recall mode**: the agent enters its mind palace with a context trimmed to the last messages, searches and reads what it needs, and returns only the relevant information, dropping the retrieval process from its context. Complements [dream mode](../user-guide/dream.md): dreams write the palace, recall reads it cheaply.
 - **Warnings section** for configuration mismatches: a reasoning effort or token budget the selected model does not support, a tool that is unavailable, a model that is not offered. (Today the reasoning selector is disabled with an explanation when unsupported; there is no general warnings area.)
 
@@ -60,7 +59,7 @@ One list of ideas and planned work, with what is already done kept separate. Imp
 Not built yet, in the order they matter (see the [known gaps](../architecture/permissions.md#known-gaps-out-of-scope-for-the-level-work)):
 
 - **Outbound network control**: a domain allowlist for `web`/`web_retrieve` and egress rules for the terminal sandbox; the largest remaining exfiltration channel.
-- **Dream extras**: the limited read-only delegate (configurable, off by default), MCP read-only tools and `sandbox_read`/`sandbox_search` on disposable sandboxes.
+- **Dream extras**: MCP read-only tools and `sandbox_read`/`sandbox_search` on disposable sandboxes. The limited read-only delegate is [done](#done) (`dream.delegate`, off by default; [dream](../user-guide/dream.md)).
 - **Folder and MCP actions through the rule engine** (deletes, moves, non-read-only MCP tools), with approval cards that do not assume a command.
 - **Per-user path isolation**, **session revocation on demotion**, **login throttle** and a **CSRF token**.
 - **Audit of every write** (files, memory, self), not only terminal and permission changes; **budgets** per agent.
@@ -70,10 +69,10 @@ Not built yet, in the order they matter (see the [known gaps](../architecture/pe
 
 Capability gaps an agent reported, in the order they block it; each line says what depends on it.
 
-1. **Scheduled jobs and proactive Telegram messages**: cron-like jobs with an unattended approval policy; reminders, recurring reports and any automation depend on it.
+1. **Scheduled jobs and proactive Telegram messages**: done as [automations](../user-guide/automations.md) (`at`, `every`, `cron`, `process_end`; unattended runs) plus `notify_telegram`. Left: sending an automation's result to a chat.
 2. **Ask the user with options**: clarify cards in web and Telegram; confirming choices without free-text round trips depends on it.
 3. **Browser**: driving a web page; sites that need clicks, logins or scripts depend on it.
-4. **Vision**: analysing images the agent did not receive in chat; screenshots and files on the backend depend on it.
+4. **Vision**: done as `view_image` (a source or a terminal backend file, or PDF pages; see [done](#done)). Left: providers without image input (OpenRouter/Ollama cases).
 5. **Voice tools**: speech output and input as tools; spoken replies depend on it.
 6. **Connectors**: mail, calendar, drive and similar accounts beyond MCP; personal-data tasks depend on it.
 
@@ -84,6 +83,7 @@ Skills imported from other agent systems:
 
 ## done
 
+- Automations: service, agent tools (group `automations`) and web tab ([automations](../user-guide/automations.md)); dream `dream.delegate` read-only chat readers ([dream](../user-guide/dream.md)).
 - Slow chats and duplicated streaming on reload (bugs reported 2026-11-14): a reply that is still running no longer shows its saved checkpoint next to the live stream (it was drawn twice and marked interrupted); the chat list keeps what it read from each transcript until the file changes instead of parsing all of them on every request; opening a chat asks for the preferences and the chat together and no longer repeats the models request; a long chat opens with its last 25 messages and a bar to load earlier ones (`GET .../chats/{id}?limit=&before=`, `window` in the answer). Measured with Chromium on 29 real chats over a simulated Tailscale link (80 ms, 40 Mbit/s): median switch 334 ms to 147 ms, p90 599 ms to 397 ms. Clicking a chat in the sidebar now marks it as the open one at once; before, the mark waited for the chat to load and for a second request that redraws the list (about 100 ms locally, 210 ms over a Tailscale-like link, longer for big chats). Still open: gzip, keeping sent files out of the chat payload, and fewer requests per switch (`/api/chats`, approvals, tasks and processes are still separate calls).
 - `view_image` (group `memory_read`): the agent looks at an image or at pages of a PDF (a source or a terminal backend, one page or a contact sheet of up to 6), downscaled to a JPEG and shown as the next message, removed from the context at the user's next message, 6 per message, only for models that declare image input. `send_file` takes `<backend>:<path>` (fetched through the terminal session, with its approval and audit).
 - `make_pdf` (group `memory_edit`): the agent describes a document as a list of elements (heading, paragraph, bullets, numbered, table, image, spacer, pagebreak) and RECALL lays it out with reportlab and saves it in any source the agent may write (default `mind_palace:documents/`), without sending it. `read` and `folder_read` return a PDF's text, and `move` and `folder_move` now copy bytes, so PDFs and images move intact ([files and media](../user-guide/files-and-media.md#pdf-files-made-by-the-agent), [tools](../reference/tools.md#memory_edit)).
