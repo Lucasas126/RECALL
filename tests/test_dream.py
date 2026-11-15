@@ -352,7 +352,7 @@ class DreamFinishTests(DreamFixture):
         provider = ScriptedProvider([_finish("ok")])
         self.runner(provider).run()
         prompt = provider.calls[0]["messages"][0]["content"]
-        for phrase in ("no size limit", "pointers", "INDEX.md", "dream_finish", "There is no hurry"):
+        for phrase in ("no size limit", "pointers", "INDEX.md", "dream_finish", "There is no hurry", "Never decide on your own"):
             self.assertIn(phrase, prompt)
 
 
