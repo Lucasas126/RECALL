@@ -509,7 +509,7 @@ details.msg.task-wake { align-self: flex-start; padding: 6px 12px; border-style:
 #pending-attachments { flex-basis: 100%; display: flex; gap: 6px; flex-wrap: wrap; }
 .pending-attachment, .attachment-name { display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border-radius: 12px; background: var(--line); font-size: .85em; }
 .pending-attachment button { border: 0; background: transparent; padding: 0 2px; cursor: pointer; }
-.message-attachments { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.message-attachments { display: flex; gap: 6px; flex-wrap: wrap; align-items: flex-start; margin-bottom: 6px; }   /* flex-start: a small chip must not stretch to the height of a picture */
 
 /* Panel toggle: on narrow screens it opens the drawer, on wide screens it collapses the sidebar */
 .nav-toggle { display: inline-flex; align-items: center; padding: 6px 12px; font-size: 1.2em; line-height: 1; }
@@ -613,7 +613,7 @@ details.thinking { border-left: 2px solid var(--line); padding-left: 10px; displ
 #composer:has(#mic.recording), #composer:has(#mic.recording):focus-within { border-color: #c0392b; box-shadow: 0 0 0 1px #c0392b; }
 .attachment-transcript { max-width: 100%; color: var(--muted); font-size: .85em; white-space: pre-wrap; }
 .attachment-image, .attachment-audio, .attachment-video { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 6px; border-radius: 8px; max-width: min(100%, 360px); }
-.attachment-image img, .attachment-video video { max-width: 100%; max-height: 260px; border-radius: 6px; display: block; }
+.attachment-image img, .attachment-video video { max-width: min(320px, 70vw); max-height: 220px; border-radius: 6px; display: block; }   /* not a percentage: a percentage makes the bubble size itself from the picture's full width and leaves empty space on the right */
 .attachment-audio audio { width: min(100%, 300px); height: 36px; }
 .attachment-label { font-size: .8em; color: var(--muted); }
 .agent-files { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 0; }
@@ -1098,3 +1098,6 @@ html.resizing-sidebar #app { transition: none; }
 #viewer-body.zoomed img { max-width: none; max-height: none; object-fit: none; cursor: zoom-out; }
 #viewer-body iframe { flex: 1; width: 100%; height: 100%; border: 0; background: #fff; }
 .attachment-image img, .msg .body img, a.attachment-pdf { cursor: zoom-in; }
+.attachment-pdf { gap: 6px; padding: 4px 10px 4px 5px; color: var(--text); text-decoration: none; cursor: pointer; }
+.attachment-pdf::before { content: "PDF"; padding: 1px 5px; border-radius: 4px; background: var(--accent); color: var(--bg); font-size: .75em; font-weight: 700; letter-spacing: .04em; }
+.attachment-pdf:hover { border-color: var(--accent); }
