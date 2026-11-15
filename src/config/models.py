@@ -720,6 +720,13 @@ class DreamConfig(BaseModel):
     notify_telegram: bool = Field(default=False, strict=True)
     # read-only workers that read chats for the dream (also needs the `delegate` group and level collaborator)
     delegate: bool = Field(default=False, strict=True)
+    # model of those workers (e.g. a cheaper one); None = the dream's model
+    delegate_model: Optional[str] = Field(default=None, strict=True, min_length=1, max_length=256)
+
+    @field_validator("delegate_model")
+    @classmethod
+    def _valid_delegate_model(cls, value: Optional[str]) -> Optional[str]:
+        return None if value is None else validate_reference(value)
 
     @field_validator("max_tokens")
     @classmethod

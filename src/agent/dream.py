@@ -24,6 +24,7 @@ from src.agent.toolsets.folders import build_folder_tools
 from src.agent.toolsets.web import build_web_tools
 from src.config.ceiling import dream_allowed_tools, dream_capabilities, dream_refusal
 from src.config.levels import Level
+from src.config.model_refs import is_claude_subscription
 from src.config.models import ResolvedAgent
 from src.core.review import ReviewQueue
 from src.core.sources.registry import SourceRegistry
@@ -398,9 +399,11 @@ class DreamRunner:
         poll_seconds: float = 0.5,
         abort_grace_seconds: float = _ABORT_GRACE_SECONDS,
         monotonic_clock: Callable[[], float] = monotonic,
+        worker_provider: LLMProvider | None = None,
     ):
         self.config = config
         self.provider = provider
+        self._worker_provider = worker_provider
         self.sources = sources
         self.session_id = session_id
         self.trigger = trigger
@@ -420,6 +423,13 @@ class DreamRunner:
     @property
     def model(self) -> str:
         return self.config.dream.model or self.config.models.chat
+
+    @property
+    def worker_model(self) -> str:
+        """The model of the dream's reading workers: `dream.delegate_model`, else the dream's own."""
+        if self.config.dream.delegate_model and self._worker_provider is not None:
+            return self.config.dream.delegate_model
+        return self.model
 
     @property
     def stop_reason(self) -> StopReason | None:
@@ -605,13 +615,14 @@ class DreamRunner:
 
             def one(chat_id: str) -> dream_workers.WorkerOutcome:
                 return dream_workers.run_worker(
-                    provider=runner.provider, model=runner.model, zdr=runner.config.require_zdr,
+                    provider=runner._worker_provider or runner.provider, model=runner.worker_model,
+                    zdr=runner.config.require_zdr and not is_claude_subscription(runner.worker_model),
                     agent_name=runner.config.name or runner.config.id, queue=runner._queue, chat_id=chat_id,
                     start_after=read_until.get(chat_id), tools=list(worker_handlers.values()), focus=focus,
                     index=index, budget=budget, stop=lambda: runner._check_stop() is not None, call_tool=call,
                 )
 
-            runner._event("delegate_started", steps_ref(), chats=ids)
+            runner._event("delegate_started", steps_ref(), chats=ids, model=runner.worker_model)
             outcomes = dream_workers.run_workers(ids, one)
             for item in outcomes:
                 if item.read_until:

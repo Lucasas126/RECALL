@@ -96,6 +96,8 @@ class DreamDependencies:
 
     resolve_agent: Callable[[str, str], ResolvedAgent]
     provider: Callable[[ResolvedAgent], LLMProvider]
+    # provider of `dream.delegate_model` (None when unset: workers use the dream's provider and model)
+    worker_provider: Callable[[ResolvedAgent], Optional[LLMProvider]] = field(default=lambda config: None)
     registry: Callable[[ResolvedAgent], SourceRegistry] = field(
         default=lambda config: SourceRegistry.for_agent(config.user_id, config.id, **dream_folder_options(config)),
     )
@@ -150,6 +152,7 @@ class DreamManager:
                     config, self._deps.provider(config), sources, session_id=session_id, trigger=trigger,
                     index_factory=(lambda: self._deps.index(config, sources)) if self._deps.index else None,
                     web_client=self._deps.web_client(), clock=self._deps.clock,
+                    worker_provider=self._deps.worker_provider(config) if config.dream.delegate else None,
                 )
                 running = _Running(session_id, started_at, runner)
                 running.thread = threading.Thread(

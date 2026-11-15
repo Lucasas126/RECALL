@@ -208,7 +208,8 @@ read (scoped to the agent, existing guards apply):
 - web search / retrieve when `web` is in `dream.tools`
 - `dream_delegate(chat_ids, focus)` when `dream.delegate` is true, the agent holds the `delegate` group and its
   level is `collaborator` or higher: up to 6 pending chats per call, 3 workers at a time. Each worker reads one
-  chat to its end in a fresh context with the dream's model (tools: the chat in parts, plus the dream's memory
+  chat to its end in a fresh context with `dream.delegate_model` (empty: the dream's model; a cheaper model such as
+  a Haiku fits this reading work) (tools: the chat in parts, plus the dream's memory
   read tools and web if the dream has it; never a write, a mark or a task) and returns structured notes with turn
   numbers (facts and preferences, decisions, project state at the end, procedures and lessons, open questions,
   where to save). The dream gets them as untrusted data, saves what matters and marks the chats; the position each
@@ -399,6 +400,7 @@ dream:
   prompt: ""                 # empty = built-in default
   notify_telegram: false     # "dream session completed" + where to see it in the web
   delegate: false            # read-only chat-reading workers (needs the delegate group, level collaborator+)
+  delegate_model: null       # model of those workers; null = the dream's model
 folders: []                  # user folders, edited in the agent's Folders tab (see [files and media](files-and-media.md) and [memory](memory.md))
 ```
 

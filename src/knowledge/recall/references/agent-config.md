@@ -77,6 +77,7 @@ MCP entry fields: `tools` (list; omitted means all of the server's tools), `read
 | `dream.max_steps` | model calls per session (60) |
 | `dream.max_tokens` | in + out per session (500000; 0 = no cap) |
 | `dream.delegate` | read-only chat-reading workers in dreams (false; needs `delegate` group, collaborator+) |
+| `dream.delegate_model` | model of those workers (null = the dream's model) |
 | `dream.max_minutes` | wall-clock limit, 1-120 (5) |
 | `dream.tools` | extra read groups: `folders` (default; needs a folder read group), `web` (opt-in) |
 | `dream.prompt` | empty uses the built-in prompt |

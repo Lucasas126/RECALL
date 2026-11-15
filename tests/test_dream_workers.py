@@ -50,8 +50,36 @@ class RoutedProvider:
 
 
 class DreamWorkerTests(DreamFixture):
-    def runner(self, provider, config) -> DreamRunner:
-        return DreamRunner(config, provider, self.sources, session_id="20261103-040000-abcd", trigger="manual")
+    def runner(self, provider, config, worker_provider=None) -> DreamRunner:
+        return DreamRunner(config, provider, self.sources, session_id="20261103-040000-abcd", trigger="manual",
+                           worker_provider=worker_provider)
+
+    def test_workers_can_run_on_their_own_model(self) -> None:
+        chat = self.chat("I moved to Valencia", "Noted")
+        dream_side = RoutedProvider([
+            {"tool_calls": [_call("d1", "dream_delegate", chat_ids=[chat])]},
+            {"tool_calls": [_call("m1", "dream_mark_reviewed", chat_id=chat)]},
+            _finish("done"),
+        ])
+        workers = RoutedProvider([])
+        models: list[str] = []
+        original = workers.invoke
+
+        def spy(messages, model, **kwargs):
+            models.append(model)
+            return original(messages, model, **kwargs)
+
+        workers.invoke = spy
+        config = _config(delegate=True, model="vendor/big", delegate_model="vendor/small")
+        summary = self.runner(dream_side, config, worker_provider=workers).run()
+        self.assertEqual(summary["status"], "completed")
+        self.assertEqual(dream_side.worker_calls, [])  # no worker call went to the dream's provider
+        self.assertTrue(models and set(models) == {"vendor/small"})
+        self.assertEqual(summary["chats_reviewed"], [chat])
+
+    def test_without_delegate_model_workers_use_the_dream_model(self) -> None:
+        runner = self.runner(RoutedProvider([]), _config(delegate=True, model="vendor/big"))
+        self.assertEqual(runner.worker_model, "vendor/big")
 
     def test_delegation_needs_option_group_and_level(self) -> None:
         self.assertTrue(delegation_allowed(_config(delegate=True)))
