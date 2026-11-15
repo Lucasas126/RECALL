@@ -250,11 +250,12 @@ class DreamRunnerTests(DreamFixture):
         self.assertEqual(changed["agent:memories/USER.md"], "created")
         self.assertIn("+Lives in Valencia", summary["diffs"]["agent:memories/USER.md"])
 
-    def test_step_and_token_budgets_end_the_session_and_leave_chats_pending(self) -> None:
+    def test_token_budget_ends_the_session_and_steps_are_only_counted(self) -> None:
         chat_id = self.chat("hello")
         loop = {"tool_calls": [_call("c", "dream_pending")], "usage": {"prompt_tokens": 600, "completion_tokens": 600}}
-        summary = self.runner(ScriptedProvider([loop] * 5), max_steps=2).run()
-        self.assertEqual((summary["status"], summary["steps"]), ("budget_exhausted", 2))
+        summary = self.runner(ScriptedProvider([loop] * 70 + [_finish("done")])).run()
+        self.assertEqual((summary["status"], summary["steps"]), ("completed", 71))  # no step cap
+        self.assertEqual(DreamConfig.model_validate({"max_steps": 60}), DreamConfig())  # the old key is ignored
         summary = self.runner(ScriptedProvider([loop] * 5), max_tokens=2000).run()
         self.assertEqual((summary["status"], summary["steps"]), ("budget_exhausted", 2))
         self.assertEqual(self.queue.pending()[0]["chat_id"], chat_id)

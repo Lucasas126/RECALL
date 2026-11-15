@@ -486,10 +486,9 @@ class DreamRunner:
             f"Journal for this month: mind_palace:{journal}",
             *self._file_notes(journal),
             f"Pending chats: {len(pending)}.",
-            f"Budget: {dream.max_steps} model calls, "
-            f"{f'{dream.max_tokens} tokens' if dream.max_tokens else 'no token cap'}, "
-            f"{_format_seconds(self._limit)} of time. You get a wrap-up warning before the time or tokens run out; until "
-            "then, take the time the work needs.",
+            f"Time: {_format_seconds(self._limit)}"
+            f"{f', tokens: {dream.max_tokens}' if dream.max_tokens else ''}. You get a wrap-up warning before the "
+            "limit; until then, take the time the work needs and read every chat fully.",
         ]
         if tasks:
             lines.append(
@@ -766,7 +765,7 @@ class DreamRunner:
             pending_before = len(pending)
             self._event(
                 "session_started", trigger=self.trigger, model=self.model, pending=pending_before,
-                max_steps=dream.max_steps, max_tokens=dream.max_tokens, max_minutes=self._limit / 60,
+                max_tokens=dream.max_tokens, max_minutes=self._limit / 60,
                 deadline_at=deadline_at,
             )
             before = _snapshot(self.sources)
@@ -810,7 +809,7 @@ class DreamRunner:
                 if worker_tokens["spent"]:
                     tokens_in += worker_tokens.pop("spent")
                     worker_tokens["spent"] = 0
-                if steps >= dream.max_steps or (dream.max_tokens and tokens_in + tokens_out >= dream.max_tokens):
+                if dream.max_tokens and tokens_in + tokens_out >= dream.max_tokens:
                     status = "budget_exhausted"
                     break
                 due = self._wrap_up_due(warned, tokens_in + tokens_out, last_input)

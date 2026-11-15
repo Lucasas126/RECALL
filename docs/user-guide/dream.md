@@ -104,7 +104,7 @@ watermark per chat:
    dream per agent at a time.
 4. **loop**: a tool-calling loop like the chat one (`DreamRunner` in
    `src/agent/dream.py`, non-streaming), with the dream model, the dream toolset
-   and limits (`max_steps` model calls, `max_tokens` input+output; provider usage,
+   and limits (`max_tokens` input+output; provider usage,
    or chars/4 when the provider reports none; `max_minutes` of wall-clock time,
    see [time limit and cancel](#time-limit-and-cancel)). every event (reasoning,
    assistant text, tool call, tool result, warnings, errors) is appended to
@@ -358,7 +358,7 @@ form (`src/web/static`):
   enabled switch), model (free text or the model picker, whose provider tabs
   list OpenRouter, Ollama and Claude subscription models; empty = the
   agent's default chat model, else the user's; a `claude_subscription:<model>` reference uses the user's own
-  Claude login, see [claude subscription](claude-subscription.md)), reasoning effort, `max_steps`, `max_tokens`, `max_minutes`, dream read
+  Claude login, see [claude subscription](claude-subscription.md)), reasoning effort, `max_tokens`, `max_minutes`, dream read
   tools, memory limits, the dream prompt (the default prompt is
   the placeholder; it can be copied for editing or reset to empty) and the
   Telegram notification. API validation errors are shown under the form.
@@ -393,7 +393,6 @@ dream:
                              # both null = manual only; both set = invalid
   model: null                # null = the agent's default chat model, else the user's
   reasoning_effort: medium
-  max_steps: 60
   max_tokens: 500000         # total input+output for the session; 0 = no cap
   max_minutes: 5             # wall-clock limit; wrap-up warning 1 minute before, then force-closed
   tools: [folders]           # optional read groups: folders (needs a folder read group), web (opt-in)
@@ -416,8 +415,8 @@ at once. scheduled runs are skipped while nothing is pending.
 
 `tools` defaults to `[folders]`; web is opt-in and needs Tavily; folders needs at least one
 entry in `folders` and a `folders_read`/`folders_edit` tool group. `terminal` is rejected.
-`reasoning_effort: null` sends no reasoning request. `max_steps` is 1–500 and
-`max_tokens` 0 (no cap) or 1000–100000000, `max_minutes` 1–120; limits are 100–50000 chars.
+`reasoning_effort: null` sends no reasoning request. model calls (steps) are counted and shown, never
+capped (an old `max_steps` key is ignored). `max_tokens` 0 (no cap) or 1000–100000000, `max_minutes` 1–120; limits are 100–50000 chars.
 
 ## migration
 

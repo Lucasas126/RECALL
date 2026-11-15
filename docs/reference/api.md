@@ -82,7 +82,7 @@ New codes are set with `UserMessageError(..., code="...")` or a class-level `cod
 | `POST` | `/api/mcp/<server_id>/connect` | starts the server's sign-in for the user; returns the status and sign-in URL |
 | `DELETE` | `/api/mcp/<server_id>/connection` | stops the user's server and deletes their stored credentials |
 | `GET` | `/api/agents` | full configuration of each agent the user owns, including `chat_config.tool_groups` and `level`, its effective permission level: the declared one, else the lowest level covering its configuration |
-| `GET` | `/api/agents/defaults` | defaults and bounds of the agent form fields, generated from the configuration models: `{chat_config, dream, terminal}`, each field `{default, min, max}` (`null` where the model has no default or bound), e.g. `dream.max_steps` `{default: 60, min: 1, max: 500}`, `chat_config.max_tool_hops` `{default: null, min: 1, max: 100}` |
+| `GET` | `/api/agents/defaults` | defaults and bounds of the agent form fields, generated from the configuration models: `{chat_config, dream, terminal}`, each field `{default, min, max}` (`null` where the model has no default or bound), e.g. `dream.max_tokens` `{default: 500000, min: 0, max: 100000000}`, `chat_config.max_tool_hops` `{default: null, min: 1, max: 100}` |
 | `POST` | `/api/agents` | creates `agents/<id>.yaml` and appends the id to `agents` in `user.yaml` (`201`) |
 | `GET` | `/api/agents/<agent_id>` | one agent's configuration, with the effective `level` and `avatar` |
 | `PUT` | `/api/agents/<agent_id>` | replaces the agent; the body `id` may differ, which renames it (its profile picture moves with it). A body without `level` keeps the stored level, and one without `avatar_style` keeps the stored style |

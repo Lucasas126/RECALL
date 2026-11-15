@@ -792,10 +792,22 @@ details.thinking { border-left: 2px solid var(--line); padding-left: 10px; displ
 .diff .diff-del { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
 .diff .diff-hunk { color: var(--accent); }
 .diff .diff-file { color: var(--muted); font-weight: 600; }
-.dream-trace { display: flex; flex-direction: column; gap: 6px; }
-.trace-step { margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--line); color: var(--muted); font-size: .8em; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+.dream-trace { display: flex; flex-direction: column; gap: 8px; }
+.trace-toggle { align-self: flex-end; font-size: .85em; }
+.trace-card { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.trace-card-head { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: .75em; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+.trace-card-meta { font-weight: 400; text-transform: none; letter-spacing: 0; }
+.trace-reasoning-text { white-space: pre-wrap; word-break: break-word; line-height: 1.5; color: var(--muted); }
+.trace-tool { font-size: .82em; color: var(--muted); }
+.trace-tool > summary { cursor: pointer; display: flex; gap: 8px; align-items: baseline; min-width: 0; white-space: nowrap; overflow: hidden; }
+.trace-tool-name { flex: none; font: 600 .95em var(--mono); color: var(--accent); }
+.trace-tool-hint { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); }
+.trace-tool-meta { flex: none; }
+.trace-tool.failed .trace-tool-name, .trace-tool.failed .trace-tool-meta { color: var(--danger); }
+.trace-tool-label { margin-top: 6px; color: var(--muted); font: 600 .6875rem/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; }
+.dream-trace.hide-tools .trace-tool { display: none; }
 .trace-note { color: var(--muted); font-size: .82em; }
-.trace-assistant .body { padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.trace-assistant .body { padding: 6px 10px; border-left: 3px solid var(--accent); background: var(--bg); }
 .trace-call { font: 13px/1.4 var(--mono); }
 .trace-call-name { color: var(--accent); font-weight: 600; }
 .trace-call pre { max-height: 40vh; overflow-y: auto; }

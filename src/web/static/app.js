@@ -630,7 +630,6 @@ function translateInterface() {
     ["agent-model-label", "Default model"], ["agent-model-browse", "Browse"], ["agent-delegation-model-browse", "Browse"],
     ["agent-model-hint", "Empty follows your default model. A model chosen inside a chat still takes precedence."],
     ["dream-effort-label", "Reasoning effort"], ["dream-effort-none", "No reasoning request"],
-    ["dream-max-steps-label", "Maximum steps"], ["dream-max-steps-hint", "Model calls per session."],
     ["dream-max-tokens-label", "Maximum tokens"],
     ["dream-max-tokens-hint", "Input plus output tokens per session; 0 = no cap."],
     ["dream-max-minutes-label", "Maximum minutes"],
@@ -7451,7 +7450,6 @@ function fillDreamSettings(settings) {
   $("dream-enabled").checked = dream.enabled;
   $("dream-model").value = dream.model ?? "";
   $("dream-effort").value = dream.reasoning_effort ?? "";
-  setNumberValue($("dream-max-steps"), dream.max_steps);
   setNumberValue($("dream-max-tokens"), dream.max_tokens);
   setNumberValue($("dream-max-minutes"), dream.max_minutes);
   $("dream-tool-web").checked = dream.tools.includes("web");
@@ -7490,7 +7488,6 @@ function dreamSettingsBody() {
       daily_at: mode === "daily" ? $("dream-daily-at").value : null,
       model: $("dream-model").value.trim() || null,
       reasoning_effort: $("dream-effort").value || null,
-      max_steps: numberValue("dream-max-steps"),
       max_tokens: numberValue("dream-max-tokens"),
       max_minutes: numberValue("dream-max-minutes"),
       tools: ["web", "folders"].filter((tool) => $(`dream-tool-${tool}`).checked),
@@ -7822,21 +7819,70 @@ function expandablePre(text) {
   return [pre, more];
 }
 
+// the dream trace, grouped by step (one model call): reasoning and replies stay readable, tools are one-line rows
+// that open to show their arguments and result; RECALL's notices stand out between the steps
 function renderTrace(events) {
   const trace = element("div", { className: "dream-trace" });
   if (!events?.length) {
     trace.append(element("p", { className: "model-note", textContent: tr("The trace is empty.") }));
     return trace;
   }
-  let step = null;
+  const toolsOnly = element("input", { type: "checkbox", checked: localStorage.getItem("dreamTraceTools") === "false" });
+  const toggle = element("label", { className: "model-filter trace-toggle" }, toolsOnly, ` ${tr("Reasoning only (hide tools)")}`);
+  const apply = () => trace.classList.toggle("hide-tools", toolsOnly.checked);
+  toolsOnly.addEventListener("change", () => {
+    localStorage.setItem("dreamTraceTools", toolsOnly.checked ? "false" : "true");
+    apply();
+  });
+  trace.append(toggle);
+  const results = new Map(events.filter((event) => event.type === "tool_result").map((event) => [event.id, event]));
+  let card = null;
+  let cardStep = null;
   for (const event of events) {
-    if (event.step != null && event.step !== step && event.type !== "session_finished") {
-      step = event.step;
-      trace.append(element("div", { className: "trace-step", textContent: tr("Step {step}", { step }) }));
+    if (event.type === "tool_result") continue;  // shown inside its call's row
+    const inStep = event.step != null && ["usage", "reasoning", "assistant", "tool_call"].includes(event.type);
+    if (inStep && event.step !== cardStep) {
+      cardStep = event.step;
+      card = element("section", { className: "trace-card" },
+        element("header", { className: "trace-card-head" }, element("span", { textContent: tr("Step {step}", { step: event.step }) })));
+      trace.append(card);
     }
+    if (inStep) {
+      if (event.type === "usage") {
+        card.querySelector(".trace-card-head").append(element("span", { className: "trace-card-meta",
+          textContent: `${event.ts ? `${formatDate(event.ts).slice(11)} · ` : ""}${tr("in {input} · out {output} tokens", {
+            input: formatCount(event.input_tokens), output: formatCount(event.output_tokens) })}` }));
+      } else if (event.type === "tool_call") {
+        card.append(renderTraceTool(event, results.get(event.id)));
+      } else {
+        card.append(renderTraceEvent(event));
+      }
+      continue;
+    }
+    card = null;
+    cardStep = null;
     trace.append(renderTraceEvent(event));
   }
+  apply();
   return trace;
+}
+
+// one tool call as a compact row: name, a short hint of the arguments, size and outcome; opens to the details
+function renderTraceTool(call, result) {
+  const args = call.arguments ?? {};
+  const hint = Object.values(args).filter((value) => typeof value === "string" || typeof value === "number")
+    .map(String).join(" · ");
+  const outcome = !result ? "…" : result.error ? "\u2717" : "\u2713";
+  const size = result ? tr("{count} characters", { count: formatCount((result.result ?? "").length) }) : "";
+  return element("details", { className: `trace-tool${result?.error ? " failed" : ""}` },
+    element("summary", {},
+      element("span", { className: "trace-tool-name", textContent: call.name }),
+      element("span", { className: "trace-tool-hint", textContent: hint.length > 90 ? `${hint.slice(0, 90)}…` : hint }),
+      element("span", { className: "trace-tool-meta", textContent: [size, outcome].filter(Boolean).join(" ") })),
+    element("div", { className: "trace-tool-label", textContent: tr("Arguments") }),
+    ...expandablePre(JSON.stringify(args, null, 2)),
+    ...(result ? [element("div", { className: "trace-tool-label", textContent: result.error ? tr("Failed") : tr("Result") }),
+      ...expandablePre(result.result ?? "")] : []));
 }
 
 function renderTraceEvent(event) {
@@ -7844,19 +7890,35 @@ function renderTraceEvent(event) {
   const note = (text) => element("div", { className: "trace-note", textContent: time ? `${time} · ${text}` : text });
   switch (event.type) {
     case "session_started":
-      return note(tr("Session started ({trigger}) with {model}; {pending} pending chats; limits {steps} steps, {tokens} tokens, {minutes} min.", {
+      return note(tr("Session started ({trigger}) with {model}; {pending} pending chats; limits {tokens} tokens, {minutes} min.", {
         trigger: dreamTriggerLabel(event.trigger), model: event.model ?? "—", pending: formatCount(event.pending),
-        steps: formatCount(event.max_steps), tokens: formatCount(event.max_tokens), minutes: formatCount(event.max_minutes),
+        tokens: event.max_tokens ? formatCount(event.max_tokens) : "∞", minutes: formatCount(event.max_minutes),
       }));
     case "usage":
       return note(tr("Tokens: input {input}, output {output}", {
         input: formatCount(event.input_tokens), output: formatCount(event.output_tokens),
       }));
     case "reasoning":
-      return element("details", { className: "thinking" },
-        element("summary", { textContent: tr("Reasoning") }), element("div", { className: "thinking-text", textContent: event.text ?? "" }));
+      return element("div", { className: "trace-reasoning" },
+        element("div", { className: "trace-tool-label", textContent: tr("Reasoning") }),
+        element("div", { className: "trace-reasoning-text", textContent: event.text ?? "" }));
     case "assistant":
       return element("div", { className: "trace-assistant" }, markdown(event.text));
+    case "compaction_warning":
+      return element("div", { className: "trace-stop" },
+        element("div", { textContent: `${time ? `${time} · ` : ""}${tr("Context {percent}% full: the agent was told to save before compaction", {
+          percent: formatCount(Math.round((event.context_tokens ?? 0) * 100 / (event.window || 1))) })}` }));
+    case "compacted":
+      return element("div", { className: "trace-stop" + (event.error ? " failed" : "") },
+        element("div", { textContent: `${time ? `${time} · ` : ""}${tr("Context compacted: {before} → {after} tokens", {
+          before: formatCount(event.tokens_before), after: formatCount(event.tokens_after) })}${event.error ? ` (${event.error})` : ""}` }));
+    case "delegate_started":
+      return note(tr("Workers started ({model}) for: {chats}", { model: event.model ?? "—", chats: (event.chats ?? []).join(", ") }));
+    case "delegate_finished":
+      return note(tr("Worker for {chat}: {state}, {steps} model calls, {tokens} tokens", {
+        chat: event.chat_id, steps: formatCount(event.worker_steps), tokens: formatCount(event.tokens),
+        state: event.finished ? tr("read to the end") : (event.error || tr("stopped early")),
+      }));
     case "tool_call":
       return element("div", { className: "trace-call" },
         element("div", { className: "trace-call-name", textContent: `→ ${event.name}` }),
@@ -8075,7 +8137,6 @@ registerRow("dream-delegate-model", {
   read: () => $("dream-delegate-model").value.trim() || null, write: (value) => { $("dream-delegate-model").value = value ?? ""; },
 });
 selectRow("dream-effort", dreamDefault("reasoning_effort"));
-numberRow("dream-max-steps", () => agentDefaultSpec("dream.max_steps"), () => "");
 numberRow("dream-max-tokens", () => agentDefaultSpec("dream.max_tokens"), () => "");
 numberRow("dream-max-minutes", () => agentDefaultSpec("dream.max_minutes"), () => "");
 numberSpecs.set("dream-every-hours", () => agentDefaultSpec("dream.every_hours"));
