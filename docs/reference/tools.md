@@ -27,6 +27,9 @@ The web **Agents** tab configures these groups for each agent:
   write_file, remove_file) and `soul_edit` (replace or patch `SOUL.md`, saving
   the previous version). Changes apply to new chats. `skill_view` lists a skill's supporting files and, given a folder such as `references/`, that folder's files; it also reads the built-in, read-only `recall` skill
   (`skill_view("recall", "references/<file>.md")`), which `skill_manage` refuses to change; see [RECALL knowledge](../user-guide/recall-knowledge.md).
+- `read` and `folder_read` return at most about 40,000 characters per call and cut lines longer than
+  2,000 characters; a capped result ends with a note giving the lines shown and the `lines` range to
+  ask for next, so a large file (a chat log, a long note) is read in parts.
 - `folders_read`: `folder_list`, `folder_read` and `folder_search` over every
   folder in the agent's `folders:` list. paths take the folder name as the source
   prefix (`notes:Projects/plan.md`); with a single folder the prefix may be omitted.
@@ -269,7 +272,8 @@ in recall mode the subagent keeps only search/read tools — it can look things 
 dream sessions get the review-queue tools (`dream_pending`, `dream_read_chat`,
 `dream_mark_reviewed`, and `dream_finish`, the only call that ends a session
 besides its limits) and the memory read tools (disposable and task chats are
-not listed, searched or read). The edit tools (writes succeed only in `mind_palace`)
+not listed, searched or read). `dream_read_chat` returns at most 40 new turns
+and about 40,000 characters per part; calling it again continues. The edit tools (writes succeed only in `mind_palace`)
 exist only if the agent's `tool_groups` include `memory_edit`, and the `self` tools
 only if they include `self`. `folder_list`, `folder_read`, `folder_search`
 (read-only) need `folders` in `dream.tools` and a `folders_read` or `folders_edit`

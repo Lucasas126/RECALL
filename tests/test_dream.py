@@ -115,6 +115,15 @@ class ReviewQueueTests(DreamFixture):
         self.assertEqual(self.queue.mark_reviewed(chat_id, 2), 4)
         self.assertEqual(self.queue.pending()[0]["new_turns"], 6)
 
+    def test_a_part_stops_at_the_char_budget_and_the_next_one_continues(self) -> None:
+        from src.core.review import PART_CHARS, TURN_CHARS
+        chat_id = self.chat(*["w" * TURN_CHARS for _ in range(30)])
+        part = self.queue.read(chat_id)
+        self.assertLess(part["read_until"], 30)
+        self.assertLessEqual(sum(len(turn["content"]) for turn in part["turns"]), PART_CHARS)
+        following = self.queue.read(chat_id, after=part["read_until"])
+        self.assertEqual(following["turns"][0]["n"], part["read_until"] + 1)
+
     def test_deleted_chats_are_dropped_and_order_is_oldest_first(self) -> None:
         old = self.chat("old")
         new = self.chat("new")
