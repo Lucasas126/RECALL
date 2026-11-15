@@ -143,7 +143,7 @@ class ServiceSteeringTests(SteeringFixture):
         old_events, new_events = list(old), list(new)
         self.assertEqual([e.kind for e in old_events], ["text", "interrupted"])
         self.assertEqual(old_events[-1].text, "Partial")
-        self.assertEqual(old_events[-1].data, {"reasoning": "", "actions": []})
+        self.assertEqual(old_events[-1].data, {"reasoning": "", "actions": [], "reason": "replaced"})
         self.assertEqual([e.kind for e in new_events], ["text", "usage"])
         self.assertEqual(new_events[0].text, "Answer: Correction")
         old_ids = {e.generation_id for e in old_events}

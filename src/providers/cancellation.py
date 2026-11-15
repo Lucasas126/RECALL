@@ -19,11 +19,14 @@ class CancellationToken:
         self._finished = False
         self._tasks: set[asyncio.Task] = set()
         self._children: set[CancellationToken] = set()
+        self.reason: str | None = None  # "stopped" (the stop button) or "replaced" (a new message); None: other
 
-    def cancel(self) -> bool:
+    def cancel(self, reason: str | None = None) -> bool:
         with self._lock:
             if self._finished:
                 return False
+            if self.reason is None:  # the first cause wins
+                self.reason = reason
             self._cancelled = True
             for task in self._tasks:
                 task.get_loop().call_soon_threadsafe(task.cancel)

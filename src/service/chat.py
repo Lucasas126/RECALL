@@ -1248,17 +1248,17 @@ class ChatService:
             sleep(0.02)
         self.delete_chat(user_id, agent_id, chat_id)
 
-    def cancel_chat_run(self, user_id: str, agent_id: str, chat_id: str) -> None:
+    def cancel_chat_run(self, user_id: str, agent_id: str, chat_id: str, reason: str | None = None) -> None:
         """Cancel the chat's active reply and drop its queued ones, keeping the chat (what a task stop uses)."""
         slot = self._slot(user_id, agent_id)
         with slot.state:
-            self._discard_replies(slot, chat_id)
+            self._discard_replies(slot, chat_id, reason)
 
     def stop_chat(self, user_id: str, agent_id: str, chat_id: str) -> dict:
         """Stop the chat's running reply (the partial answer is kept as an interrupted turn) and drop queued ones."""
         self._owned_agent(user_id, agent_id)
         self._require_chat(self._conversations(user_id, agent_id), chat_id)
-        self.cancel_chat_run(user_id, agent_id, chat_id)
+        self.cancel_chat_run(user_id, agent_id, chat_id, reason="stopped")
         return {"status": "stopping"}
 
     def openrouter_key_status(self, user_id: str) -> dict:
@@ -1446,7 +1446,7 @@ class ChatService:
                 "index": position,
                 **{
                     k: t[k] for k in (
-                        "role", "content", "ts", "reasoning", "actions", "timeline", "interrupted", "checkpoint", "media",
+                        "role", "content", "ts", "reasoning", "actions", "timeline", "interrupted", "interrupted_by", "checkpoint", "media",
                         "associative_matches", "associative_skipped", "usage", "usage_report",
                         "associative_fragments", "associative_query",
                         "source", "task_ids",  # a wake turn: a subagent result, not written by the user
@@ -1733,16 +1733,16 @@ class ChatService:
 
 
     @staticmethod
-    def _discard_replies(slot: _AgentSlot, chat_id: str) -> bool:
+    def _discard_replies(slot: _AgentSlot, chat_id: str, reason: str | None = None) -> bool:
         """Cancel the chat's active reply and drop its queued ones; True once nothing of it is running."""
         pending = slot.pending.get(chat_id)
         while pending:
             dropped = pending.popleft()
-            dropped.cancellation.cancel()
+            dropped.cancellation.cancel(reason)
             dropped.events.put(None)
         active = slot.active.get(chat_id)
         if active is not None:
-            active.cancellation.cancel()
+            active.cancellation.cancel(reason)
             return False
         return True
 
@@ -2114,9 +2114,9 @@ class ChatService:
             pending.append(run)
         else:
             if active is not None and active.chat_id == chat_id:
-                run.continuation = active.cancellation.cancel()
+                run.continuation = active.cancellation.cancel("replaced")
             for index in same_chat:
-                pending[index].cancellation.cancel()
+                pending[index].cancellation.cancel("replaced")
                 run.continuation = True
             if same_chat:
                 pending.insert(same_chat[-1] + 1, run)
@@ -2493,7 +2493,7 @@ class ChatService:
         except GenerationCancelled:
             yield ChatEvent(
                 "interrupted", agent.last_reply,
-                {"reasoning": agent.last_reasoning, "actions": agent.last_actions},
+                {"reasoning": agent.last_reasoning, "actions": agent.last_actions, "reason": run.cancellation.reason},
                 generation_id=run.generation_id,
             )
             return

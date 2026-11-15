@@ -60,7 +60,7 @@ class WebSteeringTests(steering.SteeringFixture):
         old, new = _events(old_response), _events(new_response)
         self.assertEqual([e["event"] for e in old], ["text", "interrupted", "done"])
         self.assertEqual(old[0]["data"], "Partial")
-        self.assertEqual(old[1]["data"], {"content": "Partial", "reasoning": "", "actions": []})
+        self.assertEqual(old[1]["data"], {"content": "Partial", "reasoning": "", "actions": [], "reason": "replaced"})
         self.assertEqual([e["event"] for e in new], ["text", "usage", "done"])
         self.assertEqual(new[0]["data"], "Answer: Correction")
         self.assertTrue(old[0]["id"])
@@ -81,6 +81,7 @@ class WebSteeringTests(steering.SteeringFixture):
             release.set()
             events = _events(original.result(timeout=3))
         self.assertEqual([e["event"] for e in events], ["text", "interrupted", "done"])
+        self.assertEqual(events[1]["data"]["reason"], "stopped")  # the stop button, not a new message
         history = self.client.get(f"/api/agents/agent-one/chats/{self.chat}").json()["messages"]
         self.assertTrue(history[-1]["interrupted"])
 

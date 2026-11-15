@@ -148,6 +148,7 @@ def run_worker(
                 break
             if outcome.tokens_in + outcome.tokens_out >= WORKER_MAX_TOKENS:
                 outcome.error = "the worker token limit was reached"
+                _close_with_notes(outcome, provider, model, zdr, messages, state, budget)
                 break
             outcome.steps += 1
             result = provider.invoke(messages, model, stream=False, reasoning=False, tools=specs, zdr=zdr) or {}
@@ -187,11 +188,39 @@ def run_worker(
                 messages.append({"role": "tool", "tool_call_id": call["id"], "name": call["name"], "content": output})
         else:
             outcome.error = "the worker step limit was reached"
+            _close_with_notes(outcome, provider, model, zdr, messages, state, budget)
     except Exception as exc:  # reported to the dream, never raised
         outcome.error = f"{type(exc).__name__}: {exc}"
     outcome.read_until = state["read_until"]
     outcome.finished = bool(state["finished"])
     return outcome
+
+
+def _close_with_notes(outcome: WorkerOutcome, provider, model: str, zdr: bool, messages: list[dict], state: dict,
+                      budget: WorkerBudget) -> None:
+    """A worker stopped by its own limit still writes notes on what it read: one last call without tools.
+
+    Without it the dream got "(no notes)" after the worker had read a whole long chat, and the tokens were wasted.
+    """
+    if state["read_until"] is None:
+        return  # it read nothing: nothing to write about
+    where = ("the end of the chat" if state["finished"] else f"turn {state['read_until']}")
+    messages.append({"role": "user", "content": (
+        f"Your reading budget is used up; you read up to {where}. Do not call tools: write your notes now on what "
+        "you read, in the format above, and say where you stopped if it was not the end.")})
+    try:
+        result = provider.invoke(messages, model, stream=False, reasoning=False, zdr=zdr) or {}
+    except Exception as exc:  # the limit stays the reported reason; this only adds why the notes are missing
+        outcome.error += f" (closing notes failed: {type(exc).__name__}: {exc})"
+        return
+    usage = result.get("usage") or {}
+    step_in = usage.get("prompt_tokens") or sum(len(str(m.get("content"))) for m in messages) // 4
+    step_out = usage.get("completion_tokens") or len(result.get("response") or "") // 4
+    outcome.steps += 1
+    outcome.tokens_in += step_in
+    outcome.tokens_out += step_out
+    budget.add(step_in + step_out)
+    outcome.notes = (result.get("response") or "").strip()[:NOTES_MAX_CHARS]
 
 
 def run_workers(chat_ids: list[str], one: Callable[[str], WorkerOutcome]) -> list[WorkerOutcome]:
@@ -214,6 +243,8 @@ def report(outcomes: list[WorkerOutcome], reread: bool = False) -> str:
                       "stores that point, the rest stays pending")
         else:
             status = f"not read ({item.error or 'no part read'})"
+        if item.finished and item.error:  # read to the end, but its notes were written at a limit
+            status += f" (notes written at a limit: {item.error})"
         parts.append(
             f"### Worker for {item.chat_id}: {status}. Steps {item.steps}, tokens "
             f"{item.tokens_in + item.tokens_out}.\n<chat_text untrusted=\"true\">\n{item.notes or '(no notes)'}\n</chat_text>"

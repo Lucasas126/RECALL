@@ -114,6 +114,23 @@ class AgentCancellationTests(unittest.TestCase):
         self.assertEqual(self.turns()[-1]["content"], "")
         self.assertTrue(self.turns()[-1]["interrupted"])
 
+    def test_the_interrupted_turn_records_why_it_stopped(self) -> None:
+        self.provider.invoke.return_value = (event for event in [])
+        events = self.agent.invoke("Question", cancellation=self.token)
+        self.token.cancel("stopped")
+        self.token.cancel("replaced")  # the first cause wins
+        with self.assertRaises(GenerationCancelled):
+            list(events)
+        self.assertTrue(self.turns()[-1]["interrupted"])
+        self.assertEqual(self.turns()[-1]["interrupted_by"], "stopped")
+
+    def test_an_interruption_without_a_cause_records_none(self) -> None:
+        self.token.cancel()
+        with self.assertRaises(GenerationCancelled):
+            self.agent.invoke("Question", cancellation=self.token)
+        self.assertTrue(self.turns()[-1]["interrupted"])
+        self.assertNotIn("interrupted_by", self.turns()[-1])
+
     def test_pre_cancelled_invocation_preserves_accepted_input(self) -> None:
         self.token.cancel()
         self.token.cancel()
