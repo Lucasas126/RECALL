@@ -7,9 +7,10 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from time import monotonic, perf_counter
-from typing import Callable, Literal, Optional, Protocol
+from typing import Annotated, Callable, Literal, Optional, Protocol
 
-from src.agent import compaction, dream_compaction
+from src.agent import compaction, dream_compaction, dream_workers
+from src.agent.tooling import tool
 from src.agent.permissions_prompt import block_for
 from src.agent.profile import (
     DREAM_TASKS_FILE, FOR_USER_FILE, MAX_DREAM_TASKS, AgentProfile, load_profile, open_items, system_prompt,
@@ -174,6 +175,20 @@ def _folders_allowed(config: ResolvedAgent) -> bool:
     return (
         "folders" in config.dream.tools and bool(groups & {"folders_read", "folders_edit"})
         and dream_capabilities(config.level).folders_read
+    )
+
+
+# memory read tools a reading worker may use (whatever of them the dream itself has), plus web when the dream has it
+TOOL_GROUP_READ_FOR_WORKERS: tuple[str, ...] = (
+    "query_memory", "search", "list_memories", "read", "list_tags", "find_notes_by_tag", "web_search", "web_retrieve",
+)
+
+
+def delegation_allowed(config: ResolvedAgent) -> bool:
+    """Read-only dream workers: `dream.delegate` on, the `delegate` group in the agent's chats, level collaborator+."""
+    return (
+        config.dream.delegate and "delegate" in set(config.tool_groups or ())
+        and dream_capabilities(config.level).limited_delegate
     )
 
 
@@ -523,6 +538,83 @@ class DreamRunner:
         )
         return new
 
+    def _delegate_tool(
+        self, handlers: dict, read_until: dict[str, int], worker_tokens: dict, used: Callable[[], int],
+        steps_ref: Callable[[], int],
+    ):
+        """`dream_delegate`: read-only workers, each reading one pending chat to its end in a fresh context."""
+        runner = self
+        read_names = set(TOOL_GROUP_READ_FOR_WORKERS) & set(handlers)
+        worker_handlers = {name: handlers[name] for name in read_names}
+
+        @tool
+        def dream_delegate(
+            chat_ids: Annotated[list[str], f"pending chats to hand out (at most {dream_workers.MAX_CHATS_PER_CALL})"],
+            focus: Annotated[str, "optional: what the workers should look for in particular"] = "",
+        ) -> str:
+            """Hand pending chats to read-only workers: each reads one chat to its end in a fresh context and
+            returns notes (facts, decisions, project state, lessons, with turn numbers). Use it for long chats so
+            your own context stays free. Workers cannot write or mark: save what matters from their notes, then
+            call dream_mark_reviewed for each chat they read to its end. Their tokens count toward your budget."""
+            ids = list(dict.fromkeys(str(chat).strip() for chat in chat_ids if str(chat).strip()))
+            if not ids:
+                return "error: give at least one chat_id from dream_pending"
+            if len(ids) > dream_workers.MAX_CHATS_PER_CALL:
+                return f"error: at most {dream_workers.MAX_CHATS_PER_CALL} chats per call"
+            pending = {item["chat_id"] for item in runner._queue.pending()}
+            unknown = [chat for chat in ids if chat not in pending]
+            if unknown:
+                return f"error: not pending (see dream_pending): {', '.join(unknown)}"
+            cap = runner.config.dream.max_tokens
+            budget = dream_workers.WorkerBudget(cap=cap, used=used)
+            index = runner._palace_index()
+
+            def call(tools: dict, name: str, args: dict) -> tuple[str, bool]:
+                if name != "read_chat_part" and name not in worker_handlers:
+                    return f"error: '{name}' is not available to a reading worker", True
+                return runner._call(tools, name, args, runner.config.level) if name != "read_chat_part" \
+                    else runner._call_plain(tools, name, args)
+
+            def one(chat_id: str) -> dream_workers.WorkerOutcome:
+                return dream_workers.run_worker(
+                    provider=runner.provider, model=runner.model, zdr=runner.config.require_zdr,
+                    agent_name=runner.config.name or runner.config.id, queue=runner._queue, chat_id=chat_id,
+                    start_after=read_until.get(chat_id), tools=list(worker_handlers.values()), focus=focus,
+                    index=index, budget=budget, stop=lambda: runner._check_stop() is not None, call_tool=call,
+                )
+
+            runner._event("delegate_started", steps_ref(), chats=ids)
+            outcomes = dream_workers.run_workers(ids, one)
+            for item in outcomes:
+                if item.read_until:
+                    read_until[item.chat_id] = max(read_until.get(item.chat_id, 0), item.read_until)
+                runner._event(
+                    "delegate_finished", steps_ref(), chat_id=item.chat_id, finished=item.finished,
+                    read_until=item.read_until, worker_steps=item.steps,
+                    tokens=item.tokens_in + item.tokens_out, error=item.error,
+                )
+            worker_tokens["spent"] = worker_tokens.get("spent", 0) + budget.spent
+            return dream_workers.report(outcomes)
+
+        return dream_delegate
+
+    def _palace_index(self) -> str:
+        try:
+            text = self.sources.mind_palace().read("INDEX.md")
+        except Exception:
+            return ""
+        return text[:8000]
+
+    @staticmethod
+    def _call_plain(handlers: dict, name: str, args: dict) -> tuple[str, bool]:
+        if "_invalid_json" in args:
+            return "error: the tool arguments are not valid JSON", True
+        try:
+            result = str(handlers[name](**args))
+        except Exception as exc:
+            return f"error: {exc}", True
+        return result, result.startswith("error:")
+
     def _safe_pending_list(self) -> list[dict]:
         try:
             return self._queue.pending()
@@ -650,6 +742,15 @@ class DreamRunner:
                 host, self._queue, read_until, reviewed, self._web_client, finish,
                 open_tasks=lambda: [task for task in self._open_tasks() if task in shown],
             )
+            if delegation_allowed(self.config):
+                worker_tokens = {"spent": 0}
+                delegate = self._delegate_tool(
+                    handlers, read_until, worker_tokens, lambda: tokens_in + tokens_out, steps_ref=lambda: steps,
+                )
+                specs.append(delegate.tool_spec)
+                handlers[delegate.tool_spec["function"]["name"]] = delegate
+            else:
+                worker_tokens = {"spent": 0}
             messages: list[dict] = [
                 {"role": "system", "content": self._system_prompt(profile)},
                 {"role": "user", "content": self._opening(pending, tasks)},
@@ -667,6 +768,9 @@ class DreamRunner:
                         message=f"{_STOP_MESSAGES[reason]}, session closed before the next model call",
                     )
                     break
+                if worker_tokens["spent"]:
+                    tokens_in += worker_tokens.pop("spent")
+                    worker_tokens["spent"] = 0
                 if steps >= dream.max_steps or (dream.max_tokens and tokens_in + tokens_out >= dream.max_tokens):
                     status = "budget_exhausted"
                     break

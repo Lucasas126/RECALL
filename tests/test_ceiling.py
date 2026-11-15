@@ -145,7 +145,8 @@ class DreamTableTests(unittest.TestCase):
                 self.assertEqual(caps.web, level >= L.ASSISTANT)
                 self.assertEqual(caps.mcp_read_only, level >= L.COLLABORATOR)
                 self.assertEqual(caps.sandbox_read, level >= L.OPERATOR)
-                self.assertFalse(caps.terminal_exec or caps.handoff or caps.permissions or caps.limited_delegate)
+                self.assertEqual(caps.limited_delegate, level >= L.COLLABORATOR)
+                self.assertFalse(caps.terminal_exec or caps.handoff or caps.permissions)
 
     def test_dream_tool_names_per_level(self) -> None:
         review = set(ceiling.DREAM_REVIEW_TOOLS)

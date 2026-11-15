@@ -330,6 +330,8 @@ _SPANISH = {
     "Reset the whole schedule": "Restablecer toda la programación",
     "Model calls per session.": "Llamadas al modelo por sesión.",
     "Input plus output tokens per session; 0 = no cap.": "Tokens de entrada más salida por sesión; 0 = sin límite.",
+    "Read long chats with read-only workers": "Leer los chats largos con workers de solo lectura",
+    "Needs the Delegate tool group and level collaborator or higher. Worker tokens count toward the session.": "Necesita el grupo de herramientas Delegar y nivel colaborador o superior. Los tokens de los workers cuentan en la sesión.",
     "Time limit per session. One minute before it the agent is told to wrap up; at the limit the session is closed.": "Límite de tiempo por sesión. Un minuto antes se avisa al agente de que termine; al llegar al límite la sesión se cierra.",
     "Maximum associative memory matches": "Máximo de coincidencias de memoria asociativa",
     "Leave empty to use the application default. The minimum similarity is set by the application, not by you.": "Déjalo vacío para usar el valor predeterminado de la aplicación. La similitud mínima la fija la aplicación, no tú.",

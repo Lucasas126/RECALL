@@ -649,7 +649,9 @@ function translateInterface() {
     ["dream-prompt-legend", "Dream prompt"],
     ["dream-prompt-hint", "Empty uses the built-in prompt, shown as the placeholder."],
     ["dream-prompt-copy", "Edit a copy of the default"], ["dream-prompt-reset", "Reset to default"],
-    ["dream-notify-label", "Notify me on Telegram when a session ends"], ["dream-save", "Save dream settings"],
+    ["dream-notify-label", "Notify me on Telegram when a session ends"],
+    ["dream-delegate-label", "Read long chats with read-only workers"],
+    ["dream-delegate-hint", "Needs the Delegate tool group and level collaborator or higher. Worker tokens count toward the session."], ["dream-save", "Save dream settings"],
     ["dream-status-title", "Dream status"], ["dream-sessions-title", "Dream sessions"],
     ["dream-col-date", "Date"], ["dream-col-trigger", "Trigger"], ["dream-col-status", "Status"],
     ["dream-col-chats", "Chats reviewed"], ["dream-col-duration", "Duration"], ["dream-col-tokens", "Tokens"],
@@ -7450,6 +7452,7 @@ function fillDreamSettings(settings) {
   $("dream-prompt").value = dream.prompt;
   $("dream-prompt").placeholder = settings.default_prompt;
   $("dream-notify").checked = dream.notify_telegram;
+  $("dream-delegate").checked = Boolean(dream.delegate);
   $("dream-model-browse").disabled = !state.user;
   syncDreamScheduleInputs();
   refreshRows($("dream-form"));
@@ -7484,6 +7487,7 @@ function dreamSettingsBody() {
       tools: ["web", "folders"].filter((tool) => $(`dream-tool-${tool}`).checked),
       prompt: $("dream-prompt").value.trim() ? $("dream-prompt").value : "",
       notify_telegram: $("dream-notify").checked,
+      delegate: $("dream-delegate").checked,
     },
   };
 }
@@ -8061,6 +8065,7 @@ numberRow("dream-max-tokens", () => agentDefaultSpec("dream.max_tokens"), () => 
 numberRow("dream-max-minutes", () => agentDefaultSpec("dream.max_minutes"), () => "");
 numberSpecs.set("dream-every-hours", () => agentDefaultSpec("dream.every_hours"));
 checkboxRow("dream-notify", dreamDefault("notify_telegram"));
+checkboxRow("dream-delegate", dreamDefault("delegate"));
 registerRow("dream-schedule-row", {
   // manual-only is the default whenever the model has neither an interval nor a time of day
   getDefault: () => (state.agentDefaults && agentDefault("dream.every_hours") == null && agentDefault("dream.daily_at") == null

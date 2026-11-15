@@ -1,0 +1,138 @@
+from __future__ import annotations
+
+import json
+import threading
+import unittest
+
+from src.agent.dream import DreamRunner, delegation_allowed
+from src.config.models import AgentConfig, DreamConfig, ModelsConfig, ResolvedAgent
+from test_dream import DreamFixture, _call, _finish
+
+
+def _config(level: str = "collaborator", groups=("memory_read", "memory_edit", "self", "delegate"), **dream):
+    return ResolvedAgent(
+        user_id="u", id="a", name="Aria", models=ModelsConfig(chat="vendor/chat"),
+        provider_name="ollama", api_key="", embeddings_provider_name="ollama", embeddings_api_key="",
+        dream=DreamConfig(**dream), tool_groups=list(groups), level=level,
+    )
+
+
+class RoutedProvider:
+    """Routes calls: worker calls (their system prompt names a 'reading worker') get the worker script per chat;
+    the dream's own calls follow `dream_steps`."""
+
+    def __init__(self, dream_steps: list, worker_reply: str = "## Chat\n- The user moved to Valencia (turn 1)"):
+        self.dream_steps = list(dream_steps)
+        self.worker_reply = worker_reply
+        self.lock = threading.Lock()
+        self.worker_calls: list[list[dict]] = []
+        self.dream_calls: list[list[dict]] = []
+
+    def context_window(self, model):
+        return 200_000
+
+    def invoke(self, messages, model, **kwargs):
+        if "reading worker" in str(messages[0].get("content")):
+            with self.lock:
+                self.worker_calls.append(messages)
+            last = messages[-1]
+            if last.get("role") == "tool":
+                part = json.loads(last["content"])
+                if part["remaining_after"] > 0:
+                    return {"tool_calls": [{"id": "w", "name": "read_chat_part", "arguments": "{}"}],
+                            "usage": {"prompt_tokens": 100, "completion_tokens": 5}}
+                return {"response": self.worker_reply, "usage": {"prompt_tokens": 100, "completion_tokens": 50}}
+            return {"tool_calls": [{"id": "w", "name": "read_chat_part", "arguments": json.dumps({"max_turns": 2})}],
+                    "usage": {"prompt_tokens": 100, "completion_tokens": 5}}
+        self.dream_calls.append(messages)
+        step = self.dream_steps.pop(0) if self.dream_steps else _finish("done")
+        return step(messages) if callable(step) else step
+
+
+class DreamWorkerTests(DreamFixture):
+    def runner(self, provider, config) -> DreamRunner:
+        return DreamRunner(config, provider, self.sources, session_id="20261103-040000-abcd", trigger="manual")
+
+    def test_delegation_needs_option_group_and_level(self) -> None:
+        self.assertTrue(delegation_allowed(_config(delegate=True)))
+        self.assertFalse(delegation_allowed(_config(delegate=False)))
+        self.assertFalse(delegation_allowed(_config(groups=("memory_read", "memory_edit"), delegate=True)))
+        self.assertFalse(delegation_allowed(_config(level="assistant", groups=("memory_read",), delegate=True)))
+
+    def test_tool_is_offered_only_when_allowed(self) -> None:
+        for allowed in (True, False):
+            provider = RoutedProvider([_finish("done")])
+            self.runner(provider, _config(delegate=allowed)).run()
+            names = {spec["function"]["name"] for spec in provider_tools(provider)}
+            self.assertEqual("dream_delegate" in names, allowed)
+
+    def test_workers_read_to_the_end_and_the_dream_can_mark(self) -> None:
+        first = self.chat("I moved to Valencia", "Noted", "And I like tea", "OK", "bye")
+        second = self.chat("hello", "hi")
+        provider = RoutedProvider([
+            {"tool_calls": [_call("d1", "dream_delegate", chat_ids=[first, second], focus="where the user lives")]},
+            {"tool_calls": [
+                _call("m1", "dream_mark_reviewed", chat_id=first),
+                _call("m2", "dream_mark_reviewed", chat_id=second),
+            ]},
+            _finish("done"),
+        ])
+        summary = self.runner(provider, _config(delegate=True)).run()
+        self.assertEqual(summary["status"], "completed")
+        self.assertEqual(sorted(summary["chats_reviewed"]), sorted([first, second]))
+        self.assertEqual(self.queue.pending(), [])
+        # the report reached the dream as untrusted data, with the notes and the mark hint
+        report = next(m for m in provider.dream_calls[1] if m.get("role") == "tool")["content"]
+        self.assertIn("moved to Valencia", report)
+        self.assertIn("read to its end", report)
+        self.assertIn('<chat_text untrusted="true">', report)
+        # workers got the goal and the focus, and their tokens count in the session
+        self.assertTrue(any("where the user lives" in str(call[0]["content"]) for call in provider.worker_calls))
+        self.assertIn("NOT to summarise", str(provider.worker_calls[0][0]["content"]))
+        self.assertGreater(summary["tokens"]["total"], 0)
+
+    def test_workers_cannot_write(self) -> None:
+        chat = self.chat("a", "b")
+
+        class Writer(RoutedProvider):
+            def invoke(self, messages, model, **kwargs):
+                if "reading worker" in str(messages[0].get("content")) and messages[-1].get("role") == "user":
+                    tools = {spec["function"]["name"] for spec in kwargs.get("tools") or []}
+                    self.offered = tools
+                    return {"tool_calls": [{"id": "x", "name": "write", "arguments": json.dumps(
+                        {"memory_path": "mind_palace:x.md", "content": "hacked"})}]}
+                return super().invoke(messages, model, **kwargs)
+
+        provider = Writer([{"tool_calls": [_call("d1", "dream_delegate", chat_ids=[chat])]}, _finish("done")])
+        self.runner(provider, _config(delegate=True)).run()
+        self.assertNotIn("write", provider.offered)
+        self.assertNotIn("dream_mark_reviewed", provider.offered)
+        self.assertNotIn("dream_delegate", provider.offered)
+        self.assertFalse((self.root / "u" / "a" / "mind_palace" / "x.md").exists())
+
+    def test_only_pending_chats_can_be_delegated(self) -> None:
+        provider = RoutedProvider([{"tool_calls": [_call("d1", "dream_delegate", chat_ids=["nope"])]}, _finish("done")])
+        self.runner(provider, _config(delegate=True)).run()
+        result = next(m for m in provider.dream_calls[1] if m.get("role") == "tool")["content"]
+        self.assertTrue(result.startswith("error: not pending"))
+
+
+def provider_tools(provider: RoutedProvider) -> list[dict]:
+    return provider.last_tools if hasattr(provider, "last_tools") else _captured.get(id(provider), [])
+
+
+_captured: dict[int, list[dict]] = {}
+_original = RoutedProvider.invoke
+
+
+def _capture(self, messages, model, **kwargs):
+    if "reading worker" not in str(messages[0].get("content")):
+        _captured[id(self)] = kwargs.get("tools") or []
+    return _original(self, messages, model, **kwargs)
+
+
+RoutedProvider.invoke = _capture
+
+
+if __name__ == "__main__":
+    unittest.main()

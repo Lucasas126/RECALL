@@ -718,6 +718,8 @@ class DreamConfig(BaseModel):
     tools: list[DreamToolGroup] = Field(default_factory=lambda: ["folders"])
     prompt: str = Field(default="", max_length=20000)  # empty = built-in default
     notify_telegram: bool = Field(default=False, strict=True)
+    # read-only workers that read chats for the dream (also needs the `delegate` group and level collaborator)
+    delegate: bool = Field(default=False, strict=True)
 
     @field_validator("max_tokens")
     @classmethod
