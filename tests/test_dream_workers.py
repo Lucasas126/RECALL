@@ -110,6 +110,14 @@ class DreamWorkerTests(DreamFixture):
         self.assertNotIn("dream_delegate", provider.offered)
         self.assertFalse((self.root / "u" / "a" / "mind_palace" / "x.md").exists())
 
+    def test_the_worker_guide_is_in_the_prompt_only_when_allowed(self) -> None:
+        for allowed in (True, False):
+            provider = RoutedProvider([_finish("done")])
+            self.runner(provider, _config(delegate=allowed, prompt="Custom dream prompt.")).run()
+            system = provider.dream_calls[0][0]["content"]
+            self.assertIn("Custom dream prompt.", system)
+            self.assertEqual("### Reading workers" in system, allowed)
+
     def test_only_pending_chats_can_be_delegated(self) -> None:
         provider = RoutedProvider([{"tool_calls": [_call("d1", "dream_delegate", chat_ids=["nope"])]}, _finish("done")])
         self.runner(provider, _config(delegate=True)).run()
