@@ -23,7 +23,7 @@
   --art-render: pixelated;                      /* set to pixelated when the files are MagicaVoxel PNGs */
   --orn-a: .16; --orn-arch-a: .45;
   --art-capital-a: .65;                         /* the capital is drawn at 65% on both themes so the logo above it stays at full strength */
-  --art-capital-filter: brightness(.5);         /* ...and at half brightness on the dark theme only (the light theme sets none) */
+  --art-capital-filter: brightness(.5);         /* ...at half brightness on the dark theme; the light theme brightens it a little (1.25) */
 }
 :root {
   color-scheme: dark;
@@ -33,7 +33,7 @@
   --ok: #7fc79a; --shade: #ededed26; --backdrop: #000a; --shadow: 0 6px 24px #0007, 0 1px 2px #0008;
 }
 :root[data-theme="light"] {
-  color-scheme: light; --orn-a: .1; --art-capital-filter: none;
+  color-scheme: light; --orn-a: .1; --art-capital-filter: brightness(1.25);
   --bg: #fafaf8; --panel: #ffffff; --raised: #ebebe6; --line: #dcdcd6; --line-strong: #8a8a84; --side: #f4f4f1; --code-bg: #f3f3ef;
   --text: #161616; --muted: #4a4a45; --accent: #b0205e; --accent-strong: #8d1a4b; --on-accent: #ffffff;
   --accent-soft: #f7e9ef; --danger: #b42318; --warn: #7a5a00; --warn-bg: #fbf1d3; --warn-line: #d3b24f;
@@ -41,7 +41,7 @@
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) {
-    color-scheme: light; --orn-a: .1; --art-capital-filter: none;
+    color-scheme: light; --orn-a: .1; --art-capital-filter: brightness(1.25);
     --bg: #fafaf8; --panel: #ffffff; --raised: #ebebe6; --line: #dcdcd6; --line-strong: #8a8a84; --side: #f4f4f1; --code-bg: #f3f3ef;
     --text: #161616; --muted: #4a4a45; --accent: #b0205e; --accent-strong: #8d1a4b; --on-accent: #ffffff;
     --accent-soft: #f7e9ef; --danger: #b42318; --warn: #7a5a00; --warn-bg: #fbf1d3; --warn-line: #d3b24f;
