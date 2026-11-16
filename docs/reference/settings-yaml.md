@@ -43,7 +43,7 @@ Maximum characters of an agent's `SOUL.md`, `MEMORY.md` and `USER.md`. They appl
 per-user or per-agent override) and to writes by the agent, by dreams and by the web editors. `MEMORY.md` and `USER.md`
 are injected in every system prompt with a `used/limit` counter. Lowering a limit does not truncate existing text: the
 file just cannot be saved or extended until it fits. Values outside the bounds, or unknown keys, stop the start-up.
-Agent files from older versions may still contain `memory_limits`; it is ignored.
+Agent files do not accept a `memory_limits` key.
 
 ## web authentication
 

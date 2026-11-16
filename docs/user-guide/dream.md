@@ -407,7 +407,7 @@ folders: []                  # user folders, edited in the agent's Folders tab (
 ```
 
 The maximum sizes of `SOUL.md`, `MEMORY.md` and `USER.md` are application-wide (`memory_limits` in
-[settings.yaml](../reference/settings-yaml.md#memory-limits)); a legacy `memory_limits` key in an agent file is ignored.
+[settings.yaml](../reference/settings-yaml.md#memory-limits)); an agent file has no such key.
 
 the schedule runs in whichever process is up (web or Telegram), checked every
 minute; the lock and the `last_started_at` in `review_state.json` stop double
@@ -419,14 +419,7 @@ at once. scheduled runs are skipped while nothing is pending.
 `tools` defaults to `[folders]`; web is opt-in and needs Tavily; folders needs at least one
 entry in `folders` and a `folders_read`/`folders_edit` tool group. `terminal` is rejected.
 `reasoning_effort: null` sends no reasoning request. model calls (steps) are counted and shown, never
-capped (an old `max_steps` key is ignored). `max_tokens` 0 (no cap) or 1000–100000000, `max_minutes` 1–120; limits are 100–50000 chars.
-
-## migration
-
-- `modes: { dream, sleep }` in the old docs is replaced by `dream:`.
-- existing chats start pending (watermark 0) and stay where they are
-  (`data/<user_id>/<agent_id>/conversations/`); the first dream may need several
-  sessions to catch up, most recent first.
+capped. `max_tokens` 0 (no cap) or 1000–100000000, `max_minutes` 1–120; limits are 100–50000 chars.
 
 ## web API
 

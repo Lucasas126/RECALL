@@ -410,7 +410,6 @@ class ConversationsSource(Source):
         origin = self._origin_path(chat_id)
         task = self._task_path(chat_id)
         unread = self._unread_path(chat_id)
-        legacy_transcription = self.resolve(f"{chat_id}.stt.json")  # per-chat STT overrides are no longer read
         removed = self._removed_path(chat_id)
         path.unlink()
         removed.unlink(missing_ok=True)
@@ -421,7 +420,6 @@ class ConversationsSource(Source):
         origin.unlink(missing_ok=True)
         task.unlink(missing_ok=True)
         unread.unlink(missing_ok=True)
-        legacy_transcription.unlink(missing_ok=True)
 
     def _removed_path(self, chat_id: str) -> Path:
         return self.resolve(f"{chat_id}.removed.json")

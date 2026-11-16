@@ -58,14 +58,11 @@ class AgentDescriptionTests(unittest.TestCase):
         loaded = self.store.load("user-a", "aria").chat_config
         self.assertEqual((loaded.associative_memory, loaded.associative_execution), ("question_only", "sequential"))
 
-    def test_associative_defaults_and_legacy_boolean_in_agent_files(self):
+    def test_associative_defaults_and_no_boolean_in_agent_files(self):
         default = AgentConfig(id="aria", name="Aria").chat_config
         self.assertEqual((default.associative_memory, default.associative_execution), ("llm", "parallel"))
-        for legacy, mode in ((True, "llm"), (False, "off")):
-            config = AgentConfig(
-                id="aria", name="Aria", chat_config={"associative_memory": legacy},
-            )
-            self.assertEqual(config.chat_config.associative_memory, mode)
+        with self.assertRaises(ValidationError):
+            AgentConfig(id="aria", name="Aria", chat_config={"associative_memory": True})
 
     def test_unknown_associative_values_are_rejected(self):
         for field, value in (("associative_memory", "sometimes"), ("associative_execution", "later")):

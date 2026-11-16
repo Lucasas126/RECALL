@@ -98,9 +98,7 @@ validate chat existence before resolving STT or contacting the provider;
 missing/invalid chats return 404, including deletion during transcription.
 
 Remove old agent `models` blocks and configure model IDs in user YAML instead.
-There is no legacy configuration compatibility or migration utility.
-Existing chat LLM sidecars remain explicit overrides. Legacy `<chat_id>.stt.json`
-files are no longer read and are removed with their chat.
+Existing chat LLM sidecars remain explicit overrides.
 
 Both channels expose user defaults: Telegram `/settings` saves model choices
 immediately; web **Settings** stages choices until **Save settings**, including

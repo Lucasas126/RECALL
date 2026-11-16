@@ -153,7 +153,7 @@ class DisposableToolTests(unittest.TestCase):
         config = ResolvedAgent(
             user_id="u", id="a", name="Aria", models=ModelsConfig(chat="vendor/chat"), provider_name="ollama",
             api_key="", embeddings_provider_name="ollama", embeddings_api_key="", tools=True,
-            tool_groups=list(groups), has_memory=True, associative_memory=False, **extra,
+            tool_groups=list(groups), has_memory=True, associative_memory="off", **extra,
         )
         return Agent(config, Mock(spec=LLMProvider), chat_id, sources=self.sources)
 

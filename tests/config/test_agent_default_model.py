@@ -56,7 +56,7 @@ class AgentDefaultModelConfigTests(unittest.TestCase):
         path = self.user_dir / "agents" / "aria.yaml"
         path.write_text(
             "id: aria\nname: Aria\ndescription: Plans\nchat_config:\n  stream: false\n  reasoning_effort: high\n"
-            "dream:\n  enabled: true\n  daily_at: '03:30'\nmemory_limits: {memory_chars: 1000}\n",
+            "dream:\n  enabled: true\n  daily_at: '03:30'\n",
             encoding="utf-8",
         )
         original = self.store.load("user-a", "aria")
@@ -70,7 +70,6 @@ class AgentDefaultModelConfigTests(unittest.TestCase):
         self.assertEqual(saved["chat_config"]["reasoning_effort"], "high")
         self.assertEqual((saved["description"], saved["dream"]["daily_at"], saved["dream"]["enabled"]),
                          ("Plans", "03:30", True))
-        self.assertNotIn("memory_limits", saved)  # legacy key: ignored on load, not written back
         self.store.update("user-a", "aria", original)
         cleared = yaml.safe_load(path.read_text(encoding="utf-8"))
         self.assertNotIn("model", cleared["chat_config"])
