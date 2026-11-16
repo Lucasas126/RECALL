@@ -128,3 +128,64 @@ class CompactStreamTests(unittest.TestCase):
             yield
         names = [name for name, _ in _sse_events(self._post(failing()))]
         self.assertEqual(names, ["working", "error", "done"])
+
+
+class PrunedChatWebTests(unittest.TestCase):
+    """A message to an empty chat that was pruned meanwhile is answered in a new chat, like on Telegram."""
+    setUp = preferences_tests.UserPreferencesWebTests.setUp
+
+    def _send(self, send, **body):
+        created = {"id": "new-chat", "title": None}
+        with patch.object(self.service, "send", side_effect=send), \
+                patch.object(self.service, "create_chat", return_value=created) as create:
+            response = self.client.post(
+                "/api/agents/agent-a/chats/20261116-092536-5fd221/messages", json={"content": "hello", **body},
+            )
+        return response, create
+
+    def test_unknown_chat_is_replaced_and_the_page_is_told_first(self) -> None:
+        from src.service.chat import ChatEvent, UnknownChat
+        calls = []
+
+        def send(user_id, agent_id, chat_id, text, **kwargs):
+            calls.append(chat_id)
+            if chat_id == "20261116-092536-5fd221":
+                raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id)
+            return iter([ChatEvent(kind="text", text="Hi there")])
+
+        response, create = self._send(send)
+        self.assertEqual(response.status_code, 200)
+        events = _sse_events(response)
+        self.assertEqual([name for name, _ in events], ["chat_replaced", "text", "done"])
+        self.assertEqual(events[0][1]["id"], "new-chat")
+        self.assertEqual(calls, ["20261116-092536-5fd221", "new-chat"])
+        create.assert_called_once()
+
+    def test_an_edit_of_a_missing_chat_is_still_an_error(self) -> None:
+        from src.service.chat import UnknownChat
+
+        def send(*args, **kwargs):
+            raise UnknownChat("unknown chat: {chat_id}", chat_id="gone")
+
+        response, create = self._send(send, edit_index=0)
+        self.assertEqual(response.status_code, 404)
+        create.assert_not_called()
+
+    def test_an_id_that_recall_never_generates_is_a_plain_404(self) -> None:
+        from src.service.chat import UnknownChat
+
+        def send(*args, **kwargs):
+            raise UnknownChat("unknown chat: {chat_id}", chat_id="x")
+
+        for chat_id in ("nonexistent", "..%2Fescape"):
+            with self.subTest(chat_id=chat_id), patch.object(self.service, "send", side_effect=send), \
+                    patch.object(self.service, "create_chat") as create:
+                response = self.client.post(f"/api/agents/agent-a/chats/{chat_id}/messages", json={"content": "hi"})
+                self.assertEqual(response.status_code, 404)
+                create.assert_not_called()
+
+    def test_an_existing_chat_is_not_replaced(self) -> None:
+        from src.service.chat import ChatEvent
+        response, create = self._send(lambda *a, **k: iter([ChatEvent(kind="text", text="ok")]))
+        self.assertEqual([name for name, _ in _sse_events(response)], ["text", "done"])
+        create.assert_not_called()
