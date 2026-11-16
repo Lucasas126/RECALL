@@ -2,7 +2,6 @@ import os
 from contextlib import contextmanager
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from time import sleep
 from typing import Generator
 
 if os.name == "nt":
@@ -95,15 +94,7 @@ def atomic_write_text(path: Path, content: str) -> None:
         ) as temporary:
             temporary_path = Path(temporary.name)
             temporary.write(content)
-        for attempt in range(5):
-            try:
-                temporary_path.replace(path)
-                break
-            except PermissionError as exc:
-                # Windows can briefly deny replacement while another handle is closing.
-                if os.name != "nt" or getattr(exc, "winerror", None) not in (5, 32, 33) or attempt == 4:
-                    raise
-                sleep(0.05 * (attempt + 1))
+        temporary_path.replace(path)
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
