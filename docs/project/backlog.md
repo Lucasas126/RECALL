@@ -36,7 +36,7 @@ One list of ideas and planned work, with what is already done kept separate. Imp
 ### web and tests
 
 - **Chat loading, next steps**: gzip for the JSON answers; keep files the agent sent (`media[].data_url`, base64) out of the chat payload and serve them by URL (a 28-message chat weighs 1.3 MB, 870 KB of it files); fewer requests per chat switch (`/api/chats`, approvals, tasks and processes are still separate calls, and the chat list is also polled); lighter bubbles for tool steps and reasoning, since the cost left in a long chat is the number of DOM nodes.
-- **Node tests in CI**: `tests/test_node_suite.py` now runs every `tests/*.cjs` inside the Python suite (all green since 2026-11-16, `test_model_sorting.cjs` repaired), but the GitHub workflow only builds the image and runs no tests; add a test job that runs the suite before a release.
+- **Node tests in CI**: `tests/web/js/test_node_suite.py` now runs every `tests/web/js/*.cjs` inside the Python suite (all green since 2026-11-16, `test_model_sorting.cjs` repaired), but the GitHub workflow only builds the image and runs no tests; add a test job that runs the suite before a release.
 - **PDF follow-ups**: designed documents (covers, photos) as a skill, a way to merge, split or fill PDF forms, an end-to-end check with a real model (does `make_pdf` look good, does a model receive the `view_image` picture; Ollama is unchecked), and `view_image` for formats Pillow cannot read.
 
 ### usage and data

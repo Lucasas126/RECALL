@@ -4535,7 +4535,7 @@ function thinkingSegment() {
   };
 }
 
-// ---- task cards: pure helpers (loaded without the DOM by tests/test_task_cards.cjs)
+// ---- task cards: pure helpers (loaded without the DOM by tests/web/js/test_task_cards.cjs)
 const TASK_FINAL = ["done", "failed", "cancelled", "timed_out"];
 const TASK_STATUS_LABELS = { starting: "Starting", stopped: "Stopped", running: "Running", done: "Done", failed: "Failed", cancelled: "Cancelled", timed_out: "Timed out", awaiting_approval: "Awaiting approval", awaiting_approval_web: "Awaiting approval (answer it in the web)", awaiting_approval_telegram: "Awaiting approval (answer it in Telegram)" };
 

@@ -20,7 +20,7 @@ sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases b
 - `/compact` shows "Compacting the chat…" in the web chat (a pulsing line, replaced by the result) and keeps Telegram's "typing…" on until it ends. Before, nothing showed until the end.
 - Web: a message sent to an empty chat that was deleted meanwhile (by another tab, the phone or a chat list refresh) is answered in a new chat and the page follows it, instead of failing with "unknown chat". Telegram already did this since 0.3.18. Editing an old message still needs its chat.
 - `atomic_write_text` no longer retries a refused file replacement on Windows. If Windows holds the file at that instant, the save fails with an error instead of being retried.
-- Tests: the Node tests run inside the Python suite (`tests/test_node_suite.py`), the model picker tests are repaired, and the Windows-only tests are gone. The suite has 2343 tests and skips none on Linux.
+- Tests: the Node tests run inside the Python suite (`tests/web/js/test_node_suite.py`), the model picker tests are repaired, and the Windows-only tests are gone. The suite has 2343 tests and skips none on Linux.
 - Docs: one backlog (`docs/project/backlog.md`) and status texts brought up to date.
 
 ### Agents that work together (0.2.0 to 0.3.6)

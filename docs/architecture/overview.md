@@ -272,7 +272,7 @@ token. `Agent._take_assoc_result` uses its outcome once per turn:
   the model on the next hop
 - streaming after tool hops: every layer (provider, `Agent._stream_reply`, `ChatService`,
   SSE) forwards each text delta as its own event on every hop (regression test in
-  `tests/test_live_tool_steps.py`). With the Claude subscription, Sonnet 5.5's upstream
+  `tests/chat/test_live_tool_steps.py`). With the Claude subscription, Sonnet 5.5's upstream
   stream for a request whose last message is a tool result arrives in one burst
   (measured: `message_start` and all deltas within ~10 ms), so the answer looks
   unstreamed on that model/hop; this is upstream timing, not RECALL buffering. It is a
@@ -341,12 +341,12 @@ Focused regression checks (no configured providers or private data required):
 ```shell
 uv run python -m unittest discover -s tests -p "test_*.py" -v
 node --check src/web/static/app.js
-for f in tests/*.cjs; do node --test "$f"; done
+for f in tests/web/js/*.cjs; do node --test "$f"; done
 ```
 
 The Node tests run pieces of `src/web/static/app.js` without a browser (model ordering and selector state, the
 card and live-step state, opening a chat, the "load earlier" bar, the edit indexes). The Python suite does not run
-them, so run them by hand. `tests/test_model_sorting.cjs` currently fails on a clean checkout (its page stub lacks
+them, so run them by hand. `tests/web/js/test_model_sorting.cjs` currently fails on a clean checkout (its page stub lacks
 what the page now touches while loading: `matchMedia`, `window`, `MutationObserver`, `location` and more); the other
 files pass. Keyboard navigation, scrolling and responsive layout need a real browser: a headless Chromium driving a
 local instance with seeded chats is enough to measure chat switching and to reproduce reload bugs.
