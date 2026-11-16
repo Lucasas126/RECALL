@@ -45,7 +45,7 @@ Basic holds Identity and Model and reasoning (`model`, `reasoning_effort`, `reas
 | `max_tool_hops` | tool rounds per turn, 1-100; empty = settings value (50) |
 | `compaction` | context compaction of long chats, see the table below |
 | `tools` | allow tools at all (true) |
-| `tool_groups` | list of groups; omitted means `memory_read`, `memory_edit`, `web`, `self` |
+| `tool_groups` | list of groups; omitted means `memory_read`, `memory_edit`, `web`, `self`, `identity` |
 | `allow`, `deny` | extra per-tool filters |
 | `mcp` | MCP servers enabled for this agent, keyed by server id |
 | `associative_memory` | `off`, `llm` (default), `question_only` |

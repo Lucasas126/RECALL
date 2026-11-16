@@ -44,6 +44,11 @@ TOOL_GROUP_CATALOG: Final[tuple[dict[str, str], ...]] = (
         "description": "Send you a file the agent can already read (a note, a document, an image), in the web chat and on Telegram.",
     },
     {
+        "id": "identity",
+        "name": "Display name",
+        "description": "Let the agent change its own display name (only the name; nothing else).",
+    },
+    {
         "id": "automations",
         "name": "Automations",
         "description": "Schedule things for later: once, every N minutes, on a cron schedule or when a background process ends.",
@@ -77,7 +82,7 @@ TOOL_GROUP_CATALOG: Final[tuple[dict[str, str], ...]] = (
 
 TOOL_GROUP_IDS: Final[frozenset[str]] = frozenset(item["id"] for item in TOOL_GROUP_CATALOG)
 # used when an agent sets no tool_groups; folder access is always an explicit choice
-DEFAULT_TOOL_GROUPS: Final[tuple[str, ...]] = ("memory_read", "memory_edit", "web", "self")
+DEFAULT_TOOL_GROUPS: Final[tuple[str, ...]] = ("memory_read", "memory_edit", "web", "self", "identity")
 
 # the `permissions` group: reads, then the mutations (each one asks the user, once, and is audited)
 PERMISSION_READ_TOOLS: Final[tuple[str, ...]] = ("agents_list", "agent_get_permissions", "permission_levels_help")
@@ -108,6 +113,7 @@ TOOL_GROUP_TOOLS: Final[dict[str, tuple[str, ...]]] = {
     ),
     "notify": ("notify_telegram",),
     "files_send": ("send_file",),
+    "identity": ("set_display_name",),
     "automations": (
         "automation_create", "automation_list", "automation_edit", "automation_pause", "automation_resume", "automation_delete",
     ),
@@ -141,6 +147,7 @@ DISPOSABLE_BLOCKED_TOOLS: Final[frozenset[str]] = frozenset(
     | set(TOOL_GROUP_TOOLS["secrets"])  # nor touch a secret: nobody is there to approve it
     | set(TOOL_GROUP_TOOLS["notify"])  # nor write to the user's phone
     | set(TOOL_GROUP_TOOLS["files_send"])  # nor hand files to the user
+    | set(TOOL_GROUP_TOOLS["identity"])  # nor rename the agent: it writes the agent's persistent configuration
     | set(TOOL_GROUP_TOOLS["automations"])  # nor schedule anything: an automation's own task cannot create more automations
 )
 

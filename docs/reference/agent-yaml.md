@@ -35,7 +35,7 @@ chat_config:
     keep_recent: 20                  # recent tail kept verbatim; smaller than trigger
     model: claude_subscription:haiku # summary model; null = the chat's own model
   tools: true                       # enable the selected tool groups
-  tool_groups: [memory_read, memory_edit, self]  # memory_read, memory_edit, web, self, folders_read, folders_edit, terminal, delegate, permissions, agents
+  tool_groups: [memory_read, memory_edit, self]  # memory_read, memory_edit, web, self, identity, folders_read, folders_edit, terminal, delegate, permissions, agents
   mcp:                               # MCP servers enabled for this agent (see mcp.md)
     google_calendar: {tools: null, read_only: false, instructions: ""}
 dream:                               # background self-review sessions (see dream.md)
@@ -118,7 +118,7 @@ the agent's personality lives only in `data/<user_id>/<agent_id>/SOUL.md` (a
 missing file is an empty personality; the agent YAML has no personality field),
 with its memories and skills next to it; see [dream mode](../user-guide/dream.md#per-agent-files) for the
 layout and the prompt assembly. when `tool_groups` is omitted, the default is
-`[memory_read, memory_edit, web, self]`; folder groups are always explicit.
+`[memory_read, memory_edit, web, self, identity]`; folder groups are always explicit.
 
 ## avatar_style
 

@@ -8,6 +8,7 @@ from src.agent.toolsets.delegate import build_delegate_tools
 from src.agent.toolsets.editing import build_edit_tools
 from src.agent.toolsets.automations import build_automation_tools
 from src.agent.toolsets.files_send import build_files_send_tools
+from src.agent.toolsets.identity import build_identity_tools
 from src.agent.toolsets.images import build_image_tools
 from src.agent.toolsets.pdf import build_pdf_tools
 from src.agent.toolsets.notify import build_notify_tools
@@ -36,7 +37,7 @@ _ORDER = (
     "folder_list", "folder_read", "folder_search",
     "folder_write", "folder_append", "folder_edit", "folder_move", "folder_delete",
     "web_search", "web_retrieve",
-    "notify_telegram", "send_file",
+    "notify_telegram", "send_file", "set_display_name",
     "automation_create", "automation_list", "automation_edit", "automation_pause", "automation_resume", "automation_delete",
     "terminal", "sandbox_read", "sandbox_write", "sandbox_patch", "sandbox_search",
     "process_start", "process_list", "process_read", "process_wait", "process_stop",
@@ -101,6 +102,8 @@ def build_tools(
         base_tools.extend(build_automation_tools(agent.config))
     if "files_send" in selected and (not disposable or automation):
         base_tools.extend(build_files_send_tools(agent))
+    if "identity" in selected and not disposable:  # writes the agent's configuration: DISPOSABLE_BLOCKED_TOOLS
+        base_tools.extend(build_identity_tools(agent.config))
     if "notify" in selected and (not disposable or automation):  # a worker's hidden chat never writes to the user's phone; an automation's task does
         base_tools.extend(build_notify_tools(agent))
     agent.terminal_sessions = None  # the terminal sessions by backend name, set below when the group is on

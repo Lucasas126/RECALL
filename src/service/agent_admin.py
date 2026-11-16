@@ -551,6 +551,40 @@ class AgentAdmin:
 
     # ------------------------------------------------------------------ helpers
 
+    def set_display_name(self, user_id: str, caller_id: str, runtime_level: Level, name: object, *, chat_id: str = "") -> dict:
+        """The `identity` group: the caller changes ITS OWN display name (`name`), nothing else, with no approval card.
+
+        Written like the caller's own `agent_update` (under the store's lock, the running reply is not stopped) and
+        audited as a `permission_change` line (`decision: applied`) with the old and new name. The audit trail is checked
+        before anything is written (fail closed).
+        """
+        user = self._user(user_id)
+        if caller_id not in user.agents:
+            raise PermissionRefused("this agent does not belong to the user of this chat")
+        stored = self._load(user_id, caller_id)
+        level = min(runtime_level, effective_agent_level(stored, user))
+        if "identity" not in selected_tool_groups(stored) or not group_allowed(level, "identity"):
+            raise PermissionRefused("this agent no longer holds the identity tool group")
+        new_name = self._text(name, "name", NAME_MAX, single_line=True, required=True)
+        if new_name == stored.name:
+            return {"status": "unchanged", "name": stored.name}
+        path = audit_path(self._store.data_dir, user_id, caller_id)
+        if not audit_writable(path):
+            raise PermissionRefused("the audit trail cannot be written, so the name was not changed")
+
+        def mutate(config: AgentConfig, _user: UserConfig) -> AgentConfig:
+            return config.model_copy(update={"name": new_name})
+
+        try:
+            before, after = self._store.modify(user_id, caller_id, mutate)
+        except (AgentConfigError, UserMessageError, ValueError, OSError) as exc:
+            raise PermissionRefused(f"the name was not changed: {clean_text(exc, 300)}") from exc
+        write_permission_audit(
+            path, actor=caller_id, user=user_id, agent=caller_id, target=caller_id, tool="set_display_name", field="name",
+            action="update", before=before.name, after=after.name, decision="applied", **({"chat": chat_id} if chat_id else {}),
+        )
+        return {"status": "applied", "before": before.name, "name": after.name}
+
     def _fingerprint(self, user_id: str, agent_id: str) -> str:
         try:
             return self._store.fingerprint(user_id, agent_id)

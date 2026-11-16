@@ -105,7 +105,7 @@ class AgentCliTests(AdminFixture):
         self.assertEqual((code, err), (0, ""), out)
         config = load_agent_config("user-a", "guide")
         self.assertEqual(config.name, "Guide")
-        self.assertEqual(config.chat_config.tool_groups, ["memory_read", "memory_edit", "web", "self", "agents", "permissions"])
+        self.assertEqual(config.chat_config.tool_groups, ["memory_read", "memory_edit", "web", "self", "identity", "agents", "permissions"])
         self.assertIsNone(config.terminal)
         self.assertNotIn("terminal_backends", self.read("user-a/user.yaml"))  # no backend is added any more
         soul = SourceRegistry.for_agent("user-a", "guide", data_dir=self.data_dir).agent_files().soul()
@@ -311,7 +311,7 @@ class TemplateTests(unittest.TestCase):
     def test_guide_config_is_valid_and_uses_known_groups(self) -> None:
         config, _, chosen = templates.build("guide", "guide", "Guide")
         self.assertIsNone(config.terminal)
-        self.assertEqual(config.chat_config.tool_groups, ["memory_read", "memory_edit", "web", "self", "agents", "permissions"])
+        self.assertEqual(config.chat_config.tool_groups, ["memory_read", "memory_edit", "web", "self", "identity", "agents", "permissions"])
         self.assertTrue(set(config.chat_config.tool_groups) <= TOOL_GROUP_IDS)
         with self.assertRaises(ValueError):
             templates.build("nope", "x", "X")

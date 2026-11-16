@@ -1022,6 +1022,7 @@ _SPANISH = {
     "search the web (tool group web)": "buscar en la web (grupo web)",
     "schedule things for later, at most 50 per user (tool group automations)": "programar cosas para más tarde, como máximo 50 por usuario (grupo automations)",
     "send the user a file the agent can already read (tool group files_send)": "enviar al usuario un archivo que el agente ya puede leer (grupo files_send)",
+    "change its own display name, nothing else (tool group identity)": "cambiar su propio nombre visible, nada más (grupo identity)",
     "send the user a short Telegram message, at most 30 an hour (tool group notify)": "enviar al usuario un mensaje corto por Telegram, como mucho 30 por hora (grupo notify)",
     "edit the user's folders (tool group folders_edit; asks)": "editar las carpetas del usuario (grupo folders_edit; pregunta)",
     "launch web-only workers (tool group delegate; asks only where the rules say)": "lanzar trabajadores solo web (grupo delegate; pregunta solo donde lo indican las reglas)",

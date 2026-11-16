@@ -29,6 +29,6 @@ class ToolsetRegistrationTests(unittest.TestCase):
         names_with_web = [spec["function"]["name"] for spec in specs_with_web]
         self.assertNotIn("web_search", names_without_web)
         self.assertNotIn("web_retrieve", names_without_web)
-        self.assertEqual(names_with_web[-2:], ["web_search", "web_retrieve"])
+        self.assertEqual(names_with_web[-3:], ["web_search", "web_retrieve", "set_display_name"])
         self.assertIn("web_search", handlers)
         self.assertIn("web_retrieve", handlers)

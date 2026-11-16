@@ -106,7 +106,7 @@ class Reads(AgentsFixture):
         by_name = {row["template"]: row for row in data["templates"]}
         self.assertEqual(set(by_name), set(templates.templates()))
         self.assertEqual(by_name["guide"]["level"], "operator")
-        self.assertEqual(by_name["guide"]["tool_groups"], ["memory_read", "memory_edit", "web", "self", "agents", "permissions"])
+        self.assertEqual(by_name["guide"]["tool_groups"], ["memory_read", "memory_edit", "web", "self", "identity", "agents", "permissions"])
         self.assertEqual(by_name["default"]["level"], "assistant")
         self.assertTrue(all(row["available"] for row in data["templates"]))
 
@@ -412,7 +412,7 @@ class CreateChecks(AgentsFixture):
         self.assertEqual((data["after"]["level"], data["after"]["template"]), ("operator", "guide"))
         config = load_agent_config("user-a", "guide")
         self.assertEqual(config.name, "Guide")
-        self.assertEqual(config.chat_config.tool_groups, ["memory_read", "memory_edit", "web", "self", "agents", "permissions"])
+        self.assertEqual(config.chat_config.tool_groups, ["memory_read", "memory_edit", "web", "self", "identity", "agents", "permissions"])
         self.assertIsNone(config.terminal)
         self.assertEqual(config.level, Level.OPERATOR)
         self.assertIn("setup guide", SourceRegistry.for_agent("user-a", "guide", data_dir=self.data_dir).agent_files().soul())
