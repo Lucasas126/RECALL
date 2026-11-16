@@ -9,7 +9,7 @@ sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases b
 
 - Every user needs `max_level` in `user.yaml` (0.3.0); `terminal.allow_in_dream` no longer exists.
 - Remove `prompt_cache.trim_slack_percent` and `conversation_messages_retained` from a custom `settings.yaml`: compaction replaces them (0.3.7).
-- `dream.max_steps` is gone; an old key in an agent file is ignored (0.3.25).
+- `dream.max_steps` is gone; remove it from agent files (0.3.25).
 - `questions.md` in an agent's palace is now `for_user.md` (0.3.8).
 - The daily task token budget is removed and tasks have no token cap unless `max_tokens` is set (0.3.6).
 - Sent audio and video are stored with the message and take disk space (0.3.11).

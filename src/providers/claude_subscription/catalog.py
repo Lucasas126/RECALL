@@ -24,7 +24,7 @@ MODELS = (
     ClaudeModel("opus", "claude-opus-5-5", "Claude Opus 5.5", 1_000_000, (2, 1, 280)),
 )
 _BY_NAME = {name: model for model in MODELS for name in (model.alias, model.canonical)}
-# older routes still accepted by name; their 200K window needs no [1m] suffix
+# routes outside the pinned list; their 200K window needs no [1m] suffix
 _CONTEXT_WINDOWS = {"claude-haiku-4-5-20251001": 200_000, "claude-haiku-4-5": 200_000}
 # models that reject `thinking: disabled`; the lowest effort is the nearest "off" for them
 _MANDATORY_THINKING = ("claude-fable", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5")

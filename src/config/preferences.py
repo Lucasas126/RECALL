@@ -47,7 +47,7 @@ class UserPreferences(BaseModel):
     avatar_style: Literal["circle", "free"] = "circle"
 
     def language_for(self, configured: str) -> Literal["en", "es"]:
-        """Resolve an explicit language override or the legacy YAML language."""
+        """Resolve an explicit language override or the language configured in YAML."""
         if "language" in self.model_fields_set:
             return self.language
         return "es" if configured.split("-", 1)[0] == "es" else "en"

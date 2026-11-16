@@ -139,7 +139,6 @@ class DreamApiTests(unittest.TestCase):
         self.assertEqual(self.client.put(f"{self.base}/dream/settings", json={"dream": renamed}).status_code, 422)
         body = {
             "dream": {**settings["dream"], "enabled": True, "daily_at": "04:00", "notify_telegram": True},
-            "memory_limits": {"memory_chars": 3000, "user_chars": 1000},  # an old client may still send it: ignored
         }
         saved = self.client.put(f"{self.base}/dream/settings", json=body)
         self.assertEqual(saved.status_code, 200, saved.text)

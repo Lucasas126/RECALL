@@ -102,7 +102,7 @@ class McpAgentTests(unittest.TestCase):
         config = ResolvedAgent(
             user_id="u", id="a", name="Aria", models=ModelsConfig(chat="vendor/chat"), provider_name="ollama", api_key="",
             embeddings_provider_name="ollama", embeddings_api_key="", tools=True, tool_groups=["memory_read"],
-            has_memory=True, associative_memory=False, mcp={"fake": AgentMcpConfig()}, **extra,
+            has_memory=True, associative_memory="off", mcp={"fake": AgentMcpConfig()}, **extra,
         )
         return Agent(config, Mock(spec=LLMProvider), chat_id, manager, sources=self.sources)
 

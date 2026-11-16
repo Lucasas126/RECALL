@@ -38,13 +38,8 @@ class MemoryLimitsModelTests(unittest.TestCase):
         self.assertEqual(settings.memory_limits(), settings.MEMORY_LIMITS)
 
 
-class LegacyAgentKeyTests(unittest.TestCase):
-    def test_legacy_memory_limits_key_is_ignored(self) -> None:
-        agent = AgentConfig.model_validate({"id": "a", "name": "A", "memory_limits": {"memory_chars": 1000}})
-        self.assertFalse(hasattr(agent, "memory_limits"))
-        self.assertNotIn("memory_limits", agent.model_dump())
-
-    def test_other_unknown_keys_still_fail(self) -> None:
+class UnknownAgentKeyTests(unittest.TestCase):
+    def test_unknown_keys_still_fail(self) -> None:
         with self.assertRaises(ValidationError):
             AgentConfig.model_validate({"id": "a", "name": "A", "bogus": 1})
 

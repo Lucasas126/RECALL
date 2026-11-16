@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Annotated, Literal, Optional, Union
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from src.agent.tool_groups import validate_tool_groups
 from src.config.levels import LevelField
@@ -19,15 +19,8 @@ _STATE_FILE = r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$"
 McpServerId = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{0,31}$")]
 
 
-def _legacy_associative_mode(value: object) -> object:
-    """Accept the former on/off boolean: true means `llm`, false means `off`."""
-    if isinstance(value, bool):
-        return "llm" if value else "off"
-    return value
-
-
 # how an agent searches its memory each turn: not at all, with a query proposed by a small model, or with the user's message
-AssociativeMode = Annotated[Literal["off", "llm", "question_only"], BeforeValidator(_legacy_associative_mode)]
+AssociativeMode = Literal["off", "llm", "question_only"]
 # whether the search runs beside the model (and may pause its reply) or finishes before the model starts
 AssociativeExecution = Literal["parallel", "sequential"]
 
@@ -420,7 +413,7 @@ class AgentTerminalBackend(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     workdir: str = Field(default="~", min_length=1, max_length=1024)  # a path inside the backend
-    # legacy shorthand scoped to this backend: the most specific default of the approval rules (see `shorthand`)
+    # shorthand scoped to this backend: the most specific default of the approval rules (see `shorthand`)
     approvals: TerminalApprovals = "manual"
     timeout_seconds: Optional[int] = Field(default=None, ge=1, le=600, strict=True)  # overrides the agent-wide one
 
@@ -722,14 +715,6 @@ class DreamConfig(BaseModel):
     # model of those workers (e.g. a cheaper one); None = the dream's model
     delegate_model: Optional[str] = Field(default=None, strict=True, min_length=1, max_length=256)
 
-    @model_validator(mode="before")
-    @classmethod
-    def _removed_max_steps(cls, data: object) -> object:
-        # legacy: model calls are only counted now (a metric), never capped; old agent files still carry the key
-        if isinstance(data, dict) and "max_steps" in data:
-            data = {key: value for key, value in data.items() if key != "max_steps"}
-        return data
-
     @field_validator("delegate_model")
     @classmethod
     def _valid_delegate_model(cls, value: Optional[str]) -> Optional[str]:
@@ -838,9 +823,6 @@ class AgentConfig(BaseModel):
                 "`vault` was replaced by `folders` (a list of name/path entries); "
                 "move the path to `folders: [{name: vault, path: ...}]`"
             )
-        # legacy: the size limits moved to settings.yaml (memory_limits); old agent files still carry the key
-        if isinstance(data, dict) and "memory_limits" in data:
-            data = {key: value for key, value in data.items() if key != "memory_limits"}
         # the API view of an agent carries a read-only `avatar` (url, version, style); a body sent back as read is accepted
         if isinstance(data, dict) and "avatar" in data:
             data = {key: value for key, value in data.items() if key != "avatar"}

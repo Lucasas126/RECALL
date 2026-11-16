@@ -212,14 +212,11 @@ class UserModelDefaultsTests(models_tests.ModelFixture):
                     self.service.send("user-one", "agent-one", self.chat, "", attachments=[attachment])
         self.assertFalse(self.agents)
 
-    def test_deleting_chat_removes_its_sidecars_including_legacy_stt_overrides(self) -> None:
+    def test_deleting_chat_removes_its_sidecars(self) -> None:
         source = self.sources[("user-one", "agent-one")]
         source.set_model(self.chat, "vendor/alpha")
-        legacy = source.root / f"{self.chat}.stt.json"
-        legacy.write_text('{"id": "stt/chat"}', encoding="utf-8")
         source.delete_chat(self.chat)
         self.assertFalse((source.root / f"{self.chat}.model.json").exists())
-        self.assertFalse(legacy.exists())
 
 
 class AgentModelSchemaTests(unittest.TestCase):

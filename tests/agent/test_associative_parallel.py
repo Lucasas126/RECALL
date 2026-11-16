@@ -441,15 +441,17 @@ class ParallelRecallTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ChatConfig(associative_execution="later")
 
-    def test_boolean_values_keep_working_as_modes(self) -> None:
+    def test_boolean_values_are_rejected_as_modes(self) -> None:
         fields = dict(
             user_id="u", id="a", name="A", models=ModelsConfig(),
             provider_name="ollama", api_key="", embeddings_provider_name="ollama", embeddings_api_key="",
         )
-        self.assertEqual(ResolvedAgent(**fields, associative_memory=True).associative_memory, "llm")
-        self.assertEqual(ResolvedAgent(**fields, associative_memory=False).associative_memory, "off")
+        for flag in (True, False):
+            with self.assertRaises(ValueError):
+                ResolvedAgent(**fields, associative_memory=flag)
+            with self.assertRaises(ValueError):
+                ChatConfig(associative_memory=flag)
         self.assertEqual(ResolvedAgent(**fields).associative_memory, "llm")
-        self.assertEqual(ChatConfig(associative_memory=False).associative_memory, "off")
         self.assertEqual(ChatConfig(associative_memory="question_only").associative_memory, "question_only")
         with self.assertRaises(ValueError):
             ChatConfig(associative_memory="sometimes")

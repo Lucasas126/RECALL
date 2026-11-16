@@ -28,7 +28,7 @@ class SteeringFixture(unittest.TestCase):
         self.agents: dict[tuple[str, str], Agent] = {}
         self.gates: dict[str, tuple[threading.Event, threading.Event]] = {}
         self.memory = True
-        self.associative_memory = False
+        self.associative_memory = "off"
         for user in ("user-one", "user-two"):
             for agent in ("agent-one", "agent-two"):
                 key = (user, agent)

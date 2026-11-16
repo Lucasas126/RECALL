@@ -115,7 +115,7 @@ class WebSteeringTests(steering.SteeringFixture):
         self.assertIn("provider unavailable", events[0]["data"])
 
     def test_associative_matches_are_sent_and_persisted(self) -> None:
-        self.associative_memory = True
+        self.associative_memory = "llm"
         provider = self.providers[("user-one", "agent-one")]
         original_invoke = provider.invoke.side_effect
 
@@ -186,7 +186,7 @@ class WebSteeringTests(steering.SteeringFixture):
     def test_get_chat_returns_the_injected_fragments(self) -> None:
         from src.agent.associative import RecallResult
 
-        self.associative_memory = True
+        self.associative_memory = "llm"
         self._slow_model()
         fragment = {"address": "notes:cat.md", "label": "Cat", "score": 0.81, "excerpt": "The cat is called Misu."}
         result = RecallResult("[associative memory] remembered detail", 1, [fragment], "cat name")
@@ -199,7 +199,7 @@ class WebSteeringTests(steering.SteeringFixture):
         self.assertEqual(message["associative_query"], "cat name")
 
     def test_search_without_matches_is_sent_and_persisted(self) -> None:
-        self.associative_memory = True
+        self.associative_memory = "llm"
         self._slow_model()
         with steering.patch("src.agent.agent.associative.recall", return_value=(None, 0)):
             response = self.client.post(self.messages_url, json={"content": "Question"})
@@ -209,7 +209,7 @@ class WebSteeringTests(steering.SteeringFixture):
         self.assertEqual(self._last_message()["associative_matches"], 0)
 
     def test_failed_search_is_sent_as_skipped_and_persisted(self) -> None:
-        self.associative_memory = True
+        self.associative_memory = "llm"
         self._slow_model()
         with (
             steering.patch("src.agent.agent.associative.recall", side_effect=RuntimeError("index offline")),

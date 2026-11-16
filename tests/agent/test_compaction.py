@@ -149,7 +149,7 @@ class CompactionServiceTests(steering.SteeringFixture):
             user_id=user, id=agent, name="Test",
             models=ModelsConfig(), provider_name="ollama", api_key="",
             embeddings_provider_name="ollama", embeddings_api_key="",
-            tools=False, associative_memory=False, has_memory=True, level="admin",
+            tools=False, associative_memory="off", has_memory=True, level="admin",
             compaction=self.compaction,
         )
         instance = Agent(config, self.providers[(user, agent)], chat_id)
