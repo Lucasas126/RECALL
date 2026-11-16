@@ -2586,6 +2586,18 @@ class ChatService:
     def compact_command(self, user_id: str, agent_id: str, chat_id: str, text: str) -> str | None:
         """Answer `/compact [percent] [instructions]` for the chat; None when `text` is not that command.
 
+        Blocks until the compaction ends. `compact_start` does the same but returns before it ends.
+        """
+        events = self.compact_start(user_id, agent_id, chat_id, text)
+        if events is None:
+            return None
+        return "".join(event.text or "" for event in events if event.kind == "text")
+
+    def compact_start(self, user_id: str, agent_id: str, chat_id: str, text: str) -> Iterator[ChatEvent] | None:
+        """Validate and queue `/compact [percent] [instructions]`; None when `text` is not that command.
+
+        Returns the run's events at once, so a caller can say "compacting" while the text arrives later.
+
         Runs the compaction now, whatever the trigger, keeping the latest `percent` (default 20) of the conversation's
         tokens word for word, with the optional instructions as a focus for the notes.
         It runs on the chat's worker like a reply, so messages sent meanwhile wait behind it (and do not cancel it).
@@ -2608,7 +2620,7 @@ class ChatService:
                 raise AgentBusy("wait for this chat's active and queued replies before compacting it")
             events = self._events(run, run.events.subscribe())
             self._enqueue(user_id, agent_id, slot, chat_id, run, steer=False)
-        return "".join(event.text or "" for event in events if event.kind == "text")
+        return events
 
     def usage_command(self, user_id: str, text: str) -> str | None:
         """Answer `/usage`: the Claude plan usage (session and week) in words; None when `text` is not that command.

@@ -105,3 +105,26 @@ class ProviderErrorWebTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CompactStreamTests(unittest.TestCase):
+    """`/compact` on the web says it is working first and gives the outcome as text when it ends."""
+    setUp = preferences_tests.UserPreferencesWebTests.setUp
+
+    def _post(self, events):
+        with patch.object(self.service, "compact_start", return_value=events):
+            return self.client.post("/api/agents/agent-a/chats/c1/messages", json={"content": "/compact"})
+
+    def test_working_comes_before_the_text_and_the_stream_closes(self) -> None:
+        from src.service.chat import ChatEvent
+        response = self._post(iter([ChatEvent(kind="text", text="Context compacted: 9 → 3 tokens.")]))
+        names = [name for name, _ in _sse_events(response)]
+        self.assertEqual(names, ["working", "text", "done"])
+        self.assertEqual(_sse_events(response)[1][1], "Context compacted: 9 → 3 tokens.")
+
+    def test_a_failure_while_compacting_is_reported_in_band(self) -> None:
+        def failing():
+            raise RuntimeError("summary model down")
+            yield
+        names = [name for name, _ in _sse_events(self._post(failing()))]
+        self.assertEqual(names, ["working", "error", "done"])
