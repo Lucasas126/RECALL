@@ -7,7 +7,7 @@ Status: **phases 1-7 implemented** (phase 6: web task panel over `GET /api/tasks
 Goals
 
 - An agent can hand a task to another worker and keep going. The worker is either a fresh ephemeral agent or an **existing agent of the same user** (own SOUL, memory, tools). Subagents and agent-to-agent messages are one mechanism: a *task*.
-- Asynchronous like a typical `delegate_task`: several tasks in parallel; the parent may keep working, wait, or end its turn. When a task finishes, its result **returns to the parent chat as a new message that wakes the parent agent** with no user input, and the agent then tells the user.
+- Asynchronous: several tasks in parallel; the parent may keep working, wait, or end its turn. When a task finishes, its result **returns to the parent chat as a new message that wakes the parent agent** with no user input, and the agent then tells the user.
 - The parent can list live tasks, steer one (send a correction) and stop one.
 - A child inherits only what the parent grants and never more than the parent has. Manual approvals are shown to the **user in the parent chat**, attributed to the task.
 - Hard limits from day one (depth, parallelism, wall clock, tokens). A provider 429 (the Claude subscription has a 5-hour plan limit) stops the task and reports; it never retries in a loop.
@@ -59,7 +59,7 @@ Rules enforced in the handler, never trusted to the model:
 - `tools` ⊆ parent's effective groups ∩ `delegation.allowed_groups` (and ∩ the target agent's own groups for an existing agent). `delegate` is never grantable.
 - `backends` ⊆ the parent's `terminal.backends`; see [section 6](#6-permissions-and-approvals).
 - `task_wait` is a blocking tool like `ApprovalBroker.request`: it polls and honours the parent's `CancellationToken`, so a steering message from the user ends the wait (`GenerationCancelled`). Its cap (120 s) keeps a worker thread from being held for long. A result read through `task_wait`, `task_result` or `wait=true` is marked consumed, so no wake message is sent for it.
-- `task_send` (design request, 2026-11-05): the child chat is a normal persisted chat, so continuing a task is just another `ChatService.send` into it. Allowed when the task is `done`, `timed_out` or `failed` (not `owner_lost`) and its chat still exists; the task returns to `running`, counts against the parallel limits again, gets a fresh timeout and token budget (the previous usage stays in the record), and ends with a new wake as usual. Capped at `max_followups` (5) per task. other agent frameworks does not have this: its `delegate_task` children are one-shot (`steer` only reaches a child that is still running), so a follow-up there means a new task with the context rewritten. Here it costs almost nothing extra, which is why it is in phase 2. `task_steer` stays for tasks that are still running.
+- `task_send` (requested during design, 2026-11-05): the child chat is a normal persisted chat, so continuing a task is just another `ChatService.send` into it. Allowed when the task is `done`, `timed_out` or `failed` (not `owner_lost`) and its chat still exists; the task returns to `running`, counts against the parallel limits again, gets a fresh timeout and token budget (the previous usage stays in the record), and ends with a new wake as usual. Capped at `max_followups` (5) per task. Without it, `steer` would only reach a child that is still running and a follow-up would mean a new task with the context rewritten. Here it costs almost nothing extra, which is why it is in phase 2. `task_steer` stays for tasks that are still running.
 - `instructions: str = ""` on `task_start` (ephemeral target only): the system prompt of the worker, written by the parent. For an existing-agent target it is ignored and the agent keeps its own SOUL; `goal` and `context` are the task message.
 - Errors are returned as `error: ...` strings (the convention of `Agent._run_tools`), never raised.
 
@@ -129,7 +129,7 @@ Tell the user what matters. Ask for the full text with task_result if you need i
 | parent agent deleted/edited | refused while its slot is active (existing `AgentBusy`), so children keep it busy |
 | service shutdown | `ChatService.close()` cancels running tasks (`cancelled`, reason `service shutdown`); pending approvals are already denied by `ApprovalBroker.close()` |
 
-**Guarantees when a result arrives while the user is talking (design requirement: it must behave smoothly and never jam).**
+**Guarantees when a result arrives while the user is talking (requirement: the user keeps talking and the chat never jams).**
 
 1. A wake never cancels or truncates a reply in progress, and it never blocks the user: the user's message is always accepted at once.
 2. Several results that arrive while the parent is busy become one pending wake, delivered as one turn after the current reply ends. The turn lists each result with its task id and title.
@@ -248,19 +248,19 @@ Each phase ships and is tested alone. New test files follow the existing style (
 | 6 | **Polish and budgets** | task panel, `GET /api/tasks/events` SSE, per-user daily cap hook, Telegram `Stop` buttons everywhere | web and bot files | SSE replay, cap |
 | 7 (optional) | **Unattended entry point** | `launch(..., unattended=True, trigger=...)` without a parent run; see section 13 | `src/service/tasks.py` | unattended policy table |
 
-## 12. decisions of the owner (2026-11-05)
+## 12. design decisions (2026-11-05)
 
 | # | question | decision |
 |---|---|---|
-| 1 | Does a finished task always wake the parent? | Yes by default; `wake=False` for fire-and-forget. It must behave smoothly: the user keeps talking while tasks run and results interleave safely ([guarantees in section 5](#5-execution-model)). |
+| 1 | Does a finished task always wake the parent? | Yes by default; `wake=False` for fire-and-forget. The user keeps talking while tasks run and results interleave safely ([guarantees in section 5](#5-execution-model)). |
 | 2 | Can an existing-agent child write memory? | Ephemeral children: no. Existing agents the user already has deployed (for example Scout launched by Planner): yes, they should write to their own memory in that session. Implemented in phase 5 as a per-target `remember: true` in `delegation.targets`: the child chat is then a hidden but ordinary chat of that agent (not disposable), keeps the agent's own `memory_edit` tools, and may be reviewed by Dream. If it proves complicated (concurrent memory writes, Dream review of hidden chats), it moves to the backlog and v1 targets stay read-only. |
 | 3 | Default numbers | Accepted: depth 1, **3 parallel tasks per parent**, 4 per user, 600 s (10 min), 200k tokens, 8k result chars. Agents must know the limits (see below). |
 | 4 | Ephemeral persona | The parent writes the worker's prompt (`instructions` on `task_start`); there is no inherited SOUL. An existing agent keeps its own SOUL and settings. |
 | 5 | Terminal for children | Yes, `manual` only (as recommended). |
 | 6 | Answer approvals from the other channel | No. An approval is shown in the channel of the parent chat only. The commands inbox of phase 4 stays for stop/steer/send, crash recovery and future jobs, but approvals are not relayed. |
-| 7 | Continue a finished child (new, design idea) | Yes: `task_send` (section 3). It does not exist in other agent frameworks; here it is cheap because the child chat persists. |
-| 8 | Steering a running task (design request) | The USER can steer a running task from RECALL too, not only the parent agent: the task card (web) and a Telegram button/command send a correction into the running child (same mechanism as `task_steer`: the child's current generation is interrupted, its partial reply kept, the correction appended, generation continues). Exposed as `POST /api/tasks/<id>/steer {text}` and Telegram `/task <id> <text>`; also `stop`. Phase 2 (same-process), cross-process via the commands inbox in phase 4. |
-| 9 | Wake vs. user collisions | other agent frameworks tends to cut the agent when a subagent result arrives mid-reply; RECALL does NOT cut it: the guarantees of section 5 apply (verify in tests). |
+| 7 | Continue a finished child (new idea) | Yes: `task_send` (section 3). Here it is cheap because the child chat persists. |
+| 8 | Steering a running task (requested during design) | The USER can steer a running task from RECALL too, not only the parent agent: the task card (web) and a Telegram button/command send a correction into the running child (same mechanism as `task_steer`: the child's current generation is interrupted, its partial reply kept, the correction appended, generation continues). Exposed as `POST /api/tasks/<id>/steer {text}` and Telegram `/task <id> <text>`; also `stop`. Phase 2 (same-process), cross-process via the commands inbox in phase 4. |
+| 9 | Wake vs. user collisions | Cutting the agent when a subagent result arrives mid-reply is avoided: RECALL does NOT cut it: the guarantees of section 5 apply (verify in tests). |
 
 **Agents must know the limits.** The limits are written in three places so the model does not have to find out by failing: (a) the `task_start` tool description states the numbers (3 running per parent, 10 minutes each, depth 1); (b) the `delegate` group adds a short notice to the system prompt in the same way the terminal group describes its backends; (c) the error returned when a limit is hit says which limit and what to do (`error: limit reached: 3 running tasks; wait for one to finish or use task_wait`). A knowledge-pack page `references/delegation.md` (tools, limits, wake behaviour, when not to delegate) and the user docs are deliverables of phase 1/2 (AGENTS.md rule).
 

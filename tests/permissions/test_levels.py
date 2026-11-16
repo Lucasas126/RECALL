@@ -37,7 +37,7 @@ def agent(groups=None, *, terminal=None, mcp=None, delegation=None, tools=True, 
 
 def user_config(**extra) -> UserConfig:
     backends = {
-        "sandbox": SSH, "pc": {**SSH, "user": "user-a"}, "orion": {**SSH, "user": "root"},
+        "sandbox": SSH, "pc": {**SSH, "user": "user-a"}, "atlas": {**SSH, "user": "root"},
         "local": {"type": "local", "workdir": "/app"},
     }
     return UserConfig.model_validate({
@@ -91,7 +91,7 @@ class RequiredLevelTests(unittest.TestCase):
             (agent(["memory_read"], mcp=["notes"]), Level.COLLABORATOR),
             (agent(["terminal"], terminal=["sandbox"]), Level.OPERATOR),
             (agent(["terminal"], terminal=["pc"]), Level.OPERATOR),
-            (agent(["terminal"], terminal=["orion"]), Level.ADMIN),
+            (agent(["terminal"], terminal=["atlas"]), Level.ADMIN),
             (agent(["terminal"], terminal=["local"]), Level.ADMIN),
             (agent(["delegate"], delegation={"targets": [{"agent": "other"}]}), Level.OPERATOR),
         ]
@@ -111,19 +111,19 @@ class RequiredLevelTests(unittest.TestCase):
         self.assertIs(self.required(agent(["terminal"], terminal=["gone"])), Level.OPERATOR)
 
     def test_the_highest_requirement_wins(self) -> None:
-        config = agent(["memory_read", "memory_edit", "web", "self", "terminal"], terminal=["sandbox", "orion"])
+        config = agent(["memory_read", "memory_edit", "web", "self", "terminal"], terminal=["sandbox", "atlas"])
         self.assertIs(self.required(config), Level.ADMIN)
 
     def test_production_shape_is_admin(self) -> None:
         config = agent(
-            ["memory_read", "memory_edit", "web", "self", "terminal"], terminal=["local", "sandbox", "pc", "orion"],
+            ["memory_read", "memory_edit", "web", "self", "terminal"], terminal=["local", "sandbox", "pc", "atlas"],
         )
         self.assertIs(effective_agent_level(config, user_config()), Level.ADMIN)
 
 
 class EffectiveLevelTests(unittest.TestCase):
     def test_declared_agent_level_wins_over_required(self) -> None:
-        config = agent(["terminal"], terminal=["orion"], level=Level.READER)
+        config = agent(["terminal"], terminal=["atlas"], level=Level.READER)
         self.assertIs(effective_agent_level(config, user_config()), Level.READER)
 
     def test_an_undeclared_level_is_what_the_configuration_needs(self) -> None:
@@ -182,7 +182,7 @@ class LoaderTests(AdminFixture):
         "  local: {type: local, workdir: /app}\n"
         "  sandbox: {type: ssh, host: a.example, user: deploy, key_file: /k, known_hosts_file: /h}\n"
         "  pc: {type: ssh, host: b.example, user: user-a, key_file: /k, known_hosts_file: /h}\n"
-        "  orion: {type: ssh, host: c.example, user: root, key_file: /k, known_hosts_file: /h}\n"
+        "  atlas: {type: ssh, host: c.example, user: root, key_file: /k, known_hosts_file: /h}\n"
     )
 
     def test_production_shape_above_a_lower_max_is_an_invalid_agent(self) -> None:
@@ -192,7 +192,7 @@ class LoaderTests(AdminFixture):
         self.write_agent(
             "bot",
             "id: bot\nname: Bot\nchat_config:\n  tool_groups: [memory_read, memory_edit, web, self, terminal]\n"
-            "terminal:\n  default_backend: sandbox\n  backends: {local: {}, sandbox: {}, pc: {}, orion: {}}\n",
+            "terminal:\n  default_backend: sandbox\n  backends: {local: {}, sandbox: {}, pc: {}, atlas: {}}\n",
         )
         with self.assertRaises(LevelRequiredAboveMax) as raised:
             load_agent("user-a", "bot")
@@ -208,12 +208,12 @@ class LoaderTests(AdminFixture):
         self.write_agent(
             "bot",
             "id: bot\nname: Bot\nlevel: operator\nchat_config:\n  tool_groups: [memory_read, terminal]\n"
-            "terminal:\n  backends: {orion: {}}\n",
+            "terminal:\n  backends: {atlas: {}}\n",
         )
         with self.assertRaises(LevelBelowRequired) as raised:
             load_agent("user-a", "bot")
         self.assertEqual(raised.exception.code, "level_below_required")
-        self.assertIn("terminal backend 'orion' (ssh user root)", str(raised.exception))
+        self.assertIn("terminal backend 'atlas' (ssh user root)", str(raised.exception))
         self.assertIn("'admin'", str(raised.exception))
 
     def test_an_undeclared_level_that_needs_more_than_max_is_invalid_not_a_warning(self) -> None:

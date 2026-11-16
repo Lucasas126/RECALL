@@ -92,7 +92,7 @@ Capability gaps an agent reported, in the order they block it; each line says wh
 Skills imported from other agent systems:
 
 - **Per-skill platform/compatibility tag**: mark which platform a skill is written for, so an agent knows whether its commands and tools exist here.
-- **Agents should not see foreign frontmatter**: strip or ignore foreign frontmatter keys in imported skills so they do not confuse the model.
+- **Agents should not see foreign frontmatter keys**: strip or ignore them in imported skills so they do not confuse the model.
 
 ## done
 

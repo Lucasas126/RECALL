@@ -41,10 +41,10 @@ class CleanQueryTests(unittest.TestCase):
 
     def test_answers_markdown_and_commands_are_discarded(self) -> None:
         for raw in (
-            "He registrado todo lo que hemos discutido en la nota de `RECALL-GAPS.md`, incluyendo:",
+            "I have recorded everything we discussed in the note `RECALL-GAPS.md`, including:",
             "## Paso 3: Adaptar memorias",
             "```bash",
-            "ssh orion -- bash -s",
+            "ssh atlas -- bash -s",
             "**Status: complete.** All tasks",
             "- first point",
         ):

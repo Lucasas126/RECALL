@@ -279,7 +279,7 @@ token. `Agent._take_assoc_result` uses its outcome once per turn:
   known Messages API behaviour of `claude-sonnet-5-5` reported publicly (any provider,
   thinking on or off): anthropics/anthropic-sdk-python#1960, anthropics/claude-code#96439
   and r/ClaudeAI "Sonnet 5.5 Streaming Broken on all providers when tool ...". Haiku
-  streams on the same hop; Opus was mostly bursty in our probes. Accepted by the owner
+  streams on the same hop; Opus was mostly bursty in our probes. Accepted at design time
   (2026-11-05): no client-side fake streaming
 - nothing found, or the search fails: the reply is never touched (a warning is logged
   for failures)
