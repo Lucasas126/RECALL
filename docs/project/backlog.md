@@ -36,7 +36,7 @@ One list of ideas and planned work, with what is already done kept separate. Imp
 ### web and tests
 
 - **Chat loading, next steps**: gzip for the JSON answers; keep files the agent sent (`media[].data_url`, base64) out of the chat payload and serve them by URL (a 28-message chat weighs 1.3 MB, 870 KB of it files); fewer requests per chat switch (`/api/chats`, approvals, tasks and processes are still separate calls, and the chat list is also polled); lighter bubbles for tool steps and reasoning, since the cost left in a long chat is the number of DOM nodes.
-- **Node tests**: `tests/test_model_sorting.cjs` fails on a clean checkout (its page stub lacks `matchMedia`, `window`, `MutationObserver`, `location` and more, each one added reveals the next; a generic stub or a real DOM such as jsdom would end that), and the Python suite does not run the `.cjs` files, so failures there go unnoticed; wire them into the check run before a release.
+- **Node tests in CI**: `tests/test_node_suite.py` now runs every `tests/*.cjs` inside the Python suite (all green since 2026-11-16, `test_model_sorting.cjs` repaired), but the GitHub workflow only builds the image and runs no tests; add a test job that runs the suite before a release.
 - **PDF follow-ups**: designed documents (covers, photos) as a skill, a way to merge, split or fill PDF forms, an end-to-end check with a real model (does `make_pdf` look good, does a model receive the `view_image` picture; Ollama is unchecked), and `view_image` for formats Pillow cannot read.
 
 ### usage and data
@@ -63,7 +63,7 @@ Moved here from the private notes of the RECALL agent so there is one list.
 - **Web slash commands**: accept `/dreamstart` and `/dreamcancel` (Telegram-only aliases today; the web parser in `app.js` only knows `/dream start`).
 - **`prune_empty`** deletes an empty Telegram chat before its first message (confirmed in the code, 2026-11-15): `/new` creates an empty chat (`bot.py` `_create_session_chat`), and the next `create_chat` or any `list_chats` without `keep` for the same agent prunes it, because only pending and active chats are kept (`_kept_chats` in `chat.py`); the bot itself calls `list_chats` without `keep`. Fix: keep the session's current chat, or do not prune chats younger than a few minutes.
 - **Mobile**: the Dream sessions table scrolls sideways, so the "Duration" column is cut; the Dream and Folders tabs have not been reviewed on a phone.
-- **Tests**: review of the suite (about 2300 tests, about 180 s: cut redundant ones, fix long-failing ones) and run `tests/*.cjs` in CI (see Node tests above).
+- **Tests**: review of the suite (about 2340 tests, about 185 s: cut redundant ones; no failing test or skipped fixture left as of 2026-11-16, only 2 skips that need `tesseract` or a Windows host).
 - **Tool ergonomics**: `memory` could infer `patch` when `old_text` is given without `action` (it errors with "give an action"); an address without a colon (`mind_palace/x.md`) could suggest `mind_palace:x.md` in the error.
 - **Version in the prompt**: the system prompt tells the agent when its profile was loaded but not the running version (`/api/version` exists, no agent tool reads it).
 

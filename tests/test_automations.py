@@ -296,17 +296,14 @@ class GrantTests(unittest.TestCase):
             self.assertLessEqual(set(TOOL_GROUP_TOOLS[group]), DISPOSABLE_BLOCKED_TOOLS)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 try:  # the integration check reuses the subagent fixtures, which live next to the tests
     from test_subagents_panel import AgentTargetFixture
 except ImportError:  # pragma: no cover
-    AgentTargetFixture = None
+    AgentTargetFixture = unittest.TestCase
 
 
-@unittest.skipIf(AgentTargetFixture is None, "subagent fixtures unavailable")
+@unittest.skipIf(AgentTargetFixture is unittest.TestCase, "subagent fixtures unavailable")
 class AutomationTaskGrantTests(AgentTargetFixture):
     """The task an automation starts may message its owner; a task started any other way may not."""
 
@@ -333,3 +330,6 @@ class AutomationTaskGrantTests(AgentTargetFixture):
         groups, _ = self.tool_names(self.manager.launch_unattended("user-one", "agent-two", "go", trigger="automation"))
         self.assertIn("notify", groups)
         self.assertNotIn("files_send", groups)
+
+if __name__ == "__main__":
+    unittest.main()
