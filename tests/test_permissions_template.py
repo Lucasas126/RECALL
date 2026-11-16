@@ -26,7 +26,7 @@ class TemplateTests(unittest.TestCase):
     def test_config_is_valid_operator_with_the_chosen_groups_and_no_terminal(self) -> None:
         config, _, chosen = templates.build(NAME, "pm", "Permission manager")
         self.assertEqual(config.level, Level.OPERATOR)
-        self.assertEqual(config.chat_config.tool_groups, ["memory_read", "memory_edit", "self", "permissions"])
+        self.assertEqual(config.chat_config.tool_groups, ["memory_read", "memory_edit", "self", "identity", "permissions"])
         self.assertTrue(set(config.chat_config.tool_groups) <= TOOL_GROUP_IDS)
         self.assertNotIn("terminal", config.chat_config.tool_groups)
         self.assertNotIn("web", config.chat_config.tool_groups)
@@ -37,7 +37,7 @@ class TemplateTests(unittest.TestCase):
         guide = templates.templates()["guide"]
         self.assertEqual(guide.min_level, Level.OPERATOR)
         self.assertEqual(guide.config["level"], "operator")
-        self.assertEqual(guide.config["chat_config"]["tool_groups"], ["memory_read", "memory_edit", "web", "self", "agents", "permissions"])
+        self.assertEqual(guide.config["chat_config"]["tool_groups"], ["memory_read", "memory_edit", "web", "self", "identity", "agents", "permissions"])
         self.assertNotIn("terminal", guide.config)
 
     def test_soul_is_short_english_and_names_real_tools(self) -> None:

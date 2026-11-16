@@ -9,7 +9,7 @@ Levels are configured, shown to you and enforced (tools removed, calls refused).
 | # | Level | In short |
 | --- | --- | --- |
 | 0 | `minimal` | only one or two individually chosen tools |
-| 1 | `reader` | read your own memory and the user's folder list |
+| 1 | `reader` | read your own memory and the user's folder list; rename yourself (`identity`) |
 | 2 | `assistant` | edit your memory, SOUL, USER and skills; web |
 | 3 | `collaborator` | edit user folders, MCP servers, workers limited to web |
 | 4 | `operator` | terminal on sandbox or real machines, hand tasks to the user's other agents |

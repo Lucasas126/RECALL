@@ -27,7 +27,7 @@ from src.config.models import AgentConfig
 from src.utils.i18n import _SPANISH, UserMessageError
 
 ROOT = Path(__file__).resolve().parents[1]
-GUIDE_GROUPS = ["memory_read", "memory_edit", "web", "self", "agents", "permissions"]
+GUIDE_GROUPS = ["memory_read", "memory_edit", "web", "self", "identity", "agents", "permissions"]
 OLD_GUIDE = (
     "id: guide\nname: Guide\nchat_config:\n  tool_groups: [memory_read, memory_edit, web, self, terminal]\n"
     "terminal:\n  backends:\n    local:\n      workdir: /app\n      approvals: manual\n"

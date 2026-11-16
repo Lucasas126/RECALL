@@ -38,6 +38,7 @@ approval/sandbox split, Meta's *Agents Rule of Two*, OWASP LLM06 (excessive agen
 | `delegate`: hand tasks to the user's other agents | no | no | no | no | yes | yes |
 | `notify`: send the owner a short Telegram message | no | no | yes | yes | yes | yes |
 | `files_send`: send the owner a file the agent can already read | no | yes | yes | yes | yes | yes |
+| `identity`: change its own display name (`set_display_name`; nothing else, no approval) | no | yes | yes | yes | yes | yes |
 | `automations`: schedule things for later for the owner | no | no | yes | yes | yes | yes |
 | `permissions`: view and adjust levels and rules of the same user's agents, up to the user's `max_level` | no | no | no | no | yes | yes |
 | `agents`: list, create, edit, rename and delete the same user's agents (never their level, groups or rules) | no | no | no | no | yes | yes |
@@ -355,7 +356,7 @@ them, the dream toolset does not use them) and the individually chosen tools of 
 | Audit of every write (files, memory, self) | Only the terminal and agent-made permission changes are audited today. |
 | Command parser | Best effort and heuristic (interpreters, variable expansion, wrappers, hard links can bypass it). The boundaries are the level, the backend kind and the approval, never the parser. Accepted risk. |
 | Dreams: limited read-only delegate, MCP read-only tools and `sandbox_read` | The ceiling reports them; the dream toolset does not build them yet. |
-| Individually chosen tools of the `minimal` level | Not built: a `minimal` agent has no tools. |
+| Individually chosen tools of the `minimal` level | Not built: a `minimal` agent has no tools, so `identity` is not available there either (its minimum level is `reader`, like `files_send`). |
 | Folder and MCP actions through the rule engine | Folder deletes and moves and non-read-only MCP tools never ask today; routing them needs approval cards without a command. |
 | Approval cards of file writes | The content preview is appended to the command text; the web may not link the card to its tool step. |
 | The `local` backend | A host shell as the RECALL OS user: admin only. The setup guide no longer needs it (the `agents` and `permissions` tools replace it). |

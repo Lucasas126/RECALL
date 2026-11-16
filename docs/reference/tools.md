@@ -91,6 +91,9 @@ The web **Agents** tab configures these groups for each agent:
   parameters, they come from the run, so an agent only sees and changes its own automations for its own user. When one fires the agent runs unattended (nobody can approve) and may use
   `notify_telegram` and `send_file`. Not available in a disposable chat or an automation's own task, so a scheduled run cannot schedule more. At most 50 per user, 6 runs an hour each.
 
+<a id="identity"></a>
+- `identity` (every level, on by default for an agent without `tool_groups`): `set_display_name(name)` changes the `name` of the agent that calls it, and nothing else (never its id, level, tool groups, rules or SOUL; it cannot name another agent). One line, not empty, at most 100 characters, no control characters. No approval card (it is harmless); the change is audited (`permission_change`, field `name`, old and new name, `decision: applied`) and saved like the agent's own `agent_update`. The chat in progress keeps its prompt; new chats use the new name. Not available in a disposable chat, a dream or an automation's task. Agents with an explicit `tool_groups` list do not get it until it is added.
+
 <a id="files_send"></a>
 - `files_send` (level `reader`): `send_file(path, caption="")` hands the user a file the agent can **already read**. `path` is `<source>:<path>`, resolved by the same code
   as `read` and `folder_read`, so hidden entries, protected paths (keys, secrets, `.env`) and anything outside the agent's readable sources are refused exactly as there; the
@@ -310,7 +313,6 @@ to 500 characters.
 The shared tool-group catalog is returned by `GET /api/tool-groups` (each group
 with `id`, `name`, `description` and `default`) and is selectable in the web
 **Agents** tab. Agent YAML stores the selection as `chat_config.tool_groups`;
-omitting it selects the groups marked `default`: every group except the folder
-ones, which are always an explicit choice.
+omitting it selects the groups marked `default` (`memory_read`, `memory_edit`, `web`, `self`, `identity`); folders, notices, files, automations, terminal, delegation and the management groups are always an explicit choice.
 Existing `allow` and `deny` lists remain supported as an additional per-tool
 filter.

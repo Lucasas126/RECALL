@@ -39,7 +39,7 @@ def templates() -> dict[str, AgentTemplate]:
             {
                 "description": "Guides the user through configuring RECALL; can create and change agents.",
                 "level": "operator",
-                "chat_config": {"tool_groups": ["memory_read", "memory_edit", "web", "self", "agents", "permissions"]},
+                "chat_config": {"tool_groups": ["memory_read", "memory_edit", "web", "self", "identity", "agents", "permissions"]},
             },
             _guide_soul(),
             min_level=Level.OPERATOR, display_name="Guide",
@@ -50,7 +50,7 @@ def templates() -> dict[str, AgentTemplate]:
             {
                 "description": "Reviews what each of your agents can do and proposes or applies permission changes you approve.",
                 "level": "operator",
-                "chat_config": {"tool_groups": ["memory_read", "memory_edit", "self", "permissions"]},
+                "chat_config": {"tool_groups": ["memory_read", "memory_edit", "self", "identity", "permissions"]},
             },
             _permission_manager_soul(),
             min_level=Level.OPERATOR, display_name="Permission manager",
