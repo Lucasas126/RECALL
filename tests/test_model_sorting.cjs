@@ -4,10 +4,24 @@ const path = require("node:path");
 const { test } = require("node:test");
 const vm = require("node:vm");
 
+// DOM methods app.js calls on elements that these tests do not exercise.
+const METHODS = new Set(["closest", "remove", "removeChild", "removeEventListener", "insertBefore", "prepend",
+  "before", "after", "scrollIntoView", "blur", "click", "select", "getAttribute", "removeAttribute",
+  "hasAttribute", "matches", "contains", "dispatchEvent", "getBoundingClientRect", "appendChild", "cloneNode",
+  "setSelectionRange", "scrollTo", "animate", "toggleAttribute", "querySelector", "getElementsByTagName"]);
+
 function pickerHarness() {
   const elements = new Map();
-  const element = () => ({
-    children: [], attributes: {}, listeners: {}, dataset: {},
+  // Methods the page calls that this test does not care about answer with a no-op
+  // (and a chainable element), so a new DOM call in app.js does not break the test.
+  const lenient = (target) => new Proxy(target, {
+    get(obj, key) {
+      if (key in obj || typeof key === "symbol" || !METHODS.has(key)) return obj[key];
+      return () => lenient(element());
+    },
+  });
+  const element = () => lenient({
+    children: [], options: [], attributes: {}, listeners: {}, dataset: {},
     checked: false, value: "", open: false, disabled: false,
     classList: {
       active: new Set(),
@@ -32,11 +46,29 @@ function pickerHarness() {
         return elements.get(id);
       },
       createElement: element,
+      addEventListener() {},
+      removeEventListener() {},
+      contains() { return false; },
+      querySelector() { return element(); },
+      querySelectorAll() { return []; },
+      documentElement: element(),
+      body: element(),
     },
-    localStorage: { getItem() { return null; } },
+    localStorage: { getItem() { return null; }, setItem() {}, removeItem() {} },
+    matchMedia: () => ({ matches: false, addEventListener() {}, addListener() {} }),
+    MutationObserver: class { observe() {} disconnect() {} },
+    location: { href: "http://localhost/", search: "", hash: "", pathname: "/" },
+    setInterval() { return 0; },
+    clearInterval() {},
+    setTimeout() { return 0; },
+    clearTimeout() {},
+    requestAnimationFrame() { return 0; },
     fetch: () => new Promise(() => {}),
+    navigator: { language: "en", mediaDevices: undefined },
+    Option: class { constructor(text = "", value = "") { Object.assign(this, element(), { textContent: text, value }); } },
     Intl,
   });
+  context.window = context;
   vm.runInContext(
     readFileSync(path.join(__dirname, "..", "src", "web", "static", "app.js"), "utf8"),
     context,
@@ -51,6 +83,11 @@ function pickerHarness() {
   vm.runInContext("state", context).translations = new Proxy({}, {
     get(target, key) { return target[key] ?? key; },
   });
+  // Since the provider tabs (2026-11-04) the list only renders when a provider is selected
+  // and the catalog belongs to it; the tests that fill a catalog assume OpenRouter.
+  const pickerState = vm.runInContext("state", context);
+  pickerState.modelProvider = "openrouter";
+  pickerState.modelCatalogProvider = "openrouter";
   return {
     elements, context,
     compareModels: vm.runInContext("compareModels", context),
@@ -82,7 +119,7 @@ const settlePicker = () => new Promise((resolve) => setImmediate(resolve));
 test("default pickers work without a chat, stage both models, and save only changed defaults", async () => {
   const harness = pickerHarness();
   Object.assign(harness.state, {
-    user: { id: "demo", provider: "openrouter" }, requests: new Set(["in-flight"]), busy: true,
+    user: { agents: [], id: "demo", provider: "openrouter" }, requests: new Set(["in-flight"]), busy: true,
   });
   harness.applyPreferences({ ...sharedDefaults });
   vm.runInContext("fillSettings()", harness.context);
@@ -126,7 +163,7 @@ test("default pickers work without a chat, stage both models, and save only chan
 test("default STT picker uses its own catalog, prices and no LLM favorites or capabilities", async () => {
   const harness = pickerHarness();
   Object.assign(harness.state, {
-    user: { provider: "openrouter" }, modelTarget: "default-stt",
+    user: { agents: [], provider: "openrouter" }, modelTarget: "default-stt",
     settingsOriginal: sharedDefaults, settingsModelDraft: { default_stt_model: "stt/cheap" },
     modelFavorites: ["llm/favorite"], modelFavoritesOnly: false,
   });
@@ -155,7 +192,7 @@ test("default STT picker uses its own catalog, prices and no LLM favorites or ca
 test("resetting the LLM chat override calls the nullable endpoint without saving user preferences", async () => {
   const harness = pickerHarness();
   Object.assign(harness.state, {
-    user: { provider: "openrouter" }, agentId: "agent-a", chatId: "chat",
+    user: { agents: [], provider: "openrouter" }, agentId: "agent-a", chatId: "chat",
     model: { id: "llm/override", zdr: true }, modelOverride: { id: "llm/override" },
   });
   harness.applyPreferences({ ...sharedDefaults });
@@ -184,7 +221,7 @@ test("resetting the LLM chat override calls the nullable endpoint without saving
 test("refreshing shared defaults does not change explicit chat overrides", () => {
   const harness = pickerHarness();
   Object.assign(harness.state, {
-    user: { provider: "openrouter" }, chatId: "chat",
+    user: { agents: [], provider: "openrouter" }, chatId: "chat",
     model: { id: "llm/override", zdr: false }, modelOverride: { id: "llm/override" },
   });
   harness.applyPreferences({ ...sharedDefaults, default_llm_model: "llm/new", default_stt_model: "stt/new" });
@@ -195,7 +232,7 @@ test("refreshing shared defaults does not change explicit chat overrides", () =>
 
 test("shared preference refresh uses authoritative Telegram overrides without reloading history", async () => {
   const harness = pickerHarness();
-  Object.assign(harness.state, { user: { id: "demo", provider: "openrouter" }, agentId: "agent-a", chatId: "chat" });
+  Object.assign(harness.state, { user: { agents: [], id: "demo", provider: "openrouter" }, agentId: "agent-a", chatId: "chat" });
   harness.applyPreferences(sharedDefaults);
   harness.applyChatModels(inheritedModels);
   const history = { savedMessage: true };
@@ -226,7 +263,7 @@ test("shared preference refresh uses authoritative Telegram overrides without re
 
 test("old chat model metadata cannot replace a different chat's selection", async () => {
   const harness = pickerHarness();
-  Object.assign(harness.state, { user: { id: "demo" }, agentId: "agent-a", chatId: "old" });
+  Object.assign(harness.state, { user: { agents: [], id: "demo" }, agentId: "agent-a", chatId: "old" });
   let respond;
   harness.context.fetch = async (url) => url === "/api/preferences"
     ? { ok: true, json: async () => sharedDefaults }
@@ -242,7 +279,7 @@ test("old chat model metadata cannot replace a different chat's selection", asyn
 
 test("delayed metadata cannot undo a model selected locally after the read started", async () => {
   const harness = pickerHarness();
-  Object.assign(harness.state, { user: { id: "demo", provider: "openrouter" }, agentId: "agent-a", chatId: "chat" });
+  Object.assign(harness.state, { user: { agents: [], id: "demo", provider: "openrouter" }, agentId: "agent-a", chatId: "chat" });
   let respond;
   harness.context.fetch = async (url, options) => {
     if (url === "/api/preferences") return { ok: true, json: async () => sharedDefaults };
@@ -260,7 +297,7 @@ test("delayed metadata cannot undo a model selected locally after the read start
 
 test("old metadata cannot undo a newer preference save or leak into a reset session", async () => {
   const harness = pickerHarness();
-  Object.assign(harness.state, { user: { id: "demo" }, agentId: "agent-a", chatId: "chat" });
+  Object.assign(harness.state, { user: { agents: [], id: "demo" }, agentId: "agent-a", chatId: "chat" });
   let respond;
   let first = true;
   const latest = { ...inheritedModels, model: { id: "llm/latest", provider: "openrouter", zdr: true } };
@@ -290,7 +327,7 @@ test("old metadata cannot undo a newer preference save or leak into a reset sess
 
 test("current metadata errors propagate without substituting user defaults for an unknown chat selection", async () => {
   const harness = pickerHarness();
-  Object.assign(harness.state, { user: { id: "demo" }, agentId: "agent-a", chatId: "chat" });
+  Object.assign(harness.state, { user: { agents: [], id: "demo" }, agentId: "agent-a", chatId: "chat" });
   harness.applyChatModels(inheritedModels);
   harness.context.fetch = async (url) => url === "/api/preferences"
     ? { ok: true, json: async () => sharedDefaults }
@@ -301,7 +338,7 @@ test("current metadata errors propagate without substituting user defaults for a
 test("session reset discards default drafts and ignores an in-flight STT catalog", async () => {
   const harness = pickerHarness();
   Object.assign(harness.state, {
-    user: { provider: "openrouter" }, modelTarget: "default-stt",
+    user: { agents: [], provider: "openrouter" }, modelTarget: "default-stt",
     settingsOriginal: sharedDefaults, settingsModelDraft: { default_stt_model: "stt/unsaved" },
     modelOverride: null,
   });
@@ -327,7 +364,7 @@ test("shared thinking visibility applies to the whole message history", () => {
 
 test("refreshing shared settings preserves the open agent and chat", async () => {
   const harness = pickerHarness();
-  Object.assign(harness.state, { user: { id: "demo" }, agentId: "agent-a", chatId: "existing" });
+  Object.assign(harness.state, { user: { agents: [], id: "demo" }, agentId: "agent-a", chatId: "existing" });
   harness.context.fetch = async (url, options) => {
     assert.equal(options.cache, "no-store");
     assert.ok(["/api/preferences", "/api/agents/agent-a/chats/existing/models"].includes(url));
@@ -342,7 +379,7 @@ test("refreshing shared settings preserves the open agent and chat", async () =>
 
 test("an older preferences response cannot undo a completed settings save", async () => {
   const harness = pickerHarness();
-  harness.state.user = { id: "demo" };
+  harness.state.user = { id: "demo", agents: [] };
   let resolveRead;
   harness.context.fetch = (url, options) => options.method === "PATCH"
     ? Promise.resolve({
@@ -378,7 +415,7 @@ test("the settings form patches only fields edited since opening", async () => {
 
 test("settings failures retain prior preferences and expose an error", async () => {
   const harness = pickerHarness();
-  harness.state.user = { id: "demo" };
+  harness.state.user = { id: "demo", agents: [] };
   harness.state.preferences = { show_thinking: true, language: "en", agent_id: "agent-a" };
   harness.state.settingsOriginal = { ...harness.state.preferences };
   harness.elements.get("settings-thinking").checked = false;
@@ -393,7 +430,7 @@ test("settings failures retain prior preferences and expose an error", async () 
 test("new chats use the agent selected by the other channel", async () => {
   const harness = pickerHarness();
   Object.assign(harness.state, {
-    user: { id: "demo", provider: "ollama" }, agentId: "agent-a", chatId: "existing",
+    user: { agents: [], id: "demo", provider: "ollama" }, agentId: "agent-a", chatId: "existing",
   });
   const requests = [];
   harness.context.fetch = async (url, options) => {
@@ -580,7 +617,7 @@ test("collapsed filters count active capabilities and still filter results", () 
 
 test("opening closes disclosures, retains capabilities and restores safe defaults", () => {
   const { elements, state, updateControls } = pickerHarness();
-  state.user = { provider: "openrouter" };
+  state.user = { provider: "openrouter", agents: [] };
   state.chatId = "chat";
   state.modelCatalog = [];
   state.modelCatalogZdr = true;
