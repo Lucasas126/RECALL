@@ -6,7 +6,7 @@ merged with `--no-ff` into `main`, with tests and docs in the same commit. Order
 ## steps
 
 ### 1. docs and limits: reference pages up to 12 KB
-- Raise the per-page limit of `src/knowledge/recall/references/` from 8192 to 12288 bytes, done in step 1 (`tests/test_recall_knowledge.py` lines 91 and 259, `AGENTS.md`).
+- Raise the per-page limit of `src/knowledge/recall/references/` from 8192 to 12288 bytes, done in step 1 (`tests/knowledge/test_recall_knowledge.py` lines 91 and 259, `AGENTS.md`).
 - Docs: nothing else. Do not pad pages; the limit is a ceiling, not a target. Splitting by topic still comes first.
 
 ### 2. `agent_update` accepts any setting, always with an approval card (done)

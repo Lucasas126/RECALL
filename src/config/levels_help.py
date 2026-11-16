@@ -1,7 +1,7 @@
 """The text behind the `permission_levels_help` tool: every level and what it allows, built from the code.
 
 It reads `SERVICE_MIN_LEVEL` (levels.py) and `src.config.ceiling`, so it cannot drift from what is enforced. The prose of the
-design page (docs/architecture/permissions.md) and the built-in manual say the same; `tests/test_permissions_tool_help.py`
+design page (docs/architecture/permissions.md) and the built-in manual say the same; `tests/permissions/test_permissions_tool_help.py`
 compares them.
 """
 

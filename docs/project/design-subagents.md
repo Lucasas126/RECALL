@@ -236,7 +236,7 @@ The web learns of a wake started in its own process through the polling describe
 
 ## 11. phased build plan
 
-Each phase ships and is tested alone. New test files follow the existing style (`SteeringFixture` in `tests/test_service_steering.py`, `tests/test_disposable_chats.py`, `tests/test_terminal_approvals.py`, `tests/test_terminal_telegram.py`).
+Each phase ships and is tested alone. New test files follow the existing style (`SteeringFixture` in `tests/tasks/test_service_steering.py`, `tests/chat/test_disposable_chats.py`, `tests/terminal/test_terminal_approvals.py`, `tests/terminal/test_terminal_telegram.py`).
 
 | # | phase | scope | files touched (expected) | tests |
 |---|---|---|---|---|

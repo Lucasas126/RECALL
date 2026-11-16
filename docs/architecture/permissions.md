@@ -370,8 +370,8 @@ them, the dream toolset does not use them) and the individually chosen tools of 
 | 2 (done, except the prompt block) | Ceiling enforcement in one module (`src/config/ceiling.py`): when tools are built (chats, workers, dreams), at dispatch, on config save and on load. Still to do: the `permissions` prompt block and skill page, and the limited dream delegate. |
 | 3 (done) | Rule engine (`src/terminal/rules.py`): layers, deny/ask/allow, matching, the three legacy modes as a per-backend shorthand, the blanket-allow guardrail, audit fields. Terminal and file tools only; see [implemented](#implemented-step-3). |
 | 4 (done) | Approvals with memory: once / session / always for this agent, web and Telegram, audit. |
-| 5 (done) | `permissions` tool group and a permission-manager agent template; escalation tests (`tests/test_permissions_tool_*.py`). |
-| 8 (done) | `agents` tool group and the guide template rebased on it ([implemented](#implemented-step-8-the-agents-tool-group); `tests/test_agents_tool*.py`). |
+| 5 (done) | `permissions` tool group and a permission-manager agent template; escalation tests (`tests/permissions/test_permissions_tool_*.py`). |
+| 8 (done) | `agents` tool group and the guide template rebased on it ([implemented](#implemented-step-8-the-agents-tool-group); `tests/tools/test_agents_tool*.py`). |
 | 6 (done) | Web UI and admin CLI: level selector capped by `max_level`, rule editor, admin screen; see [implemented](#implemented-step-6-web-ui-and-admin-screen). |
 | 7 (done) | Final documentation and the remaining-gaps list (this page, the [security notes](../deployment/security.md#permission-levels) and the [backlog](../project/backlog.md#permission-level-follow-ups)). |
 

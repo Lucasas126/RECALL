@@ -51,7 +51,7 @@ they are not shared with Telegram and do not count as unsaved changes):
 
 - **Theme**: system, light or dark (the Theme row above it).
 - **Accent colour**: pink (default), blue, gold, green, violet or cyan. It colours the primary buttons, the active-chat bookmark, links and
-  focus rings. Each colour has a dark-theme and a light-theme value, and every text/background pair is at least 4.5:1 (WCAG AA); `tests/test_web_theme.py` checks it.
+  focus rings. Each colour has a dark-theme and a light-theme value, and every text/background pair is at least 4.5:1 (WCAG AA); `tests/web/test_web_theme.py` checks it.
 
 The page sets `data-accent` and `data-theme` on `<html>` before first paint (`static/appearance.js`, loaded as a normal
 script, so no inline script is needed). Fonts (Fraunces, Inter, Geist Mono) are served from `static/fonts/`, so the page makes no request
