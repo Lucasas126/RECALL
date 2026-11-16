@@ -24,7 +24,7 @@ GROUP_FIRST_LEVEL = {
 SSH = {"type": "ssh", "host": "box.example", "key_file": "/k", "known_hosts_file": "/h"}
 BACKENDS = {
     "box": {**SSH, "user": "deploy"},      # unprivileged ssh: a sandbox or a real machine
-    "orion": {**SSH, "user": "root"},       # root over ssh
+    "atlas": {**SSH, "user": "root"},       # root over ssh
     "local": {"type": "local", "workdir": "/app"},
 }
 PRODUCTION_GROUPS = ["memory_read", "memory_edit", "web", "self", "terminal"]
@@ -76,10 +76,10 @@ class GroupTableTests(unittest.TestCase):
         for level in Level:
             with self.subTest(level=level.label):
                 self.assertEqual(ceiling.backend_allowed(level, classes["box"]), level >= L.OPERATOR)
-                self.assertEqual(ceiling.backend_allowed(level, classes["orion"]), level >= L.ADMIN)
+                self.assertEqual(ceiling.backend_allowed(level, classes["atlas"]), level >= L.ADMIN)
                 self.assertEqual(ceiling.backend_allowed(level, classes["local"]), level >= L.ADMIN)
                 self.assertEqual(set(ceiling.usable_backends(level, classes)), {
-                    name for name, minimum in (("box", L.OPERATOR), ("orion", L.ADMIN), ("local", L.ADMIN)) if level >= minimum
+                    name for name, minimum in (("box", L.OPERATOR), ("atlas", L.ADMIN), ("local", L.ADMIN)) if level >= minimum
                 })
 
     def test_every_catalogued_tool_has_a_minimum_and_unknown_names_are_refused(self) -> None:
@@ -167,8 +167,8 @@ class DreamTableTests(unittest.TestCase):
 class ConfigRuleTests(unittest.TestCase):
     def test_required_level_with_a_reason(self) -> None:
         self.assertEqual(required_level_reason(agent(["memory_read"]), user().terminal_backends), (L.READER, "tool group 'memory_read'"))
-        level, why = required_level_reason(agent(["terminal"], ["orion"]), user().terminal_backends)
-        self.assertEqual((level, why), (L.ADMIN, "terminal backend 'orion' (ssh user root)"))
+        level, why = required_level_reason(agent(["terminal"], ["atlas"]), user().terminal_backends)
+        self.assertEqual((level, why), (L.ADMIN, "terminal backend 'atlas' (ssh user root)"))
         self.assertEqual(required_level(agent([])), L.MINIMAL)
 
     def test_the_rule_for_every_declared_level_and_maximum(self) -> None:
@@ -221,7 +221,7 @@ class ProductionShapeTests(unittest.TestCase):
     """The two real configurations that motivated the rule."""
 
     def test_groups_memory_edit_web_self_terminal_with_local_and_root_backends_are_admin_only(self) -> None:
-        config = agent(PRODUCTION_GROUPS, ["local", "box", "orion"])
+        config = agent(PRODUCTION_GROUPS, ["local", "box", "atlas"])
         self.assertEqual(required_level(config, user().terminal_backends), L.ADMIN)
         for maximum in (L.ASSISTANT, L.COLLABORATOR, L.OPERATOR):
             with self.assertRaises(LevelRequiredAboveMax):

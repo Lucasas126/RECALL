@@ -69,7 +69,7 @@ At start-up, after the services are up, for each run journal left behind:
 
 ### 3. background processes
 
-- **ssh backends** (`pc`, `laptop`, `orion`, `dev`...): run the command fully detached on the target:
+- **ssh backends** (`desktop`, `laptop`, `atlas`, `dev`...): run the command fully detached on the target:
   `setsid nohup bash -c '<cmd>' > /tmp/recall-proc-<id>.log 2>&1 < /dev/null; echo $? > .../<id>.code`, with the
   pid file as today. RECALL follows it by polling over ssh (tail of the log, presence of the code file) instead
   of holding a stream open. After a restart the poller simply goes on from the record. Log size capped on the
@@ -156,5 +156,5 @@ At start-up, after the services are up, for each run journal left behind:
 ## not in this plan
 
 - Zero-downtime deploys (two containers behind a proxy, `docker rollout`): see the research note in the
-  the assistant's palace; possible later, needs per-chat locks on disk instead of the in-memory slot.
+  the current design; possible later, needs per-chat locks on disk instead of the in-memory slot.
 - Resuming subagent tasks.

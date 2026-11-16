@@ -17,11 +17,11 @@ GOOD = "correct-horse-battery"
 SSH_BACKENDS = (
     "terminal_backends:\n"
     "  local: {type: local, workdir: /app}\n"
-    "  orion: {type: ssh, host: c.example, user: root, key_file: /k, known_hosts_file: /h}\n"
+    "  atlas: {type: ssh, host: c.example, user: root, key_file: /k, known_hosts_file: /h}\n"
 )
 TERMINAL_AGENT = (
     "id: {id}\nname: Term\nchat_config:\n  tool_groups: [memory_read, terminal]\n"
-    "terminal:\n  backends: {{orion: {{}}}}\n"
+    "terminal:\n  backends: {{atlas: {{}}}}\n"
 )
 
 
@@ -157,15 +157,15 @@ class AgentCheckTests(LevelAdminBase):
         self.write_agent("bot", TERMINAL_AGENT.format(id="bot"))
         code, out, _ = self.run_cli(["agent", "check", "--user", "user-a"])
         self.assertEqual(code, 1, out)
-        self.assertIn("= admin (computed, needs admin for terminal backend 'orion' (ssh user root))", out)
-        self.assertIn("error: user-a/bot: Agent 'bot' uses terminal backend 'orion' (ssh user root), which needs the level 'admin'", out)
+        self.assertIn("= admin (computed, needs admin for terminal backend 'atlas' (ssh user root))", out)
+        self.assertIn("error: user-a/bot: Agent 'bot' uses terminal backend 'atlas' (ssh user root), which needs the level 'admin'", out)
 
     def test_a_declared_level_below_what_the_agent_needs_is_an_error(self) -> None:
         self.write_user(self.read("user-a/user.yaml") + SSH_BACKENDS)
         self.write_agent("bot", TERMINAL_AGENT.format(id="bot") + "level: operator\n")
         code, out, _ = self.run_cli(["agent", "check", "--user", "user-a"])
         self.assertEqual(code, 1, out)
-        self.assertIn("has the level 'operator', but terminal backend 'orion' (ssh user root) needs the level 'admin'", out)
+        self.assertIn("has the level 'operator', but terminal backend 'atlas' (ssh user root) needs the level 'admin'", out)
 
     def test_a_declared_level_above_the_maximum_is_an_error(self) -> None:
         self.write_agent("bot", "id: bot\nname: Bot\nlevel: admin\n")

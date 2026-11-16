@@ -16,7 +16,7 @@ merged with `--no-ff` into `main`, with tests and docs in the same commit. Order
 - Touches `src/service/agent_admin.py` (`PLAIN_SETTINGS`, `_PERMISSION_KEYS`, `_ACCESS_KEYS`, the self-change check), `src/agent/toolsets/agents.py` (docstring), `docs/architecture/permissions.md` and tests.
 
 ### 3. optional token cap per task (done)
-- Default: no cap per task (`subagents.max_tokens` stops being a default of 200k; `0`/absent = unlimited). The per-user daily budget was removed (design decision, 2026-11-12): only time and parallelism limit tasks.
+- Default: no cap per task (`subagents.max_tokens` stops being a default of 200k; `0`/absent = unlimited). The per-user daily budget was removed (maintainer decision, 2026-11-12): only time and parallelism limit tasks.
 - `task_start(max_tokens=...)` lets the agent set a cap for one task; `agent.delegation.max_tokens` and the application setting stay as upper bounds when set.
 - Changes: `TaskLimits.max_tokens` becomes optional, the checks in `src/service/tasks.py` (~1189 and ~1211), the notice text `DELEGATE_NOTICE`, the task record `limits`, docs (delegation guide, settings reference).
 
@@ -29,7 +29,7 @@ Proposal, to confirm before coding:
 - Risk to document: a worker that reads untrusted web pages now holds the parent's terminal rights. Dangerous-command denial and the audit log are the mitigation.
 
 ### 5. background processes (the large step)
-Design from an existing implementation (process registry, rolling output buffer, poll/log/wait/kill, completion notification), adapted to RECALL's backends.
+Design: a process registry, rolling output buffer, poll/log/wait/kill and completion notification (process registry, rolling output buffer, poll/log/wait/kill, completion notification), adapted to RECALL's backends.
 
 Tools (terminal group, same approval engine as `terminal`; a start is one action, polls are read-only):
 - `process_start(command, backend, workdir, notify_on_complete=true)` returns an id at once.
@@ -53,12 +53,12 @@ Once step 5 lands, the full test suite (~150 s) runs with `process_start` instea
 - Model: a new application-wide setting in `settings.yaml` (not per user or agent), like the model that titles chats; default set, empty = no summary. Reuse the title-model plumbing and provider rules (no forced ZDR labels).
 - Safety: the summary is advisory and untrusted (it can be wrong or be steered by the command text); label it as such, give the model only the command, backend and short context, cap its time (card must not wait on it) and tokens, and never use it to auto-approve.
 - Changes: settings model and defaults, a summarizer in the approval path (`src/terminal/approvals.py`), card UI in `app.js`, docs, tests with a fake provider.
-- Not started; order after step 5 unless User A moves it.
+- Not started; order after step 5 unless the maintainer moves it.
 
 ## parked (backlog, not in this plan)
 - Dedupe of associative hints across turns (judged unnecessary after the 0.3.3 changes).
 - Conversation search, scheduled jobs and proactive messages, ask-with-options, agent-to-agent messages, browser, vision, voice, connectors.
-- Auto-approval of read-only commands for workers on `pc`/`laptop`/`orion` beyond what `inherit` gives.
+- Auto-approval of read-only commands for workers on `desktop`/`laptop`/`atlas` beyond what `inherit` gives.
 - Passing files or skills to a fresh worker (today: paste into `context`).
 
 ## done in this run

@@ -258,7 +258,7 @@ class PromptAssemblyTests(AgentFilesFixture):
         from src.agent.agent import _MEMORY_HABITS_NOTICE
 
         self.assertLessEqual(len(_MEMORY_HABITS_NOTICE), 1300)
-        for word in ("Nova", "User A", "other agent frameworks", "Orion"):
+        for word in ("Alice", "Bob", "Carol", "Atlas"):
             self.assertNotIn(word, _MEMORY_HABITS_NOTICE)
 
     def test_empty_profile_is_only_the_soul(self) -> None:

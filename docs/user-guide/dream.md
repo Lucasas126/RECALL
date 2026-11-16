@@ -14,7 +14,7 @@ separate "sleep mode" and "dream mode" ideas in the README; they are one feature
 
 - the agent keeps improving between chats without blocking them.
 - what it learns lives in plain files the user can read and edit.
-- the per-agent file layout mirrors other agent frameworks' (`SOUL.md`, `memories/`,
+- the per-agent file layout is fixed (`SOUL.md`, `memories/`,
   `skills/`) plus RECALL's mind palace, journal and review queue.
 - everything a dream did is inspectable in the web UI: reasoning, tool calls,
   results.
@@ -63,7 +63,7 @@ notice, dream tasks notice, memory habits notice, MCP notes). the memory habits 
 the assembly lives in `src/agent/profile.py`; empty blocks are left out.
 
 files are read when a chat's agent is built: changes made by a dream take
-effect in **new chats**, never mid-conversation (by design).
+effect in **new chats**, never mid-conversation (a fixed rule).
 
 ## review queue
 
@@ -240,7 +240,7 @@ write (only the agent's own files; everything else is refused):
 - `soul_edit` (replace or patch `SOUL.md`; snapshot to `soul_history/` first,
   keeping the last 5)
 - `skill_view`
-- `memory` (add / patch / remove on `MEMORY.md` or `USER.md`, usual semantics:
+- `memory` (add / patch / remove on `MEMORY.md` or `USER.md`, with these semantics:
   char limit enforced on the final result, batch is atomic)
 - `skill_manage` (create / patch / delete skills, write supporting files)
 - mind palace write/append/edit/move/delete (journal, `for_user.md`,
