@@ -6377,6 +6377,7 @@ function addMessage(role, parent = state.view ?? $("messages")) {
   let thinking = null;  // the thinking segment that still takes chunks: nothing was added after it yet
   let thinkingRaw = "";
   let memoryIndicator = null;
+  let workingLine = null;  // the "working…" line (see `working`), removed by the first text or error
   let actionCount = 0;
   let liveSteps = [];  // tool steps of this reply (state from toolStepsApply) and their DOM nodes, same indexes
   const liveNodes = [];
@@ -6469,6 +6470,7 @@ function addMessage(role, parent = state.view ?? $("messages")) {
       }
       raw += chunk;
       if (chunk.trim()) thinking = null;
+      if (workingLine) { workingLine.remove(); workingLine = null; }
       renderBody();
     },
     attachments: (items) => renderAttachmentNames(items),
@@ -6483,6 +6485,15 @@ function addMessage(role, parent = state.view ?? $("messages")) {
       // models end their reasoning with newlines; trimming keeps an empty line from showing under the block
       thinkingRaw += chunk;
       thinking.set(thinkingRaw.trimEnd());
+    },
+    // `working`: a pulsing line while RECALL does something that streams no text (a /compact); the first text replaces it.
+    working(text) {
+      if (workingLine) workingLine.remove();
+      workingLine = document.createElement("div");
+      workingLine.className = "working";
+      workingLine.setAttribute("role", "status");
+      workingLine.textContent = text;
+      el.insertBefore(workingLine, body);
     },
     notice(text) {
       const note = document.createElement("div");
@@ -6598,6 +6609,7 @@ function addMessage(role, parent = state.view ?? $("messages")) {
       }
     },
     error(source) {
+      if (workingLine) { workingLine.remove(); workingLine = null; }
       this.settleMemory();
       this.settleSteps();
       // with nothing streamed yet the card replaces the reply bubble; otherwise it follows the partial reply
@@ -7208,6 +7220,7 @@ function handleEvent(raw, request) {
   else if (event === "tool") reply.action(payload);
   else if (event === "memory") reply.memory(payload);
   else if (event === "notice") reply.notice(payload);
+  else if (event === "working") reply.working(payload);
   else if (event === "approval") reply.approval({ agent_id: request.agentId, chat_id: request.chatId, ...payload });
   else if (event === "approval_resolved") settleApproval(payload);
   else if (event === "approval_explanation") explainApproval(payload);

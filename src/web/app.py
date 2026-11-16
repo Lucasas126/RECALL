@@ -186,6 +186,18 @@ def _sse(event: str, data, generation_id: str = "") -> str:
     return f"{event_id}event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def _compaction_stream(events, language: str) -> Iterator[str]:
+    """`/compact` as SSE: a `working` event now, then the outcome as text; the answer is not stored in the chat."""
+    generation_id = uuid4().hex
+    yield _sse("working", message(language, "Compacting the chat…"), generation_id)
+    try:
+        yield _sse("text", "".join(event.text or "" for event in events if event.kind == "text"), generation_id)
+    except Exception as exc:
+        logger.warning("compaction stream failed: %s", exc)
+        yield _sse("error", _error_payload(language, exc), generation_id)
+    yield _sse("done", "", generation_id)
+
+
 def _event_stream(events, language: str, user_id: str, agent_id: str, chat_id: str) -> Iterator[str]:
     """Format a reply's events as SSE; failures are reported in-band and `done` always closes the stream."""
     generation_id = ""
@@ -636,7 +648,13 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
             else service.dream_command(user_id, agent_id, body.content)
         )
         if command_reply is None and not body.attachments and body.edit_index is None:
-            command_reply = service.compact_command(user_id, agent_id, chat_id, body.content)
+            compaction = service.compact_start(user_id, agent_id, chat_id, body.content)
+            if compaction is not None:
+                return StreamingResponse(
+                    _compaction_stream(compaction, language),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
         if command_reply is None and not body.attachments and body.edit_index is None:
             command_reply = service.usage_command(user_id, body.content)
         if command_reply is not None:

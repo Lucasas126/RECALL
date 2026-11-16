@@ -1272,10 +1272,18 @@ async def compact_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.effective_message.reply_text(_msg(session, "Nothing to compact yet: the chat is still short."))
         return
     text = " ".join(["/compact", *(context.args or [])])
+    compaction = asyncio.create_task(asyncio.to_thread(
+        state.service.compact_command, session.user_id, session.agent_id, session.chat_id, text,
+    ))
     try:
-        reply = await asyncio.to_thread(
-            state.service.compact_command, session.user_id, session.agent_id, session.chat_id, text,
-        )
+        # a compaction takes a while and streams nothing: keep Telegram's "typing…" on until it ends
+        while True:
+            with suppress(TelegramError):
+                await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+            done, _ = await asyncio.wait({compaction}, timeout=4)
+            if done:
+                break
+        reply = compaction.result()
     except (ServiceError, ValueError, OSError, RuntimeError) as exc:
         logger.warning("Telegram /compact failed: %s", exc)
         await update.effective_message.reply_text(

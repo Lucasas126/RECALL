@@ -288,6 +288,16 @@ class CompactionServiceTests(steering.SteeringFixture):
         self.assertGreater(cut.summarised_tokens, cut.tail_tokens)  # the window-sized tail, as before
         self.assertIsNone(compaction.split(_conversation(2, 100), 200, 50))  # too little to summarise: skipped
 
+    def test_compact_start_returns_before_the_outcome_and_matches_compact_command(self) -> None:
+        for provider in self.providers.values():
+            provider.context_window.return_value = 1_000_000
+        for i in range(12):
+            self._say(f"m{i}")
+        self.assertIsNone(self.service.compact_start("user-one", "agent-one", self.chat, "hello"))
+        events = self.service.compact_start("user-one", "agent-one", self.chat, "/compact 10")
+        text = "".join(event.text or "" for event in events if event.kind == "text")
+        self.assertIn("Context compacted", text)
+
     def test_compact_command_takes_a_share_and_a_focus(self) -> None:
         for provider in self.providers.values():
             provider.context_window.return_value = 1_000_000
