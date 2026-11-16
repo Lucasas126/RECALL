@@ -7026,8 +7026,9 @@ async function dispatchMessage(content, attachments, edit = null) {
     if (sameSession(request)) {
       syncApprovals(request.agentId, request.chatId);
       if (!isGenerating(request.agentId, request.chatId) && !isCurrent(request)) {
-        state.views.delete(key);
-        state.usages.delete(key);
+        const finalKey = chatKey(request.agentId, request.chatId);  // the chat may have been replaced meanwhile
+        state.views.delete(finalKey);
+        state.usages.delete(finalKey);
       }
       updateBusy();
       if (!isGenerating(request.agentId, request.chatId)) {
@@ -7197,6 +7198,24 @@ async function followReply(agentId, chatId, attempt = 0) {
   }
 }
 
+// The server answered in a new chat because the one this page wrote to (still empty) had been deleted:
+// from here on the request, the open chat, the address bar and the sidebar follow the new one.
+function adoptReplacedChat(request, chat) {
+  if (!chat?.id) return;
+  const wasCurrent = isCurrent(request);
+  const oldKey = chatKey(request.agentId, request.chatId);
+  const newKey = chatKey(request.agentId, chat.id);
+  if (state.views.has(oldKey)) {
+    state.views.set(newKey, state.views.get(oldKey));
+    state.views.delete(oldKey);
+  }
+  request.chatId = chat.id;
+  if (!wasCurrent) return;
+  state.chatId = chat.id;
+  state.chatInfo = chat;
+  rememberChat(request.agentId, chat.id, true);
+}
+
 function handleEvent(raw, request) {
   if (!sameSession(request)) return;
   const reply = request.reply;
@@ -7221,6 +7240,7 @@ function handleEvent(raw, request) {
   else if (event === "memory") reply.memory(payload);
   else if (event === "notice") reply.notice(payload);
   else if (event === "working") reply.working(payload);
+  else if (event === "chat_replaced") adoptReplacedChat(request, payload);
   else if (event === "approval") reply.approval({ agent_id: request.agentId, chat_id: request.chatId, ...payload });
   else if (event === "approval_resolved") settleApproval(payload);
   else if (event === "approval_explanation") explainApproval(payload);

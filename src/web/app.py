@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -196,6 +197,15 @@ def _compaction_stream(events, language: str) -> Iterator[str]:
         logger.warning("compaction stream failed: %s", exc)
         yield _sse("error", _error_payload(language, exc), generation_id)
     yield _sse("done", "", generation_id)
+
+
+_GENERATED_CHAT_ID = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{6}$")  # the ids `ConversationsSource.create` makes
+
+
+def _chat_replaced_stream(chat: dict, stream: Iterator[str]) -> Iterator[str]:
+    """Tell the page its chat was replaced (`chat_replaced`: the new chat's summary), then the reply."""
+    yield _sse("chat_replaced", chat)
+    yield from stream
 
 
 def _event_stream(events, language: str, user_id: str, agent_id: str, chat_id: str) -> Iterator[str]:
@@ -665,14 +675,30 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
-        events = service.send(
-            user_id, agent_id, chat_id, body.content, stream=True,
-            attachments=[attachment.model_dump() for attachment in body.attachments],
-            rewind_to=body.edit_index, channel="web",
-        )
+        attachments = [attachment.model_dump() for attachment in body.attachments]
+        replaced = None
+        try:
+            events = service.send(
+                user_id, agent_id, chat_id, body.content, stream=True,
+                attachments=attachments, rewind_to=body.edit_index, channel="web",
+            )
+        except UnknownChat:
+            if body.edit_index is not None or not _GENERATED_CHAT_ID.match(chat_id):
+                raise  # an edit needs its chat; an id RECALL never generates is a plain 404, not a chat to replace
+            # an empty chat can be pruned before its first message (another tab, the phone, a listing):
+            # answer in a fresh one and tell the page which chat it is now
+            logger.warning("web chat %s/%s/%s no longer exists; answering in a new chat", user_id, agent_id, chat_id)
+            replaced = service.create_chat(user_id, agent_id)
+            chat_id = replaced["id"]
+            events = service.send(
+                user_id, agent_id, chat_id, body.content, stream=True, attachments=attachments, channel="web",
+            )
 
+        stream = _event_stream(events, language, user_id, agent_id, chat_id)
+        if replaced is not None:
+            stream = _chat_replaced_stream(replaced, stream)
         return StreamingResponse(
-            _event_stream(events, language, user_id, agent_id, chat_id), media_type="text/event-stream",
+            stream, media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 

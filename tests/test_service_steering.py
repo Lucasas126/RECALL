@@ -294,6 +294,25 @@ class ServiceSteeringTests(SteeringFixture):
         release.set()
         self.assertNotIn("interrupted", [e.kind for e in first])
 
+    def test_web_message_to_a_pruned_empty_chat_is_answered_in_a_new_one(self) -> None:
+        """End to end on the real service: another client's listing deletes the empty chat, then the page sends."""
+        from fastapi.testclient import TestClient
+        from auth_helpers import login
+        from src.web.app import create_app
+        import json
+        empty = self.service.create_chat("user-one", "agent-one")["id"]
+        self.service.list_chats("user-one", "agent-one")  # a second client lists without `keep`: the empty chat goes
+        self.assertFalse(self.sources[("user-one", "agent-one")].exists_chat(empty))
+        with TestClient(create_app(self.service)) as client:
+            login(client, "user-one")
+            response = client.post(f"/api/agents/agent-one/chats/{empty}/messages", json={"content": "Hello"})
+        frames = [dict(line.split(": ", 1) for line in f.splitlines()) for f in response.text.strip().split("\n\n")]
+        self.assertEqual(frames[0]["event"], "chat_replaced")
+        new = json.loads(frames[0]["data"])["id"]
+        self.assertNotEqual(new, empty)
+        self.assertIn("Answer: Hello", response.text)
+        self.assertEqual(self.sources[("user-one", "agent-one")].load(new)[0]["content"][-5:], "Hello")
+
     def test_queued_empty_chats_are_not_pruned(self) -> None:
         started, release = self._gate("Original")
         first = self._send("Original")
