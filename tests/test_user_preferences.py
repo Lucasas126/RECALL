@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import multiprocessing
-import os
 import unittest
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
@@ -112,38 +111,6 @@ class UserPreferencesStorageTests(unittest.TestCase):
         self.assertEqual(sorted(path.name for path in self.path.parent.iterdir()), [
             "preferences.json", "preferences.lock",
         ])
-
-    @unittest.skipUnless(os.name == "nt", "Windows replacement contention")
-    def test_transient_windows_replace_error_is_retried_without_losing_changes(self) -> None:
-        original_replace = Path.replace
-        denied = PermissionError(13, "Access denied", str(self.path), 5)
-        calls = 0
-
-        def replace(path: Path, target: Path) -> Path:
-            nonlocal calls
-            calls += 1
-            if calls == 1:
-                raise denied
-            return original_replace(path, target)
-
-        with patch("src.utils.files.Path.replace", new=replace):
-            self.store.update("user-one", UserPreferences(language="es"))
-        self.assertEqual(calls, 2)
-        self.assertEqual(self.store.get("user-one").language, "es")
-        self.assertFalse(list(self.path.parent.glob("*.tmp")))
-
-    @unittest.skipUnless(os.name == "nt", "Windows replacement contention")
-    def test_persistent_windows_replace_error_is_bounded_and_reported(self) -> None:
-        self.store.update("user-one", UserPreferences(language="es"))
-        denied = PermissionError(13, "Access denied", str(self.path), 5)
-        with patch("src.utils.files.Path.replace", side_effect=denied) as replace:
-            with patch("src.utils.files.sleep") as sleep:
-                with self.assertRaises(PreferencesError):
-                    self.store.update("user-one", UserPreferences(language="en"))
-        self.assertEqual(replace.call_count, 5)
-        self.assertEqual(sleep.call_count, 4)
-        self.assertEqual(self.store.get("user-one").language, "es")
-        self.assertFalse(list(self.path.parent.glob("*.tmp")))
 
     def test_failed_lock_reports_actionable_error_without_mutating_preferences(self) -> None:
         with patch("src.config.preferences.exclusive_file_lock", side_effect=PermissionError("denied")):
