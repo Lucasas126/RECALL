@@ -7,6 +7,10 @@ One list of ideas and planned work, with what is already done kept separate. Imp
 
 - **Secrets for admin agents** are done: the opt-in `secrets` group (admin only) lists names and copies, renames or deletes variables without ever seeing a value, one approval card each. Setting a new value stays with the user (`set-secret` or Settings, Providers).
 
+### resilience
+
+- **One invalid agent file must not take the whole service down** (2026-11-17, release 0.4.2): removing legacy keys made pydantic reject an agent file that still had one (`Extra inputs are not permitted`), and every web request failed, so no agent could be used to fix it. Wanted: a bad agent file disables only that agent (shown as broken in Settings with the error and the file path, other agents keep working); the error names the offending key; `python -m src.admin agent check` lists every invalid file; and a release that drops config keys ships a check (or a startup warning) before it can break a deploy.
+
 ### automation and behavior
 
 - **Automations** are being built in steps: the service (triggers `at`, `every`, `cron`, `process_end`; guards; catch-up) is done, see [automations](../user-guide/automations.md); the agent tools (group `automations`, level `assistant`) and the web tab (a second tab of the Tasks dialog) are done too. Left for later: sending a result to a chat. Calendar and conversation events are out of scope.
