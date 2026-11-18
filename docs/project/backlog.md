@@ -21,6 +21,10 @@ One list of ideas and planned work. Implemented behaviour is documented in the
 - **Hand a web chat over to Telegram**: a voluntary action that sets the chat's `origin` to `telegram` (the marker in `<chat_id>.origin.json`, already exposed in chat summaries) and notifies the user, so the bot continues it. The origin marker is the base; nothing else exists yet.
 - **Orchestrator follow-ups**: a default routed agent for the web UI, per-agent routing hints beyond the description, and a log of routing decisions to tune descriptions.
 
+### interface
+
+- **Per-agent accent colour** (optional): today the accent colour and theme are one browser-wide preference (`localStorage`), so every agent looks the same apart from its picture. Let an agent's file set an optional accent (one of the swatches or a custom colour) that the web UI applies while that agent is open, falling back to the user's own choice; the agent list and the Telegram bot are unaffected.
+
 ### tools
 
 - **RECALL knowledge, phase 2** (the admin pages `admin-cli`, `recipes` and `security-for-admins` are done): reference pages for Telegram, models and providers, MCP, more recipes (step-by-step fixes) and the user documentation, added to `src/knowledge/recall/` ([RECALL knowledge](../user-guide/recall-knowledge.md) is phase 1).

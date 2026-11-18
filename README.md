@@ -25,9 +25,9 @@ Per-user agents with long-term memory, tools and their own personality, reachabl
 | ![The associative-memory dialog: the search query and the fragments injected into the reply, with their source and score](docs/images/memory.png) | ![The agent form: tool groups and the permission level each one needs](docs/images/agent-tools.png) |
 | What the agent recalled for this reply, from which note, and how close it was. | Tool groups per agent; each shows the permission level it needs. |
 
-Every agent has its own look: a picture of your own (here, pixel art) or a coloured initial, and any accent colour, in a light or dark theme.
+Every agent can have its own picture (here, pixel art) or a coloured initial, and the interface takes any accent colour, in a light or dark theme.
 
-| Light theme, agent with a picture | Another agent, no picture, cyan accent |
+| Light theme, agent with a picture | Another agent without a picture, cyan accent |
 |---|---|
 | ![The trip-planning chat in the light theme](docs/images/chat-light.png) | ![A research chat with Sage, an agent without a picture, in a cyan accent](docs/images/chat-no-picture.png) |
 
