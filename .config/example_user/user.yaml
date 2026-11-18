@@ -1,18 +1,19 @@
-id: user-a
+id: example_user       # must match the folder name (.config/<user_id>/)
 # require_zdr: true  # optional: only use zero-data-retention routes (OpenRouter); off by default. See docs/user-guide/models-and-providers.md
-# password_hash: "$argon2id$..."
+# password_hash: "$argon2id$..."  # web login; set it with `python -m src.admin set-password example_user`
+language: en           # language of the interface and capability errors (en, es)
 models:
   chat: openai/gpt-4o-mini
   stt: openai/whisper-large-v3-turbo
   embeddings: openai/text-embedding-3-small
   # stt_language: es  # optional spoken language for transcription (ISO-639-1, e.g. es or es-ES); unset auto-detects
-name: user-a
+name: Example User
 # max_level: highest permission level of this user's agents (minimal, reader, assistant, collaborator, operator, admin);
 # required; set only by an administrator (`python -m src.admin user set`). See docs/reference/user-yaml.md
 max_level: collaborator
 provider:
   name: openrouter
-  api_key: OPENROUTER_USER_A_API_KEY
+  api_key: OPENROUTER_EXAMPLE_USER_API_KEY   # env var NAME holding the key (in .env or secrets.env), never the key
 agents: [example_agent]
 # terminal_backends:    # machines the user's agents may run commands on (docs/user-guide/terminal.md)
 #   sandbox:
