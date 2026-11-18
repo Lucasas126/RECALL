@@ -2038,7 +2038,7 @@ async def _send_generation(
 
 
 # ---------------------------------------------------------------------------------------------- subagent tasks
-# The bot listens to the TaskManager of its own process (docs/project/design-subagents.md sections 8 and 9): one
+# The bot listens to the TaskManager of its own process: one
 # status line when a task of a Telegram chat starts and one when it ends, the wake reply streamed into the private
 # chat, and /tasks and /task to look at, stop and correct tasks.
 

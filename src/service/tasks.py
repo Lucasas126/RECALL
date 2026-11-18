@@ -1,6 +1,6 @@
 """Subagent tasks: the durable task store and the manager that runs a task in a hidden chat.
 
-Phase 1 (see docs/project/design-subagents.md): the `delegate` tool group launches one ephemeral worker and blocks
+Phase 1: the `delegate` tool group launches one ephemeral worker and blocks
 until it ends (`wait=true`). The manager is written so that phase 2 only has to add the wake: `launch` starts the
 worker's threads and returns at once, and `run` is just `launch` plus waiting.
 
@@ -127,7 +127,7 @@ def _seconds_between(start: str | None, end: str | None) -> int | None:
 
 
 def wake_block(record: dict) -> str:
-    """One task's block of a wake turn (see docs/project/design-subagents.md section 5)."""
+    """One task's block of a wake turn."""
     usage = record.get("usage") or {}
     tokens = (usage.get("in") or 0) + (usage.get("out") or 0)
     seconds = _seconds_between(record.get("started_at"), record.get("ended_at"))

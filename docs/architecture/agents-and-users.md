@@ -71,7 +71,7 @@ If any check fails the call is rejected before touching data.
 
 ## subagent tasks
 
-The `delegate` tool group (phases 1 and 2a of the [subagents design](../project/design-subagents.md): async `task_start`, the wake, task tools) adds a second kind of chat run, owned by the
+The `delegate` tool group (async `task_start`, the wake, task tools; see [delegation](../user-guide/delegation.md)) adds a second kind of chat run, owned by the
 `TaskManager` in `src/service/tasks.py`, which `ChatService` creates and binds to every reply through `RunContext.tasks`:
 
 - **Store.** `data/<user_id>/.tasks/` holds one JSON record per task (read-modify-write under `.state.lock`, atomic writes), `<id>.run.lock` held by the executing process
