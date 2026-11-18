@@ -10,6 +10,7 @@ One list of ideas and planned work. Implemented behaviour is documented in the
 ### resilience
 
 - **One invalid agent file must not take the whole service down** (seen in release 0.4.2): removing legacy keys made pydantic reject an agent file that still had one (`Extra inputs are not permitted`), and every web request failed, so no agent could be used to fix it. Wanted: a bad agent file disables only that agent (shown as broken in Settings with the error and the file path, other agents keep working); the error names the offending key; `python -m src.admin agent check` lists every invalid file; and a release that drops config keys ships a check (or a startup warning) before it can break a deploy.
+- **A `user.yaml` whose `id` differs from its folder must not load**: today `load_user` reads `.config/<user_id>/user.yaml` and never compares the file's `id` with the folder name, so a copied example with a stale `id` loads and the two identifiers silently diverge (paths, permissions, Telegram mapping). Reject it with an error that names both values, and report it in `agent check`.
 
 ### automation and behavior
 
@@ -23,6 +24,10 @@ One list of ideas and planned work. Implemented behaviour is documented in the
 
 ### interface
 
+- **Admin web interface**, visible only to administrators:
+  - *First run*: when no user exists, the web UI opens a setup page that creates the first (admin) user, its password, provider and key variable name, instead of `create-user` and hand-edited YAML. It must be impossible to reach once a user exists.
+  - *User management*: list, create, edit (name, language, provider, `max_level`) and delete users, reset a password and see each user's agents and levels; the same rules as the admin CLI (`max_level` only set by an administrator, refusals named the same way).
+  - Needs a notion of *administrator* in the user model (today only the CLI and the host are administrators), audit of every change, and no access to other users' chats or secrets from this page.
 - **Per-agent accent colour** (optional): today the accent colour and theme are one browser-wide preference (`localStorage`), so every agent looks the same apart from its picture. Let an agent's file set an optional accent (one of the swatches or a custom colour) that the web UI applies while that agent is open, falling back to the user's own choice; the agent list and the Telegram bot are unaffected.
 
 ### tools
