@@ -12,7 +12,7 @@ Per-user agents with long-term memory, tools and their own personality, reachabl
 
 ## Why would you use RECALL?
 
-- **Memory that works on its own.** While the agent writes, a vector search is made over its notes, skills and past chats. Any relevant fragments are slipped into the reply as hints. You can open them and see exactly what was recalled and why.
+- **Memory that works on its own.** While the agent writes, a vector search is made over its notes, skills and past chats. Any relevant fragments are slipped into the reply as hints. You can open them and see exactly what was recalled and why. This feature was inspired by human **associative memory**, which brings up related information based on stimuli. It's still a work in progress, but it already works well for many use cases.
 - **Agents that look after themselves.** Each agent keeps a private *mind palace* (Markdown notes it organises), its own `SOUL.md` personality and its skills. In *dream mode* it reviews recent conversations and tidies its own files in the background.
 - **Real tools, with you in control.** Memory, web search, user folders (an Obsidian vault, for instance), MCP servers, sandboxed terminals and subagents, chosen per agent. Permission levels and approval cards decide what runs without asking.
 - **Multi-user by design.** Every user owns their agents, data and provider key; nothing is shared implicitly.
