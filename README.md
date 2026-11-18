@@ -47,8 +47,8 @@ Every agent has its own look: a picture of your own (here, pixel art) or a colou
 
 ```bash
 # 1. get the Compose file and the example settings
-curl -O https://raw.githubusercontent.com/<owner>/RECALL/main/docker-compose.yml
-curl -o .env https://raw.githubusercontent.com/<owner>/RECALL/main/.env.deploy.example
+curl -O https://raw.githubusercontent.com/Lucasas126/RECALL/main/docker-compose.yml
+curl -o .env https://raw.githubusercontent.com/Lucasas126/RECALL/main/.env.deploy.example
 chmod 600 .env          # then fill it in
 
 # 2. state folders, owned by the container user
@@ -65,7 +65,7 @@ The web UI listens on `http://<server>:8000`. Watchtower keeps it on the latest 
 Requirements: Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-git clone https://github.com/<owner>/RECALL.git && cd RECALL
+git clone https://github.com/Lucasas126/RECALL.git && cd RECALL
 uv sync
 cp -r .config/example_user .config/<user_id>   # edit user.yaml: id, name, provider key name
 uv run python -m src.web.auth                   # prints the password hash for user.yaml
