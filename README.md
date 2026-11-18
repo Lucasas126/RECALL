@@ -2,7 +2,7 @@
 
 # RECALL
 
-**Self-hosted AI assistants that remembers.**
+**Self-hosted AI assistants that remember.**
 Per-user agents with long-term memory, tools and their own personality, reachable from the web or Telegram.
 
 </div>
@@ -89,7 +89,7 @@ RECALL is under active development and changes quickly; configuration keys can c
 
 ## Why did I build RECALL?
 
-Of course, there are many agent frameworks out there that are probalby more mature and have more features. RECALL itself is heavily inspired by many other agent frameworks, such as [Hermes](https://github.com/nousresearch/hermes-agent). But I wanted to build one that:
+Of course, there are many agent frameworks out there that are probably more mature and have more features. RECALL itself is heavily inspired by many other agent frameworks, such as [Hermes](https://github.com/nousresearch/hermes-agent). But I wanted to build one that:
 - Had Obsidian at its core, with Markdown notes and a mind palace for each agent that you can explore. An agent can build its own knowledge base and skills, and recall them in context.
 - Could run on a small server, with a web UI and a Telegram bot, and be self-hosted with your own data and models. No telemetry or third-party tracking.
 - Could be configured per user and per agent, with permission levels and approval rules for tools, and a clear separation between framework settings and user/agent configuration.
@@ -97,7 +97,7 @@ Of course, there are many agent frameworks out there that are probalby more matu
 
 And of course I wanted to face the challenges that come with building a framework like this, and learn from them. As you can imagine RECALL was not completely built by hand, I used many AI tools to help me write the code (at some point RECALL itself became the main tool to build its own code), but the design is as much my own as I could make it. It obviously had my own needs in mind, but I hope it can be useful to others too.
 
-All pixelart images in the web UI and in this README were manually painted by myself using [Aseprite](https://www.aseprite.org/), so no stolen or AI-slop art here.
+All pixel-art images in the web UI and in this README were manually painted by myself using [Aseprite](https://www.aseprite.org/), so no stolen or AI-slop art here.
 
 And finally, why not?
 
