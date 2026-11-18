@@ -48,6 +48,6 @@ Documentation map. The root [README](../README.md) gives the short pitch; [AGENT
 ## project
 
 - [Changelog](project/changelog.md): what changed, by topic, with upgrade notes.
-- [Backlog](project/backlog.md): what is done and what is planned.
+- [Backlog](project/backlog.md): planned work.
 
-Conventions: see `.claude/rules/documentation.md`. Prefer updating the canonical page over adding a new one, and link instead of copying.
+Conventions: see the Documentation section of [AGENTS.md](../AGENTS.md). Prefer updating the canonical page over adding a new one, and link instead of copying.
