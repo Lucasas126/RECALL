@@ -2,11 +2,14 @@
 
 RECALL agents can use external services through the
 [Model Context Protocol](https://modelcontextprotocol.io/) (MCP). RECALL is the
-MCP client: it starts each server, lists its tools and exposes them to the model
-next to the built-in [tools](../reference/tools.md).
+MCP client: it starts or reaches each server, lists its tools and exposes them to
+the model next to the built-in [tools](../reference/tools.md).
 
-Status: implemented for stdio servers (a local command such as `npx`). Remote
-(streamable HTTP) servers are planned.
+Two transports are supported:
+
+- **stdio**: a local command (such as `npx`) started per user.
+- **http**: a remote streamable HTTP endpoint, reached with each user's own
+  access token.
 
 ## three levels
 
@@ -17,9 +20,10 @@ Status: implemented for stdio servers (a local command such as `npx`). Remote
 | agent | Agents > agent > **MCP** tab | which servers the agent uses, and how |
 
 Every server in the catalog is visible to every user, but nothing is shared
-between users: each user connects their own account, and each connected user gets
-a separate server process whose credentials and working directory live in
-`.config/<user_id>/mcp/<server_id>/` (ignored by Git). Agents only get a server's
+between users: each user connects their own account. A connected user gets a
+separate stdio server process, or a separate http session with their own token;
+credentials and working directory live in `.config/<user_id>/mcp/<server_id>/`
+(ignored by Git). Agents only get a server's
 tools when the agent enables it **and** its user has connected it.
 
 ## catalog (`settings.yaml`)
@@ -57,6 +61,31 @@ mcp:
   finds the sign-in URL in the command output, and `timeout_seconds` (30-1800,
   default 300) ends an unfinished sign-in.
 
+### http servers
+
+```yaml
+mcp:
+  servers:
+    finance:
+      name: Finance
+      description: Read the user's accounts and movements.
+      transport: http
+      url: https://finance.example.com/mcp/
+      auth:
+        type: token
+        label: Personal access token     # shown on the input field
+        help: Create one in Finance > Settings > MCP access.
+```
+
+- `url` must be `https://`, or plain `http://` to a private-network host
+  (`localhost`, `127.x`, `10.x`, `172.16-31.x`, `192.168.x`, a single-label name such
+  as `atlas`, or a `.local`, `.lan`, `.internal` or `.home.arpa` name), so a token is
+  never sent in clear text over the internet. Credentials in the URL are refused.
+- `auth: {type: token}` (optional): each user pastes their own token, sent as
+  `Authorization: Bearer <token>`. Without `auth` the server needs no connection.
+- `command`, `args` and `env` are only for stdio servers; `url` and token auth only
+  for http servers.
+
 Restart RECALL after changing the catalog.
 
 ## connecting an account
@@ -70,6 +99,14 @@ an integration simply never connect it.
 
 Because the sign-in callback goes to `localhost`, connect from a browser on the
 computer that runs RECALL.
+
+For an http server with token auth, the card shows a password field instead:
+paste the token and press **Connect**. RECALL checks it against the server right
+away and keeps it only if the server accepts it. It is stored in the user's
+private folder (`token`, mode 600), never shown again and never put in a chat.
+Paste a new one to replace it; **Disconnect** deletes it. If the server later
+rejects the token (revoked or expired), tools report that the user must connect
+again.
 
 ## enabling a server for an agent
 
@@ -99,8 +136,8 @@ whose YAML references a server no longer in the catalog is an error.
 
 ## runtime behavior
 
-- Server processes start lazily on the first turn that needs them and are reused
-  by all of that user's agents and chats. They stop when the web or Telegram
+- Server processes (or http sessions) start lazily on the first turn that needs
+  them and are reused by all of that user's agents and chats. They stop when the web or Telegram
   service, or the CLI, exits (on Windows a Job Object also stops them if RECALL is
   killed). Server output is logged to `logs/<run>/mcp_<server>_<user>.log`.
 - MCP tools are refreshed at the start of every turn, so connecting or
@@ -150,4 +187,4 @@ One-time setup by the RECALL administrator:
 The server's `manage-accounts` tool is hidden because accounts are connected from
 RECALL. Google also offers an official remote Calendar MCP server
 (`calendarmcp.googleapis.com`), currently in Developer Preview and HTTP-only, so it
-is not supported yet.
+could be added as an http server once it accepts a bearer token.

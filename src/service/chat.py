@@ -577,6 +577,11 @@ class ChatService:
         self._user(user_id)
         return self._mcp.start_auth(user_id, server_id)
 
+    def set_mcp_token(self, user_id: str, server_id: str, token: str) -> dict:
+        """Store the user's access token for an http MCP server, after checking it works."""
+        self._user(user_id)
+        return self._mcp.set_token(user_id, server_id, token)
+
     def disconnect_mcp(self, user_id: str, server_id: str) -> dict:
         """Stop this user's server and delete the user's stored credentials for it."""
         self._user(user_id)

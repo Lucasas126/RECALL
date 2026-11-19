@@ -13,7 +13,7 @@ plus an optional `"code"` (see [error codes](#error-codes)).
 | providers | `GET /api/claude/login`, `POST /api/claude/login/start` (returns `{"url"}`), `POST /api/claude/login/code` (`{"code"}`), `DELETE /api/claude/login/start` (cancel); `GET`/`PUT`/`DELETE /api/openrouter/key` (`{"key"}`; answers `{"configured", "own"}`, never the value) |
 | models | `GET /api/claude/usage` ([plan usage](#claude-plan-usage)), `GET /api/providers/status`, `GET /api/models/catalog`, `GET /api/models`, `GET`/`POST /api/models/favorites`, `DELETE /api/models/favorites/<model_id>` ([models and providers](../user-guide/models-and-providers.md)) |
 | agents | `GET`/`POST /api/agents`, `GET`/`PUT`/`DELETE /api/agents/<agent_id>`, `GET`/`PUT`/`DELETE /api/agents/<agent_id>/avatar` ([profile pictures](#profile-pictures)), `GET /api/tool-groups`, `GET /api/agents/<agent_id>/index`, `POST /api/agents/<agent_id>/index/reindex` (table below) |
-| MCP | `GET /api/mcp`, `GET /api/mcp/<server_id>/tools`, `POST /api/mcp/<server_id>/connect`, `DELETE /api/mcp/<server_id>/connection` ([MCP servers](../user-guide/mcp.md)) |
+| MCP | `GET /api/mcp`, `GET /api/mcp/<server_id>/tools`, `POST /api/mcp/<server_id>/connect`, `PUT /api/mcp/<server_id>/token`, `DELETE /api/mcp/<server_id>/connection` ([MCP servers](../user-guide/mcp.md)) |
 | chats | `GET /api/chats`, `GET`/`POST /api/agents/<agent_id>/chats`, `POST .../chats/<chat_id>/disposable`, `GET`/`DELETE .../chats/<chat_id>`, `GET .../chats/<chat_id>/models`, `PUT .../model`, `PUT .../reasoning-effort`, `PUT .../title`, `POST .../chats/<chat_id>/messages` (SSE, see [architecture](../architecture/overview.md#web-steering)), `GET .../chats/<chat_id>/stream` ([following a running reply](#following-a-running-reply)), `POST .../chats/<chat_id>/stop` ([stopping a reply](#stopping-a-reply)), `GET .../chats/<chat_id>/approvals`, `POST .../chats/<chat_id>/approvals/<approval_id>` ([terminal approvals](#terminal-approvals)) |
 | approval rules | `GET`/`DELETE /api/agents/<agent_id>/approval-rules`, `DELETE .../approval-rules/<index>`, `POST .../approval-rules/reset`, `GET .../approval-rules/effective` ([learned approval rules](#learned-approval-rules)) |
 | levels and administration | `GET /api/levels`, `GET /api/admin/users`, `PUT /api/admin/users/<user_id>/max-level` ([permission levels in the web UI](#permission-levels-in-the-web-ui)) |
@@ -77,9 +77,10 @@ New codes are set with `UserMessageError(..., code="...")` or a class-level `cod
 | method | route | result |
 | --- | --- | --- |
 | `GET` | `/api/tool-groups` | shared tool-group catalog available to the user's agents |
-| `GET` | `/api/mcp` | shared MCP server catalog with the user's connection status |
+| `GET` | `/api/mcp` | shared MCP server catalog with the user's connection status (`auth_type`: `null`, `signin` or `token`; `token_label` and `token_help` for token servers) |
 | `GET` | `/api/mcp/<server_id>/tools` | tools of a server the user has connected (`409` when not connected) |
 | `POST` | `/api/mcp/<server_id>/connect` | starts the server's sign-in for the user; returns the status and sign-in URL |
+| `PUT` | `/api/mcp/<server_id>/token` | body `{"token": ...}`: stores the user's access token for an http server after checking it with the server (`409` `mcp_not_connected` when the server rejects it); returns the status |
 | `DELETE` | `/api/mcp/<server_id>/connection` | stops the user's server and deletes their stored credentials |
 | `GET` | `/api/agents` | full configuration of each agent the user owns, including `chat_config.tool_groups` and `level`, its effective permission level: the declared one, else the lowest level covering its configuration |
 | `GET` | `/api/agents/defaults` | defaults and bounds of the agent form fields, generated from the configuration models: `{chat_config, dream, terminal}`, each field `{default, min, max}` (`null` where the model has no default or bound), e.g. `dream.max_tokens` `{default: 500000, min: 0, max: 100000000}`, `chat_config.max_tool_hops` `{default: null, min: 1, max: 100}` |
