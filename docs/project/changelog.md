@@ -3,7 +3,7 @@
 The notes of each release are on the GitHub Releases page. This file groups what changed by topic, starting with 0.4.0, which
 sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases between 5 and 15 November.
 
-## Unreleased
+## 0.4.3
 
 - Approval rules now apply at once in chats that are already running: a rule added, removed or reset (permission tools, web form, CLI or file edit) and a `deny` are honoured by the next action, not only in new chats. An unreadable agent or user file keeps the last good rules. The permission cards and tool results say what applies at once (approval rules) and what only applies in new chats (level, tool groups).
 - One invalid agent file no longer breaks the web UI for its user: the **Agents** tab lists it as *Invalid configuration* with the reason, preferences load, and the other agents work. `agent list` marks it too.
