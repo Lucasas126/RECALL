@@ -2402,7 +2402,8 @@ function applyChatModels(models) {
 // as they are; sending answers in a new chat (`chat_replaced`), which `adoptReplacedChat` follows.
 function vanishedEmptyChat(err, view) {
   const gone = err?.code === "unknown_chat" || err?.status === 404;
-  return Boolean(gone && view && view.history?.total === 0 && !view.querySelector(":scope > .msg.user"));
+  // `history.total` is what the server had when the chat was drawn; the bubble of the message being sent does not count
+  return Boolean(gone && view && view.history?.total === 0);
 }
 
 async function refreshChatModels(session, preferencesRequest) {
@@ -6707,15 +6708,16 @@ function addMessage(role, parent = state.view ?? $("messages")) {
     },
     interrupted(snapshot = null, reason = snapshot?.reason) {
       this.settleMemory();
-      this.settleSteps();
       if (snapshot) {
         raw = snapshot.content;
         for (let i = starts.length - 1; i > 0; i--) if (starts[i] > raw.length) starts[i] = raw.length;
         renderBody(true);
         // the thinking segments already shown stay; the snapshot only fills in a view that saw none
         if (snapshot.reasoning && !el.querySelector(":scope > details.thinking")) this.thinking(snapshot.reasoning);
+        // the step that was running when Stop came is completed in place by its final action (no second card)
         for (const action of snapshot.actions.slice(actionCount)) this.action(action);
       }
+      this.settleSteps();
       if (!el.classList.contains("interrupted")) {
         el.classList.add("interrupted");
         const note = document.createElement("div");

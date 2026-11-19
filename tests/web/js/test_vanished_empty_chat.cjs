@@ -35,7 +35,6 @@ test("an empty chat that vanished is recognised from the error code or a 404", (
 test("a chat with messages, or another error, is not treated as a vanished empty chat", () => {
   const { context } = harness(null, view(0));
   assert.equal(context.vanishedEmptyChat(gone, view(3)), false);
-  assert.equal(context.vanishedEmptyChat(gone, view(0, 1)), false);
   assert.equal(context.vanishedEmptyChat(Object.assign(new Error("x"), { status: 500 }), view(0)), false);
   assert.equal(context.vanishedEmptyChat(gone, null), false);
 });
@@ -44,6 +43,11 @@ test("reading the models of a vanished empty chat does not fail (the send goes o
   const { context, applied } = harness(gone, view(0));
   await context.refreshChatModels(1, 1);
   assert.deepEqual(applied, []);
+});
+
+test("the bubble of the message being sent does not make the chat non-empty", () => {
+  const { context } = harness(null, view(0, 1));
+  assert.equal(context.vanishedEmptyChat(gone, view(0, 1)), true);
 });
 
 test("reading the models of a vanished chat that has messages still fails", async () => {
