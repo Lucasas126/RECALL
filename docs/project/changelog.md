@@ -3,6 +3,10 @@
 The notes of each release are on the GitHub Releases page. This file groups what changed by topic, starting with 0.4.0, which
 sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases between 5 and 15 November.
 
+## 0.4.4
+
+- Remote MCP servers over streamable HTTP. A catalog server can be `transport: http` with a `url` (https, or plain http only to a private-network host) and `auth: {type: token}`. Each user pastes their own access token in Settings > Connections; RECALL checks it with the server before keeping it, stores it in the user's folder (mode 600) and never shows it again. If the server later rejects the token, tools ask the user to connect again. New route `PUT /api/mcp/<server_id>/token`. stdio servers work as before.
+
 ## 0.4.3
 
 - Approval rules now apply at once in chats that are already running: a rule added, removed or reset (permission tools, web form, CLI or file edit) and a `deny` are honoured by the next action, not only in new chats. An unreadable agent or user file keeps the last good rules. The permission cards and tool results say what applies at once (approval rules) and what only applies in new chats (level, tool groups).
