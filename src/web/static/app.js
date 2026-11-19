@@ -2397,6 +2397,14 @@ function applyChatModels(models) {
   updateModelControls();
 }
 
+// True when `err` only says the open chat no longer exists and that chat is still empty (nothing sent): the server
+// prunes empty chats, so this is expected, not a failure. The page keeps the draft, the recording and the attachments
+// as they are; sending answers in a new chat (`chat_replaced`), which `adoptReplacedChat` follows.
+function vanishedEmptyChat(err, view) {
+  const gone = err?.code === "unknown_chat" || err?.status === 404;
+  return Boolean(gone && view && view.history?.total === 0 && !view.querySelector(":scope > .msg.user"));
+}
+
 async function refreshChatModels(session, preferencesRequest) {
   if (!state.agentId || !state.chatId || state.modelBusy) return;
   const agentId = state.agentId;
@@ -2409,7 +2417,8 @@ async function refreshChatModels(session, preferencesRequest) {
     const models = await api(chatsUrl(`/${chatId}/models`), { cache: "no-store" });
     if (current()) applyChatModels(models);
   } catch (err) {
-    if (current()) throw err;
+    // an empty chat pruned meanwhile must not make a send fail (and lose the draft): keep the models shown
+    if (current() && !vanishedEmptyChat(err, state.view)) throw err;
   }
 }
 
