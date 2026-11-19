@@ -10,7 +10,8 @@ from pathlib import Path
 
 from tests.support.admin_helpers import AdminFixture, FakeAgent
 
-from src.config.loader import load_agent_config
+from src.config.agents import AgentConfigError, AgentStore
+from src.config.loader import load_agent_config, load_user
 from src.service.chat import ChatService
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -142,3 +143,46 @@ class InvalidEditResilienceTests(PickupFixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OneInvalidAgentFileTests(PickupFixture):
+    """A fresh service (no cached good config) still lists the valid agents and loads the preferences."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.write_agent("bad", "id: bad\nname: Bad\nmax_steps: 30\n")
+        self.write_user(self.read("user-a/user.yaml").replace("agents: [bot]", "agents: [bot, bad]"))
+        self.fresh = ChatService(agent_factory=lambda *a, **k: None)
+
+    def test_agent_configs_mark_the_invalid_one(self) -> None:
+        with self.assertLogs("recall.service", level="ERROR"):
+            rows = self.fresh.list_agent_configs("user-a")
+        self.assertEqual([row["id"] for row in rows], ["bot", "bad"])
+        self.assertEqual(rows[0]["name"], "Bot")
+        self.assertEqual((rows[1]["name"], rows[1]["broken"]), ("bad", True))
+        self.assertIn("max_steps", rows[1]["error"])
+
+    def test_preferences_load_and_list_both_agents(self) -> None:
+        with self.assertLogs("recall.service", level="ERROR"):
+            agents = self.fresh.get_preferences("user-a")["defaults"]["agents"]
+        self.assertEqual(agents, [{"id": "bot", "name": "Bot"}, {"id": "bad", "name": "bad"}])
+
+    def test_list_agents_is_unchanged(self) -> None:
+        with self.assertLogs("recall.service", level="ERROR"):
+            agents = self.fresh.list_agents("user-a")
+        self.assertEqual(agents, [{"id": "bot", "name": "Bot", "avatar": None}, {"id": "bad", "name": "bad", "avatar": None}])
+
+
+class UserFolderIdTests(PickupFixture):
+    def test_an_id_that_differs_from_the_folder_is_refused(self) -> None:
+        self.write_user(self.read("user-a/user.yaml").replace("id: user-a", "id: user-b"))
+        with self.assertRaises(AgentConfigError) as raised:
+            load_user("user-a")
+        self.assertIn("'user-a'", str(raised.exception))
+        self.assertIn("'user-b'", str(raised.exception))
+        with self.assertRaises(AgentConfigError):
+            AgentStore(self.config_dir, self.data_dir).user("user-a")
+
+    def test_a_matching_id_loads(self) -> None:
+        self.assertEqual(load_user("user-a").id, "user-a")
+        self.assertEqual(AgentStore(self.config_dir, self.data_dir).user("user-a").id, "user-a")

@@ -216,6 +216,9 @@ def agent_list(service, user_id: str) -> int:
         print(f"User '{user_id}' has no agents.")
         return 0
     for row in rows:
+        if row.get("broken"):
+            print(f"{row['id']}  (invalid: {row['error']})")
+            continue
         chat = row.get("chat_config") or {}
         groups = chat.get("tool_groups")
         print(f"{row['id']}  name={row['name']!r}  level={row.get('level')}  "

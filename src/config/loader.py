@@ -6,7 +6,7 @@ from typing import Optional
 
 import yaml
 
-from src.config.agents import AgentStore
+from src.config.agents import AgentStore, check_user_folder
 from src.config.levels import check_agent_level, effective_agent_level
 from src.config.models import AgentConfig, ModelsConfig, ResolvedAgent, UserConfig
 from src.config.preferences import UserPreferencesStore
@@ -28,8 +28,8 @@ def _load_yaml(path: Path) -> dict:
 
 
 def load_user(user_id: str) -> UserConfig:
-    """Load a user's config; raises FileNotFoundError if the user does not exist."""
-    return UserConfig(**_load_yaml(CONFIG_DIR / user_id / "user.yaml"))
+    """Load a user's config; raises FileNotFoundError if the user does not exist and AgentConfigError if its id differs from the folder."""
+    return check_user_folder(UserConfig(**_load_yaml(CONFIG_DIR / user_id / "user.yaml")), user_id)
 
 
 def load_agent_config(user_id: str, agent_id: str) -> AgentConfig:
