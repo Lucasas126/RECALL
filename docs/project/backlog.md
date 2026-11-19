@@ -9,8 +9,6 @@ One list of ideas and planned work. Implemented behaviour is documented in the
 
 ### resilience
 
-- **One invalid agent file must not take the whole service down** (seen in release 0.4.2): removing legacy keys made pydantic reject an agent file that still had one (`Extra inputs are not permitted`), and every web request failed, so no agent could be used to fix it. Wanted: a bad agent file disables only that agent (shown as broken in Settings with the error and the file path, other agents keep working); the error names the offending key; `python -m src.admin agent check` lists every invalid file; and a release that drops config keys ships a check (or a startup warning) before it can break a deploy.
-- **A `user.yaml` whose `id` differs from its folder must not load**: today `load_user` reads `.config/<user_id>/user.yaml` and never compares the file's `id` with the folder name, so a copied example with a stale `id` loads and the two identifiers silently diverge (paths, permissions, Telegram mapping). Reject it with an error that names both values, and report it in `agent check`.
 
 ### automation and behavior
 

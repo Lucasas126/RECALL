@@ -238,6 +238,14 @@ class CheckCommandTests(AdminFixture):
         self.assertEqual(code, 1)
         self.assertIn("ghost", out)
 
+    def test_a_user_id_that_differs_from_its_folder_is_reported(self) -> None:
+        self.write_user(self.read("user-a/user.yaml").replace("id: user-a", "id: user-b"))
+        code, out, _ = self.run_cli(["agent", "check", "--user", "user-a"])
+        self.assertEqual(code, 1)
+        self.assertIn("user-a/user.yaml", out)
+        self.assertIn("has id 'user-b'", out)
+        self.assertIn("FAILED", out)
+
     def test_orphan_agent_files_and_unset_keys_are_warnings(self) -> None:
         self.write_agent("extra", "id: extra\nname: Extra\n")
         with patch.dict("os.environ", {}, clear=False):
@@ -251,6 +259,16 @@ class CheckCommandTests(AdminFixture):
         code, out, _ = self.run_cli(["agent", "check"])
         self.assertEqual(code, 0)
         self.assertIn("no usable backend", out)
+
+
+class BrokenAgentListTests(AdminFixture):
+    def test_the_listing_marks_an_invalid_agent(self) -> None:
+        self.write_agent("bad", "id: bad\nname: Bad\nmax_steps: 30\n")
+        self.write_user(self.read("user-a/user.yaml").replace("agents: [bot]", "agents: [bot, bad]"))
+        code, out, _ = self.run_cli(["agent", "list", "--user", "user-a"])
+        self.assertEqual(code, 0)
+        self.assertIn("bad  (invalid: ", out)
+        self.assertIn("name='Bot'", out)
 
 
 class UserCliTests(AdminFixture):

@@ -25,6 +25,16 @@ class AgentConfigError(UserMessageError, ValueError):
     """An agent configuration could not be read, validated or saved."""
 
 
+def check_user_folder(user: UserConfig, folder: str) -> UserConfig:
+    """Refuse a `user.yaml` whose `id` differs from the folder holding it."""
+    if user.id != folder:
+        raise AgentConfigError(
+            "User configuration '{file}' in folder '{folder}' has id '{found}'; the id must match the folder name.",
+            file="user.yaml", folder=folder, found=user.id,
+        )
+    return user
+
+
 class UnknownApprovalRule(AgentConfigError):
     """No agent approval rule at that position."""
 
@@ -420,12 +430,13 @@ class AgentStore:
     def _read_user(self, user_id: str) -> UserConfig:
         path = self._user_file(user_id)
         try:
-            return UserConfig.model_validate(self._load_yaml(path))
+            user = UserConfig.model_validate(self._load_yaml(path))
         except ValidationError as exc:
             raise AgentConfigError(
                 "Invalid user configuration '{file}': {details}",
                 file=path.name, details="; ".join(error["msg"] for error in exc.errors()),
             ) from exc
+        return check_user_folder(user, user_id)
 
     def _read(self, path: Path) -> AgentConfig:
         try:

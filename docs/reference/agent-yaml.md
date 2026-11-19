@@ -169,6 +169,6 @@ messages.
 `settings.yaml` is read at start-up (restart to change it). `user.yaml` and agent files are re-read on every request, and the
 cached agent runtime of a chat is rebuilt on its next message when either file (or `.config/secrets.env`) changed on disk, whoever
 changed it: the web API, the [admin CLI](../user-guide/admin-cli.md) in another process, or a hand edit. A file left invalid by a
-hand edit does not stop the services: they keep the last good configuration, log the error and show a notice in the chat; the
+hand edit does not stop the services: they keep the last good configuration, log the error and show a notice in the chat (an agent that was never loaded, for instance after an upgrade, is listed in the **Agents** tab as *Invalid configuration* with the reason, while the user's other agents keep working); the
 agent list keeps working. Model favorites, per-chat selections and agent edits made through
 the APIs above are persisted immediately, without restarting.

@@ -1260,7 +1260,16 @@ function renderAgentList() {
         button.title = agent.description;
         button.append(description);
       }
-      button.addEventListener("click", () => openAgent(agent.id));
+      if (agent.broken) {
+        const warning = document.createElement("span");
+        warning.className = "agent-description";
+        warning.textContent = `⚠ ${tr("Invalid configuration")}`;
+        button.title = agent.error || "";
+        button.append(warning);
+        button.disabled = true;
+      } else {
+        button.addEventListener("click", () => openAgent(agent.id));
+      }
       item.append(button);
       return item;
     })

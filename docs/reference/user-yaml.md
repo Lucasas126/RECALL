@@ -12,6 +12,9 @@ Agent files are described in [agent.yaml](agent-yaml.md); framework-wide values 
 | `mcp/<server_id>/` | the user's MCP credentials, see [MCP servers](../user-guide/mcp.md) |
 | `agents.lock`, `preferences.lock` | coordination files for atomic writes; never delete them between requests |
 
+The `id` must equal the name of the folder (`.config/<user_id>/`); a file whose `id` differs is refused with an error naming both,
+and `python -m src.admin agent check` reports it.
+
 Keys of `user.yaml`: `id`, `name`, `password_hash` (optional), `language`, `require_zdr`, `max_level`, `provider`, `embeddings_provider`
 (optional, falls back to `provider`), `agents`, `models`, `openrouter`, `ollama`, `claude_subscription`, `terminal_backends` and `approval_rules`. Unknown keys inside
 the provider blocks are rejected.
@@ -338,8 +341,8 @@ A rule or default that allows everything on a `machine` or `local` backend is on
 ## example
 
 ```yaml
-# .config/<user_id>/user.yaml
-id: user-a
+# .config/user-a/user.yaml
+id: user-a                                # must equal the folder name; a mismatch is refused
 name: User A
 password_hash: "$argon2id$..."          # web login; create it with `python -m src.admin set-password <user_id>`
 language: en

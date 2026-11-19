@@ -3,6 +3,11 @@
 The notes of each release are on the GitHub Releases page. This file groups what changed by topic, starting with 0.4.0, which
 sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases between 5 and 15 November.
 
+## Unreleased
+
+- One invalid agent file no longer breaks the web UI for its user: the **Agents** tab lists it as *Invalid configuration* with the reason, preferences load, and the other agents work. `agent list` marks it too.
+- A `user.yaml` whose `id` differs from its folder is refused with an error naming both values; `agent check` reports it.
+
 ## 0.4.0
 
 ### Upgrading

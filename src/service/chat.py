@@ -532,7 +532,15 @@ class ChatService:
     def list_agent_configs(self, user_id: str) -> list[dict]:
         """Full editable configuration of every agent the user owns."""
         user = self._user(user_id)
-        return [self._agent_view(user_id, self._agent_config(user_id, agent_id)) for agent_id in user.agents]
+        views = []
+        for agent_id in user.agents:
+            try:
+                views.append(self._agent_view(user_id, self._agent_config(user_id, agent_id)))
+            except Exception as exc:  # one invalid agent file must not hide the others
+                reason = describe_config_error(exc)
+                logger.error("agent list: %s/%s: %s", user_id, agent_id, reason)
+                views.append({"id": agent_id, "name": agent_id, "broken": True, "error": reason})
+        return views
 
     def agent_defaults(self, user_id: str) -> dict:
         """Defaults and bounds of the agent form fields, generated from the configuration models."""
@@ -933,6 +941,14 @@ class ChatService:
         user = self._user(user_id)
         return self._preferences_body(user, self._resolve_preferences(user, self._preferences.get(user_id)))
 
+    def _agent_name(self, user_id: str, agent_id: str) -> str:
+        """The agent's name, or its id when its file cannot be read."""
+        try:
+            return self._agent_config(user_id, agent_id).name
+        except Exception as exc:
+            logger.error("agent list: %s/%s: %s", user_id, agent_id, describe_config_error(exc))
+            return agent_id
+
     def _preferences_body(self, user: UserConfig, preferences: UserPreferences) -> dict:
         """Preferences plus the application-wide size limits (settings.yaml) and the effective defaults.
 
@@ -962,7 +978,7 @@ class ChatService:
                 "orchestrator": ORCHESTRATOR.enabled,
                 "default_agent_id": None,
                 "core_agent_id": None,
-                "agents": [{"id": agent_id, "name": self._agent_config(user.id, agent_id).name} for agent_id in user.agents],
+                "agents": [{"id": agent_id, "name": self._agent_name(user.id, agent_id)} for agent_id in user.agents],
             },
         }
 
