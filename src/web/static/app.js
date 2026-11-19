@@ -3924,11 +3924,41 @@ async function stopReply() {
   $("send").disabled = true;
   try {
     await api(`/api/agents/${agentId}/chats/${chatId}/stop`, { method: "POST" });
+    beginStopping();
   } catch (err) {
     addMessage("assistant", state.view).error(err);
   } finally {
     setComposer(Boolean(state.chatId));
   }
+}
+
+// After Stop: running steps say "Stopping…"; if no `interrupted` event arrives within a few seconds, a notice says why.
+const STOP_NOTICE_MS = 4000;
+let stopNotice = null;
+let stopTimer = null;
+
+function beginStopping() {
+  for (const node of runningSteps) {
+    if (node._parts) continue;  // a task card has its own Stop
+    node._stopping = true;
+    node._status.textContent = tr("Stopping…");
+  }
+  clearTimeout(stopTimer);
+  stopTimer = setTimeout(() => {
+    stopTimer = null;
+    if (stopNotice || !state.busy) return;
+    stopNotice = document.createElement("div");
+    stopNotice.className = "interruption";
+    stopNotice.setAttribute("role", "status");
+    stopNotice.textContent = tr("Still stopping: the action is still running and cannot be cut right now");
+    (state.view ?? $("messages")).append(stopNotice);
+  }, STOP_NOTICE_MS);
+}
+
+function endStopping() {
+  clearTimeout(stopTimer);
+  stopTimer = null;
+  if (stopNotice) { stopNotice.remove(); stopNotice = null; }
 }
 
 function resetStreams() {
@@ -4921,6 +4951,7 @@ function watchRunningStep(node) {
 
 function paintRunningStep(node) {
   if (node._parts) refreshTaskCard(node);  // a task card shows "Starting" and the seconds in its badge
+  else if (node._stopping) node._status.textContent = tr("Stopping…");
   else if (node._status) node._status.textContent = `${tr("Running")} · ${toolStepElapsed({ phase: "running", startedAt: node._startedAt }, Date.now())}`;
 }
 
@@ -4950,7 +4981,7 @@ function stopRunningStep(node) {
   }
   node.classList.remove("running");
   node.classList.add("stopped");
-  if (node._status) node._status.textContent = tr("Stopped");
+  if (node._status) node._status.textContent = node._stopping ? tr("Stopped by you") : tr("Stopped");
 }
 
 // ---- task cards: DOM, polling and the worker-chat dialog
@@ -6613,6 +6644,7 @@ function addMessage(role, parent = state.view ?? $("messages")) {
     },
     // The stream ended or the turn was interrupted: a step without its final event will not get one.
     settleSteps() {
+      endStopping();
       liveSteps = liveSteps.map((step, index) => {
         if (step.phase !== "running") return step;
         stopRunningStep(liveNodes[index]);

@@ -8,16 +8,20 @@ import shlex
 import shutil
 import signal
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from src.config.models import LocalBackendConfig, SshBackendConfig
+from src.providers.cancellation import CancellationToken
+from src.terminal.context import current_run
 from src.utils.logger import get_logger
 
 logger = get_logger("terminal")
 
 _CONNECT_TIMEOUT = 10
+_CANCEL_POLL_SECONDS = 0.2  # how often a running command looks at the stop signal
 # the ONLY environment variables a local process inherits (an allowlist: SSH_AUTH_SOCK, DOCKER_HOST, KUBECONFIG,
 # DBUS_SESSION_BUS_ADDRESS, DATABASE_URL, proxies, tokens and every RECALL setting are never passed)
 _ALLOWED_ENV = ("PATH", "HOME", "LANG", "TERM", "TMPDIR", "USER", "LOGNAME", "SHELL", "TZ")
@@ -36,13 +40,15 @@ class Result:
     stderr: str = ""
     timed_out: bool = False
     truncated: bool = False
+    cancelled: bool = False  # the user stopped the run while it was executing: the process tree was killed
     approval: str = ""  # one line telling the agent how the command was authorized (set by TerminalSession.run)
 
 
 class Backend(Protocol):
     name: str
 
-    def run(self, command: str, cwd: str, timeout: float, stdin: bytes | str | None = None) -> Result: ...
+    def run(self, command: str, cwd: str, timeout: float, stdin: bytes | str | None = None,
+            cancellation: CancellationToken | None = None) -> Result: ...
 
 
 def scrubbed_env(environ: dict[str, str] | None = None) -> dict[str, str]:
@@ -88,8 +94,11 @@ def kill_tree(proc: subprocess.Popen) -> None:
 
 
 def run_process(argv: list[str], *, cwd: str | None, env: dict[str, str], timeout: float,
-                stdin: bytes | str | None) -> Result:
-    """Run `argv` (never through a local shell) with a hard timeout that kills the whole process tree."""
+                stdin: bytes | str | None, cancellation: CancellationToken | None = None) -> Result:
+    """Run `argv` (never through a local shell) with a hard timeout that kills the whole process tree.
+
+    The stop signal (`cancellation`, default: the current run's) is polled in short slices: when it fires the tree is
+    killed at once and the Result is marked `cancelled`."""
     data = stdin.encode("utf-8") if isinstance(stdin, str) else stdin
     if os.name == "nt":
         kwargs: dict = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
@@ -101,19 +110,35 @@ def run_process(argv: list[str], *, cwd: str | None, env: dict[str, str], timeou
         )
     except (OSError, ValueError) as exc:
         return Result(None, stderr=f"could not start the process: {exc}")
-    try:
-        out, err = proc.communicate(data, timeout=timeout)
-        timed_out = False
-    except subprocess.TimeoutExpired:
-        kill_tree(proc)
+    if cancellation is None:
+        run = current_run()
+        cancellation = run.cancellation if run is not None else None
+    deadline = time.monotonic() + timeout
+    pending: bytes | None = data  # handed to communicate() once; later slices only wait
+    timed_out = cancelled = False
+    while True:
+        remaining = deadline - time.monotonic()
+        if cancellation is not None and cancellation.is_cancelled():
+            cancelled = True
+        elif remaining <= 0:
+            timed_out = True
+        if cancelled or timed_out:
+            kill_tree(proc)
+            break
+        try:
+            out, err = proc.communicate(pending, timeout=min(_CANCEL_POLL_SECONDS, remaining))
+            break
+        except subprocess.TimeoutExpired:
+            pending = None
+    if cancelled or timed_out:
         try:
             out, err = proc.communicate(timeout=5)
         except subprocess.SubprocessError:
             out, err = b"", b""
-        timed_out = True
     return Result(
-        None if timed_out else proc.returncode,
+        None if timed_out or cancelled else proc.returncode,
         (out or b"").decode("utf-8", "replace"), (err or b"").decode("utf-8", "replace"), timed_out,
+        cancelled=cancelled,
     )
 
 
@@ -161,11 +186,13 @@ class SshBackend:
         pid_file = self.pid_file(process_id)
         return self.run(f"kill -KILL -- -$(cat {pid_file}) 2>/dev/null; rm -f {pid_file}", "~", 15)
 
-    def run(self, command: str, cwd: str, timeout: float, stdin: bytes | str | None = None) -> Result:
+    def run(self, command: str, cwd: str, timeout: float, stdin: bytes | str | None = None,
+            cancellation: CancellationToken | None = None) -> Result:
         result = run_process(
             self.argv(command, cwd), cwd=None, env=minimal_env(), timeout=timeout + _CONNECT_TIMEOUT, stdin=stdin,
+            cancellation=cancellation,
         )
-        if result.exit_code == 255 and not result.timed_out:  # ssh itself failed (connection, key, host key)
+        if result.exit_code == 255 and not result.timed_out and not result.cancelled:  # ssh itself failed (connection, key, host key)
             result.stderr = (result.stderr.strip() + "\n[ssh could not reach or authenticate to the sandbox]").strip()
         return result
 
@@ -186,14 +213,16 @@ class LocalBackend:
             return [os.environ.get("COMSPEC", "cmd.exe"), "/c"]
         return ["/bin/sh", "-c"]
 
-    def run(self, command: str, cwd: str, timeout: float, stdin: bytes | str | None = None) -> Result:
+    def run(self, command: str, cwd: str, timeout: float, stdin: bytes | str | None = None,
+            cancellation: CancellationToken | None = None) -> Result:
         base = Path(self.config.workdir).expanduser()
         target = Path(cwd).expanduser() if cwd and cwd != "~/workspace" else base
         if not target.is_absolute():
             target = base / target
         if not target.is_dir():
             return Result(None, stderr=f"working directory does not exist: {target}")
-        return run_process([*self.shell(), command], cwd=str(target), env=scrubbed_env(), timeout=timeout, stdin=stdin)
+        return run_process([*self.shell(), command], cwd=str(target), env=scrubbed_env(), timeout=timeout, stdin=stdin,
+                           cancellation=cancellation)
 
 
 def build_backend(name: str, config: SshBackendConfig | LocalBackendConfig) -> Backend:
