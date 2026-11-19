@@ -172,6 +172,49 @@ class McpHttpSettingsTests(unittest.TestCase):
             McpSettings.model_validate({"servers": {"s": {"name": "S"}}})  # stdio without a command
 
 
+class McpLocalCatalogTests(unittest.TestCase):
+    """CONFIG_DIR/mcp_servers.yaml adds servers to the ones in settings.yaml."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.file = Path(self._tmp.name) / "mcp_servers.yaml"
+        self.base = {"mcp": {"call_timeout_seconds": 30, "servers": {"cal": {"name": "Cal", "command": "npx"}}}}
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _load(self):
+        from src.config.settings import _mcp_settings
+
+        return _mcp_settings(self.base, self.file)
+
+    def test_without_the_file_only_settings_yaml_counts(self) -> None:
+        self.assertEqual(list(self._load().servers), ["cal"])
+
+    def test_local_servers_are_added_and_shared_settings_kept(self) -> None:
+        self.file.write_text(
+            "servers:\n  finance:\n    name: Finance\n    transport: http\n"
+            "    url: http://atlas:8000/mcp/\n    auth: {type: token}\n",
+            encoding="utf-8",
+        )
+        settings = self._load()
+        self.assertEqual(list(settings.servers), ["cal", "finance"])
+        self.assertEqual(settings.servers["finance"].transport, "http")
+        self.assertEqual(settings.call_timeout_seconds, 30)
+
+    def test_an_empty_file_is_fine(self) -> None:
+        self.file.write_text("", encoding="utf-8")
+        self.assertEqual(list(self._load().servers), ["cal"])
+
+    def test_bad_files_stop_the_start(self) -> None:
+        for text in ["call_timeout_seconds: 5\n", "servers: [a, b]\n", "- just a list\n",
+                     "servers:\n  cal:\n    name: Other\n    command: npx\n",
+                     "servers:\n  web:\n    name: Web\n    transport: http\n    url: http://example.com/mcp\n"]:
+            self.file.write_text(text, encoding="utf-8")
+            with self.assertRaises((ValueError, ValidationError), msg=text):
+                self._load()
+
+
 class McpHttpManagerTests(unittest.TestCase):
     TOKEN = "of_good-token"
 

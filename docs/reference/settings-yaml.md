@@ -19,7 +19,7 @@ web UI and the Telegram bot after editing it. In Docker you can mount your own c
 | `associative_memory` | `context_messages`, `top_n`, `score_threshold`, `query_model`, `api_key`, `zdr` | [memory](../user-guide/memory.md#associative-memory) |
 | `chat_naming` | `model`, `api_key`, `zdr`, `min_messages` | [chat naming](#chat-naming) |
 | `approval_explain` | `enabled`, `model`, `api_key`, `zdr`, `max_context_chars` | [approval explanations](#approval-explanations) |
-| `mcp` | `connect_timeout_seconds`, `call_timeout_seconds`, `servers` | [MCP servers](../user-guide/mcp.md) |
+| `mcp` | `connect_timeout_seconds`, `call_timeout_seconds`, `servers` (more servers can go in `<config_dir>/mcp_servers.yaml`) | [MCP servers](../user-guide/mcp.md) |
 
 ## folders
 

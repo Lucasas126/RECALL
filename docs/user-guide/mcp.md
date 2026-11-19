@@ -86,6 +86,27 @@ mcp:
 - `command`, `args` and `env` are only for stdio servers; `url` and token auth only
   for http servers.
 
+### local servers (`mcp_servers.yaml`)
+
+Servers that belong to one installation (a service on your own network, for
+example) do not need to go in the tracked `settings.yaml`. Put them in
+`mcp_servers.yaml` inside the config folder (`paths.config_dir`, `.config/` by
+default; ignored by Git and kept across image updates):
+
+```yaml
+servers:
+  finance:
+    name: Finance
+    transport: http
+    url: http://atlas:8000/mcp/
+    auth: {type: token, label: Personal access token}
+```
+
+Only a `servers:` map is allowed, in the same format as above; it is added to the
+servers of `settings.yaml`, and an id that already exists there is refused. The
+timeouts stay in `settings.yaml`. A wrong file stops RECALL at start with a message
+naming the problem.
+
 Restart RECALL after changing the catalog.
 
 ## connecting an account
