@@ -320,16 +320,25 @@ class TerminalSession:
         elapsed = time.monotonic() - started
         result.approval = self.approval_note(decision, ruling)
         self._audit(tool, display, cwd, decision, result.exit_code, elapsed, timed_out=result.timed_out, verdict=verdict.level,
-                    ruling=ruling)
+                    ruling=ruling, cancelled=result.cancelled)
         logger.info(
             "terminal %s/%s [%s] %s exit=%s decision=%s %.1fs: %s",
             self.user_id, self.agent_id, self.name, tool, result.exit_code, decision, elapsed, display[:200],
         )
+        if result.cancelled:  # the user pressed Stop: the command was killed; end the turn, not just this tool
+            current = current_run()
+            token = current.cancellation if current is not None else None
+            if token is not None:
+                token.raise_if_cancelled()
+            raise GenerationCancelled("generation interrupted by user")
         return result, None
 
     def _audit(self, tool: str, command: str, cwd: str, decision: str, exit_code: int | None, elapsed: float,
-               *, timed_out: bool = False, verdict: str | None = None, ruling: Ruling | None = None) -> bool:
+               *, timed_out: bool = False, verdict: str | None = None, ruling: Ruling | None = None,
+               cancelled: bool = False) -> bool:
         extra: dict = {"verdict": verdict} if verdict else {}
+        if cancelled:
+            extra["cancelled"] = True
         if ruling is not None:  # which layer and rule decided, what they said, and the approval card that was answered
             if ruling.layer:
                 extra["layer"] = ruling.layer

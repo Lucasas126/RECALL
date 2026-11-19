@@ -6,6 +6,8 @@ sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases b
 ## Unreleased
 
 - Fix: an empty chat deleted by the server while you wrote or recorded in it (another tab, the phone) no longer costs you the draft: the page keeps the text, the recording and the attachments, and sending still works (the reply arrives in a new chat that the page follows).
+- Fix: pressing Stop while an agent runs a terminal command now kills the command within about a second (it used to wait for the command or its timeout). The agent is told on its next turn that the action was stopped by the user and killed, the audit log marks it `cancelled`, and the web UI shows the step as *Stopping…* then *Stopped by you*, with a notice if the stop takes more than a few seconds.
+- Fix: Stop also aborts the associative-memory search (its embedding request) instead of leaving it running.
 
 ## 0.4.6
 
