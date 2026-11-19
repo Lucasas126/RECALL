@@ -3,6 +3,10 @@
 The notes of each release are on the GitHub Releases page. This file groups what changed by topic, starting with 0.4.0, which
 sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases between 5 and 15 November.
 
+## 0.4.6
+
+- Fix: connecting an http MCP server with a token failed with "JSON decode error" (the web UI sent the body as an object instead of JSON). A test now checks that no call sends a raw object as body.
+
 ## 0.4.5
 
 - Local MCP catalog: `<config_dir>/mcp_servers.yaml` (a `servers:` map, same format as `settings.yaml`) adds servers for one installation without editing the tracked `settings.yaml`, and survives image updates. Ids already in `settings.yaml` are refused.
