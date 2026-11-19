@@ -9,6 +9,7 @@ One list of ideas and planned work. Implemented behaviour is documented in the
 
 ### resilience
 
+- **Level and tool groups in a running chat**: approval rules are re-read before every decision and apply at once, but a changed level, tool group or tool availability still applies only to new chats (the chat keeps the tools it was built with). Open: whether to rebuild the tools between turns of a running chat.
 
 ### automation and behavior
 

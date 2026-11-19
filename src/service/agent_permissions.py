@@ -114,8 +114,16 @@ class Change:
             lines += [f"  before: {_show(self.before)}", f"  after:  {_show(self.after)}"]
         if self.warning:
             lines.append(f"Note: {self.warning}")
+        lines.append(f"Takes effect: {self.effect}.")
         lines.append("Approving applies exactly this change, once. It is written to the audit log.")
         return "\n".join(lines)
+
+    @property
+    def effect(self) -> str:
+        """When the change reaches the chats already running: approval rules at once, everything else in new chats."""
+        if self.field == "approval_rules":
+            return "at once: the agent's next action in a running chat already follows these rules"
+        return "in new chats only: a chat already running keeps its current level, tool groups and tools"
 
     def _rules_lines(self) -> list[str]:
         rules = self.detail.get("rules") or ([self.detail["rule"]] if "rule" in self.detail else [])
@@ -131,7 +139,7 @@ class Change:
         """The structured record for the tool result and the audit line."""
         return {
             "target": self.target_id, "self_change": self.is_self, "field": self.field, "action": self.action,
-            "before": self.before, "after": self.after, **self.detail,
+            "before": self.before, "after": self.after, **self.detail, "takes_effect": self.effect,
         }
 
 

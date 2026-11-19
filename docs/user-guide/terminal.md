@@ -225,6 +225,7 @@ A card offers up to four answers:
 rule, when the command looks like it contains a secret, or in a subagent task. A rule is never a wildcard or a prefix, and it cannot lift the
 [fixed floor](#approvals). If the rule cannot be saved (for instance the agent would break the blanket-allow guardrail), the action is
 approved once and you are told why. The rule is active in the same reply and in every chat of the agent from its next reply.
+The same holds for any change of the agent's or the user's `approval_rules` (the web form, the permission tools, the CLI or an edit of the file): the next action of a running chat follows it, a `deny` included. If the file cannot be read or is invalid, the last good rules stay in force.
 
 Every learned rule is listed under **Learned approvals** in the Terminal block of the agent form (each with **Remove**, and **Reset to
 defaults** for all of them), and with `python -m src.admin agent rules --user U --agent A [--clear]`. The rule file edits and every approval

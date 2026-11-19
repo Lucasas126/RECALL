@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import threading
 from typing import Annotated, Callable
 
+import yaml
+from pydantic import ValidationError
+
 from src.agent.tooling import tool
+from src.config.agents import AgentConfigError, AgentStore
 from src.config.models import ResolvedAgent
-from src.config.settings import APPROVAL_RULES, DATA_DIR, TERMINAL
+from src.config.settings import APPROVAL_RULES, CONFIG_DIR, DATA_DIR, TERMINAL
 from src.agent.toolsets.processes import build_process_tools
 from src.terminal import files
 from src.terminal.audit import audit_path
@@ -12,6 +17,9 @@ from src.terminal.backends import Backend, build_backend
 from src.terminal.output import clean
 from src.terminal.rules import RuleSet
 from src.terminal.session import TerminalSession
+from src.utils.logger import get_logger
+
+logger = get_logger("terminal")
 
 BACKEND_HELP = "which backend (machine) to use; omit for the default"
 
@@ -51,6 +59,38 @@ def _approval_text(shorthand: str | None, rules: RuleSet) -> str:
     return f"{base} (approval rules decide; some actions are always blocked)"
 
 
+def live_rules_provider(config: ResolvedAgent) -> Callable[[], RuleSet]:
+    """A function returning the approval rules now in force for the agent: the installation rules plus the user's and
+    the agent's lists as they are on disk, re-read only when `user.yaml` or the agent file changes.
+
+    Unreadable or invalid files keep the last good set (the one the agent was built with at first), so a failed read
+    never leaves fewer rules than before.
+    """
+    store = AgentStore(CONFIG_DIR, DATA_DIR)
+    user_id, agent_id = config.user_id, config.id
+    state = {
+        "rules": RuleSet.build(APPROVAL_RULES, config.user_approval_rules, config.approval_rules),
+        "fingerprint": store.fingerprint(user_id, agent_id),
+    }
+    lock = threading.Lock()
+
+    def current() -> RuleSet:
+        with lock:
+            fingerprint = store.fingerprint(user_id, agent_id)
+            if fingerprint != state["fingerprint"]:
+                state["fingerprint"] = fingerprint  # a bad file is not re-read (and re-logged) until it changes again
+                try:
+                    user = store.user(user_id)
+                    agent = store.load(user_id, agent_id)
+                except (OSError, ValueError, ValidationError, AgentConfigError, yaml.YAMLError) as exc:
+                    logger.warning("approval rules of %s/%s not reloaded, keeping the previous ones: %s", user_id, agent_id, exc)
+                else:
+                    state["rules"] = RuleSet.build(APPROVAL_RULES, user.approval_rules, agent.approval_rules)
+            return state["rules"]
+
+    return current
+
+
 def make_backend(name: str, config) -> Backend:
     """Indirection so tests can swap the backend."""
     return build_backend(name, config)
@@ -85,6 +125,7 @@ def build_terminal_tools(
         return []
     cfg = config.terminal
     sessions: dict[str, TerminalSession] = {}
+    provider = live_rules_provider(config)  # one reader shared by the backends: the files are read once per change
     for name, backend_config in config.terminal_backends.items():
         if name not in cfg.backends:
             continue
@@ -94,6 +135,7 @@ def build_terminal_tools(
             audit_file=audit_path(DATA_DIR, config.user_id, config.id), unattended=unattended,
             local=backend_config.type == "local", kind=backend_config.backend_kind,
             rules=RuleSet.build(APPROVAL_RULES, config.user_approval_rules, config.approval_rules),
+            rules_provider=provider,
         )
     if not sessions:
         return []

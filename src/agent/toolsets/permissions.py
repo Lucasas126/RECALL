@@ -46,7 +46,7 @@ def permissions_notice(config: ResolvedAgent) -> str:
         "`agent_get_permissions`, `permission_levels_help`) and, when the user asks, change their level, tool groups and "
         "approval rules. Each change shows the user a card (you, the agent, the before and after; a change of yourself is "
         "marked as a self-change) and waits for Approve or Deny; it is applied only if approved, and every attempt is "
-        "recorded. You can change your own groups and rules within your level, and only lower your own level (below "
+        "recorded. Approval rules apply at once, in chats already running too; a level or tool groups apply only in new chats (the result's `takes_effect` says which). You can change your own groups and rules within your level, and only lower your own level (below "
         "operator you lose these tools; the user can raise it). You cannot give an agent a level above your own or the "
         "user's maximum, nor add what you could not hold. Propose a change and its trade-off before you make it, "
         "recommend the narrowest rule and the lowest level that do the job, never retry a denial, and "
