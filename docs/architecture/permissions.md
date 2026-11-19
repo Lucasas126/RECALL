@@ -138,7 +138,10 @@ Telegram buttons.
 - **Guardrail.** If saving fails (the agent would no longer satisfy the blanket-allow guardrail, the file cannot be written, the
   audit trail is not writable...), the action is still approved **once** and the answer carries `error`; nothing is written.
 - **Live pickup.** The running agent's rule set is updated at once, so the next call of the same reply is not asked again; other
-  chats of the agent rebuild from the file before their next reply.
+  chats of the agent rebuild from the file before their next reply. Every terminal session re-reads the user and agent approval
+  rules whenever `user.yaml` or the agent file changes (checked by `AgentStore.fingerprint` before each decision), so a rule
+  added, removed or reset from a card, the web form, the CLI or by hand applies to the next action of any running chat, a `deny`
+  included. An unreadable or invalid file keeps the last good rules (never fewer), with a warning in the log.
 - **Audit.** Every approval record in `terminal_audit.jsonl` has `scope` (`once`, `session`, `agent`, or `deny` for a refusal; an
   action allowed by a session grant is `decision: approved:session`). Writing or removing an agent rule is its own line:
   `event: approval_rule`, `action: add|remove`, `actor: user` (`admin` from the CLI), `user`, `agent`, `rule`, and `index` / `via: reset` / `chat` where they apply.
@@ -190,8 +193,9 @@ Code: `src/agent/toolsets/permissions.py` (the eight tools and the card), `src/s
   (caller id), `actor_kind: agent`, `user`, `agent` (file owner), `target`, `tool`, `field`, `action`, `before`, `after`,
   `decision` (`approved`, `denied`, or `refused` for an attempt the rules blocked before anyone was asked; that one only goes to the
   caller's file; a self-change writes one line, because target and caller are the same file), `reason`, `approval_id`, `chat`, `applied`, and `rule` / `index` / `rules` for rules. Rule commands are redacted.
-- **Running targets.** The file changes at once and the target's other chats rebuild before their next reply (as for rules learned
-  from a card); a reply already running keeps its old configuration until it ends.
+- **Running targets.** The file changes at once. Approval rules also apply at once: the target's running chats follow them from
+  their next action (see Live pickup). Level, tool groups and tool availability apply to new chats; a chat already running keeps
+  them until it ends. The card says which applies (`Takes effect: ...`) and the tool result carries `takes_effect`.
 - **Template.** `agent create --from-template permission-manager`: level `operator`, groups `memory_read`, `memory_edit`, `self`,
   `permissions` (no terminal, no web), a short SOUL. It fails with a clear message for a user whose `max_level` is below operator.
 

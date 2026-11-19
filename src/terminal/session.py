@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from src.config.models import AgentTerminalConfig, TerminalSettings
 from src.providers.cancellation import GenerationCancelled
@@ -64,6 +65,7 @@ class TerminalSession:
         self, backend: Backend, config: AgentTerminalConfig, settings: TerminalSettings, *,
         user_id: str, agent_id: str, name: str, audit_file: Path | None = None, unattended: bool = False,
         local: bool | None = None, rules: RuleSet | None = None, kind: str | None = None,
+        rules_provider: Callable[[], RuleSet] | None = None,
     ):
         self.backend = backend
         self.name = name  # the key in the user's terminal_backends
@@ -77,19 +79,49 @@ class TerminalSession:
         # the protected-path rules apply to the local backend only (ssh backends are other machines)
         self.local = isinstance(backend, LocalBackend) if local is None else local
         # the approval rules (installation, user and agent layers); none = the legacy per-backend mode alone
-        self.rules = rules if rules is not None else RuleSet()
+        self._rules = rules if rules is not None else RuleSet()
+        # returns the current rule set (it keeps the last good one when the files cannot be read); none = `rules` is fixed
+        self._rules_provider = rules_provider
+        self._learned: tuple[ApprovalRule, ...] = ()  # learned rules not yet seen in a reloaded rule set
+        self._learned_base: RuleSet | None = None
         self.kind = kind or ("local" if self.local else "machine")  # sandbox | machine | local
         self.shorthand = config.shorthand(name)  # the explicit `approvals` mode of this backend, if the config sets one
 
-    def add_rules(self, rules: list[ApprovalRule]) -> None:
-        """Append rules to the agent layer of the running rule set (a learned 'always for this agent'); skips duplicates."""
-        current = self.rules
+    @property
+    def rules(self) -> RuleSet:
+        """The approval rules in force now: the provider's current set (when there is one) plus rules learned since."""
+        if self._rules_provider is None:
+            return self._rules
+        fresh = self._rules_provider()
+        learned, base = self._learned, self._learned_base
+        if learned and fresh is not base:  # the files were reloaded after the rules were persisted: they hold them now
+            self._learned, self._learned_base = (), None
+            learned = ()
+        return self._with_learned(fresh, learned)
+
+    @rules.setter
+    def rules(self, value: RuleSet) -> None:
+        self._rules = value
+
+    @staticmethod
+    def _with_learned(current: RuleSet, learned: tuple[ApprovalRule, ...]) -> RuleSet:
         known = {rule_key(rule) for rule in current.layer("agent").rules}
-        for rule in rules:
+        for rule in learned:
             if rule_key(rule) not in known:
                 current = current.with_rule("agent", rule)
                 known.add(rule_key(rule))
-        self.rules = current  # one assignment: a concurrent decision sees the old or the new set, never half of it
+        return current
+
+    def add_rules(self, rules: list[ApprovalRule]) -> None:
+        """Append rules to the agent layer of the running rule set (a learned 'always for this agent'); skips duplicates."""
+        if self._rules_provider is None:
+            self._rules = self._with_learned(self._rules, tuple(rules))  # one assignment: a concurrent decision sees the old or the new set
+            return
+        base = self._rules_provider()
+        known = {rule_key(rule) for rule in self._learned}
+        added = tuple(rule for rule in rules if rule_key(rule) not in known)
+        self._learned_base = base
+        self._learned = (*self._learned, *added)
 
     # ------------------------------------------------------------------ protected paths
     def protected(self) -> ProtectedPaths | None:

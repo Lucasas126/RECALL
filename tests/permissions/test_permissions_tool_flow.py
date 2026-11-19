@@ -78,6 +78,16 @@ class Changes(PermissionsFixture):
         for expected in ("Agent 'Boss' [boss]", "agent 'Bot' [bot]", "before: memory_read, memory_edit", "after:  memory_read, memory_edit, web"):
             self.assertIn(expected, card["command"])
         self.assertIn("always allow", card["reason"])
+        self.assertIn("Takes effect: in new chats only", card["command"])
+
+    def test_a_rule_change_says_it_applies_at_once_and_a_level_change_does_not(self) -> None:
+        run = Run(self.service)
+        out = json.loads(self.call("agent_add_rule", run, agent_id="bot", rule={"verdict": "deny", "command": "rm *"}))
+        self.assertIn("Takes effect: at once", run.cards[0]["command"])
+        self.assertTrue(out["takes_effect"].startswith("at once"))
+        run = Run(self.service)
+        out = json.loads(self.call("agent_set_tool_groups", run, agent_id="bot", groups=MORE_GROUPS))
+        self.assertTrue(out["takes_effect"].startswith("in new chats only"))
 
     def test_groups_card_and_result(self) -> None:
         run = Run(self.service)
