@@ -389,7 +389,7 @@ class OpenRouterProvider(LLMProvider):
             logger.error(f"Unexpected error: {e}")
             raise
 
-    def invoke_embeddings(self, input: list[str], model: str) -> list[list[float]]:
+    def invoke_embeddings(self, input: list[str], model: str, cancellation: CancellationToken | None = None) -> list[list[float]]:
         model = self.own_model(model)
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -397,6 +397,12 @@ class OpenRouterProvider(LLMProvider):
         }
         payload = {"model": model, "input": list(input)}
         logger.debug("openrouter embeddings request; payload=%s", payload)
+        if cancellation is not None:  # the in-flight request is aborted when the token is cancelled
+            data = post_chat(
+                "https://openrouter.ai/api/v1/embeddings", payload, headers=headers, cancellation=cancellation, timeout=60,
+            )["data"]
+            data.sort(key=lambda x: x["index"])
+            return [item["embedding"] for item in data]
         response = post_json(
             "https://openrouter.ai/api/v1/embeddings",
             json=payload,

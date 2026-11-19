@@ -59,7 +59,7 @@ class ClaudeSubscriptionProvider(LLMProvider):
     def supported_modalities(self, model: str) -> set[str]:
         return {"text", "image"}
 
-    def invoke_embeddings(self, input: list[str], model: str):
+    def invoke_embeddings(self, input: list[str], model: str, cancellation: CancellationToken | None = None):
         raise ClaudeSubscriptionError(
             "the Claude subscription provider cannot compute embeddings; keep embeddings on OpenRouter"
         )

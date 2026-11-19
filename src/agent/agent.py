@@ -486,12 +486,15 @@ class Agent:
 
     def query_memory(
         self, query: str, top_k: int = 5, *, exclude_chat: str | None = None, only_source: str | None = None,
-        only_chat: str | None = None,
+        only_chat: str | None = None, cancellation: CancellationToken | None = None,
     ) -> list[dict]:
-        """Semantic recall over what is indexed (never syncs); `exclude_chat` leaves one chat's chunks out."""
+        """Semantic recall over what is indexed (never syncs); `exclude_chat` leaves one chat's chunks out.
+
+        With a `cancellation` token, cancelling it aborts the embedding request in flight."""
         queried_at = perf_counter()
+        extra = {} if cancellation is None else {"cancellation": cancellation}
         results = self.index.query(
-            query, top_k, exclude_chat=exclude_chat, only_source=only_source, only_chat=only_chat,
+            query, top_k, exclude_chat=exclude_chat, only_source=only_source, only_chat=only_chat, **extra,
         )
         logger.debug(
             "query_memory %r -> %d hits (%.0f ms)", query, len(results), (perf_counter() - queried_at) * 1000,
