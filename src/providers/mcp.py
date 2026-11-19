@@ -11,10 +11,13 @@ import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import IO, Any, Coroutine, TypeVar
+from contextlib import asynccontextmanager
+from typing import IO, Any, AsyncIterator, Callable, Coroutine, TypeVar
 
+import httpx2
 from mcp import ClientSession, StdioServerParameters, stdio_client
 from mcp.client.stdio import get_default_environment
+from mcp.client.streamable_http import streamable_http_client
 from mcp_types import (
     CallToolResult,
     EmbeddedResource,
@@ -23,7 +26,10 @@ from mcp_types import (
     TextResourceContents,
 )
 
-from src.config.models import McpEnvFromEnvironment, McpEnvUserFile, McpServerConfig, McpSettings
+from src.config.models import (
+    McpAuthConfig, McpEnvFromEnvironment, McpEnvUserFile, McpServerConfig, McpSettings, McpTokenAuthConfig,
+    check_mcp_url,
+)
 from src.config.secrets import get_secret
 from src.utils.i18n import UserMessageError
 from src.utils.logger import get_logger, run_log_dir
@@ -33,6 +39,8 @@ logger = get_logger("mcp")
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _AUTH_URL_WAIT_SECONDS = 120
 _CLOSE_WAIT_SECONDS = 10
+_TOKEN_FILE = "token"  # per-user access token of an http server, in its private folder
+_MAX_TOKEN_LENGTH = 4096
 _T = TypeVar("_T")
 
 
@@ -91,13 +99,17 @@ class _EventLoop:
 
 
 class _Connection:
-    """One running server process and its client session, owned by the event loop."""
+    """One client session (a server process for stdio, an HTTP endpoint for http), owned by the loop."""
 
-    def __init__(self, params: StdioServerParameters, log_path: Path | None, call_timeout: float) -> None:
-        self._params = params
+    def __init__(self, transport: Callable[..., Any], label: str, log_path: Path | None,
+                 call_timeout: float) -> None:
+        # `transport(errlog, connection)` is an async context manager yielding (read, write, ...).
+        self._transport = transport
+        self._label = label
         self._log_path = log_path
         self._call_timeout = call_timeout
         self._session: ClientSession | None = None
+        self.rejected = False  # set by an http transport that saw 401/403
         self._stop: asyncio.Event | None = None
         self._task: asyncio.Task | None = None
         self.tools: list[McpTool] = []
@@ -119,7 +131,7 @@ class _Connection:
     async def _run(self, ready: asyncio.Future[None]) -> None:
         try:
             with self._open_log() as errlog:
-                async with stdio_client(self._params, errlog) as (read, write):
+                async with self._transport(errlog, self) as (read, write, *_):
                     async with ClientSession(read, write, read_timeout_seconds=self._call_timeout) as session:
                         await session.initialize()
                         self.tools = await _list_tools(session)
@@ -130,7 +142,7 @@ class _Connection:
             if not ready.done():
                 ready.set_exception(exc if isinstance(exc, Exception) else RuntimeError(_error_text(exc)))
             elif not isinstance(exc, asyncio.CancelledError):
-                logger.warning("MCP server %s stopped: %s", self._params.args, _error_text(exc))
+                logger.warning("MCP server %s stopped: %s", self._label, _error_text(exc))
             if isinstance(exc, asyncio.CancelledError):
                 raise
         finally:
@@ -226,8 +238,15 @@ class McpManager:
 
     def is_connected(self, user_id: str, server_id: str) -> bool:
         """Whether the user has the credentials the server needs (always true without sign-in)."""
+        return self._credential_path(user_id, server_id) is None or self._credential_path(user_id, server_id).is_file()
+
+    def _credential_path(self, user_id: str, server_id: str) -> Path | None:
+        """The user's credential file for the server, or None when it needs no sign-in."""
         auth = self.server(server_id).auth
-        return auth is None or (self.state_dir(user_id, server_id) / auth.credential_file).is_file()
+        if auth is None:
+            return None
+        name = _TOKEN_FILE if isinstance(auth, McpTokenAuthConfig) else auth.credential_file
+        return self.state_dir(user_id, server_id) / name
 
     def status(self, user_id: str, server_id: str) -> dict:
         server = self.server(server_id)
@@ -238,6 +257,12 @@ class McpManager:
             "name": server.name,
             "description": server.description,
             "requires_auth": server.auth is not None,
+            # "token": the user pastes an access token; "signin": the server runs its own sign-in.
+            "auth_type": None if server.auth is None else (
+                "token" if isinstance(server.auth, McpTokenAuthConfig) else "signin"
+            ),
+            "token_label": server.auth.label if isinstance(server.auth, McpTokenAuthConfig) else None,
+            "token_help": server.auth.help if isinstance(server.auth, McpTokenAuthConfig) else None,
             "connected": self.is_connected(user_id, server_id),
             "pending": pending,
             "auth_url": flow.url if pending and flow is not None else None,
@@ -265,6 +290,12 @@ class McpManager:
                 server=self.server(server_id).name, seconds=int(timeout),
             ) from None
         except Exception as exc:
+            if _is_unauthorized(exc) or connection.rejected:
+                self._close_connection((user_id, server_id))
+                raise McpNotConnected(
+                    "{server} rejected the access token; connect it again in Settings.",
+                    server=self.server(server_id).name,
+                ) from exc
             raise McpError("The MCP tool '{tool}' failed: {error}", tool=tool, error=_error_text(exc)) from exc
         text = _result_text(result)
         if result.is_error:
@@ -280,13 +311,10 @@ class McpManager:
             connection = self._connections.get(key)
             if connection is not None and connection.alive:
                 return connection
-            params = StdioServerParameters(
-                command=self._command(server_id),
-                args=server.args,
-                env=self._environment(user_id, server_id),
-                cwd=self._prepared_state_dir(user_id, server_id),
+            connection = _Connection(
+                self._transport(user_id, server_id), server_id,
+                self._log_path(user_id, server_id), self._settings.call_timeout_seconds,
             )
-            connection = _Connection(params, self._log_path(user_id, server_id), self._settings.call_timeout_seconds)
             timeout = self._settings.connect_timeout_seconds
             try:
                 self._loop.run(connection.open(timeout), timeout + _CLOSE_WAIT_SECONDS)
@@ -296,6 +324,10 @@ class McpManager:
                     server=server.name, seconds=int(timeout),
                 ) from None
             except Exception as exc:
+                if _is_unauthorized(exc):
+                    raise McpNotConnected(
+                        "{server} rejected the access token; connect it again in Settings.", server=server.name,
+                    ) from exc
                 raise McpError(
                     "Could not start the MCP server '{server}': {error}", server=server.name, error=_error_text(exc),
                 ) from exc
@@ -311,6 +343,8 @@ class McpManager:
         auth = server.auth
         if auth is None:
             raise McpError("{server} does not need a sign-in.", server=server.name)
+        if isinstance(auth, McpTokenAuthConfig):
+            raise McpError("{server} is connected with an access token, not a sign-in.", server=server.name)
         key = (user_id, server_id)
         with self._key_lock(key):
             flow = self._auth.get(key)
@@ -337,13 +371,38 @@ class McpManager:
             if flow is not None and not flow.finished.is_set():
                 flow.process.kill()
             self._close_connection(key)
-            if auth is not None:
-                (self.state_dir(user_id, server_id) / auth.credential_file).unlink(missing_ok=True)
+            credential = self._credential_path(user_id, server_id)
+            if credential is not None:
+                credential.unlink(missing_ok=True)
+        return self.status(user_id, server_id)
+
+    def set_token(self, user_id: str, server_id: str, token: str) -> dict:
+        """Store the user's access token for an http server (mode 600) and check it works."""
+        server = self.server(server_id)
+        if not isinstance(server.auth, McpTokenAuthConfig):
+            raise McpError("{server} does not use an access token.", server=server.name)
+        token = token.strip()
+        if not token or len(token) > _MAX_TOKEN_LENGTH or any(c.isspace() or ord(c) < 32 for c in token):
+            raise McpError("That does not look like an access token.")
+        key = (user_id, server_id)
+        path = self._prepared_state_dir(user_id, server_id) / _TOKEN_FILE
+        with self._key_lock(key):
+            self._close_connection(key)
+            tmp = path.with_suffix(".tmp")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(token)
+            os.replace(tmp, path)
+        try:
+            self._connection(user_id, server_id)  # proves the token now, not at the first tool call
+        except McpError:
+            path.unlink(missing_ok=True)
+            raise
         return self.status(user_id, server_id)
 
     def _spawn_auth(self, user_id: str, server_id: str) -> _AuthFlow:
         auth = self.server(server_id).auth
-        assert auth is not None
+        assert isinstance(auth, McpAuthConfig)
         log_path = self._log_path(user_id, server_id)
         process = subprocess.Popen(
             [self._command(server_id), *auth.args],
@@ -388,6 +447,48 @@ class McpManager:
         return flow
 
     # ------------------------------------------------------------------ helpers
+
+    def _transport(self, user_id: str, server_id: str) -> Callable[..., Any]:
+        server = self.server(server_id)
+        if server.transport == "http":
+            url = check_mcp_url(server.url)  # the catalog may have been edited by hand
+            headers = {}
+            credential = self._credential_path(user_id, server_id)
+            if credential is not None:
+                headers["Authorization"] = f"Bearer {credential.read_text(encoding='utf-8').strip()}"
+            timeout = self._settings.call_timeout_seconds
+
+            @asynccontextmanager
+            async def open_http(_errlog: IO[str], owner: "_Connection | None" = None) -> AsyncIterator[Any]:
+                # The SDK turns HTTP errors into a generic JSON-RPC error; remember a 401/403
+                # here so a revoked or wrong token can be reported as such.
+                rejected: list[int] = []
+
+                async def note_status(response: httpx2.Response) -> None:
+                    if response.status_code in (401, 403):
+                        rejected.append(response.status_code)
+                        if owner is not None:
+                            owner.rejected = True
+
+                async with httpx2.AsyncClient(
+                    headers=headers, timeout=timeout, event_hooks={"response": [note_status]},
+                ) as client:
+                    try:
+                        async with streamable_http_client(url, http_client=client) as streams:
+                            yield streams
+                    except BaseException as exc:
+                        if rejected:
+                            raise _Unauthorized(rejected[0]) from exc
+                        raise
+
+            return open_http
+        params = StdioServerParameters(
+            command=self._command(server_id),
+            args=server.args,
+            env=self._environment(user_id, server_id),
+            cwd=self._prepared_state_dir(user_id, server_id),
+        )
+        return lambda errlog, _owner=None: stdio_client(params, errlog)
 
     def close(self) -> None:
         """Stop every server process and pending sign-in."""
@@ -446,6 +547,31 @@ class McpManager:
     def _log_path(user_id: str, server_id: str) -> Path | None:
         run_dir = run_log_dir()
         return run_dir / f"mcp_{server_id}_{user_id}.log" if run_dir is not None else None
+
+
+class _Unauthorized(Exception):
+    """The http MCP server answered 401 or 403: the user's token is missing, wrong or revoked."""
+
+    def __init__(self, status: int) -> None:
+        super().__init__(f"HTTP {status}")
+        self.status = status
+
+
+def _is_unauthorized(error: BaseException | None) -> bool:
+    """Whether an error, possibly wrapped in exception groups or chained, is a rejected token."""
+    seen: set[int] = set()
+    stack = [error]
+    while stack:
+        current = stack.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, _Unauthorized):
+            return True
+        if isinstance(current, BaseExceptionGroup):
+            stack.extend(current.exceptions)
+        stack.extend([current.__cause__, current.__context__])
+    return False
 
 
 def _result_text(result: CallToolResult) -> str:

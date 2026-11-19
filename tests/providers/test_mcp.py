@@ -143,6 +143,122 @@ class McpManagerTests(unittest.TestCase):
         self.assertTrue(second.exists())
 
 
+class McpHttpSettingsTests(unittest.TestCase):
+    def _http(self, **overrides) -> McpSettings:
+        server = {"name": "Remote", "transport": "http", "url": "https://mcp.example.com/mcp", **overrides}
+        return McpSettings.model_validate({"servers": {"remote": server}})
+
+    def test_http_server_with_token_auth(self) -> None:
+        settings = self._http(auth={"type": "token", "label": "Personal token"})
+        self.assertEqual(settings.servers["remote"].auth.label, "Personal token")
+
+    def test_plain_http_only_to_private_hosts(self) -> None:
+        for url in ["http://127.0.0.1:8000/mcp", "http://10.1.2.3/mcp", "http://192.168.1.9:8000/mcp",
+                    "http://172.20.0.4/mcp", "http://localhost/mcp", "http://atlas:8000/mcp", "http://nas.local/mcp"]:
+            self._http(url=url)
+        for url in ["http://mcp.example.com/mcp", "http://8.8.8.8/mcp", "http://192.168.1.9.example.com/mcp",
+                    "ftp://atlas/mcp", "https://user:secret@mcp.example.com/mcp", "file:///etc/passwd"]:
+            with self.assertRaises(ValidationError, msg=url):
+                self._http(url=url)
+
+    def test_transport_fields_do_not_mix(self) -> None:
+        with self.assertRaises(ValidationError):
+            self._http(command="npx")
+        with self.assertRaises(ValidationError):
+            self._http(auth={"args": ["auth"], "credential_file": "t.json"})
+        with self.assertRaises(ValidationError):
+            McpSettings.model_validate({"servers": {"s": {"name": "S", "command": "npx", "auth": {"type": "token"}}}})
+        with self.assertRaises(ValidationError):
+            McpSettings.model_validate({"servers": {"s": {"name": "S"}}})  # stdio without a command
+
+
+class McpHttpManagerTests(unittest.TestCase):
+    TOKEN = "of_good-token"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from tests.support.fake_mcp_http_server import start
+
+        cls.url, cls._stop, cls.valid = start(cls.TOKEN)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._stop()
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        settings = McpSettings.model_validate({"servers": {"remote": {
+            "name": "Remote", "transport": "http", "url": self.url, "exclude_tools": ["fail"],
+            "auth": {"type": "token", "label": "Access token", "help": "Create one in Settings."},
+        }}})
+        self.manager = McpManager(settings, self.root)
+
+    def tearDown(self) -> None:
+        self.manager.close()
+        self._tmp.cleanup()
+
+    def test_status_before_connecting(self) -> None:
+        status = self.manager.status("user-one", "remote")
+        self.assertFalse(status["connected"])
+        self.assertEqual((status["auth_type"], status["token_label"]), ("token", "Access token"))
+        with self.assertRaisesRegex(McpError, "Connect Remote"):
+            self.manager.list_tools("user-one", "remote")
+
+    def test_token_is_stored_privately_and_tools_work(self) -> None:
+        status = self.manager.set_token("user-one", "remote", f"  {self.TOKEN}\n")
+
+        self.assertTrue(status["connected"])
+        path = self.manager.state_dir("user-one", "remote") / "token"
+        self.assertEqual(path.read_text(encoding="utf-8"), self.TOKEN)
+        if os.name == "posix":
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        tools = {t.name: t for t in self.manager.list_tools("user-one", "remote")}
+        self.assertEqual(set(tools), {"balance", "add_note"})  # "fail" is hidden by the catalog
+        self.assertTrue(tools["balance"].read_only)
+        self.assertEqual(self.manager.call_tool("user-one", "remote", "add_note", {"text": "hi"}), "noted hi")
+        self.assertFalse(self.manager.status("user-two", "remote")["connected"])
+
+    def test_a_rejected_token_is_not_kept(self) -> None:
+        with self.assertRaisesRegex(McpError, "rejected the access token"):
+            self.manager.set_token("user-one", "remote", "of_wrong")
+        self.assertFalse(self.manager.status("user-one", "remote")["connected"])
+        self.assertFalse((self.manager.state_dir("user-one", "remote") / "token").exists())
+
+    def test_malformed_tokens_are_refused(self) -> None:
+        for bad in ["", "   ", "two words", "x" * 5000, "line\nbreak"]:
+            with self.assertRaises(McpError, msg=repr(bad)):
+                self.manager.set_token("user-one", "remote", bad)
+
+    def test_a_token_revoked_later_asks_to_reconnect(self) -> None:
+        self.valid.add("of_short-lived")
+        self.manager.set_token("user-one", "remote", "of_short-lived")
+        self.assertEqual(self.manager.call_tool("user-one", "remote", "balance", {}), "42.00")
+
+        self.valid.discard("of_short-lived")
+
+        with self.assertRaisesRegex(McpError, "rejected the access token"):
+            self.manager.call_tool("user-one", "remote", "balance", {})
+
+    def test_disconnect_deletes_the_token(self) -> None:
+        self.manager.set_token("user-one", "remote", self.TOKEN)
+        self.manager.set_token("user-two", "remote", self.TOKEN)
+
+        status = self.manager.disconnect("user-one", "remote")
+
+        self.assertFalse(status["connected"])
+        self.assertTrue(self.manager.status("user-two", "remote")["connected"])
+
+    def test_sign_in_flow_is_not_for_token_servers(self) -> None:
+        with self.assertRaisesRegex(McpError, "access token"):
+            self.manager.start_auth("user-one", "remote")
+
+    def test_stdio_servers_reject_set_token(self) -> None:
+        manager = McpManager(_settings(), self.root)
+        with self.assertRaisesRegex(McpError, "does not use an access token"):
+            manager.set_token("user-one", "fake", "x")
+
+
 class McpToolsetTests(unittest.TestCase):
     def setUp(self) -> None:
         self.manager = Mock()

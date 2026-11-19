@@ -96,6 +96,12 @@ class AutomationEditIn(BaseModel):
     trigger: Optional[AutomationTriggerIn] = None
 
 
+class McpTokenIn(BaseModel):
+    """An access token the user pastes to connect an http MCP server."""
+
+    token: str = Field(min_length=1, max_length=4096)
+
+
 class OpenRouterKeyIn(BaseModel):
     key: str = Field(max_length=600)
 
@@ -487,6 +493,10 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     @app.post("/api/mcp/{server_id}/connect")
     def connect_mcp(server_id: str, user_id: str = Depends(current_user)):
         return service.connect_mcp(user_id, server_id)
+
+    @app.put("/api/mcp/{server_id}/token")
+    def set_mcp_token(server_id: str, body: McpTokenIn, user_id: str = Depends(current_user)):
+        return service.set_mcp_token(user_id, server_id, body.token)
 
     @app.delete("/api/mcp/{server_id}/connection")
     def disconnect_mcp(server_id: str, user_id: str = Depends(current_user)):

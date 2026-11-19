@@ -3015,7 +3015,9 @@ function connectionItem(server) {
       href: server.auth_url, target: "_blank", rel: "noopener noreferrer", textContent: tr("Open sign-in page"),
     }));
   }
-  if (server.requires_auth) {
+  if (server.auth_type === "token") {
+    item.append(tokenConnection(server));
+  } else if (server.requires_auth) {
     const actions = document.createElement("div");
     actions.className = "agent-actions";
     const connect = Object.assign(document.createElement("button"), {
@@ -3037,15 +3039,58 @@ function connectionItem(server) {
   return item;
 }
 
-async function changeConnection(server, action) {
+// Servers reached over HTTP: the user pastes their own access token. It is sent once to
+// RECALL, checked against the server and stored in the user's private folder; it is never
+// shown again or put in a chat.
+function tokenConnection(server) {
+  const box = document.createElement("div");
+  if (server.token_help) {
+    box.append(Object.assign(document.createElement("p"), { className: "model-note", textContent: server.token_help }));
+  }
+  const form = document.createElement("form");
+  form.className = "agent-actions mcp-token-form";
+  const input = Object.assign(document.createElement("input"), {
+    type: "password", autocomplete: "off", spellcheck: false, maxLength: 4096, required: true,
+    placeholder: server.connected ? tr("Paste a new token to replace it") : (server.token_label || tr("Access token")),
+  });
+  input.setAttribute("aria-label", server.token_label || tr("Access token"));
+  const save = Object.assign(document.createElement("button"), {
+    type: "submit", textContent: tr(server.connected ? "Replace token" : "Connect"),
+  });
+  form.append(input, save);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const token = input.value.trim();
+    input.value = "";
+    if (token) changeConnection(server, "token", token);
+  });
+  box.append(form);
+  if (server.connected) {
+    const disconnect = Object.assign(document.createElement("button"), { type: "button", textContent: tr("Disconnect") });
+    disconnect.addEventListener("click", () => {
+      if (window.confirm(tr("Disconnect {server}? Your stored credentials for it are deleted.", { server: server.name }))) {
+        changeConnection(server, "disconnect");
+      }
+    });
+    const actions = document.createElement("div");
+    actions.className = "agent-actions";
+    actions.append(disconnect);
+    box.append(actions);
+  }
+  return box;
+}
+
+async function changeConnection(server, action, token) {
   const session = state.session;
   $("connections-error").textContent = "";
   for (const button of $("connection-list").querySelectorAll("button")) button.disabled = true;
   try {
-    const status = await api(
-      action === "connect" ? `/api/mcp/${server.id}/connect` : `/api/mcp/${server.id}/connection`,
-      { method: action === "connect" ? "POST" : "DELETE" },
-    );
+    const status = action === "token"
+      ? await api(`/api/mcp/${server.id}/token`, { method: "PUT", body: { token } })
+      : await api(
+        action === "connect" ? `/api/mcp/${server.id}/connect` : `/api/mcp/${server.id}/connection`,
+        { method: action === "connect" ? "POST" : "DELETE" },
+      );
     if (session !== state.session) return;
     state.mcpServers = state.mcpServers.map((item) => (item.id === status.id ? status : item));
     state.mcpTools.delete(status.id);

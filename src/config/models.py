@@ -55,19 +55,34 @@ class McpAuthConfig(BaseModel):
     timeout_seconds: int = Field(default=300, ge=30, le=1800, strict=True)
 
 
+class McpTokenAuthConfig(BaseModel):
+    """Each user pastes their own access token; it is sent as `Authorization: Bearer <token>`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["token"]
+    label: str = Field(default="Access token", min_length=1, max_length=100)
+    help: str = Field(default="", max_length=500)  # where the user creates the token
+
+
 class McpServerConfig(BaseModel):
-    """One MCP server offered to every user; each user connects with their own credentials."""
+    """One MCP server offered to every user; each user connects with their own credentials.
+
+    `stdio` servers are a local command started per user; `http` servers are a remote
+    streamable-HTTP endpoint reached with each user's own token.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=100)
     description: str = Field(default="", max_length=500)
-    transport: Literal["stdio"] = "stdio"
-    command: str = Field(min_length=1)
+    transport: Literal["stdio", "http"] = "stdio"
+    command: str = ""
     args: list[str] = Field(default_factory=list)
     env: dict[str, McpEnvValue] = Field(default_factory=dict)
+    url: str = ""
     exclude_tools: list[str] = Field(default_factory=list)
-    auth: Optional[McpAuthConfig] = None
+    auth: Optional[Union[McpTokenAuthConfig, McpAuthConfig]] = None
 
     @field_validator("env")
     @classmethod
@@ -76,6 +91,46 @@ class McpServerConfig(BaseModel):
         if invalid:
             raise ValueError(f"invalid environment variable name: {', '.join(invalid)}")
         return value
+
+    @model_validator(mode="after")
+    def _check_transport(self) -> "McpServerConfig":
+        if self.transport == "stdio":
+            if not self.command:
+                raise ValueError("a stdio MCP server needs a command")
+            if self.url:
+                raise ValueError("url is only for http MCP servers")
+            if isinstance(self.auth, McpTokenAuthConfig):
+                raise ValueError("token auth is only for http MCP servers")
+        else:
+            if self.command or self.args or self.env:
+                raise ValueError("command, args and env are only for stdio MCP servers")
+            if isinstance(self.auth, McpAuthConfig):
+                raise ValueError("http MCP servers use auth: {type: token}")
+            check_mcp_url(self.url)
+        return self
+
+
+_PRIVATE_HOST = re.compile(
+    r"^(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+"
+    r"|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|\[::1\]|[a-z0-9-]+(\.(local|lan|internal|home\.arpa))?)$"
+)
+
+
+def check_mcp_url(url: str) -> str:
+    """An http MCP server URL: https anywhere, or plain http only to a private-network host,
+    so a user's token is never sent in clear text over the internet."""
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError("an http MCP server needs an http(s) url")
+    if parts.username or parts.password:
+        raise ValueError("put credentials in the user's token, not in the url")
+    host = parts.hostname.lower()
+    host_for_match = f"[{host}]" if ":" in host else host
+    if parts.scheme == "http" and not _PRIVATE_HOST.match(host_for_match):
+        raise ValueError("plain http is only allowed to a private-network host; use https")
+    return url
 
 
 class McpSettings(BaseModel):
