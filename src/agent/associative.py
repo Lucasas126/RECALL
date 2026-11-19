@@ -109,7 +109,8 @@ def recall(
         logger.info("no lookup needed (query proposal %.0f ms)", (proposed_at - started_at) * 1000)
         return RecallResult(None, 0)
     limit = max_matches(agent)
-    found = agent.query_memory(query, limit, exclude_chat=chat_id)
+    extra = {} if cancellation is None else {"cancellation": cancellation}
+    found = agent.query_memory(query, limit, exclude_chat=chat_id, **extra)
     logger.info(
         "query=%r proposed in %.0f ms, memory search took %.0f ms",
         query, (proposed_at - started_at) * 1000, (perf_counter() - proposed_at) * 1000,
