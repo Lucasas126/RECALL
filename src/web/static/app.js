@@ -4540,6 +4540,19 @@ function thinkingPreview(text, max = 90) {
 
 // One-line view of a tool call: name, backend (terminal) and a short summary of the arguments.
 // `line` is the first line of a command or a key=value list; `full` is the tooltip.
+// An MCP tool is named `<server_id>__<tool>` for the model (no built-in tool has "__"). For display, split it
+// into the server, shown as a highlighted chip with its catalog name when known, and the server's own tool name.
+function mcpToolParts(name) {
+  const cut = String(name ?? "").indexOf("__");
+  if (cut <= 0) return null;
+  const serverId = name.slice(0, cut);
+  const tool = name.slice(cut + 2);
+  if (!/^[a-z][a-z0-9_]{0,31}$/.test(serverId) || !tool) return null;
+  const servers = typeof state !== "undefined" && Array.isArray(state.mcpServers) ? state.mcpServers : [];
+  const server = servers.find((item) => item.id === serverId);
+  return { serverId, server: server?.name || serverId, tool };
+}
+
 function actionSummary(action) {
   const args = action?.arguments && typeof action.arguments === "object" ? action.arguments : {};
   const backend = typeof args.backend === "string" ? args.backend : "";
@@ -4552,7 +4565,11 @@ function actionSummary(action) {
       .map(([key, value]) => `${key}=${one(typeof value === "string" ? value : JSON.stringify(value))}`).join(", ");
   }
   const full = `${action?.name ?? ""}${backend ? ` [${backend}]` : ""}\n${actionArgsText(action)}`.trim();
-  return { name: String(action?.name ?? ""), backend, line, full: full.length > 2000 ? `${full.slice(0, 2000)}…` : full };
+  const mcp = mcpToolParts(action?.name);
+  return {
+    name: mcp ? mcp.tool : String(action?.name ?? ""), mcp, backend, line,
+    full: full.length > 2000 ? `${full.slice(0, 2000)}…` : full,
+  };
 }
 
 // The arguments as a block: a lone command as it is (newlines kept), anything else as indented JSON.
@@ -4880,6 +4897,11 @@ function actionStep(action) {
   item.className = "action" + (action.error ? " failed" : "") + (action.pending ? " running" : "");
   const summary = document.createElement("summary");
   summary.title = info.full;
+  if (info.mcp) {
+    const chip = element("span", { className: "action-mcp", textContent: info.mcp.server });
+    chip.title = tr("MCP server: {server}", { server: info.mcp.server });
+    summary.append(chip);
+  }
   summary.append(Object.assign(document.createElement("span"), { className: "action-name", textContent: info.name }));
   if (info.backend) summary.append(Object.assign(document.createElement("span"), { className: "action-backend", textContent: info.backend }));
   summary.append(Object.assign(document.createElement("span"), { className: "action-args", textContent: info.line }));
@@ -8065,7 +8087,8 @@ function renderTraceTool(call, result) {
   const size = result ? tr("{count} characters", { count: formatCount((result.result ?? "").length) }) : "";
   return element("details", { className: `trace-tool${result?.error ? " failed" : ""}` },
     element("summary", {},
-      element("span", { className: "trace-tool-name", textContent: call.name }),
+      ...(mcpToolParts(call.name) ? [element("span", { className: "action-mcp", textContent: mcpToolParts(call.name).server })] : []),
+      element("span", { className: "trace-tool-name", textContent: mcpToolParts(call.name)?.tool ?? call.name }),
       element("span", { className: "trace-tool-hint", textContent: hint.length > 90 ? `${hint.slice(0, 90)}…` : hint }),
       element("span", { className: "trace-tool-meta", textContent: [size, outcome].filter(Boolean).join(" ") })),
     element("div", { className: "trace-tool-label", textContent: tr("Arguments") }),

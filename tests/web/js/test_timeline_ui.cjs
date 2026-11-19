@@ -60,6 +60,30 @@ test("other arguments become a key=value line and the block is JSON", () => {
   assert.deepEqual(JSON.parse(context.actionArgsText(action)), { path: "a.txt", offset: 1 });
 });
 
+test("an MCP tool shows its server apart from the tool name", () => {
+  const info = context.actionSummary({ name: "openbank__list_accounts", arguments: {} });
+  assert.equal(info.name, "list_accounts");
+  assert.deepEqual(plain(info.mcp), { serverId: "openbank", server: "openbank", tool: "list_accounts" });
+  assert.match(info.full, /^openbank__list_accounts/);
+});
+
+test("the MCP chip uses the catalog name when the server is known", () => {
+  context.state = { mcpServers: [{ id: "google_calendar", name: "Google Calendar" }] };
+  try {
+    const info = context.actionSummary({ name: "google_calendar__list-events", arguments: {} });
+    assert.equal(info.mcp.server, "Google Calendar");
+    assert.equal(info.name, "list-events");
+  } finally {
+    delete context.state;
+  }
+});
+
+test("built-in tools are not taken for MCP tools", () => {
+  for (const name of ["terminal", "query_memory", "__x", "Bad__x", "srv__"]) {
+    assert.equal(context.actionSummary({ name, arguments: {} }).mcp, null, name);
+  }
+});
+
 test("thinking preview is one trimmed line", () => {
   assert.equal(context.thinkingPreview("  a\n b  "), "a b");
   assert.equal(context.thinkingPreview("x".repeat(100), 10), "xxxxxxxxxx…");
