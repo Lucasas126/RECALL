@@ -35,6 +35,7 @@ from src.core.chunking import CHUNKING_VERSION, Chunk, ChunkSizes, chunk_exchang
 from src.core.sources.base import Source, scan_files
 from src.core.sources.folders import FolderSource
 from src.core.sources.registry import SourceRegistry
+from src.providers.cancellation import CancellationToken
 from src.providers.provider import LLMProvider
 from src.utils.files import NonBlockingFileLock, exclusive_file_lock
 from src.utils.logger import get_logger
@@ -390,10 +391,11 @@ class _Embedder:
         self._model = model
         self._batch = batch
 
-    def __call__(self, texts: list[str]) -> list[list[float]]:
+    def __call__(self, texts: list[str], cancellation: CancellationToken | None = None) -> list[list[float]]:
         vectors: list[list[float]] = []
+        extra = {} if cancellation is None else {"cancellation": cancellation}
         for start in range(0, len(texts), self._batch):
-            vectors.extend(self._provider.invoke_embeddings(texts[start:start + self._batch], self._model))
+            vectors.extend(self._provider.invoke_embeddings(texts[start:start + self._batch], self._model, **extra))
         if len(vectors) != len(texts):
             raise RuntimeError(f"the embeddings provider returned {len(vectors)} vectors for {len(texts)} texts")
         return vectors
@@ -482,15 +484,16 @@ class VectorIndex:
 
     def query(
         self, query: str, top_k: int = 5, *, exclude_chat: str | None = None, only_source: str | None = None,
-        only_chat: str | None = None,
+        only_chat: str | None = None, cancellation: CancellationToken | None = None,
     ) -> list[dict]:
         """The `top_k` most similar chunks as {address, context, document, body, score}; never syncs.
 
-        `only_source` / `only_chat` narrow the search to one source or one chat's chunks."""
+        `only_source` / `only_chat` narrow the search to one source or one chat's chunks. A `cancellation` token
+        aborts the query embedding request in flight (GenerationCancelled)."""
         with self._store.session() as store:
             if store.identity != self.identity or not store.count():
                 return []
-        vector = self._embed([query])[0]
+        vector = self._embed([query], cancellation)[0]
         with self._store.session() as store:
             count = store.count()
             if store.identity != self.identity or not count:

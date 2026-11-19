@@ -63,9 +63,10 @@ class LLMProvider(BaseModel):
         """
         raise NotImplementedError("This method should be implemented by subclasses.")
 
-    def invoke_embeddings(self, input: list[str], model: str):
+    def invoke_embeddings(self, input: list[str], model: str, cancellation: CancellationToken | None = None):
         """
         Invokes the LLM provider API to get embeddings for a batch of texts.
+        With a `cancellation` token the in-flight request is aborted (GenerationCancelled) when it is cancelled.
         """
         raise NotImplementedError("This method should be implemented by subclasses.")
 

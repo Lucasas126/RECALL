@@ -186,6 +186,9 @@ def model_provider(config: ResolvedAgent, model: str) -> LLMProvider:
     return named_provider(config, provider_of(model, config.provider_name), f"the model {model}")
 
 
+STOPPED_WHILE_RUNNING = "stopped by the user while running; the command was killed and may have had partial effects"
+
+
 class Agent:
     """Orchestration entry point: wraps an agent's config, provider and conversation memory."""
 
@@ -486,12 +489,15 @@ class Agent:
 
     def query_memory(
         self, query: str, top_k: int = 5, *, exclude_chat: str | None = None, only_source: str | None = None,
-        only_chat: str | None = None,
+        only_chat: str | None = None, cancellation: CancellationToken | None = None,
     ) -> list[dict]:
-        """Semantic recall over what is indexed (never syncs); `exclude_chat` leaves one chat's chunks out."""
+        """Semantic recall over what is indexed (never syncs); `exclude_chat` leaves one chat's chunks out.
+
+        With a `cancellation` token, cancelling it aborts the embedding request in flight."""
         queried_at = perf_counter()
+        extra = {} if cancellation is None else {"cancellation": cancellation}
         results = self.index.query(
-            query, top_k, exclude_chat=exclude_chat, only_source=only_source, only_chat=only_chat,
+            query, top_k, exclude_chat=exclude_chat, only_source=only_source, only_chat=only_chat, **extra,
         )
         logger.debug(
             "query_memory %r -> %d hits (%.0f ms)", query, len(results), (perf_counter() - queried_at) * 1000,
@@ -961,6 +967,11 @@ class Agent:
                 try:
                     result = handler(**args)
                 except GenerationCancelled:
+                    # the user pressed Stop while this tool was running: say so, so the next turn knows it was cut
+                    self.messages.append({"role": "tool", "tool_call_id": tc["id"], "name": name,
+                                          "content": STOPPED_WHILE_RUNNING})
+                    self.last_actions.append({"name": name, "arguments": args, "result": STOPPED_WHILE_RUNNING,
+                                              "error": True})
                     raise
                 except Exception as e:  # surfaced back to the model, not fatal
                     result, failed = f"error: {e}", True

@@ -65,10 +65,11 @@ def _response(
     payload: dict,
     headers: dict[str, str] | None,
     cancellation: CancellationToken | None,
+    timeout: float | None = None,
 ) -> Generator[tuple[asyncio.Runner, httpx.Response]]:
     # Each synchronous invocation owns its loop; cancellation can come from another thread.
     with asyncio.Runner() as runner:
-        client = httpx.AsyncClient(timeout=httpx.Timeout(None, connect=30))
+        client = httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=30))
         response = None
         try:
             request = client.build_request("POST", url, json=payload, headers=headers)
@@ -91,9 +92,10 @@ def post_chat(
     *,
     headers: dict[str, str] | None = None,
     cancellation: CancellationToken | None = None,
+    timeout: float | None = None,
 ) -> dict:
     """Read a chat response, cancelling even while waiting for headers or the body."""
-    with _response(url, payload, headers, cancellation) as (runner, response):
+    with _response(url, payload, headers, cancellation, timeout) as (runner, response):
         _run(runner, response.aread, cancellation)
         return response.json()
 

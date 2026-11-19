@@ -53,6 +53,22 @@ class CheckpointTests(unittest.TestCase):
         self.assertEqual(saved["actions"][0]["name"], "terminal")
         self.assertEqual(saved["actions"][0]["result"], "done")
 
+    def test_stop_during_a_tool_tells_the_model_the_action_was_cut(self) -> None:
+        from src.providers.cancellation import GenerationCancelled
+
+        def stopped(**_):
+            raise GenerationCancelled("generation interrupted by user")
+
+        self.agent._tool_handlers = {"terminal": stopped}
+        self.provider.invoke.side_effect = [_tool_round()]
+        with self.assertRaises(GenerationCancelled):
+            self.agent.invoke("Do it", stream=False)
+        results = [m["content"] for m in self.agent.messages if m.get("role") == "tool"]
+        self.assertEqual(len(results), 1)
+        self.assertIn("stopped by the user while running", results[0])
+        self.assertNotIn("not executed", results[0])
+        self.assertEqual(self.agent.last_actions[-1]["name"], "terminal")
+
     def test_final_reply_replaces_the_checkpoint(self) -> None:
         self.provider.invoke.side_effect = [_tool_round(), _tool_round(), {"response": "All done"}]
         self.agent.invoke("Do it", stream=False)

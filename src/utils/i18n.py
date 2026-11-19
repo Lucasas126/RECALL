@@ -251,6 +251,8 @@ _SPANISH = {
     "This removes the {count} messages after it.": "Esto elimina los {count} mensajes posteriores.",
     "Interrupted by a new message": "Interrumpido por un mensaje nuevo",
     "Stopped by you": "Detenido por ti",
+    "Stopping…": "Deteniendo…",
+    "Still stopping: the action is still running and cannot be cut right now": "Aún deteniendo: la acción sigue en ejecución y no se puede cortar ahora mismo",
     "Drop files to attach them": "Suelta los archivos para adjuntarlos",
     "Interrupted": "Interrumpido",
     "Generating…": "Generando…",

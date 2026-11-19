@@ -209,10 +209,12 @@ class OllamaProvider(LLMProvider):
             logger.error(f"Error invoking Ollama API (non-streaming): {e}")
             raise
 
-    def invoke_embeddings(self, input: list[str], model: str) -> list[list[float]]:
+    def invoke_embeddings(self, input: list[str], model: str, cancellation: CancellationToken | None = None) -> list[list[float]]:
         model = self.own_model(model)
         payload = {"model": model, "input": list(input)}
         logger.debug("ollama embeddings request; payload=%s", payload)
+        if cancellation is not None:  # the in-flight request is aborted when the token is cancelled
+            return post_chat(f"{self.base_url}/api/embed", payload, cancellation=cancellation, timeout=60)["embeddings"]
         response = requests.post(f"{self.base_url}/api/embed", json=payload, timeout=60)
         response.raise_for_status()
         return response.json()["embeddings"]
