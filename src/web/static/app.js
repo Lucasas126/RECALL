@@ -3086,7 +3086,7 @@ async function changeConnection(server, action, token) {
   for (const button of $("connection-list").querySelectorAll("button")) button.disabled = true;
   try {
     const status = action === "token"
-      ? await api(`/api/mcp/${server.id}/token`, { method: "PUT", body: { token } })
+      ? await api(`/api/mcp/${server.id}/token`, { method: "PUT", body: JSON.stringify({ token }) })
       : await api(
         action === "connect" ? `/api/mcp/${server.id}/connect` : `/api/mcp/${server.id}/connection`,
         { method: action === "connect" ? "POST" : "DELETE" },
