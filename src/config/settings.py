@@ -130,7 +130,30 @@ CHAT_NAMING = ChatNamingConfig.model_validate(_raw.get("chat_naming", {}))
 APPROVAL_EXPLAIN = ApprovalExplainConfig.model_validate(_raw.get("approval_explain", {}))
 
 # ------------------------------------------------------------------ mcp servers
-MCP = McpSettings.model_validate(_raw.get("mcp", {}))
+# The installation can add servers without editing the tracked settings.yaml: CONFIG_DIR/mcp_servers.yaml
+# holds a `servers:` map in the same format. It keeps local URLs out of the repo and survives image updates.
+MCP_LOCAL_FILE = CONFIG_DIR / "mcp_servers.yaml"
+
+
+def _mcp_settings(raw: dict, local_file: Path) -> McpSettings:
+    """settings.yaml `mcp`, plus the servers of the optional local catalog file."""
+    mcp_raw = dict(raw.get("mcp") or {})
+    if local_file.is_file():
+        with open(local_file, "r", encoding="utf-8") as fh:
+            local = yaml.safe_load(fh) or {}
+        if not isinstance(local, dict) or set(local) - {"servers"}:
+            raise ValueError(f"{local_file}: only a `servers:` map is allowed")
+        extra = local.get("servers") or {}
+        if not isinstance(extra, dict):
+            raise ValueError(f"{local_file}: `servers` must be a map of server id to server")
+        shared = set(extra) & set(mcp_raw.get("servers") or {})
+        if shared:
+            raise ValueError(f"{local_file}: server ids already in settings.yaml: {', '.join(sorted(shared))}")
+        mcp_raw["servers"] = {**(mcp_raw.get("servers") or {}), **extra}
+    return McpSettings.model_validate(mcp_raw)
+
+
+MCP = _mcp_settings(_raw, MCP_LOCAL_FILE)
 
 # ------------------------------------------------------------------ claude subscription: who may use the default login
 # RECALL_CLAUDE_DEFAULT_LOGIN_USERS (comma-separated user ids), when set, replaces the yaml list: a local override
