@@ -345,6 +345,9 @@ details.action.stopped .action-status { color: var(--muted); }
 details.action.stopped .action-status::before { animation: none; opacity: .6; }
 @media (prefers-reduced-motion: reduce) { .action-status::before { animation: none; opacity: .8; } }
 details.action.failed .action-name { color: var(--danger); }
+/* the MCP server of a tool step, so it stands out from the built-in tools */
+.action-mcp { flex: none; white-space: nowrap; font-size: .75rem; font-weight: 600; line-height: 1.5; padding: 1px 9px; border-radius: 999px; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+details.action.failed .action-mcp { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
 .action-backend { flex: none; overflow: visible; white-space: nowrap; font-size: .75rem; line-height: 1.5; padding: 1px 9px; border: 1px solid var(--line-strong); border-radius: 999px; }
 .action-args { flex: 1 1 12rem; min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; font: 400 .75rem/1.4 var(--mono); }
 .action-block { margin: 6px 0 0 20px; }

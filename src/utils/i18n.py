@@ -509,6 +509,7 @@ _SPANISH = {
     "Reconnect": "Reconectar",
     "Disconnect": "Desconectar",
     "Access token": "Token de acceso",
+    "MCP server: {server}": "Servidor MCP: {server}",
     "Paste a new token to replace it": "Pega un token nuevo para sustituirlo",
     "Replace token": "Sustituir token",
     "Open sign-in page": "Abrir la página de inicio de sesión",
