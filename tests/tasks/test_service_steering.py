@@ -301,7 +301,8 @@ class ServiceSteeringTests(SteeringFixture):
         from src.web.app import create_app
         import json
         empty = self.service.create_chat("user-one", "agent-one")["id"]
-        self.service.list_chats("user-one", "agent-one")  # a second client lists without `keep`: the empty chat goes
+        with patch("src.service.chat._EMPTY_CHAT_GRACE_SECONDS", 0):  # past the grace period
+            self.service.list_chats("user-one", "agent-one")  # a second client lists without `keep`: the empty chat goes
         self.assertFalse(self.sources[("user-one", "agent-one")].exists_chat(empty))
         with TestClient(create_app(self.service)) as client:
             login(client, "user-one")

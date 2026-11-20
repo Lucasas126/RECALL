@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import secrets
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Collection, Literal, Optional
@@ -523,14 +524,21 @@ class ConversationsSource(Source):
         hidden = set() if include_internal else self.task_chats()
         return sorted(p.stem for p in self.root.iterdir() if p.suffix == ".jsonl" and p.stem not in hidden)
 
-    def prune_empty(self, keep: str | Collection[str] | None = None) -> list[str]:
-        """Delete unused chats except the given chat id(s) and task chats (which start empty); return the removed ids."""
+    def prune_empty(self, keep: str | Collection[str] | None = None, *, grace: float = 0) -> list[str]:
+        """Delete unused chats except the given chat id(s) and task chats (which start empty); return the removed ids.
+
+        An empty chat younger than `grace` seconds is spared: a page that has just created it may not have named it
+        as `keep` yet (a listing in flight, another tab), and the person has not had time to write.
+        """
         removed = []
+        now = time.time()
         kept = {keep} if isinstance(keep, str) else set(keep or ())
         for path in self.root.iterdir():
             if path.suffix != ".jsonl" or path.stem in kept or self._task_path(path.stem).is_file():
                 continue
             try:
+                if grace and now - path.stat().st_mtime < grace:
+                    continue
                 empty = _is_blank(path)
             except FileNotFoundError:
                 continue  # deleted meanwhile

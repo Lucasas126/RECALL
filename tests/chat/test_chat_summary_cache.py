@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -110,6 +111,14 @@ class PruneEmptyTests(unittest.TestCase):
         keep = self.source.create()
         self.assertEqual(self.source.prune_empty(keep), [])
         self.assertEqual(self.source.chats(), [keep])
+
+    def test_a_young_blank_chat_is_spared_during_the_grace_period(self) -> None:
+        young, old = self.source.create(), self.source.create()
+        past = time.time() - 120
+        os.utime(self.root / f"{old}.jsonl", (past, past))
+        self.assertEqual(self.source.prune_empty(grace=30), [old])
+        self.assertEqual(self.source.chats(), [young])
+        self.assertEqual(self.source.prune_empty(), [young])  # no grace: removed as before
 
     def test_a_chat_deleted_while_listing_is_skipped(self) -> None:
         chat = self.source.create()
