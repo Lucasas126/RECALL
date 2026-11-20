@@ -24,6 +24,7 @@ _DISPOSABLE_SUFFIX = ".disposable.json"
 _ORIGIN_SUFFIX = ".origin.json"
 _TASK_SUFFIX = ".task.json"
 _UNREAD_SUFFIX = ".unread.json"
+_MENTION_SUFFIX = ".mention.json"  # a chat answering @mentions from another agent's chat
 DEFAULT_ORIGIN = "web"  # chats without an origin marker predate it and count as web chats
 _ORIGIN_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 
@@ -353,6 +354,32 @@ class ConversationsSource(Source):
         except OSError as exc:
             raise ChatMetadataError("Could not save the origin of chat {chat_id}.", chat_id=chat_id) from exc
 
+    def set_mention_source(self, chat_id: str, agent_id: str, source_chat_id: str) -> None:
+        """Mark the chat as the one answering @mentions from `source_chat_id` of agent `agent_id`."""
+        if not self.exists_chat(chat_id):
+            raise FileNotFoundError(f"chat not found: {chat_id}")
+        payload = json.dumps({"agent_id": agent_id, "chat_id": source_chat_id})
+        try:
+            atomic_write_text(self.resolve(f"{chat_id}{_MENTION_SUFFIX}"), payload + "\n")
+        except OSError as exc:
+            raise ChatMetadataError("Could not save the mention mark of chat {chat_id}.", chat_id=chat_id) from exc
+
+    def find_by_mention(self, agent_id: str, source_chat_id: str) -> str | None:
+        """The chat that answers @mentions from that chat of that agent, if it still exists."""
+        for path in sorted(self.root.glob(f"*{_MENTION_SUFFIX}")):
+            try:
+                mark = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, ValueError):
+                continue
+            if isinstance(mark, dict) and mark.get("agent_id") == agent_id and mark.get("chat_id") == source_chat_id:
+                chat_id = path.name[: -len(_MENTION_SUFFIX)]
+                try:
+                    if self.exists_chat(chat_id):
+                        return chat_id
+                except ValueError:
+                    continue
+        return None
+
     def _task_path(self, chat_id: str) -> Path:
         return self.resolve(f"{chat_id}{_TASK_SUFFIX}")
 
@@ -435,6 +462,7 @@ class ConversationsSource(Source):
         origin.unlink(missing_ok=True)
         task.unlink(missing_ok=True)
         unread.unlink(missing_ok=True)
+        self.resolve(f"{chat_id}{_MENTION_SUFFIX}").unlink(missing_ok=True)
 
     def _removed_path(self, chat_id: str) -> Path:
         return self.resolve(f"{chat_id}.removed.json")

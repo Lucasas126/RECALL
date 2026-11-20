@@ -75,6 +75,7 @@ from src.agent.toolsets.delegate import TaskError
 from src.service.agent_admin import AgentAdmin
 from src.service.agent_permissions import AgentPermissions
 from src.service.tasks import TaskManager
+from src.service.mentions import MENTION_CONTEXT_CHARS, chat_excerpt, mention_prompt, parse_mention
 from src.agent.toolsets.processes import process_registry, process_wake_block, process_wake_frame
 from src.terminal.approvals import ApprovalBroker, ApprovalNotFound
 from src.terminal.output import clean, redact
@@ -1693,7 +1694,7 @@ class ChatService:
         self, user_id: str, agent_id: str, chat_id: str, text: str,
         stream: Optional[bool] = None, attachments: Optional[list[dict]] = None,
         rewind_to: Optional[int] = None, internal_task: bool = False, meta: Optional[dict] = None,
-        channel: Optional[str] = None,
+        channel: Optional[str] = None, mention_meta: Optional[dict] = None,
     ) -> Iterator[ChatEvent]:
         """Send a user message to a chat and yield the reply as events.
 
@@ -1711,8 +1712,18 @@ class ChatService:
         attachments are kept; long-term memory (Dream) is not rewound.
 
         `channel` (`web` or `telegram`) is where the person wrote; it is stored on the turn and shown to the model.
+
+        A person's message starting with `@<agent_id>` of another agent of the same user is answered by that agent
+        instead (see `_send_mention`). `mention_meta` is only set by that path and stored on the mentioned agent's turn.
         """
         conversations = self._conversations(user_id, agent_id)
+        if not internal_task and rewind_to is None and mention_meta is None:
+            target = self._mention_target(user_id, agent_id, text)
+            if target is not None:
+                return self._send_mention(
+                    user_id, agent_id, chat_id, target[0], target[1], text,
+                    stream=stream, attachments=attachments, channel=channel,
+                )
         if not internal_task:
             try:
                 is_task_chat = conversations.is_task_chat(chat_id)
@@ -1756,6 +1767,8 @@ class ChatService:
         slot = self._slot(user_id, agent_id)
         # `meta` (structured task brief / follow-up) is stored on the user turn; only the TaskManager may set it
         run_meta = dict(meta) if (meta and internal_task) else {}
+        if mention_meta:
+            run_meta.update(mention_meta)
         if media:
             run_meta["media"] = media
         run = _MessageRun(chat_id, text, attachments, stream, meta=run_meta or None,
@@ -1795,6 +1808,90 @@ class ChatService:
         self._tasks.release_held(user_id, agent_id, chat_id)  # results held back by max_auto_wakes now follow this reply
         return events
 
+
+    # ------------------------------------------------------------------ @mentions of another agent
+
+    def _mention_target(self, user_id: str, agent_id: str, text: str) -> Optional[tuple[str, str]]:
+        """`(other_agent_id, rest)` when the message mentions another agent of the same user, else None."""
+        parsed = parse_mention(text)
+        if parsed is None or parsed[0] == agent_id:
+            return None
+        if parsed[0] not in (self._user(user_id).agents or []):
+            return None  # unknown id: a normal message to this agent
+        return parsed
+
+    def _send_mention(
+        self, user_id: str, origin_id: str, origin_chat: str, target_id: str, rest: str, original: str, *,
+        stream: Optional[bool], attachments: Optional[list[dict]], channel: Optional[str],
+    ) -> Iterator[ChatEvent]:
+        """Answer a message of `origin_id`'s chat with `target_id`, which runs with its own config and permissions.
+
+        The origin agent does not run on this turn and never gets the target's tools: the target runs through its
+        normal path (its slot, its agent factory, its approval rules) in its own chat for this origin chat. The
+        person's message is stored as typed in the origin chat and the target's reply is copied there afterwards.
+        """
+        origin_conversations = self._conversations(user_id, origin_id)
+        self._require_chat(origin_conversations, origin_chat)
+        if origin_conversations.is_task_chat(origin_chat):
+            raise InputError("this is an internal task chat: steer the task instead")
+        target_conversations = self._conversations(user_id, target_id)
+        target_chat = target_conversations.find_by_mention(origin_id, origin_chat)
+        if target_chat is None:
+            target_chat = target_conversations.create(origin="mention")
+            target_conversations.set_mention_source(target_chat, origin_id, origin_chat)
+        excerpt = chat_excerpt(origin_conversations.load(origin_chat), MENTION_CONTEXT_CHARS)
+        prompt = mention_prompt(rest, origin_id, self._agent_name(user_id, origin_id), excerpt)
+        events = self.send(
+            user_id, target_id, target_chat, prompt, stream=stream, attachments=attachments, channel=channel,
+            mention_meta={"mention_from": {"agent_id": origin_id, "chat_id": origin_chat}},
+        )
+        stored_channel = channel if channel in ("web", "telegram") else None
+        origin_conversations.append(
+            origin_chat, "user", original, mention={"agent_id": target_id, "chat_id": target_chat},
+            **({"channel": stored_channel} if stored_channel else {}),
+        )
+        self._forget_cached_agent(user_id, origin_id, origin_chat)
+        follower = self.follow(user_id, target_id, target_chat)
+        threading.Thread(
+            target=self._copy_mention_reply,
+            args=(user_id, origin_id, origin_chat, target_id, target_chat, follower),
+            name=f"mention-{target_id}", daemon=True,
+        ).start()
+        return events
+
+    def _copy_mention_reply(
+        self, user_id: str, origin_id: str, origin_chat: str, target_id: str, target_chat: str,
+        follower: Optional[Iterator[ChatEvent]],
+    ) -> None:
+        """Wait for the mentioned agent's reply to end, then copy it into the origin chat (labeled with its author)."""
+        try:
+            if follower is not None:
+                for _ in follower:
+                    pass
+        except Exception as exc:  # the reply failed: nothing to copy but the failure
+            logger.warning("mention reply %s/%s/%s failed: %s", user_id, target_id, target_chat, exc)
+        try:
+            turns = self._conversations(user_id, target_id).load(target_chat)
+            reply = next((t for t in reversed(turns) if t.get("role") == "assistant"), None)
+            last_user = max((i for i, t in enumerate(turns) if t.get("role") == "user"), default=-1)
+            if reply is None or turns.index(reply) < last_user:
+                return  # no reply to this message
+            extra = {k: reply[k] for k in ("interrupted", "model", "usage") if reply.get(k) is not None}
+            self._conversations(user_id, origin_id).append(
+                origin_chat, "assistant", reply.get("content") or "",
+                author_agent=target_id, author_name=self._agent_name(user_id, target_id),
+                mention_reply={"agent_id": target_id, "chat_id": target_chat}, **extra,
+            )
+            self._forget_cached_agent(user_id, origin_id, origin_chat)
+        except Exception:
+            logger.exception("could not copy the mention reply of %s into %s/%s", target_id, origin_id, origin_chat)
+
+    def _forget_cached_agent(self, user_id: str, agent_id: str, chat_id: str) -> None:
+        """Drop an idle cached agent of the chat so its next reply reloads the turns written beside it."""
+        slot = self._slot(user_id, agent_id)
+        with slot.state:
+            if chat_id not in slot.active and not slot.pending.get(chat_id):
+                slot.agents.pop(chat_id, None)
 
     @staticmethod
     def _discard_replies(slot: _AgentSlot, chat_id: str, reason: str | None = None) -> bool:
