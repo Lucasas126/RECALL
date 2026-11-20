@@ -76,6 +76,25 @@ class PreferencesDefaultsWebTests(unittest.TestCase):
     def test_agent_defaults_endpoint(self) -> None:
         response = self.client.get("/api/agents/defaults")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), agent_defaults())
+        from src.service.chat import AGENT_MAX_TOOL_HOPS, SUBAGENTS
+        self.assertEqual(response.json(), agent_defaults(max_tool_hops=AGENT_MAX_TOOL_HOPS, subagents=SUBAGENTS))
         self.client.cookies.clear()
         self.assertEqual(self.client.get("/api/agents/defaults").status_code, 401)
+
+    def test_agent_defaults_follow_the_application_settings(self) -> None:
+        from unittest import mock
+
+        from src.config.models import SubagentSettings
+        for hops, timeout, tokens in ((37, 900, 0), (12, 120, 50_000)):
+            subagents = SubagentSettings(max_parallel_per_parent=3, timeout_seconds=timeout, max_tokens=tokens)
+            with self.subTest(hops=hops), mock.patch("src.service.chat.AGENT_MAX_TOOL_HOPS", hops), \
+                    mock.patch("src.service.chat.SUBAGENTS", subagents):
+                body = self.client.get("/api/agents/defaults").json()
+            self.assertEqual(body["chat_config"]["max_tool_hops"], {"default": hops, "min": 1, "max": 100})
+            self.assertEqual(body["delegation"]["max_parallel"]["default"], 3)
+            self.assertEqual(body["delegation"]["timeout_seconds"]["default"], timeout)
+            self.assertEqual(body["delegation"]["max_tokens"]["default"], tokens)
+            self.assertEqual(body["delegation"]["max_tokens"]["min"], 1000)  # bounds are kept
+
+    def test_model_defaults_alone_stay_empty_for_application_fields(self) -> None:
+        self.assertIsNone(agent_defaults()["chat_config"]["max_tool_hops"]["default"])

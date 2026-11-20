@@ -10,7 +10,7 @@ const code = source.match(/\/\/ ---- settings helpers[\s\S]*?\/\/ ---- end setti
 const context = vm.createContext({});
 vm.runInContext(`${code}
 this.api = { SETTINGS_SECTIONS, settingsSectionView, settingsSectionOf, sectionChangeCounts, sameValue,
-  differsFromDefault, parseNumberInput, clampNumber, stepNumber, formatNumber, rangeText, preferenceChange, settingsChanges };`, context);
+  differsFromDefault, resetValue, resetDisabled, parseNumberInput, clampNumber, stepNumber, formatNumber, rangeText, preferenceChange, settingsChanges };`, context);
 const api = context.api;
 const plain = (value) => JSON.parse(JSON.stringify(value));
 const translate = (text, values = {}) => text.replace(/\{(\w+)\}/g, (_, key) => values[key]);
@@ -122,4 +122,16 @@ test("the voice message language is a models setting that resets to its default"
   assert.equal(api.preferenceChange("stt_language", "es", "fr", "es"), null);
   assert.equal(api.preferenceChange("stt_language", null, "fr", null), null);
   assert.equal(api.preferenceChange("stt_language", "fr", "fr", "es"), undefined);
+});
+
+test("an inherit row resets to empty and is clean while empty; other rows reset to their default", () => {
+  const inherit = { inherits: true, getDefault: () => 50 };
+  assert.equal(api.resetValue(inherit), null);
+  assert.equal(api.resetDisabled(inherit, null, 50), true);
+  assert.equal(api.resetDisabled(inherit, 50, 50), false);  // explicitly set to the default: still can go back to empty
+  assert.equal(api.resetDisabled(inherit, 30, 50), false);
+  const plain_ = { getDefault: () => 60 };
+  assert.equal(api.resetValue(plain_), 60);
+  assert.equal(api.resetDisabled(plain_, 60, 60), true);
+  assert.equal(api.resetDisabled(plain_, 10, undefined), true);
 });

@@ -331,6 +331,7 @@ _SPANISH = {
     "Saved": "Guardado",
     "your default model": "tu modelo predeterminado",
     "No limit": "Sin límite",
+    "no limit": "sin límite",
     "the agent's model, else yours": "el modelo del agente, si no el tuyo",
     "Shows the model's reasoning above its replies in the chat.": "Muestra el razonamiento del modelo encima de sus respuestas en el chat.",
     "Most memory fragments suggested to the agent per message. The minimum similarity is set by the application, not by you.": "Máximo de fragmentos de memoria que se sugieren al agente por mensaje. La similitud mínima la fija la aplicación, no tú.",
