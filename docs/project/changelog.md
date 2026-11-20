@@ -3,6 +3,10 @@
 The notes of each release are on the GitHub Releases page. This file groups what changed by topic, starting with 0.4.0, which
 sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases between 5 and 15 November.
 
+## Unreleased
+
+- Fix: the reply to an @mention shows the mentioned agent's name and picture from the first moment, instead of the chat's agent until its first words arrive.
+
 ## 0.5.0
 
 Sums up the 0.4.x line (0.4.0 to 0.4.7, 16 to 19 November 2026) and adds what is new in this release.
