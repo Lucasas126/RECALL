@@ -3889,7 +3889,7 @@ function openModelPicker(target) {
   $("model-zdr").checked = Boolean(state.user?.require_zdr);
   state.modelFavoritesOnly = false;  // the filter is off whenever the selector opens; favorites still sort first
   $("model-favorites-only").hidden = stt;
-  $("model-filters").hidden = stt;
+  $("model-capabilities").hidden = stt;
   if (stt) $("model-sort").value = "prompt-asc";
   else if (previousStt) $("model-sort").value = "favorites";
   for (const option of $("model-sort").querySelectorAll("option")) {

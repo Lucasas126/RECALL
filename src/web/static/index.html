@@ -1051,13 +1051,14 @@
     </div>
     <p id="model-subtitle" class="model-subtitle">Choose a model for this chat.</p>
     <div id="model-providers" class="provider-tabs" role="tablist"></div>
-    <button id="model-inherit" type="button">Use user default</button>
     <div class="model-toolbar">
       <input id="model-search" type="search" placeholder="Search by model name or ID" aria-label="Search models">
       <button id="model-favorites-only" class="model-favorites-toggle" type="button"
         aria-label="Favorites only" aria-pressed="false" title="Show favorites only"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></button>
       <button id="model-refresh" type="button" class="icon-btn" title="Refresh" aria-label="Refresh"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg></button>
     </div>
+    <details id="model-filters" class="model-disclosure">
+      <summary id="model-filters-label">Filters</summary>
     <div class="model-options">
       <label id="model-zdr-label" class="model-filter" title="Resets to your ZDR setting each time you open the selector">
         <input id="model-zdr" type="checkbox"> <span id="model-zdr-text">ZDR only (OpenRouter)</span>
@@ -1073,9 +1074,7 @@
         </select>
       </label>
     </div>
-    <details id="model-filters" class="model-disclosure">
-      <summary id="model-filters-label">Filters</summary>
-      <div class="model-capabilities" role="group" aria-label="Model capabilities">
+      <div id="model-capabilities" class="model-capabilities" role="group" aria-label="Model capabilities">
         <label class="model-filter"><input id="model-tools" type="checkbox"> Tools</label>
         <label class="model-filter"><input id="model-images" type="checkbox"> Image input</label>
         <label class="model-filter"><input id="model-reasoning" type="checkbox"> Reasoning</label>
@@ -1086,6 +1085,7 @@
       Your OpenRouter account may still enforce ZDR.</p>
     <p id="model-status" role="status"></p>
     <p id="model-error" class="error" role="alert"></p>
+    <button id="model-inherit" type="button" class="model-inherit">Use user default</button>
     <ul id="model-list"></ul>
     <details id="model-info" class="model-disclosure">
       <summary>Information</summary>
