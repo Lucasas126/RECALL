@@ -25,7 +25,7 @@ test("slash opens only at the very start of the message", () => {
   assert.equal(context.composerTrigger("hello /du", 9), null);
   assert.equal(context.composerTrigger(" /du", 4), null);
   assert.equal(context.composerTrigger("/dream start", 12), null);
-  assert.equal(context.composerTrigger("/dream", 3).query, "d");
+  assert.equal(context.composerTrigger("/dream", 3).query, "dr");
 });
 
 test("at-sign opens at the start or after a space or newline", () => {
