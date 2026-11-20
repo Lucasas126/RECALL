@@ -663,7 +663,7 @@ details.thinking { border-left: 2px solid var(--line); padding-left: 10px; displ
 .sidebar-footer #user-name { flex: 1; min-width: 0; margin-right: 4px; }
 
 /* Composer: one card with the input and the chat options as compact chips */
-#composer-row { display: flex; align-items: stretch; min-width: 0; margin: 0 var(--gutter) calc(14px + env(safe-area-inset-bottom)); gap: 6px; }
+#composer-row { position: relative; display: flex; align-items: stretch; min-width: 0; margin: 0 var(--gutter) calc(14px + env(safe-area-inset-bottom)); gap: 6px; }
 #composer-row:has(+ #under-composer > :not([hidden])) { margin-bottom: 2px; }   /* the strip with the debug usage and the Claude dots sits right under the box */
 #composer { flex: 1; min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; grid-template-areas: "pend pend pend pend pend" "attach input controls mic send"; align-items: end; gap: 0 4px; margin: 0; padding: 4px 6px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--bg); box-shadow: 0 1px 3px #0000001f; }
 #composer:focus-within { border-color: var(--accent); }
@@ -1114,3 +1114,15 @@ html.resizing-sidebar #app { transition: none; }
 /* files dragged over the chat: a dashed frame inside the chat area (it does not move the layout) */
 #chat-view { position: relative; }
 #chat-view.drop-target::after { content: attr(data-drop-label); position: absolute; inset: 8px; z-index: 5; pointer-events: none; display: flex; align-items: center; justify-content: center; border: 2px dashed var(--accent); border-radius: var(--radius); background: color-mix(in srgb, var(--bg) 82%, transparent); color: var(--accent); font-weight: 600; }
+
+/* composer popup: slash commands and agents, above the message box */
+#composer-popup { position: absolute; z-index: 20; left: 0; right: 0; bottom: calc(100% + 4px); max-height: min(40vh, 15rem); overflow-y: auto; margin: 0; padding: 4px; list-style: none; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--bg); box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+#composer-popup[hidden] { display: none; }
+#composer-popup li { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 8px; border-radius: 4px; cursor: pointer; font-size: .9375rem; }
+#composer-popup li[aria-selected="true"], #composer-popup li:hover { background: var(--accent-soft); }
+.composer-avatar { flex-shrink: 0; display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid var(--accent); border-radius: 50%; overflow: hidden; color: var(--accent); font: 600 .75rem/1 var(--sans); }
+.composer-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.composer-avatar[data-avatar-style="free"] { border: 0; border-radius: 0; overflow: visible; }
+.composer-avatar[data-avatar-style="free"] img { object-fit: contain; }
+.composer-label { flex-shrink: 0; font-weight: 600; }
+.composer-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); opacity: .75; font-size: .8125rem; }
