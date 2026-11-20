@@ -36,7 +36,7 @@ function harness({ preferencesDelay = 0, chatDelay = 0 } = {}) {
     markChatRead: () => {}, applyChatModels: () => log.push("applyChatModels"), rememberChat: () => {},
     chatKey: (a, c) => `${a}/${c}`, isGenerating: () => false, forgetApprovals: () => {}, renderMessages: () => log.push("render"),
     followReply: () => {}, updateBusy: () => {}, syncApprovals: () => {}, ensureTaskPolling: () => {}, startProcessPolling: () => {},
-    refreshChats: async () => log.push("refreshChats"), activateView: () => {}, showUsage: () => {},
+    renderChatHeader: () => {}, refreshChats: async () => log.push("refreshChats"), activateView: () => {}, showUsage: () => {},
   });
   vm.runInContext(
     `${grab("applyServerPreferences")}\n${grab("refreshPreferences")}\n${grab("openChat")}\n`

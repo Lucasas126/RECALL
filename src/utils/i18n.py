@@ -229,6 +229,7 @@ _SPANISH = {
     "New chat": "Chat nuevo",
     "Today": "Hoy",
     "Resize the side panel": "Cambiar el tamaño del panel lateral",
+    "Resize the header": "Cambiar el tamaño de la cabecera",
     "Choose a model and routing policy for this chat": "Elige un modelo y una política de rutas para este chat",
     "Yesterday": "Ayer",
     "Previous 7 days": "Últimos 7 días",

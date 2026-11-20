@@ -53,6 +53,8 @@ context** keeps all messages when empty; its default is 30.
 
 The button at the top left of the chat header (and of the Agents view) hides or shows the left panel so the chat can use the full width; the choice is remembered in this browser, and on narrow screens the same button opens the menu drawer.
 
+On desktop the chat header also shows the open chat's name after the agent's name (a chat without messages shows *New chat* and cannot be renamed yet). Click it to rename the chat in place: Enter or leaving the field saves, Escape cancels and an empty name is ignored; it uses the same rename as the side panel, so both stay in sync. Drag the bottom edge of the header (or focus it and use the up and down arrow keys; double-click resets) to make the header taller up to 220 px: the agent's picture grows with it, and the height is remembered in this browser. On narrow screens the header is unchanged and does not show the chat name.
+
 the web **Agents** tab lists the user's agents in the sidebar (name and description) and edits the name, `description`, all `chat_config` options (associative memory is a mode selector plus a timing selector, the latter disabled while the mode is off) and, in the **Folders** tab, the folder list (name, path, indexed, read-only) with the agent's memory index status (sources, files, chats and chunks indexed, last reconciles, rebuilding or indexing) and **Reindex** / **Rebuild from scratch** buttons. a new agent's `id` is derived from its name (lowercase, accents removed, non-alphanumeric characters replaced by `-`) and is not editable from the form. the same operations are available as routes (see the [API reference](../reference/api.md#agent-routes)).
 
 ## writing agent descriptions
