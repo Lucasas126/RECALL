@@ -9,6 +9,8 @@ One list of ideas and planned work. Implemented behaviour is documented in the
 
 ### resilience
 
+- **Voice message transcript in the web UI** (reported 2026-11-20): (1) after sending an audio, its transcription does not show until the page is reloaded; (2) once shown, the transcript appears twice: as small text under the audio player and again as a plain "[AUDIO] Audio transcription:" message body. Intended: show it once, right after the transcription arrives, without a reload, and without the raw "[AUDIO]" prefix in the visible text.
+
 - **Switching agent in the web UI breaks the chat** (reported 2026-11-20, not yet reproduced): changing the agent in the top selector of an open chat leaves it half broken. Intended behavior: choosing another agent opens a new chat with that agent automatically (the current chat stays as it was). Reproduce first in a browser demo, then fix.
 
 - **Level and tool groups in a running chat**: approval rules are re-read before every decision and apply at once, but a changed level, tool group or tool availability still applies only to new chats (the chat keeps the tools it was built with). Open: whether to rebuild the tools between turns of a running chat.
