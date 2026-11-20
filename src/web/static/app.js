@@ -2879,7 +2879,13 @@ function renderProviderTabs() {
       tab.append(Object.assign(document.createElement("strong"), { textContent: any ? tr("Any") : row.label }));
       const experimental = tr("experimental");
       const note = row.available ? (row.experimental ? experimental : "") : providerReason(row);
-      if (note) tab.append(Object.assign(document.createElement("small"), { textContent: note }));
+      if (note) {
+        // status as a small dot plus tooltip, so the chip stays on one line
+        tab.append(Object.assign(document.createElement("span"), { className: "provider-dot", ariaHidden: "true" }));
+        tab.title = row.available ? note : `${note}${row.detail ? ` (${row.detail})` : ""}`;
+        tab.setAttribute("aria-label", `${any ? tr("Any") : row.label}: ${note}`);
+        tab.dataset.status = row.available ? "info" : "warn";
+      }
       tab.addEventListener("click", () => chooseProvider(row.id));
       return tab;
     }));
