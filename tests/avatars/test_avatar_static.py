@@ -140,7 +140,8 @@ class AvatarScriptTests(unittest.TestCase):
     def test_assistant_replies_start_with_the_big_picture_only_for_assistant_bubbles(self) -> None:
         body = APP_JS[APP_JS.index("function addMessage("):]
         body = body[: body.index("function renderOne(")]
-        self.assertIn('role === "assistant" ? messageAvatar(currentAgentAvatar())', body)
+        self.assertIn('if (role === "assistant") setPicture(author ? author.avatar : currentAgentAvatar())', body)
+        self.assertIn("messageAvatar(avatar)", body)
         self.assertIn('className: "msg-avatar"', body)
         self.assertNotIn("innerHTML", body)
         for rule in (".msg-avatar {", "display: flow-root", ".msg-avatar img", '[data-avatar-style="free"]'):
