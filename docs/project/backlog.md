@@ -67,6 +67,7 @@ One list of ideas and planned work. Implemented behaviour is documented in the
 - Remove unnecessary messages from the settings and configuration selectors to keep the interface clean.
 - **Model and provider picker redesign**: the current selector is overloaded and uncomfortable; on mobile the provider selection and filters take most of the screen, leaving almost no room for the model list. Make it compact (list first, filters collapsed or in a sheet) and usable on a phone.
 - **Agent settings, tools section**: when approval rules exist they take a lot of space and push the tool selections to the bottom. Put the tool selections first and make the rules list collapsible (collapsed by default, with a count). Review the other agent settings sections for the same problem.
+- **Chat header (desktop)**: show the current chat's name next to the agent name, and make the header taller on desktop so the agent's picture can be seen larger. Leave the mobile header as it is (already tight).
 - A global `defaults.yaml` merged under `user.yaml` and agent files, and a channel to user index in a `ConfigStore` ([agent.yaml](../reference/agent-yaml.md#loading)).
 
 ### maintenance and workflow
