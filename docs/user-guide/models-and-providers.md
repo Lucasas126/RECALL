@@ -27,6 +27,13 @@ selected model, else the last provider used, else the main provider. Switching
 tab never changes the *favorites only* filter. Embeddings always use the main
 provider (no picker).
 
+The picker is compact so the model list is the main content, also on a phone. Providers are one
+horizontally scrollable row of chips; a small dot marks a provider that is unavailable or experimental, and its
+tooltip says why. Search, the favorites toggle and refresh share one row; **Filters** (collapsed by default) holds
+the sort order, the ZDR checkbox and the capability filters. The "Use ... default" entry is the first row of the
+list. Each model is one line (name, id, small badges for image input, tools and reasoning, and the starting input
+price); the **i** button on a row shows its full price, routing notes and description.
+
 A provider is **available** when the server can use it, checked on the server:
 
 | provider | available when | otherwise the tab is disabled with |

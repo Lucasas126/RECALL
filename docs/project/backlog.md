@@ -65,7 +65,6 @@ One list of ideas and planned work. Implemented behaviour is documented in the
 - Search across chat history from the web UI (the agent can already search its conversations; the user cannot).
 - Optional voice replies (TTS) in Telegram, per agent.
 - Remove unnecessary messages from the settings and configuration selectors to keep the interface clean.
-- **Model and provider picker redesign**: the current selector is overloaded and uncomfortable; on mobile the provider selection and filters take most of the screen, leaving almost no room for the model list. Make it compact (list first, filters collapsed or in a sheet) and usable on a phone. Observed on a phone: provider cards (two rows, each with a subtitle) plus the default-model button, search, sort and filters use about 60% of the height, so only 1.5 models are visible; each model card repeats name, id and a two-line description. Ideas: provider chips in one scrollable row with the status as a small dot, search and sort on one row, one-line model rows (name, short id, badges) with the description on tap, sticky header. Some labels are untranslated (Search, Sort, Filters, Information, Favorites first).
 - A global `defaults.yaml` merged under `user.yaml` and agent files, and a channel to user index in a `ConfigStore` ([agent.yaml](../reference/agent-yaml.md#loading)).
 
 ### maintenance and workflow

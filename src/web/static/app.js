@@ -492,6 +492,34 @@ function numberRow(id, getSpec, nullText) {
 }
 // ---- end number fields and setting rows
 
+const SORT_LABELS = {
+  favorites: "Favorites first", name: "Name A-Z", "prompt-asc": "Input price: low to high",
+  "prompt-desc": "Input price: high to low", "completion-asc": "Output price: low to high",
+  "completion-desc": "Output price: high to low",
+};
+const INFO_NOTES = [
+  "Prices are starting rates in USD per 1M tokens; provider, context tiers, caching and extras may change charges.",
+  "Capability filters use catalog metadata, not a routing guarantee. Image input describes the model; the composer also accepts image, video and audio attachments when the selected model declares support. PDFs are converted to text on the server and work with any model. Filters do not enable tools or reasoning in the agent.",
+];
+
+// static texts of the model picker dialog that translateInterface's id/text pairs do not reach
+function translateModelDialog() {
+  for (const option of $("model-sort").options) option.textContent = tr(SORT_LABELS[option.value]);
+  for (const [id, text] of [
+    ["model-sort-text", "Sort"], ["model-tools-text", "Tools"], ["model-images-text", "Image input"],
+    ["model-reasoning-text", "Reasoning"], ["model-info-summary", "Information"],
+    ["model-note-prices", INFO_NOTES[0]], ["model-note-capabilities", INFO_NOTES[1]],
+  ]) $(id).textContent = tr(text);
+  $("model-capabilities").setAttribute("aria-label", tr("Model capabilities"));
+  $("model-search").placeholder = tr("Search by model name or ID");
+  $("model-search").setAttribute("aria-label", tr("Search models"));
+  $("model-refresh").title = tr("Refresh");
+  $("model-refresh").setAttribute("aria-label", tr("Refresh"));
+  $("model-close").title = tr("Close");
+  $("model-close").setAttribute("aria-label", tr("Close model selector"));
+  updateModelControls();
+}
+
 function translateInterface() {
   renderVersion();
   for (const [id, text] of [
@@ -691,6 +719,7 @@ function translateInterface() {
   for (const option of $("automation-kind").options) option.textContent = tr(kindLabels[option.value]);
   $("automation-title").placeholder = tr("Short name (optional)");
   $("automation-instruction").placeholder = tr("What the agent must do when it fires. It will not have this screen: be specific.");
+  translateModelDialog();
   $("new-disposable-chat").title = tr("New disposable chat");
   $("new-disposable-chat").setAttribute("aria-label", tr("New disposable chat"));
   syncNavToggles();
@@ -2895,7 +2924,13 @@ function renderProviderTabs() {
       tab.append(Object.assign(document.createElement("strong"), { textContent: any ? tr("Any") : row.label }));
       const experimental = tr("experimental");
       const note = row.available ? (row.experimental ? experimental : "") : providerReason(row);
-      if (note) tab.append(Object.assign(document.createElement("small"), { textContent: note }));
+      if (note) {
+        // status as a small dot plus tooltip, so the chip stays on one line
+        tab.append(Object.assign(document.createElement("span"), { className: "provider-dot", ariaHidden: "true" }));
+        tab.title = row.available ? note : `${note}${row.detail ? ` (${row.detail})` : ""}`;
+        tab.setAttribute("aria-label", `${any ? tr("Any") : row.label}: ${note}`);
+        tab.dataset.status = row.available ? "info" : "warn";
+      }
       tab.addEventListener("click", () => chooseProvider(row.id));
       return tab;
     }));
@@ -3606,10 +3641,11 @@ function updateModelControls() {
   $("model-zdr-warning").hidden = $("model-zdr").checked || !zdrApplies || !state.user?.require_zdr;
   renderProviderTabs();
   $("model-favorites-only").setAttribute("aria-pressed", String(state.modelFavoritesOnly));
-  $("model-favorites-only").title = state.modelFavoritesOnly ? "Show all models" : "Show favorites only";
+  $("model-favorites-only").title = tr(state.modelFavoritesOnly ? "Show all models" : "Show favorites only");
+  $("model-favorites-only").setAttribute("aria-label", tr("Favorites only"));
   const activeFilters = ["model-tools", "model-images", "model-reasoning"]
     .filter((id) => $(id).checked).length;
-  $("model-filters-label").textContent = activeFilters ? `Filters (${activeFilters})` : "Filters";
+  $("model-filters-label").textContent = activeFilters ? `${tr("Filters")} (${activeFilters})` : tr("Filters");
   $("model-filters").dataset.active = String(activeFilters > 0);
 }
 
@@ -3764,27 +3800,42 @@ function renderModelList() {
     const name = document.createElement("strong");
     name.textContent = model.name;
     const id = document.createElement("small");
+    id.className = "model-id";
     id.textContent = model.id;
-    const providers = document.createElement("small");
-    providers.textContent = !available ? tr("Unavailable under the current filter")
+    const notes = [!available ? tr("Unavailable under the current filter")
       : subscription ? tr("Experimental: uses your own Claude Code login.")
       : cloud ? tr(zdrInPlay ? "Ollama cloud model: runs on Ollama's servers. Not ZDR." : "Ollama cloud model: runs on Ollama's servers.")
       : local ? tr("Runs on your Ollama server.")
       : !zdrInPlay ? ""
       : model.zdr_providers?.length ? `ZDR routes: ${model.zdr_providers.join(", ")}`
-      : "No active ZDR routes";
+      : "No active ZDR routes"];
+    const price = subscription || local ? "" : `${tokenPrice(model.pricing?.prompt)}`;
     const pricing = document.createElement("small");
-    pricing.textContent = subscription ? tr("Counts against your Claude plan limits; no per-token price.")
+    pricing.className = "model-price";
+    pricing.textContent = price.replace("from ", "");
+    const details = document.createElement("small");
+    details.className = "model-details";
+    details.hidden = true;
+    details.textContent = [...notes, subscription ? tr("Counts against your Claude plan limits; no per-token price.")
       : local ? tr("Local model; no per-token price.")
       : `USD / 1M tokens: input ${tokenPrice(model.pricing?.prompt)}`
-        + (stt ? "" : ` | output ${tokenPrice(model.pricing?.completion)}`);
-    choose.append(name);
+        + (stt ? "" : ` | output ${tokenPrice(model.pricing?.completion)}`), model.description]
+      .filter(Boolean).join("\n");
+    const badges = document.createElement("span");
+    badges.className = "model-badges";
+    if (model.input_modalities?.includes("image")) badges.append(Object.assign(document.createElement("small"), { className: "model-badge", textContent: "img", title: tr("Image input") }));
+    if (matchesCapabilities(model, { tools: true, images: false, reasoning: false })) badges.append(Object.assign(document.createElement("small"), { className: "model-badge", textContent: "tools", title: tr("Tools") }));
+    if (matchesCapabilities(model, { tools: false, images: false, reasoning: true })) badges.append(Object.assign(document.createElement("small"), { className: "model-badge", textContent: "reasoning", title: tr("Reasoning") }));
+    const line = document.createElement("span");
+    line.className = "model-line";
+    line.append(name);
     if (state.modelProvider === ANY_PROVIDER) {
-      choose.append(Object.assign(document.createElement("small"), {
+      line.append(Object.assign(document.createElement("small"), {
         className: "model-provider-tag", textContent: model.provider_label ?? providerName(provider),
       }));
     }
-    choose.append(id, pricing, providers);
+    line.append(badges, pricing);
+    choose.append(line, id);
     choose.addEventListener("click", () => selectModel(model.id, provider));
     const star = document.createElement("button");
     star.type = "button";
@@ -3796,8 +3847,20 @@ function renderModelList() {
     star.title = label;
     star.disabled = state.modelBusy || state.busy;
     star.addEventListener("click", () => toggleFavorite(model.id, provider));
-    row.append(choose);
+    const info = document.createElement("button");
+    info.type = "button";
+    info.className = "model-info-toggle";
+    info.textContent = "i";
+    info.setAttribute("aria-label", tr("Information"));
+    info.setAttribute("aria-expanded", "false");
+    info.title = tr("Information");
+    info.addEventListener("click", () => {
+      details.hidden = !details.hidden;
+      info.setAttribute("aria-expanded", String(!details.hidden));
+    });
+    row.append(choose, info);
     if (!stt) row.append(star);
+    row.append(details);
     list.append(row);
   }
 }
@@ -3959,7 +4022,7 @@ function openModelPicker(target) {
   $("model-zdr").checked = Boolean(state.user?.require_zdr);
   state.modelFavoritesOnly = false;  // the filter is off whenever the selector opens; favorites still sort first
   $("model-favorites-only").hidden = stt;
-  $("model-filters").hidden = stt;
+  $("model-capabilities").hidden = stt;
   if (stt) $("model-sort").value = "prompt-asc";
   else if (previousStt) $("model-sort").value = "favorites";
   for (const option of $("model-sort").querySelectorAll("option")) {
