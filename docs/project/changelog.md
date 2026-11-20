@@ -3,6 +3,11 @@
 The notes of each release are on the GitHub Releases page. This file groups what changed by topic, starting with 0.4.0, which
 sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases between 5 and 15 November.
 
+## unreleased
+
+- Memory search is hybrid: keyword matches (BM25) are merged with the embedding matches, so exact names and model numbers are found. Existing indexes get their keyword table from the stored chunks, without new embedding calls.
+- Associative memory injects up to 5 fragments by default (was 3), and 2 of them are reserved for the agent's own mind palace when relevant enough (similarity 0.40). Each user can change both in Settings; new `settings.yaml` keys `palace_slots`, `palace_threshold`, `palace_exclude`.
+
 ## 0.5.1
 
 - Fix: the reply to an @mention shows the mentioned agent's name and picture from the first moment, instead of the chat's agent until its first words arrive.

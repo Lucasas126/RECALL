@@ -56,8 +56,11 @@ should not use the chat's own model:
 ```yaml
 associative_memory:
   context_messages: 8
-  top_n: 3
+  top_n: 5
   score_threshold: 0.45
+  palace_slots: 2
+  palace_threshold: 0.40
+  palace_exclude: []
   query_model: openai/gpt-4o-mini
   api_key: OPENROUTER_API_KEY
   # zdr: true   # optional override of the user's require_zdr
@@ -74,7 +77,7 @@ neither. If the env var is unset or the query request fails, the error is logged
 turn continues without associative memory and the indicator shows "skipped".
 `context_messages` (0-100) is how many recent messages the query model sees (as a quoted transcript, each
 message cut to 600 characters, so the small model judges the conversation instead of continuing it),
-`top_n` (1-20) the application default for the maximum fragments injected per turn, and
+`top_n` (1-20, shipped 5) the application default for the maximum fragments injected per turn, and
 `score_threshold` (0-1, shipped 0.45) the minimum similarity. On a small English test vault 0.35 was the best
 cut (0.45 dropped correct hits), but on a real agent memory that is mostly about one subject everything
 in-domain scores 0.44-0.60, so the tail below 0.45 was almost all noise; re-measure when the embeddings model
@@ -83,11 +86,30 @@ general knowledge, and a proposal that is not a short keyword query (prose, mark
 Settings (`associative_max_matches` in their `preferences.json`, integer 1-20; empty or absent follows
 `top_n`); a change applies from the next message. `score_threshold` is application-only and cannot be
 set per user.
+
+Of those fragments, `palace_slots` (shipped 2) are reserved for the agent's own mind palace: the best
+mind-palace chunks with a similarity of at least `palace_threshold` (shipped 0.40) are taken first, and the
+remaining places go to any chunk above `score_threshold`, in search order. Chats are numerous and tend to
+outrank notes, so without the reservation the agent's curated notes rarely appeared. Unused reserved places go
+to the normal fill, and nothing below its threshold is ever injected. `palace_exclude` lists mind-palace path
+prefixes (for example an archive folder) that never take a reserved slot; they still compete as normal hits.
+Each user can change the number of reserved slots in Settings (`associative_palace_slots`, 0-20, never more than
+their maximum; 0 turns it off); the thresholds and exclusions are application-only. These defaults come from an
+evaluation on about 200 real associative queries: with 5 fragments and hybrid search, the share of turns that got
+at least one useful fragment rose from 79% to 93% with 2 reserved slots, while reserving slots for any document
+(user folders included) added mostly noise.
 Each fragment is shown with its address and heading path (or chat title and date) and
 up to 400 characters of its text, cut at a sentence end when possible. Chunks of the
 chat being answered are never suggested: that chat is already in the context.
 
 ## memory index
+
+The search (associative memory and the `query_memory` tool) is hybrid: the chunks nearest to the query by
+embedding and the best keyword matches (BM25 over a SQLite FTS5 table beside the vectors) are merged by
+reciprocal rank fusion, so exact names, model numbers and rare words are found even when their embedding is not
+close. The fused rank only orders the results; each hit's score stays its cosine similarity, which is what the
+thresholds compare. An index built before hybrid search gets its keyword table filled from the stored chunks
+on the next reconcile, without new embedding calls.
 
 The search runs over the agent's vector index (`data/<user_id>/<agent_id>/.index`),
 which covers the mind palace, the agent's skills (`agent:skills/**`), its conversations
