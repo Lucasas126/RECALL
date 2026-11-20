@@ -981,6 +981,15 @@ function replyAuthor(authorId, storedName, agents, currentId) {
   return { id, name: agent?.name ?? storedName ?? id ?? "", avatar: agent?.avatar ?? null };
 }
 
+// The agent a message @mentions (same rule as the server: `@<id>` at the start, then a space or the end), when it is
+// another existing agent of the user; else null. Lets the reply bubble show the right author before the first event.
+function mentionedAgent(text, agents, currentId) {
+  const match = /^\s*@([a-z0-9][a-z0-9_-]{0,63})(?=\s|$)/i.exec(String(text ?? ""));
+  const id = match?.[1].toLowerCase();
+  if (!id || id === currentId) return null;
+  return (agents ?? []).some((a) => a.id === id) ? id : null;
+}
+
 // The active agent is the header's headline; the select is stretched invisibly over it as the switcher.
 function renderAgentBanner() {
   const name = currentAgentName();
@@ -7208,7 +7217,9 @@ async function dispatchMessage(content, attachments, edit = null) {
   userMessage.attachments(edit ? edit.shown : attachments);
   // /dream and /compact are answered by RECALL itself (not stored, not the model): shown as a system reply
   const command = !edit && !attachments.length && (DREAM_COMMAND.test(content) || COMPACT_COMMAND.test(content) || USAGE_COMMAND.test(content));
-  const reply = addMessage(command ? "command" : "assistant", state.view);
+  const mentioned = !edit && !command ? mentionedAgent(content, state.user?.agents, state.agentId) : null;
+  const author = mentioned ? replyAuthor(mentioned, null, state.user?.agents, state.agentId) : null;
+  const reply = addMessage(command ? "command" : "assistant", state.view, author);
   const request = {
     userId: state.user.id, agentId: state.agentId, chatId: state.chatId,
     session: state.session, controller: new AbortController(), reply,

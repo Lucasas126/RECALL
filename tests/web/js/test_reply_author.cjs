@@ -8,7 +8,7 @@ const vm = require("node:vm");
 const source = readFileSync(path.join(__dirname, "..", "..", "..", "src", "web", "static", "app.js"), "utf8");
 const take = (name) => source.match(new RegExp(`function ${name}\\([\\s\\S]*?\\r?\\n\\}\\r?\\n`))[0];
 const context = vm.createContext({});
-vm.runInContext([take("replyAuthor"), "this.replyAuthor = replyAuthor;"].join("\n"), context);
+vm.runInContext([take("replyAuthor"), take("mentionedAgent"), "this.replyAuthor = replyAuthor; this.mentionedAgent = mentionedAgent;"].join("\n"), context);
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
 const avatar = { url: "/api/agents/sage/avatar", version: "1", style: "circle" };
@@ -25,4 +25,16 @@ test("without an author the chat's own agent is used", () => {
 test("a deleted agent falls back to the stored name, then the id, without a picture", () => {
   assert.deepEqual(plain(context.replyAuthor("atlas", "Atlas", agents, "nova")), { id: "atlas", name: "Atlas", avatar: null });
   assert.deepEqual(plain(context.replyAuthor("atlas", undefined, null, "nova")), { id: "atlas", name: "atlas", avatar: null });
+});
+
+test("a message that @mentions another existing agent names it before the reply starts", () => {
+  assert.equal(context.mentionedAgent("@Sage hello", agents, "nova"), "sage");
+  assert.equal(context.mentionedAgent("  @sage", agents, "nova"), "sage");
+});
+
+test("no early author for the chat's own agent, an unknown id, a mid-text @ or a glued word", () => {
+  assert.equal(context.mentionedAgent("@nova hi", agents, "nova"), null);
+  assert.equal(context.mentionedAgent("@atlas hi", agents, "nova"), null);
+  assert.equal(context.mentionedAgent("hi @sage", agents, "nova"), null);
+  assert.equal(context.mentionedAgent("@sage, hi", agents, "nova"), null);
 });
