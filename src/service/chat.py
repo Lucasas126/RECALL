@@ -282,7 +282,7 @@ class ChatEvent:
     carry a generation id so adapters can distinguish overlapping deliveries.
     """
 
-    kind: Literal["reasoning", "text", "tool_start", "tool", "usage", "interrupted", "memory", "notice", "approval", "approval_resolved", "approval_explanation", "task_started", "transcript"]
+    kind: Literal["reasoning", "text", "tool_start", "tool", "usage", "interrupted", "memory", "notice", "approval", "approval_resolved", "approval_explanation", "task_started", "transcript", "speaker"]
     text: str = ""
     data: Optional[dict] = None
     generation_id: str = ""
@@ -409,6 +409,8 @@ class ChatService:
         )
         self._slots: dict[tuple[str, str], _AgentSlot] = {}
         self._slots_guard = threading.Lock()
+        # (user, origin agent, origin chat) -> (mentioned agent, its chat) while a mention reply runs or is being copied
+        self._mention_runs: dict[tuple[str, str, str], tuple[str, str]] = {}
         self._favorites = ModelFavorites(CONFIG_DIR)
         self._preferences = UserPreferencesStore(CONFIG_DIR)
         self._agents = AgentStore(CONFIG_DIR, DATA_DIR)
@@ -1281,7 +1283,9 @@ class ChatService:
         """Whether the chat has a reply running or queued right now."""
         slot = self._slot(user_id, agent_id)
         with slot.state:
-            return self._chat_busy(slot, chat_id)
+            if self._chat_busy(slot, chat_id):
+                return True
+        return self._mention_run(user_id, agent_id, chat_id) is not None
 
     def chat_summary(self, user_id: str, agent_id: str, chat_id: str) -> dict:
         """The summary (title, turns, last activity) of one chat."""
@@ -1307,6 +1311,11 @@ class ChatService:
         slot = self._slot(user_id, agent_id)
         with slot.state:
             self._discard_replies(slot, chat_id, reason)
+        mention = self._mention_run(user_id, agent_id, chat_id)
+        if mention is not None:  # the chat shows another agent's reply to an @mention: stop that one
+            target = self._slot(user_id, mention[0])
+            with target.state:
+                self._discard_replies(target, mention[1], reason)
 
     def stop_chat(self, user_id: str, agent_id: str, chat_id: str) -> dict:
         """Stop the chat's running reply (the partial answer is kept as an interrupted turn) and drop queued ones."""
@@ -1505,7 +1514,8 @@ class ChatService:
                         "associative_fragments", "associative_query",
                         "source", "task_ids",  # a wake turn: a subagent result, not written by the user
                         "task_brief", "task_message",  # a worker chat's first message / follow-up, structured for the UI
-                        "tokens_before", "tokens_after", "manual", "kept_percent",  # a compaction turn: the divider shows the reduction
+                        "tokens_before", "tokens_after", "manual", "kept_percent",
+                        "author_agent", "author_name", "mention",  # an @mention: who wrote the reply / whom the user asked  # a compaction turn: the divider shows the reduction
                     )
                     if t.get(k) is not None
                 },
@@ -1851,13 +1861,33 @@ class ChatService:
             **({"channel": stored_channel} if stored_channel else {}),
         )
         self._forget_cached_agent(user_id, origin_id, origin_chat)
+        key = (user_id, origin_id, origin_chat)
+        with self._slots_guard:
+            self._mention_runs[key] = (target_id, target_chat)
         follower = self.follow(user_id, target_id, target_chat)
         threading.Thread(
             target=self._copy_mention_reply,
             args=(user_id, origin_id, origin_chat, target_id, target_chat, follower),
             name=f"mention-{target_id}", daemon=True,
         ).start()
-        return events
+        return self._with_speaker(user_id, target_id, events)
+
+    def _mention_run(self, user_id: str, agent_id: str, chat_id: str) -> Optional[tuple[str, str]]:
+        with self._slots_guard:
+            return self._mention_runs.get((user_id, agent_id, chat_id))
+
+    def speaker(self, user_id: str, agent_id: str) -> dict:
+        """Who answers in a chat that is not its own (an @mention): id, name and picture of that agent."""
+        try:
+            config = self._agent_config(user_id, agent_id)
+            return {"agent_id": agent_id, "name": config.name, "avatar": self._agent_avatar_view(user_id, config)}
+        except Exception:
+            return {"agent_id": agent_id, "name": agent_id, "avatar": None}
+
+    def _with_speaker(self, user_id: str, agent_id: str, events: Iterator[ChatEvent]) -> Iterator[ChatEvent]:
+        """The events of another agent's reply, announced by a first `speaker` event."""
+        yield ChatEvent("speaker", data=self.speaker(user_id, agent_id))
+        yield from events
 
     def _copy_mention_reply(
         self, user_id: str, origin_id: str, origin_chat: str, target_id: str, target_chat: str,
@@ -1885,6 +1915,10 @@ class ChatService:
             self._forget_cached_agent(user_id, origin_id, origin_chat)
         except Exception:
             logger.exception("could not copy the mention reply of %s into %s/%s", target_id, origin_id, origin_chat)
+        finally:
+            with self._slots_guard:
+                if self._mention_runs.get((user_id, origin_id, origin_chat)) == (target_id, target_chat):
+                    del self._mention_runs[(user_id, origin_id, origin_chat)]
 
     def _forget_cached_agent(self, user_id: str, agent_id: str, chat_id: str) -> None:
         """Drop an idle cached agent of the chat so its next reply reloads the turns written beside it."""
@@ -2509,6 +2543,10 @@ class ChatService:
         """
         self._owned_agent(user_id, agent_id)
         self._require_chat(self._conversations(user_id, agent_id), chat_id)
+        mention = self._mention_run(user_id, agent_id, chat_id)
+        if mention is not None:
+            events = self.follow(user_id, mention[0], mention[1])
+            return None if events is None else self._with_speaker(user_id, mention[0], events)
         slot = self._slot(user_id, agent_id)
         with slot.state:
             run = slot.active.get(chat_id)

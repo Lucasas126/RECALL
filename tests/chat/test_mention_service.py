@@ -74,6 +74,43 @@ class MentionServiceTests(steering.SteeringFixture):
         list(self.service.send("user-one", "agent-one", self.chat, "@agent-two edited", rewind_to=0))
         self.assertEqual(len(self.calls[B]), 0)
 
+    def test_stream_starts_with_the_speaker_and_history_names_the_author(self) -> None:
+        events = list(self._send("@agent-two hi"))
+        self.assertEqual(events[0].kind, "speaker")
+        self.assertEqual(events[0].data["agent_id"], "agent-two")
+        self.assertEqual(events[0].data["name"], "agent-two")
+        self._wait_copy(1)
+        messages = self.service.get_chat("user-one", "agent-one", self.chat)["messages"]
+        self.assertEqual(messages[0]["mention"]["agent_id"], "agent-two")
+        self.assertEqual((messages[1]["author_agent"], messages[1]["author_name"]), ("agent-two", "agent-two"))
+
+    def test_running_mention_shows_as_active_can_be_followed_and_stopped(self) -> None:
+        started, release = self._gate(self._b_prompt_key("slow"))
+        events = self._send("@agent-two slow")
+        consumer = threading.Thread(target=lambda: self.collected.extend(events))
+        self.collected: list = []
+        consumer.start()
+        self.assertTrue(started.wait(2))
+        self.assertTrue(self.service.chat_active("user-one", "agent-one", self.chat))
+        follower = self.service.follow("user-one", "agent-one", self.chat)
+        self.assertIsNotNone(follower)
+        self.assertEqual(next(follower).kind, "speaker")
+        self.service.stop_chat("user-one", "agent-one", self.chat)
+        release.set()
+        consumer.join(3)
+        self.assertEqual(self.collected[-1].kind, "interrupted")
+        copied = self._wait_copy(1)[-1]
+        self.assertTrue(copied.get("interrupted"))
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and self.service.chat_active("user-one", "agent-one", self.chat):
+            time.sleep(0.02)
+        self.assertFalse(self.service.chat_active("user-one", "agent-one", self.chat))
+
+    def _b_prompt_key(self, text: str) -> str:
+        """The gate key: the responder matches the whole latest user message, which for B is the full mention prompt."""
+        from src.service.mentions import chat_excerpt, mention_prompt
+        return mention_prompt(text, "agent-one", "agent-one", chat_excerpt(self.sources[A].load(self.chat)))
+
 
 if __name__ == "__main__":
     unittest.main()
