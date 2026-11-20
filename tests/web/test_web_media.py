@@ -37,6 +37,22 @@ class VoiceMessageServiceTests(models_tests.ModelFixture):
         reloaded = self.service.get_chat("user-one", "agent-one", self.chat)["messages"][0]
         self.assertEqual(reloaded["media"][0]["transcript"], "Hola qué tal")
 
+    def test_transcript_event_comes_before_the_reply(self) -> None:
+        events = self._send_audio("Hello there")
+        heard = [e for e in events if e.kind == "transcript"]
+        self.assertEqual([e.data for e in heard], [{"transcripts": ["Hello there"]}])
+        self.assertEqual(events[0].kind, "transcript")
+
+    def test_editing_a_voice_message_keeps_recording_and_transcript(self) -> None:
+        self._send_audio("Hello there")
+        resolved = Mock(provider_name="openrouter", api_key="test")
+        with patch("src.service.chat.load_agent", return_value=resolved):
+            events = list(self.service.send("user-one", "agent-one", self.chat, "and more", rewind_to=0))
+        self.assertEqual([e for e in events if e.kind == "transcript"], [])  # nothing is transcribed again
+        turn = self.service.get_chat("user-one", "agent-one", self.chat)["messages"][0]
+        self.assertEqual(turn["content"], "and more\n\n[AUDIO] Audio transcription:\nHello there")
+        self.assertEqual([m["transcript"] for m in turn["media"]], ["Hello there"])
+
     def test_empty_transcription_gives_a_clear_error_and_logs_it(self) -> None:
         with self.assertLogs("recall.service", level="WARNING") as logs:
             with self.assertRaises(InputError) as caught:

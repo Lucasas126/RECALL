@@ -1738,8 +1738,8 @@ class ChatService:
         media = [
             {k: a[k] for k in ("name", "modality", "mime_type", "data_url")}
             for a in attachments if a["modality"] in ("audio", "video", "document")
-        ] + kept_documents + kept_recordings
-        if not media and rewind_to is not None and not attachments:
+        ] + kept_documents
+        if rewind_to is not None and not attachments:  # an edit without new files keeps all the originals
             media = list(original.get("media") or [])
         text, attachments, notice = self._decompose_videos(user_id, agent_id, chat_id, text, attachments)
         transcripts: list[str] = []
