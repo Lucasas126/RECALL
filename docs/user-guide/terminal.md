@@ -227,7 +227,7 @@ rule, when the command looks like it contains a secret, or in a subagent task. A
 approved once and you are told why. The rule is active in the same reply and in every chat of the agent from its next reply.
 The same holds for any change of the agent's or the user's `approval_rules` (the web form, the permission tools, the CLI or an edit of the file): the next action of a running chat follows it, a `deny` included. If the file cannot be read or is invalid, the last good rules stay in force.
 
-Every learned rule is listed under **Learned approvals** in the Terminal block of the agent form (each with **Remove**, and **Reset to
+Every learned rule is listed under **Learned approvals** (a collapsed section with a count, after the other tool settings) in the agent form (each with **Remove**, and **Reset to
 defaults** for all of them), and with `python -m src.admin agent rules --user U --agent A [--clear]`. The rule file edits and every approval
 (with its `scope`) are in the [audit file](#audit).
 
@@ -245,7 +245,7 @@ defaults** for all of them), and with `python -m src.admin agent rules --user U 
   command timeout, the **Learned approvals** (the rules written by *Always for this agent*, with **Remove** and **Reset to defaults**, which
   removes only those), and the **Approval rules** editor. With no backends defined it explains how to add one. Each backend also shows,
   read only, its `kind` (`sandbox`, `machine` or `local`) and the level it needs; backends are defined in `user.yaml` only, never in the web UI.
-- **Approval rules editor** (Terminal block, Tools tab): the agent's own hand-written `approval_rules`. **When no rule matches** is the
+- **Approval rules editor** (Tools tab, after the tool, terminal and delegation settings, in a collapsed **Approval rules (n)** section that opens when you add a rule or a rule has an error): the agent's own hand-written `approval_rules`. **When no rule matches** is the
   layer `default` (empty follows the user and installation defaults). **Add rule** appends a row with the fields of a rule: verdict
   (allow, ask, deny), what it applies to (any action, terminal commands, read files, write files), command, path, backend (name or
   pattern), kind of backend, danger (any, only dangerous, only not dangerous) and **Exact match**; each row has **Remove**, and keys the

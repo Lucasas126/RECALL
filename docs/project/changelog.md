@@ -5,6 +5,7 @@ sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases b
 
 ## unreleased
 
+- Agent settings, Tools tab: the tool, terminal and delegation selections come first; the approval rules, the learned approvals and the default verdict for unmatched actions follow in a "Terminal approvals" block where the two lists are collapsed by default with a count, and rule rows are more compact.
 - Memory search is hybrid: keyword matches (BM25) are merged with the embedding matches, so exact names and model numbers are found. Existing indexes get their keyword table from the stored chunks, without new embedding calls.
 - Associative memory injects up to 5 fragments by default (was 3), and 2 of them are reserved for the agent's own mind palace when relevant enough (similarity 0.40). Each user can change both in Settings; new `settings.yaml` keys `palace_slots`, `palace_threshold`, `palace_exclude`.
 
