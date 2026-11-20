@@ -1975,7 +1975,11 @@ class ChatService:
         """Approvals the chat's tools are waiting on (same payload as the `approval` event)."""
         self._owned_agent(user_id, agent_id)
         self._require_chat(self._conversations(user_id, agent_id), chat_id)
-        return self._approvals.pending(user_id, agent_id, chat_id)
+        pending = self._approvals.pending(user_id, agent_id, chat_id)
+        mention = self._mention_run(user_id, agent_id, chat_id)
+        if mention is not None:  # an @mentioned agent answers here: its cards carry its own agent and chat ids
+            pending = pending + self._approvals.pending(user_id, mention[0], mention[1])
+        return pending
 
     # ------------------------------------------------------------------ subagent tasks (web API; always the session user's own)
 

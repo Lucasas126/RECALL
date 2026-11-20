@@ -106,6 +106,39 @@ class MentionServiceTests(steering.SteeringFixture):
             time.sleep(0.02)
         self.assertFalse(self.service.chat_active("user-one", "agent-one", self.chat))
 
+    def test_approvals_of_the_mentioned_agent_are_answered_in_its_own_chat(self) -> None:
+        from types import SimpleNamespace
+        from src.terminal.approvals import ApprovalNotFound
+        started, release = self._gate(self._b_prompt_key("tool"))
+        events = self._send("@agent-two tool")
+        consumer = threading.Thread(target=lambda: list(events))
+        consumer.start()
+        self.assertTrue(started.wait(2))
+        b_chat = self.service._mention_run("user-one", "agent-one", self.chat)[1]
+        emitted: list = []
+        run = SimpleNamespace(emit=lambda kind, data: emitted.append(data), cancellation=None)
+        outcome: list = []
+        asker = threading.Thread(target=lambda: outcome.append(self.service._approvals.request(
+            "user-one", "agent-two", b_chat, run, "terminal", "ls", "~", "look", "low",
+        )))
+        asker.start()
+        deadline = time.monotonic() + 3
+        while not emitted and time.monotonic() < deadline:
+            time.sleep(0.01)
+        card = emitted[0]
+        self.assertEqual((card["agent_id"], card["chat_id"]), ("agent-two", b_chat))
+        listed = self.service.list_approvals("user-one", "agent-one", self.chat)
+        self.assertEqual([item["id"] for item in listed], [card["id"]])
+        with self.assertRaises(ApprovalNotFound):  # A's chat cannot answer it: A has no say over B's tools
+            self.service.resolve_approval("user-one", "agent-one", self.chat, card["id"], "approve")
+        self.assertEqual(
+            self.service.resolve_approval("user-one", "agent-two", b_chat, card["id"], "approve")["status"], "approved",
+        )
+        asker.join(3)
+        self.assertTrue(outcome[0].approved)
+        release.set()
+        consumer.join(3)
+
     def _b_prompt_key(self, text: str) -> str:
         """The gate key: the responder matches the whole latest user message, which for B is the full mention prompt."""
         from src.service.mentions import chat_excerpt, mention_prompt
