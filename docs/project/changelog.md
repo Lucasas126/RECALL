@@ -5,6 +5,7 @@ sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases b
 
 ## unreleased
 
+- Agent settings show the real application default (tool rounds per turn, delegation parallel tasks, time and tokens, read live from `settings.yaml`) instead of a vague text; reset empties those fields so they keep following the application.
 - Web UI (desktop): the chat header shows the chat's name, editable in place (same rename as the side panel), and its height can be dragged taller (agent picture scales with it, remembered per browser). The phone header is unchanged.
 - Agent settings, Tools tab: the tool, terminal and delegation selections come first; the approval rules, the learned approvals and the default verdict for unmatched actions follow in a "Terminal approvals" block where the two lists are collapsed by default with a count, and rule rows are more compact.
 - The model picker is compact: providers are one scrollable row of chips (a dot marks an unavailable or experimental provider, details in the tooltip), search, favorites and refresh share one row, sort and the ZDR and capability filters sit in the collapsed Filters section, "Use ... default" is a small first entry, and each model is one line with badges and a price, with its details behind an info button. The dialog texts are translated to Spanish.

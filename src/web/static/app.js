@@ -192,6 +192,16 @@ function differsFromDefault(value, defaultValue) {
   return !sameValue(value, defaultValue);
 }
 
+// An "inherits" row (empty = follow the application) is reset to empty, never to the application's number, so it keeps
+// following settings.yaml; other rows are reset to their default.
+function resetValue(row) {
+  return row.inherits ? null : row.getDefault();
+}
+function resetDisabled(row, current, defaultValue) {
+  if (defaultValue === undefined || current === undefined) return true;
+  return row.inherits ? sameValue(current, null) : !differsFromDefault(current, defaultValue);
+}
+
 // Reads typed text. Thousands separators ("500,000", "500.000", "500 000") are accepted; decimals are not.
 // error: null | "format" | "min" | "max"; value is the number whenever the text is numeric.
 function parseNumberInput(raw, spec = {}) {
@@ -255,6 +265,7 @@ function settingsChanges(current, original, defaults) {
 // enabled only while the value differs from the default. Number inputs (`input[data-number]`) become a text
 // field with - / + buttons, a unit and inline validation.
 const settingRows = [];
+const numberZeroText = new Map(); // input id -> () => text shown for a default of 0 ("no limit")
 const numberSpecs = new Map(); // input id -> () => ({ default, min, max, step })
 
 function uiLanguage() {
@@ -388,7 +399,8 @@ function refreshNumberFields() {
     minus.setAttribute("aria-label", tr("Decrease"));
     plus.setAttribute("aria-label", tr("Increase"));
     field.querySelector(".num-unit").textContent = unitLabel(input.dataset.unit);
-    input.placeholder = spec.default == null ? "" : formatNumber(spec.default, uiLanguage());
+    input.placeholder = spec.default == null ? "" : spec.default === 0 && numberZeroText.has(input.id)
+      ? numberZeroText.get(input.id)() : formatNumber(spec.default, uiLanguage());
   }
 }
 
@@ -424,7 +436,7 @@ function registerRow(controlId, config) {
   const row = { id: controlId, element, ...config };
   settingRows.push(row);
   element.querySelector(".setting-reset").addEventListener("click", () => {
-    const value = row.getDefault();
+    const value = resetValue(row);
     if (value === undefined) return;
     row.write(value);
     fireChange(element);
@@ -444,7 +456,7 @@ function refreshRow(row) {
     if (range) text += ` · ${range}`;
   }
   hint.textContent = text;
-  reset.disabled = unknown || current === undefined || !differsFromDefault(current, defaultValue);
+  reset.disabled = resetDisabled(row, current, defaultValue);
   const label = tr("Reset to default");
   reset.title = label;
   reset.setAttribute("aria-label", label);
@@ -481,11 +493,16 @@ function selectRow(id, getDefault, afterWrite) {
     write: (value) => { $(id).value = value ?? ""; afterWrite?.(); },
   });
 }
-function numberRow(id, getSpec, nullText) {
+// `inherits`: empty means "follow the application", so the default is its live value and reset empties the field.
+// `zeroText`: what a default of 0 means (for example "no limit").
+function numberRow(id, getSpec, nullText, { inherits = false, zeroText = null } = {}) {
   numberSpecs.set(id, getSpec);
+  if (zeroText) numberZeroText.set(id, zeroText);
   return registerRow(id, {
+    inherits,
     getDefault: () => { const spec = getSpec(); return spec ? spec.default : undefined; },
-    describe: (value) => (value == null ? nullText() : `${formatNumber(value, uiLanguage())} ${unitLabel($(id).dataset.unit)}`.trim()),
+    describe: (value) => (value == null ? nullText()
+      : value === 0 && zeroText ? zeroText() : `${formatNumber(value, uiLanguage())} ${unitLabel($(id).dataset.unit)}`.trim()),
     range: () => getSpec() ?? {},
     read: () => numberValue(id), write: (value) => setNumberValue($(id), value),
   });
@@ -8747,7 +8764,7 @@ selectRow("agent-associative", chatDefault("associative_memory"), () => {
   $("agent-associative-execution").disabled = $("agent-associative").value === "off";
 });
 selectRow("agent-associative-execution", chatDefault("associative_execution"));
-numberRow("agent-max-hops", () => agentDefaultSpec("chat_config.max_tool_hops"), () => tr("Application value"));
+numberRow("agent-max-hops", () => agentDefaultSpec("chat_config.max_tool_hops"), () => tr("Application value"), { inherits: true });
 checkboxRow("agent-tools", chatDefault("tools"));
 const compactionDefault = (name) => () => agentDefault(`compaction.${name}`);
 checkboxRow("agent-compaction-enabled", compactionDefault("enabled"), syncCompactionUnits);
@@ -8761,9 +8778,10 @@ registerRow("agent-compaction-model", {
 numberRow("agent-terminal-timeout", () => agentDefaultSpec("terminal.timeout_seconds"), () => "");
 // delegation block: limits can only lower the application's, so an empty value is the default
 checkboxRow("agent-delegation-enabled", () => agentDefault("delegation.enabled"));
-numberRow("agent-delegation-parallel", () => agentDefaultSpec("delegation.max_parallel"), () => tr("the application's limit"));
-numberRow("agent-delegation-timeout", () => agentDefaultSpec("delegation.timeout_seconds"), () => tr("the application's limit"));
-numberRow("agent-delegation-tokens", () => agentDefaultSpec("delegation.max_tokens"), () => tr("the application's limit"));
+numberRow("agent-delegation-parallel", () => agentDefaultSpec("delegation.max_parallel"), () => tr("the application's limit"), { inherits: true });
+numberRow("agent-delegation-timeout", () => agentDefaultSpec("delegation.timeout_seconds"), () => tr("the application's limit"), { inherits: true });
+numberRow("agent-delegation-tokens", () => agentDefaultSpec("delegation.max_tokens"), () => tr("the application's limit"),
+  { inherits: true, zeroText: () => tr("no limit") });
 registerRow("agent-delegation-groups", {
   getDefault: () => DELEGATION_DEFAULT_GROUPS.join(","), describe: (value) => value || tr("none"),
   read: () => readDelegationGroups().join(","), write: (value) => renderDelegationGroups(value ? value.split(",") : []),
@@ -8783,7 +8801,7 @@ registerRow("dream-delegate-model", {
   read: () => $("dream-delegate-model").value.trim() || null, write: (value) => { $("dream-delegate-model").value = value ?? ""; },
 });
 selectRow("dream-effort", dreamDefault("reasoning_effort"));
-numberRow("dream-max-tokens", () => agentDefaultSpec("dream.max_tokens"), () => "");
+numberRow("dream-max-tokens", () => agentDefaultSpec("dream.max_tokens"), () => "", { zeroText: () => tr("no limit") });
 numberRow("dream-max-minutes", () => agentDefaultSpec("dream.max_minutes"), () => "");
 numberSpecs.set("dream-every-hours", () => agentDefaultSpec("dream.every_hours"));
 checkboxRow("dream-notify", dreamDefault("notify_telegram"));

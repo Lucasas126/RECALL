@@ -10,7 +10,7 @@ from typing import Any
 from pydantic import BaseModel
 from pydantic_core import PydanticUndefined
 
-from src.config.models import AgentDelegationConfig, AgentTerminalConfig, ChatConfig, CompactionConfig, DreamConfig
+from src.config.models import AgentDelegationConfig, SubagentSettings, AgentTerminalConfig, ChatConfig, CompactionConfig, DreamConfig
 
 
 def field_spec(model: type[BaseModel], name: str) -> dict[str, Any]:
@@ -29,9 +29,13 @@ def _specs(model: type[BaseModel], names: tuple[str, ...]) -> dict[str, dict[str
     return {name: field_spec(model, name) for name in names}
 
 
-def agent_defaults() -> dict[str, dict[str, dict[str, Any]]]:
-    """Defaults and bounds of the agent form, grouped like the agent YAML: chat_config, dream, terminal, delegation."""
-    return {
+def agent_defaults(max_tool_hops: int | None = None, subagents: SubagentSettings | None = None) -> dict[str, dict[str, dict[str, Any]]]:
+    """Defaults and bounds of the agent form, grouped like the agent YAML: chat_config, dream, terminal, delegation.
+
+    Fields that are empty in the model because they follow settings.yaml (`max_tool_hops`, the delegation limits) get the
+    effective application value as their default when `max_tool_hops` / `subagents` are given (the loaded settings).
+    """
+    defaults = {
         "chat_config": _specs(ChatConfig, (
             "stream", "has_memory", "reasoning", "reasoning_effort", "reasoning_tokens", "keep_reasoning_in_memory",
             "max_tool_hops", "tools", "associative_memory", "associative_execution",
@@ -45,3 +49,10 @@ def agent_defaults() -> dict[str, dict[str, dict[str, Any]]]:
         "terminal": _specs(AgentTerminalConfig, ("timeout_seconds", "max_output_chars")),
         "delegation": _specs(AgentDelegationConfig, ("enabled", "max_parallel", "timeout_seconds", "max_tokens")),
     }
+    if max_tool_hops is not None:
+        defaults["chat_config"]["max_tool_hops"]["default"] = max_tool_hops
+    if subagents is not None:
+        for name, value in (("max_parallel", subagents.max_parallel_per_parent), ("timeout_seconds", subagents.timeout_seconds),
+                            ("max_tokens", subagents.max_tokens)):
+            defaults["delegation"][name]["default"] = value
+    return defaults

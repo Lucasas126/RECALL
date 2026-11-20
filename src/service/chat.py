@@ -40,8 +40,8 @@ from src.config.field_defaults import agent_defaults
 from src.config.secrets import fingerprint as secrets_fingerprint, get_secret
 from src.config.zdr import chat_zdr, zdr_required
 from src.config.settings import (
-    APPROVAL_EXPLAIN, ASSOC, CHAT_NAMING, CONFIG_DIR, DATA_DIR, MCP, ORCHESTRATOR, PDF, SPEECH_TO_TEXT, TAVILY, TELEGRAM_ALLOWED_USERS_ENV,
-    TERMINAL, VIDEO_DECOMPOSITION, WEB_PUBLIC_URL, memory_limits,
+    AGENT_MAX_TOOL_HOPS, APPROVAL_EXPLAIN, ASSOC, CHAT_NAMING, CONFIG_DIR, DATA_DIR, MCP, ORCHESTRATOR, PDF, SPEECH_TO_TEXT, TAVILY, TELEGRAM_ALLOWED_USERS_ENV,
+    SUBAGENTS, TERMINAL, VIDEO_DECOMPOSITION, WEB_PUBLIC_URL, memory_limits,
 )
 from src.core.index import VectorIndex
 from src.core.sources.folders import folder_path_problem
@@ -550,9 +550,10 @@ class ChatService:
         return views
 
     def agent_defaults(self, user_id: str) -> dict:
-        """Defaults and bounds of the agent form fields, generated from the configuration models."""
+        """Defaults and bounds of the agent form fields, generated from the configuration models, with the effective
+        application values (settings.yaml) for the fields an agent leaves empty to follow the application."""
         self._user(user_id)
-        return agent_defaults()
+        return agent_defaults(max_tool_hops=AGENT_MAX_TOOL_HOPS, subagents=SUBAGENTS)
 
     def levels(self, user_id: str) -> dict:
         """The permission levels as the agent form needs them: names, descriptions, the minimum level of every group and

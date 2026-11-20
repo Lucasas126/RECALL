@@ -40,7 +40,7 @@ The **Delegation** section of the Tools tab appears while the **Delegate** tool 
 Every setting in the agent form (the Basic, Tools and Dream tabs) is one row: its name and a short help line, the control, a muted
 **Default: X** line and a **↺** button (*Reset to default*) that is enabled only while the value differs from the default. The defaults
 come from the configuration models through `GET /api/agents/defaults`, so they match what the server applies to a field an agent file
-omits. Resetting puts the default value in the field; **Save agent** (or **Save dream settings**) stores it. The default model resets to
+omits. For the few limits that an empty field leaves to the application (tool rounds per turn and the delegation limits), the default shown is the live value from `settings.yaml` (for example *Default: 50 rounds*, or *no limit* for 0 tokens) and *Reset* empties the field so the agent keeps following the application. Otherwise resetting puts the default value in the field; **Save agent** (or **Save dream settings**) stores it. The default model resets to
 *your default model*, the reasoning token limit to *no limit*, and the dream schedule to *manual only*.
 
 Numeric fields (messages kept in context, reasoning tokens, command timeout, dream steps, tokens, minutes and the schedule interval) are a
