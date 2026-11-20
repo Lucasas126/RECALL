@@ -1819,6 +1819,11 @@ def _approval_line(data: dict) -> str:
     return f">{data.get('tool', '')}({json.dumps(command, ensure_ascii=False)})"
 
 
+def _speaker_line(data: dict) -> str:
+    """The line that opens a reply written by another agent the user @mentioned (Telegram has no per-message picture)."""
+    return f"{data.get('name') or data.get('agent_id') or '?'}:"
+
+
 async def _send_approval(context: ContextTypes.DEFAULT_TYPE, state: TelegramBotState, session: TelegramSession,
                          telegram_chat_id: int, data: dict, language: str, stream: Any = None) -> None:
     """Ask for an approval with [Approve][Deny] buttons; the reply stream simply waits."""
@@ -1827,8 +1832,10 @@ async def _send_approval(context: ContextTypes.DEFAULT_TYPE, state: TelegramBotS
     plain, entities = _convert_markdown(body)
     markup = _approval_buttons(language, approval_id, data.get("options"))
     sent = await context.bot.send_message(telegram_chat_id, plain, entities=entities, reply_markup=markup)
+    # the agent and chat that asked (another agent's chat when an @mentioned agent answers here)
+    agent_id, chat_id = data.get("agent_id") or session.agent_id, data.get("chat_id") or session.chat_id
     state.approvals[approval_id] = _ApprovalCard(
-        session.user_id, session.agent_id, session.chat_id, telegram_chat_id, sent.message_id, body, markup,
+        session.user_id, agent_id, chat_id, telegram_chat_id, sent.message_id, body, markup,
         stream=stream, line=_approval_line(data),
     )
 
@@ -2007,6 +2014,8 @@ async def _send_generation(
                     await _send_agent_files(context.bot, chat.id, event.data["files"], language)
             elif event.kind == "notice":
                 content.append("notice", event.text)
+            elif event.kind == "speaker" and event.data:  # an @mentioned agent answers: say who
+                content.append("notice", _speaker_line(event.data))
             elif event.kind == "approval" and event.data:
                 await _send_approval(context, state, session, chat.id, event.data, language, stream)
                 continue
@@ -2178,6 +2187,8 @@ async def _send_wake(bot, state: TelegramBotState, telegram_id: int, session: Te
                     await _send_agent_files(bot, telegram_id, item.data["files"], language)
             elif item.kind == "notice":
                 content.append("notice", item.text)
+            elif item.kind == "speaker" and item.data:
+                content.append("notice", _speaker_line(item.data))
             elif item.kind == "approval" and item.data:
                 await _send_approval(
                     SimpleNamespace(bot=bot), state, TelegramSession(user_id, agent_id, chat_id), telegram_id, item.data, language,

@@ -1121,6 +1121,7 @@ _SPANISH = {
     "The file is not a valid PNG, JPEG, WEBP or GIF image.": "El archivo no es una imagen PNG, JPEG, WEBP o GIF válida.",
     "The animation is too large (too many pixels in all its frames).": "La animación es demasiado grande (demasiados píxeles entre todos sus fotogramas).",
     "Could not save the profile picture; check the data folder permissions.": "No se ha podido guardar la foto de perfil; revisa los permisos de la carpeta de datos.",
+    "Could not save the mention mark of chat {chat_id}.": "No se ha podido guardar la marca de mención del chat {chat_id}.",
     "Could not remove the profile picture; check the data folder permissions.": "No se ha podido eliminar la foto de perfil; revisa los permisos de la carpeta de datos.",
     "Could not move the agent's profile picture; close other programs using its files and try again.": "No se ha podido mover la foto de perfil del agente; cierra otros programas que usen sus archivos e inténtalo de nuevo.",
     "This agent has no profile picture.": "Este agente no tiene foto de perfil.",

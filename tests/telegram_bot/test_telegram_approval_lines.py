@@ -8,6 +8,7 @@ from telegram.error import BadRequest
 
 from src.telegram.bot import (
     TelegramBotState, TelegramSession, _ReplyContent, _approval_line, _close_approval, _generation_message, _send_approval,
+    _speaker_line,
 )
 
 DATA = {"id": "0123456789ab", "tool": "terminal", "command": "rm -rf build\nls", "cwd": "~", "reason": "x",
@@ -39,6 +40,13 @@ class ApprovalLineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.stream.content.parts, [("reasoning_tool", '✅ >terminal("rm -rf build")')])
         self.stream.update.assert_awaited_once()
         self.assertTrue(self.stream.update.await_args.kwargs["force"])
+
+    async def test_a_mentioned_agents_card_is_answered_in_its_own_chat(self) -> None:
+        await _send_approval(self.context, self.state, self.session, 456, {**DATA, "agent_id": "b", "chat_id": "bc"}, "en", self.stream)
+        card = self.state.approvals[DATA["id"]]
+        self.assertEqual((card.agent_id, card.chat_id), ("b", "bc"))
+        self.assertEqual(_speaker_line({"agent_id": "sage", "name": "Sage"}), "Sage:")
+        self.assertEqual(_speaker_line({"agent_id": "sage"}), "sage:")
 
     async def test_a_denied_card_gets_a_cross(self) -> None:
         await _send_approval(self.context, self.state, self.session, 456, DATA, "en", self.stream)

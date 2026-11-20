@@ -973,6 +973,14 @@ function currentAgentName() {
   return state.user?.agents.find((a) => a.id === state.agentId)?.name ?? "";
 }
 
+// Who wrote an assistant reply: the chat's agent, or another agent the user @mentioned (`author_agent` on a stored turn,
+// the `speaker` event live). Its current name and picture come from the agent list; the stored name is the fallback.
+function replyAuthor(authorId, storedName, agents, currentId) {
+  const id = authorId || currentId;
+  const agent = (agents ?? []).find((a) => a.id === id);
+  return { id, name: agent?.name ?? storedName ?? id ?? "", avatar: agent?.avatar ?? null };
+}
+
 // The active agent is the header's headline; the select is stretched invisibly over it as the switcher.
 function renderAgentBanner() {
   const name = currentAgentName();
@@ -4253,7 +4261,9 @@ function drawMessages(container, messages, { usage }) {
       container.append(compactionDivider(m));
       continue;
     }
-    const view = addMessage(m.role, container);
+    const author = m.role === "assistant" && m.author_agent
+      ? replyAuthor(m.author_agent, m.author_name, state.user?.agents, state.agentId) : null;
+    const view = addMessage(m.role, container, author);
     if (m.role === "user" && m.index != null) setEditable(view.el, m.index);
     if (m.associative_skipped) view.memory({ state: "skipped" });
     else if (m.associative_matches != null) {
@@ -6541,10 +6551,10 @@ function isTerminalError(message) {
   return /terminal/i.test(String(message ?? ""));
 }
 
-function addMessage(role, parent = state.view ?? $("messages")) {
+function addMessage(role, parent = state.view ?? $("messages"), author = null) {
   const el = document.createElement("div");
   el.className = `msg ${role}`;
-  if (role === "assistant") el.dataset.author = currentAgentName();
+  if (role === "assistant") el.dataset.author = author ? author.name : currentAgentName();
   else if (role === "command") el.dataset.author = "RECALL";
   let body = document.createElement("div");
   body.className = "body";
@@ -6560,15 +6570,21 @@ function addMessage(role, parent = state.view ?? $("messages")) {
   let liveSteps = [];  // tool steps of this reply (state from toolStepsApply) and their DOM nodes, same indexes
   const liveNodes = [];
   let attachmentBox = null;
-  const picture = role === "assistant" ? messageAvatar(currentAgentAvatar()) : null;
-  if (picture) {
+  let badge = null;
+  function setPicture(avatar) {  // the big picture at the start of the reply (hidden by the show_agent_avatar setting)
+    badge?.remove();
+    badge = null;
+    const picture = messageAvatar(avatar);
+    if (!picture) return;
     const image = element("img", { alt: "", draggable: false });
-    const badge = element("span", { className: "msg-avatar" }, image);
-    if (picture.free) badge.dataset.avatarStyle = "free";
-    image.addEventListener("error", () => badge.remove());
+    const own = element("span", { className: "msg-avatar" }, image);
+    if (picture.free) own.dataset.avatarStyle = "free";
+    image.addEventListener("error", () => own.remove());
     image.src = picture.src;
-    el.append(badge);
+    el.prepend(own);
+    badge = own;
   }
+  if (role === "assistant") setPicture(author ? author.avatar : currentAgentAvatar());
   el.append(body);
   parent.append(el);
   function renderOne(target, text) {
@@ -6792,6 +6808,12 @@ function addMessage(role, parent = state.view ?? $("messages")) {
         note.textContent = reason === "stopped" ? tr("Stopped by you") : reason === "replaced" ? tr("Interrupted by a new message") : tr("Interrupted");
         el.append(note);
       }
+    },
+    // another agent answers this reply (an @mention): its name and picture replace the chat agent's
+    speaker(payload) {
+      const author = replyAuthor(payload?.agent_id, payload?.name, state.user?.agents, state.agentId);
+      el.dataset.author = author.name;
+      setPicture(payload?.avatar ?? author.avatar);
     },
     error(source) {
       if (workingLine) { workingLine.remove(); workingLine = null; }
@@ -7569,6 +7591,7 @@ function handleEvent(raw, request) {
   else if (event === "tool") reply.action(payload);
   else if (event === "memory") reply.memory(payload);
   else if (event === "notice") reply.notice(payload);
+  else if (event === "speaker") reply.speaker(payload);
   else if (event === "transcript") request.userMessage?.transcripts(payload.transcripts || []);
   else if (event === "working") reply.working(payload);
   else if (event === "chat_replaced") adoptReplacedChat(request, payload);

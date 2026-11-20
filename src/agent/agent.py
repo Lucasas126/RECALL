@@ -45,6 +45,7 @@ from src.providers.provider import (
 from src.providers.cancellation import CancellationToken, GenerationCancelled
 from src.providers.mcp import McpManager
 from src.providers.tavily import TavilyClient
+from src.service.mentions import reply_label
 
 logger = get_logger("agent")
 _CHANNEL_NAMES = {"web": "web UI", "telegram": "telegram"}  # how a message channel reads in the model context
@@ -1104,6 +1105,11 @@ class Agent:
             content = self._reply_content(t["content"], bool(t.get("interrupted")), bool(t.get("checkpoint")))
             if t["role"] == "user" and t.get("ts"):
                 content = self._stamped(content, t["ts"], t.get("channel"))
+            if t["role"] == "assistant" and t.get("author_agent"):
+                # a reply of another agent the user @mentioned here: this agent did not write it
+                label = reply_label(t["author_agent"], t.get("author_name") or "")
+                self.messages.append({"role": "assistant", "content": f"{label} {content}" if isinstance(content, str) else content})
+                continue
             if t["role"] == "assistant" and t.get("actions"):
                 restored = self._restore_tool_rounds(t, position)
                 if restored is not None:
