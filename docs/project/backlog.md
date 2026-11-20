@@ -15,6 +15,8 @@ One list of ideas and planned work. Implemented behaviour is documented in the
 
 ### automation and behavior
 
+- **Agents shared between users** (idea): one agent that several users can open, with a memory (mind palace) shared by all of them, for example a household agent for two people. Users could also talk to each other through it, with the agent relaying or summarising. Open: who owns the agent and its files, per-user chats versus one shared chat, what each user may read of the other's messages, permission level and approvals (whose limit applies), and where the shared memory lives so private data of one user never leaks to the other.
+
 - **@mention another agent in a chat**: typing `@` in the message box lists the user's agents; the message is sent to the chosen agent, and its reply is saved in both places, the mentioned agent's own conversation and the chat where the mention was made. Builds on messages between agents (`task_start` with `agent`). Open: whether the mentioned agent sees the current chat, permission levels, and how the reply is shown (a marked message from that agent).
 
 - **Automations** are being built in steps: the service (triggers `at`, `every`, `cron`, `process_end`; guards; catch-up) is done, see [automations](../user-guide/automations.md); the agent tools (group `automations`, level `assistant`) and the web tab (a second tab of the Tasks dialog) are done too. Left for later: sending a result to a chat. Calendar and conversation events are out of scope.
