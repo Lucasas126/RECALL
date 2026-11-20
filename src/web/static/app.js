@@ -577,7 +577,7 @@ function translateInterface() {
     ["agent-terminal-no-backends", "No terminal backends are configured. Add one under terminal_backends in your user configuration; see docs/user-guide/terminal.md."],
     ["agent-terminal-timeout-label", "Command timeout (seconds)"],
     ["agent-level-legend", "Permission level"], ["agent-level-label", "Level"],
-    ["agent-rules-label", "Approval rules"],
+    ["agent-approvals-legend", "Terminal approvals"], ["agent-rules-label", "Approval rules"],
     ["agent-rules-hint", "Rules of this agent for commands and file operations. The strictest verdict wins: deny beats ask, ask beats allow. Hardline commands and protected paths are always refused."],
     ["agent-rules-default-label", "When no rule matches"], ["agent-rules-default-inherit", "Follow the user and installation defaults"],
     ["agent-rules-default-ask", "Ask"], ["agent-rules-default-deny", "Deny"], ["agent-rules-default-allow", "Allow"],
@@ -1590,9 +1590,16 @@ function readRuleRows() {
   return [...document.querySelectorAll("#agent-rules-list .agent-rule")].map(readRuleRow);
 }
 
+// The collapsed sections show how many rules they hold: "(7)".
+function updateRuleCounts() {
+  $("agent-rules-count").textContent = `(${$("agent-rules-list").children.length})`;
+  $("agent-approval-rules-count").textContent = `(${state.agentForm.learnedEntries?.length ?? 0})`;
+}
+
 function ruleEditorChanged() {
   state.agentForm.rulesDirty = true;
   $("agent-rules-empty").hidden = $("agent-rules-list").children.length > 0;
+  updateRuleCounts();
 }
 
 function renderRuleEditor(approvalRules) {
@@ -1603,6 +1610,9 @@ function renderRuleEditor(approvalRules) {
   $("agent-rules-list").replaceChildren(...manual.map(buildRuleRow));
   $("agent-rules-empty").hidden = manual.length > 0;
   $("agent-rules-error").textContent = "";
+  $("agent-rules-section").open = false;
+  state.agentForm.learnedEntries = [];
+  updateRuleCounts();
   $("agent-rules-backends").replaceChildren(...(state.user?.terminal_backends ?? []).map((backend) => Object.assign(
     document.createElement("option"), { value: backend.name },
   )));
@@ -1617,6 +1627,7 @@ function ruleEditorPayload() {
 $("agent-rules-add").addEventListener("click", () => {
   const row = buildRuleRow(null);
   $("agent-rules-list").append(row);
+  $("agent-rules-section").open = true;
   ruleEditorChanged();
   row.querySelector(".rule-command").focus();
 });
@@ -1670,6 +1681,8 @@ function updateTerminalBlock() {
   const enabled = terminalGroupChecked();
   $("agent-terminal").hidden = !enabled;
   $("agent-terminal").disabled = !enabled;  // a disabled fieldset is not validated, so hidden fields never block saving
+  $("agent-approvals").hidden = !enabled;
+  $("agent-approvals").disabled = !enabled;
 }
 
 // One readable line for a rule of the agent's approval list: "allow terminal: git status [box] (exact)".
@@ -1699,6 +1712,7 @@ function drawApprovalRules(entries) {
   }));
   $("agent-approval-rules-empty").hidden = rules.length > 0;
   $("agent-approval-rules-reset").hidden = rules.length === 0;
+  updateRuleCounts();
 }
 
 // Loads (no method) or changes the saved agent's approval rules; the form never edits them as part of its own save.
@@ -2373,6 +2387,7 @@ $("agent-form").addEventListener("submit", async (event) => {
         showAgentPanel("basic");
       } else if (terminalGroupChecked() && isRuleError(err)) {
         $("agent-rules-error").textContent = err.message;
+        $("agent-rules-section").open = true;
         showAgentPanel("tools");
       } else if (terminalGroupChecked() && isTerminalError(err.message)) {
         $("agent-terminal-error").textContent = err.message;

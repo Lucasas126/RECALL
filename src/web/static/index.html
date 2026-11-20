@@ -357,36 +357,6 @@
                 <p class="setting-default model-note"></p>
                 <p class="setting-error error" role="alert"></p>
               </div>
-              <div id="agent-approval-rules" class="approval-rules" hidden>
-                <span id="agent-approval-rules-label">Learned approvals</span>
-                <p id="agent-approval-rules-hint" class="model-note">Saved when you choose Always for this agent on an approval card. Remove one to be asked again, or reset them all.</p>
-                <ul id="agent-approval-rules-list" class="approval-rules-list"></ul>
-                <p id="agent-approval-rules-empty" class="model-note">No learned approvals.</p>
-                <button id="agent-approval-rules-reset" type="button">Reset to defaults</button>
-                <p id="agent-approval-rules-error" class="error" role="alert"></p>
-              </div>
-              <div id="agent-rules" class="approval-rules">
-                <span id="agent-rules-label">Approval rules</span>
-                <p id="agent-rules-hint" class="model-note">Rules of this agent for commands and file operations. The strictest verdict wins: deny beats ask, ask beats allow. Hardline commands and protected paths are always refused.</p>
-                <label>
-                  <span id="agent-rules-default-label">When no rule matches</span>
-                  <select id="agent-rules-default">
-                    <option value="" id="agent-rules-default-inherit">Follow the user and installation defaults</option>
-                    <option value="ask" id="agent-rules-default-ask">Ask</option>
-                    <option value="deny" id="agent-rules-default-deny">Deny</option>
-                    <option value="allow" id="agent-rules-default-allow">Allow</option>
-                  </select>
-                </label>
-                <ul id="agent-rules-list" class="approval-rules-list"></ul>
-                <p id="agent-rules-empty" class="model-note">This agent has no rules of its own.</p>
-                <datalist id="agent-rules-backends"></datalist>
-                <button id="agent-rules-add" type="button">Add rule</button>
-                <p id="agent-rules-error" class="error" role="alert"></p>
-                <details id="agent-rules-effective" hidden>
-                  <summary id="agent-rules-effective-summary">Effective rules (read only)</summary>
-                  <div id="agent-rules-effective-body" class="approval-rules"></div>
-                </details>
-              </div>
               <p id="agent-terminal-error" class="error" role="alert"></p>
             </fieldset>
             <fieldset id="agent-delegation" class="agent-terminal" hidden disabled>
@@ -451,6 +421,45 @@
                 <p class="setting-default model-note"></p>
               </div>
               <p id="agent-delegation-error" class="error" role="alert"></p>
+            </fieldset>
+            <fieldset id="agent-approvals" class="agent-terminal" hidden disabled>
+              <legend id="agent-approvals-legend">Terminal approvals</legend>
+              <div id="agent-rules" class="approval-rules">
+                <label>
+                  <span id="agent-rules-default-label">When no rule matches</span>
+                  <select id="agent-rules-default">
+                    <option value="" id="agent-rules-default-inherit">Follow the user and installation defaults</option>
+                    <option value="ask" id="agent-rules-default-ask">Ask</option>
+                    <option value="deny" id="agent-rules-default-deny">Deny</option>
+                    <option value="allow" id="agent-rules-default-allow">Allow</option>
+                  </select>
+                </label>
+                <details id="agent-rules-section" class="approval-section">
+                  <summary><span id="agent-rules-label">Approval rules</span> <span id="agent-rules-count"></span></summary>
+                  <div class="approval-rules">
+                    <p id="agent-rules-hint" class="model-note">Rules of this agent for commands and file operations. The strictest verdict wins: deny beats ask, ask beats allow. Hardline commands and protected paths are always refused.</p>
+                    <ul id="agent-rules-list" class="approval-rules-list"></ul>
+                    <p id="agent-rules-empty" class="model-note">This agent has no rules of its own.</p>
+                    <datalist id="agent-rules-backends"></datalist>
+                    <button id="agent-rules-add" type="button">Add rule</button>
+                    <p id="agent-rules-error" class="error" role="alert"></p>
+                    <details id="agent-rules-effective" hidden>
+                      <summary id="agent-rules-effective-summary">Effective rules (read only)</summary>
+                      <div id="agent-rules-effective-body" class="approval-rules"></div>
+                    </details>
+                  </div>
+                </details>
+              </div>
+              <details id="agent-approval-rules" class="approval-section" hidden>
+                <summary><span id="agent-approval-rules-label">Learned approvals</span> <span id="agent-approval-rules-count"></span></summary>
+                <div class="approval-rules">
+                  <p id="agent-approval-rules-hint" class="model-note">Saved when you choose Always for this agent on an approval card. Remove one to be asked again, or reset them all.</p>
+                  <ul id="agent-approval-rules-list" class="approval-rules-list"></ul>
+                  <p id="agent-approval-rules-empty" class="model-note">No learned approvals.</p>
+                  <button id="agent-approval-rules-reset" type="button">Reset to defaults</button>
+                  <p id="agent-approval-rules-error" class="error" role="alert"></p>
+                </div>
+              </details>
             </fieldset>
           </div>
           <div id="agent-panel-mcp" class="agent-panel" hidden>

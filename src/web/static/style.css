@@ -1028,8 +1028,10 @@ html.resizing-sidebar #app { transition: none; }
 .model-filter .level-badge { margin-left: 6px; border-color: var(--warn); color: var(--warn); }
 .model-filter .level-badge.over-max { border-color: var(--danger); color: var(--danger); }
 #agent-form-level { margin-left: 6px; }
-.approval-rules-list li.agent-rule { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 6px 10px; align-items: end; justify-content: stretch; }
+.approval-rules-list li.agent-rule { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 4px 8px; align-items: end; justify-content: stretch; padding: 3px 6px; }
 .agent-rule label { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.approval-section > summary { cursor: pointer; font-weight: 600; }
+.approval-section > .approval-rules { margin-top: 6px; }
 .agent-rule label.model-filter { flex-direction: row; align-items: center; }
 .agent-rule select, .agent-rule input[type="text"], .agent-rule input:not([type]) { width: 100%; min-width: 0; }
 .agent-rule button { justify-self: end; }
