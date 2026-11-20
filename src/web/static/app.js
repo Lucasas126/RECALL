@@ -7332,7 +7332,7 @@ function updateComposerPopup() {
   const input = $("input");
   const trigger = input.disabled || input.selectionStart !== input.selectionEnd ? null : composerTrigger(input.value, input.selectionStart);
   const dismissed = composerPopup.dismissed;
-  if (!trigger || (dismissed && dismissed.start === trigger.start && dismissed.kind === trigger.kind)) {
+  if (!trigger || (dismissed && dismissed.start === trigger.start && dismissed.kind === trigger.kind && dismissed.query === trigger.query)) {
     if (!trigger) composerPopup.dismissed = null;
     closeComposerPopup();
     return;
@@ -7369,7 +7369,7 @@ $("input").addEventListener("keydown", (e) => {
     pickComposerItem(composerPopup.items[composerPopup.index]);
   } else if (e.key === "Escape") {
     e.preventDefault();
-    composerPopup.dismissed = { kind: composerPopup.trigger.kind, start: composerPopup.trigger.start };
+    composerPopup.dismissed = { kind: composerPopup.trigger.kind, start: composerPopup.trigger.start, query: composerPopup.trigger.query };
     closeComposerPopup();
   }
 });
