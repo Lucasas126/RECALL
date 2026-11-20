@@ -606,7 +606,7 @@ details.msg.task-wake { align-self: flex-start; padding: 6px 12px; border-style:
 #chat-title:hover:not(:disabled) { background: var(--raised); }
 #chat-title:disabled { color: var(--muted); cursor: default; }
 #chat-title-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#chat-title-text.empty { font-style: italic; color: var(--muted); }
+#chat-title-text.empty { color: var(--muted); }
 #chat-title-edit { display: none; flex-shrink: 0; color: var(--muted); }
 #chat-title:hover:not(:disabled) #chat-title-edit, #chat-title:focus-visible #chat-title-edit { display: inline-grid; }
 #chat-title-edit svg { width: 14px; height: 14px; }
