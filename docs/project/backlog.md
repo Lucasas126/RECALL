@@ -9,17 +9,11 @@ One list of ideas and planned work. Implemented behaviour is documented in the
 
 ### resilience
 
-- **Voice message transcript in the web UI** (reported 2026-11-20): (1) after sending an audio, its transcription does not show until the page is reloaded; (2) once shown, the transcript appears twice: as small text under the audio player and again as a plain "[AUDIO] Audio transcription:" message body. Intended: show it once, right after the transcription arrives, without a reload, and without the raw "[AUDIO]" prefix in the visible text.
-
-- **Switching agent in the web UI breaks the chat** (reported 2026-11-20, not yet reproduced): changing the agent in the top selector of an open chat leaves it half broken. Intended behavior: choosing another agent opens a new chat with that agent automatically (the current chat stays as it was). Reproduce first in a browser demo, then fix.
-
 - **Level and tool groups in a running chat**: approval rules are re-read before every decision and apply at once, but a changed level, tool group or tool availability still applies only to new chats (the chat keeps the tools it was built with). Open: whether to rebuild the tools between turns of a running chat.
 
 ### automation and behavior
 
 - **Agents shared between users** (idea): one agent that several users can open, with a memory (mind palace) shared by all of them, for example a household agent for two people. Users could also talk to each other through it, with the agent relaying or summarising. Open: who owns the agent and its files, per-user chats versus one shared chat, what each user may read of the other's messages, permission level and approvals (whose limit applies), and where the shared memory lives so private data of one user never leaks to the other.
-
-- **@mention another agent in a chat**: the server side and the reply display are done (see the changelog and [agents](../architecture/agents-and-users.md#mentions-of-another-agent)). The `@` autocomplete in the message box is done too. Open: whether a mention should also work from automations or other agents (today only a person can trigger it).
 
 - **Automations** are being built in steps: the service (triggers `at`, `every`, `cron`, `process_end`; guards; catch-up) is done, see [automations](../user-guide/automations.md); the agent tools (group `automations`, level `assistant`) and the web tab (a second tab of the Tasks dialog) are done too. Left for later: sending a result to a chat. Calendar and conversation events are out of scope.
 - **Reminders and proactive messages**: a one-off message the agent sends while it works exists (`notify_telegram`) and an agent can schedule work for later with the `automations` tools (see above). Still open: a scheduled message delivered straight to Telegram and shown in the web without running the agent ("sending a result to a chat" in the automations item).
@@ -114,5 +108,8 @@ Skills imported from other agent systems:
 
 
 ## done
+
+- **@mention another agent in a chat** (0.5.0, 0.5.1): a message starting with `@<agent_id>` is answered by that agent with its own permissions, model and memory; it gets a capped, untrusted excerpt of the chat; the reply shows with its name and picture from the first moment, is kept in both chats, can be stopped, and its approvals are decided as its own (also on Telegram). The message box lists agents on `@` and slash commands on `/`. Open: whether automations or other agents should be able to mention.
+- **Web UI fixes** (0.5.0): switching agent in the top selector opens a fresh chat and rolls back cleanly if that fails (not yet tried by hand); a voice message transcript shows once, live, without the raw `[AUDIO]` block; the usage disclosure stays available while the agent replies; the subagent tray always shows the model.
 
 Implemented features are listed by topic in the [changelog](changelog.md).
