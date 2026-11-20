@@ -78,7 +78,12 @@
           <span id="agent-chevron" aria-hidden="true">&#9662;</span>
           <select id="agent-select"></select>
         </div>
+        <div id="chat-title-wrap" hidden>
+          <button id="chat-title" type="button"><span id="chat-title-text"></span><span id="chat-title-edit" aria-hidden="true"></span></button>
+          <input id="chat-title-input" maxlength="60" hidden>
+        </div>
         <button id="chat-make-disposable" type="button" hidden><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span id="chat-make-disposable-text"></span></button>
+        <div id="header-resizer" role="separator" aria-orientation="horizontal" aria-label="Resize the header" tabindex="0"></div>
       </header>
       <div id="disposable-banner" role="status" hidden>
         <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>

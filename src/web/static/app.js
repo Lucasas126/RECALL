@@ -677,7 +677,7 @@ function translateInterface() {
   $("agent-delegation-model").placeholder = tr("The model of the chat");
   for (const [id, text] of [
     ["settings-open", "Settings"], ["settings-close", "Close"], ["tasks-open", "Tasks"], ["tasks-close", "Close"], ["assoc-close", "Close"],
-    ["logout", "Log out"], ["jump-latest", "Jump to latest"], ["claude-usage-toggle", "Claude plan usage"], ["claude-usage-body", "Claude plan usage"], ["theme-toggle", "Switch theme"],
+    ["logout", "Log out"], ["jump-latest", "Jump to latest"], ["claude-usage-toggle", "Claude plan usage"], ["claude-usage-body", "Claude plan usage"], ["theme-toggle", "Switch theme"], ["header-resizer", "Resize the header"],
   ]) {
     $(id).title = tr(text);
     $(id).setAttribute("aria-label", tr(text));
@@ -798,6 +798,7 @@ function showLogin() {
   state.user = null;
   state.agentId = null;
   state.chatId = null;
+  renderChatHeader(null);
   state.model = null;
   state.attachments = [];
   renderPendingAttachments();
@@ -1150,6 +1151,7 @@ async function selectAgent(agentId) {
   if (state.modelBusy) return;
   state.agentId = agentId;
   state.chatId = null;
+  renderChatHeader(null);
   state.model = null;
   updateModelControls();
   $("agent-select").value = agentId ?? "";
@@ -3214,6 +3216,7 @@ async function refreshChats() {
   const keep = state.chatId ? `?keep=${encodeURIComponent(state.chatId)}` : "";
   const chats = await api(`/api/chats${keep}`);
   if (session !== state.session) return;
+  renderChatHeader(chats.find((chat) => chat.id === state.chatId && chat.agent_id === state.agentId) ?? state.chatInfo);
   const list = $("chat-list");
   let section = null;
   list.replaceChildren(
@@ -3320,6 +3323,74 @@ function chatSection(updated) {
   return "Older";
 }
 
+// Saves a new title through the same endpoint for the sidebar and the header, then redraws both.
+async function saveChatTitle(chat, value) {
+  const session = state.session;
+  try {
+    if (value && value !== chat.title) {
+      await api(`/api/agents/${chat.agent_id}/chats/${chat.id}/title`, {
+        method: "PUT", body: JSON.stringify({ title: value }),
+      });
+    }
+  } catch (err) {
+    if (session === state.session) addMessage("assistant").error(err);
+  }
+  if (session === state.session) await refreshChats();
+}
+
+// ---- the open chat's name in the header (desktop): shows the title, edited in place like in the sidebar
+let headerChat = null;  // the open chat as the list or the chat itself describes it: { agent_id, id, title, turns }
+const chatTitleInput = () => $("chat-title-input");
+function renderChatHeader(chat) {
+  headerChat = chat && state.chatId && chat.id === state.chatId ? { agent_id: state.agentId, ...chat } : null;
+  $("chat-title-wrap").hidden = !headerChat;
+  if (!headerChat || !chatTitleInput().hidden) return;  // nothing open, or being edited: the input keeps its text
+  const text = headerChat.title || tr("New chat");
+  $("chat-title-text").textContent = text;
+  $("chat-title-text").classList.toggle("empty", !headerChat.title);
+  $("chat-title").title = headerChat.turns > 0 ? tr("Rename chat") : text;
+  $("chat-title").disabled = !(headerChat.turns > 0);
+  $("chat-title-edit").innerHTML = headerChat.turns > 0 ? ICONS.pencil : "";
+}
+
+function startHeaderRename() {
+  const chat = headerChat;
+  const input = chatTitleInput();
+  if (!chat || !chat.turns || !input.hidden) return;
+  input.value = chat.title;
+  input.setAttribute("aria-label", tr("Rename chat"));
+  $("chat-title").hidden = true;
+  input.hidden = false;
+  input.focus();
+  input.select();
+  let finished = false;
+  const finish = async (save) => {
+    if (finished) return;
+    finished = true;
+    input.removeEventListener("keydown", onKey);
+    input.removeEventListener("blur", onBlur);
+    const value = input.value.trim();
+    input.hidden = true;
+    $("chat-title").hidden = false;
+    renderChatHeader(headerChat);
+    if (save && value) await saveChatTitle(chat, value);  // empty: the old title stays
+    if (document.activeElement === document.body) $("chat-title").focus();
+  };
+  const onKey = (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      finish(true);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      finish(false);
+    }
+  };
+  const onBlur = () => finish(true);
+  input.addEventListener("keydown", onKey);
+  input.addEventListener("blur", onBlur);
+}
+$("chat-title").addEventListener("click", startHeaderRename);
+
 function startRenameChat(chat, title) {
   const input = document.createElement("input");
   input.className = "rename-input";
@@ -3331,17 +3402,7 @@ function startRenameChat(chat, title) {
     if (finished) return;
     finished = true;
     const value = input.value.trim();
-    const session = state.session;
-    try {
-      if (save && value && value !== chat.title) {
-        await api(`/api/agents/${chat.agent_id}/chats/${chat.id}/title`, {
-          method: "PUT", body: JSON.stringify({ title: value }),
-        });
-      }
-    } catch (err) {
-      if (session === state.session) addMessage("assistant").error(err);
-    }
-    if (session === state.session) await refreshChats();
+    await saveChatTitle(chat, save ? value : "");
   };
   input.addEventListener("click", (e) => e.stopPropagation());
   input.addEventListener("keydown", (e) => {
@@ -3448,6 +3509,7 @@ async function openChat(chatId) {
   if (session !== state.session || agentId !== state.agentId || revision !== state.chatModelRevision || state.modelBusy) return;
   state.chatId = chatId;
   state.chatInfo = data.chat;
+  renderChatHeader(data.chat);
   markChatRead(agentId, chatId);
   applyChatModels(data);
   if ($("agents-view").hidden) rememberChat(agentId, chatId, data.messages.length > 0);
@@ -8706,6 +8768,55 @@ api("/api/me").then(showApp, showLogin);
   });
 })();
 
+// ---- resizable header (desktop): drag its bottom edge (or use the arrow keys); the height is remembered in this browser
+const HEADER_KEY = "headerHeight", HEADER_MIN = 60, HEADER_MAX = 220;
+function clampHeaderHeight(px) {
+  const value = Number(px);
+  return Number.isFinite(value) ? Math.min(HEADER_MAX, Math.max(HEADER_MIN, Math.round(value))) : HEADER_MIN;
+}
+function readHeaderHeight(storage) {
+  try { const saved = Number(storage.getItem(HEADER_KEY)); return saved ? clampHeaderHeight(saved) : null; } catch { return null; }
+}
+function writeHeaderHeight(storage, px) {
+  try { if (px == null) storage.removeItem(HEADER_KEY); else storage.setItem(HEADER_KEY, String(clampHeaderHeight(px))); } catch { /* storage may be blocked */ }
+}
+(() => {
+  const handle = document.getElementById("header-resizer"), bar = document.getElementById("model-bar");
+  if (!handle || !bar) return;
+  const root = document.documentElement;
+  const apply = (px) => { root.style.setProperty("--header-h", `${clampHeaderHeight(px)}px`); handle.setAttribute("aria-valuenow", String(clampHeaderHeight(px))); };
+  const height = () => Math.round(bar.getBoundingClientRect().height);
+  const saved = readHeaderHeight(localStorage);
+  handle.setAttribute("aria-valuemin", String(HEADER_MIN));
+  handle.setAttribute("aria-valuemax", String(HEADER_MAX));
+  if (saved) apply(saved);
+  handle.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    handle.setPointerCapture(event.pointerId);
+    handle.classList.add("dragging");
+    root.classList.add("resizing-header");
+  });
+  handle.addEventListener("pointermove", (event) => {
+    if (handle.hasPointerCapture(event.pointerId)) apply(event.clientY - bar.getBoundingClientRect().top);
+  });
+  const stop = (event) => {
+    if (!handle.hasPointerCapture(event.pointerId)) return;
+    handle.releasePointerCapture(event.pointerId);
+    handle.classList.remove("dragging");
+    root.classList.remove("resizing-header");
+    writeHeaderHeight(localStorage, height());
+  };
+  handle.addEventListener("pointerup", stop);
+  handle.addEventListener("pointercancel", stop);
+  handle.addEventListener("dblclick", () => { root.style.removeProperty("--header-h"); handle.removeAttribute("aria-valuenow"); writeHeaderHeight(localStorage, null); });
+  handle.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    apply(height() + (event.key === "ArrowDown" ? 16 : -16));
+    writeHeaderHeight(localStorage, height());
+  });
+})();
+
 // ---- composer: once the message needs more than one line it spans the box and the chat options move under it
 (() => {
   const input = document.getElementById("input"), composer = document.getElementById("composer");
@@ -8792,6 +8903,6 @@ usageTimer = setInterval(() => { if (!document.hidden) refreshClaudeUsage(); }, 
 
 // the chat list shows which chats are working, waiting for an approval or have an unread answer: keep it current
 setInterval(() => {
-  if (document.hidden || !state.user || document.querySelector("#chat-list .rename-input")) return;
+  if (document.hidden || !state.user || document.querySelector("#chat-list .rename-input") || !$("chat-title-input").hidden) return;
   refreshChats().catch(() => {});
 }, 4000);
