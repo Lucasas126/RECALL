@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import re
 import sqlite3
 import threading
 import time
@@ -49,6 +51,13 @@ _WRITE_LOCK = "write.lock"
 _TEXT_EXTS = {"md", "txt"}
 _IDLE_CHECK_SECONDS = 60.0
 _UPSERT_BATCH = 1000
+# hybrid search: candidates taken from each ranking, and the reciprocal rank fusion constant
+_HYBRID_CANDIDATES = 50
+_RRF_K = 60
+# keyword table beside the manifest; bump to rebuild it from the stored chunks
+_FTS_VERSION = "1"
+_FTS_WORD = re.compile(r"\w+", re.UNICODE)
+_FTS_MAX_TERMS = 32
 
 
 def _indexable_content(content: Any) -> str:
@@ -123,6 +132,9 @@ class _Store:
                 "CREATE TABLE IF NOT EXISTS chats (chat_id TEXT PRIMARY KEY, offset INTEGER NOT NULL,"
                 " turns INTEGER NOT NULL, mtime_ns INTEGER, size INTEGER, chunks INTEGER NOT NULL DEFAULT 0);"
                 "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);"
+                # keyword index of every chunk (BM25), kept in step with the Chroma collection
+                "CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(chunk_id UNINDEXED, source UNINDEXED,"
+                " address UNINDEXED, chat UNINDEXED, text, tokenize = 'unicode61 remove_diacritics 2');"
             )
         # background work of this process for this index
         self.jobs: OrderedDict[tuple, Callable[[], None]] = OrderedDict()
@@ -222,8 +234,9 @@ class _Store:
                 "index_id": index_id,
             },
         )
-        self._db.executescript("DELETE FROM files; DELETE FROM chats;")
+        self._db.executescript("DELETE FROM files; DELETE FROM chats; DELETE FROM chunks_fts;")
         self.set_meta("index_id", index_id)
+        self.set_meta("fts_version", _FTS_VERSION)
         self.identity = identity
         self.bump()
 
@@ -235,6 +248,69 @@ class _Store:
 
     def count(self) -> int:
         return self._collection.count() if self._collection is not None else 0
+
+    # ------------------------------------------------------------------ chunks (Chroma + keyword table)
+
+    def delete_chunks(self, **where: str) -> None:
+        """Drop the chunks whose metadata field (`address`, `chat` or `source`) equals the value, in both stores."""
+        (field, value), = where.items()
+        if field not in {"address", "chat", "source"}:
+            raise ValueError(f"cannot delete chunks by {field!r}")
+        self.collection.delete(where={field: value})
+        self._db.execute(f"DELETE FROM chunks_fts WHERE {field} = ?", (value,))
+
+    def index_keywords(self, ids: list[str], documents: list[str], metadatas: list[dict]) -> None:
+        """Add (or replace) chunks in the keyword table."""
+        rows = [
+            (chunk_id, str(meta.get("source", "")), str(meta.get("address", "")), str(meta.get("chat", "")), doc)
+            for chunk_id, doc, meta in zip(ids, documents, metadatas)
+        ]
+        self._db.executemany("DELETE FROM chunks_fts WHERE chunk_id = ?", [(row[0],) for row in rows])
+        self._db.executemany(
+            "INSERT INTO chunks_fts (chunk_id, source, address, chat, text) VALUES (?, ?, ?, ?, ?)", rows,
+        )
+
+    def keywords_current(self) -> bool:
+        return self.meta("fts_version") == _FTS_VERSION
+
+    def rebuild_keywords(self) -> int:
+        """Fill the keyword table from the chunks stored in Chroma (no embedding calls); how many were added."""
+        self._db.execute("DELETE FROM chunks_fts")
+        added = 0
+        if self._collection is not None:
+            total = self._collection.count()
+            for offset in range(0, total, _UPSERT_BATCH):
+                page = self._collection.get(include=["documents", "metadatas"], limit=_UPSERT_BATCH, offset=offset)
+                self.index_keywords(page["ids"], page["documents"], [meta or {} for meta in page["metadatas"]])
+                added += len(page["ids"])
+        self.set_meta("fts_version", _FTS_VERSION)
+        return added
+
+    def keyword_search(
+        self, query: str, limit: int, sources: list[str], exclude_chat: str | None, only_chat: str | None,
+    ) -> list[str]:
+        """Ids of the best BM25 matches for the words of `query` among the allowed chunks (best first)."""
+        match = fts_query(query)
+        if not match or not sources:
+            return []
+        sql = (
+            "SELECT chunk_id FROM chunks_fts WHERE chunks_fts MATCH ?"
+            f" AND source IN ({', '.join('?' for _ in sources)})"
+        )
+        params: list = [match, *sources]
+        if exclude_chat:
+            sql += " AND chat != ?"
+            params.append(exclude_chat)
+        if only_chat:
+            sql += " AND chat = ?"
+            params.append(only_chat)
+        sql += " ORDER BY bm25(chunks_fts) LIMIT ?"
+        params.append(limit)
+        try:
+            return [row[0] for row in self._db.execute(sql, params)]
+        except sqlite3.OperationalError as exc:  # a query FTS cannot parse: the dense ranking still answers
+            logger.debug("keyword search failed for %r: %s", match, exc)
+            return []
 
     # ------------------------------------------------------------------ manifest
 
@@ -460,7 +536,7 @@ class VectorIndex:
         """Drop a deleted chat's chunks now instead of waiting for the next reconcile."""
         with self._store.writing(), self._store.session() as store:
             if store.identity == self.identity:
-                store.collection.delete(where={"chat": chat_id})
+                store.delete_chunks(chat=chat_id)
             store.forget_chat(chat_id)
             store.bump()
 
@@ -486,8 +562,11 @@ class VectorIndex:
         self, query: str, top_k: int = 5, *, exclude_chat: str | None = None, only_source: str | None = None,
         only_chat: str | None = None, cancellation: CancellationToken | None = None,
     ) -> list[dict]:
-        """The `top_k` most similar chunks as {address, context, document, body, score}; never syncs.
+        """The `top_k` best chunks as {address, source, context, document, body, score}; never syncs.
 
+        Hybrid search: the nearest chunks by embedding and the best keyword (BM25) matches are merged by
+        reciprocal rank fusion, which decides the order. `score` is always the cosine similarity to the query,
+        also for chunks found only by keyword, so callers can keep gating on it (fused ranks have no scale).
         `only_source` / `only_chat` narrow the search to one source or one chat's chunks. A `cancellation` token
         aborts the query embedding request in flight (GenerationCancelled)."""
         with self._store.session() as store:
@@ -501,23 +580,35 @@ class VectorIndex:
             where = self._query_filter(exclude_chat, only_source, only_chat)
             if not where:  # the requested source is not visible: nothing to find
                 return []
+            pool = max(top_k, _HYBRID_CANDIDATES)
             res = store.collection.query(
                 query_embeddings=[vector],
-                n_results=min(top_k, count),
+                n_results=min(pool, count),
                 where=where,
                 include=["documents", "distances", "metadatas"],
             )
-        out: list[dict] = []
-        for doc, dist, meta in zip(res["documents"][0], res["distances"][0], res["metadatas"][0]):
-            meta = meta or {}
-            out.append({
-                "address": meta.get("address", ""),
-                "context": meta.get("context", ""),
-                "document": doc,
-                "body": doc.split("\n\n", 1)[1] if "\n\n" in doc else doc,
-                "score": round(1.0 - dist, 4),
-            })
-        return out
+            chunks: dict[str, dict] = {}
+            dense: list[str] = []
+            for chunk_id, doc, dist, meta in zip(
+                res["ids"][0], res["documents"][0], res["distances"][0], res["metadatas"][0],
+            ):
+                chunks[chunk_id] = _hit(doc, meta, 1.0 - dist)
+                dense.append(chunk_id)
+            sources = [only_source] if only_source else _allowed_sources(where)
+            keyword = store.keyword_search(query, pool, sources, exclude_chat, only_chat)
+            missing = [chunk_id for chunk_id in keyword if chunk_id not in chunks]
+            if missing:  # found only by keyword: score them by cosine from their stored vectors
+                extra = store.collection.get(ids=missing, include=["documents", "metadatas", "embeddings"])
+                for chunk_id, doc, meta, emb in zip(
+                    extra["ids"], extra["documents"], extra["metadatas"], extra["embeddings"],
+                ):
+                    chunks[chunk_id] = _hit(doc, meta, _cosine(vector, emb))
+        fused: dict[str, float] = {}
+        for ranking in (dense, [chunk_id for chunk_id in keyword if chunk_id in chunks]):
+            for rank, chunk_id in enumerate(ranking, start=1):
+                fused[chunk_id] = fused.get(chunk_id, 0.0) + 1.0 / (_RRF_K + rank)
+        order = sorted(fused, key=lambda chunk_id: (-fused[chunk_id], -chunks[chunk_id]["score"]))
+        return [chunks[chunk_id] for chunk_id in order[:top_k]]
 
     def _query_filter(self, exclude_chat: str | None, only_source: str | None = None, only_chat: str | None = None) -> dict:
         """Chunks the caller may see: own sources, and folders that are readable (and indexed) right now."""
@@ -583,6 +674,19 @@ class VectorIndex:
     def _ensure_identity(self) -> None:
         if not self._matches():
             self._rebuild(force=False)
+        self._ensure_keywords()
+
+    def _ensure_keywords(self) -> None:
+        """Build the keyword table of an index made before hybrid search, from the stored chunks."""
+        with self._store.session() as store:
+            if store.keywords_current():
+                return
+        with self._store.writing(), self._store.session() as store:
+            if store.keywords_current() or store.identity != self.identity:
+                return
+            added = store.rebuild_keywords()
+            store.bump()
+        logger.info("built the keyword index of %s from %d stored chunk(s)", self.path, added)
 
     def _rebuild(self, *, force: bool) -> None:
         """Start an empty collection for this identity; the reconciles that follow fill it again."""
@@ -609,7 +713,7 @@ class VectorIndex:
                 return
             for name in stale:
                 logger.info("dropping the indexed chunks of source %r: it is no longer an indexed source", name)
-                store.collection.delete(where={"source": name})
+                store.delete_chunks(source=name)
                 store.forget_source(name)
             store.bump()
 
@@ -702,7 +806,7 @@ class VectorIndex:
             with self._store.session() as store:
                 if store.identity != self.identity:
                     return
-                store.collection.delete(where={"address": address})
+                store.delete_chunks(address=address)
                 if chunks:
                     _upsert(
                         store,
@@ -738,7 +842,7 @@ class VectorIndex:
             if store.file_row(address) is None:
                 return
             if store.identity == self.identity:
-                store.collection.delete(where={"address": address})
+                store.delete_chunks(address=address)
             store.forget_file(address)
             store.bump()
 
@@ -761,7 +865,7 @@ class VectorIndex:
         for chat_id in set(rows) - set(scanned):
             with self._store.writing(), self._store.session() as store:
                 if store.identity == self.identity:
-                    store.collection.delete(where={"chat": chat_id})
+                    store.delete_chunks(chat=chat_id)
                 store.forget_chat(chat_id)
                 store.bump()
 
@@ -805,7 +909,7 @@ class VectorIndex:
                 if store.identity != self.identity:
                     return
                 if restart:
-                    store.collection.delete(where={"chat": chat_id})
+                    store.delete_chunks(chat=chat_id)
                 if documents:
                     _upsert(
                         store,
@@ -832,6 +936,39 @@ def _disposable_chats(source: Source) -> set[str]:
     return {path.name[: -len(suffix)] for path in source.root.iterdir() if path.name.endswith(suffix)}
 
 
+def fts_query(text: str) -> str:
+    """An FTS5 MATCH expression for the words of `text`: each word quoted, any of them may match."""
+    words = list(dict.fromkeys(word.lower() for word in _FTS_WORD.findall(text) if len(word) > 1))
+    return " OR ".join(f'"{word}"' for word in words[:_FTS_MAX_TERMS])
+
+
+def _allowed_sources(where: dict) -> list[str]:
+    """The source names of a `_query_filter` result."""
+    clauses = where.get("$and", [where])
+    for clause in clauses:
+        if "source" in clause:
+            return list(clause["source"]["$in"])
+    return []
+
+
+def _hit(doc: str, meta: dict | None, score: float) -> dict:
+    meta = meta or {}
+    return {
+        "address": meta.get("address", ""),
+        "source": meta.get("source", ""),
+        "context": meta.get("context", ""),
+        "document": doc,
+        "body": doc.split("\n\n", 1)[1] if "\n\n" in doc else doc,
+        "score": round(score, 4),
+    }
+
+
+def _cosine(a, b) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    norm = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
+    return dot / norm if norm else 0.0
+
+
 def _upsert(store: _Store, ids: list[str], documents: list[str], vectors: list, metadatas: list[dict]) -> None:
     """Store chunks in batches small enough for Chroma's maximum batch size."""
     for start in range(0, len(ids), _UPSERT_BATCH):
@@ -840,6 +977,7 @@ def _upsert(store: _Store, ids: list[str], documents: list[str], vectors: list, 
             ids=ids[start:end], documents=documents[start:end], embeddings=vectors[start:end],
             metadatas=metadatas[start:end],
         )
+    store.index_keywords(ids, documents, metadatas)
 
 
 def _complete_exchanges(data: bytes, first_line: int) -> tuple[list[tuple[int, str, str, str]], int, int]:
