@@ -92,6 +92,7 @@
       <details id="tasks-tray" hidden><summary></summary><ul></ul></details>
       <details id="processes" hidden><summary></summary><ul></ul></details>
       <div id="composer-row">
+      <ul id="composer-popup" role="listbox" aria-label="Suggestions" hidden></ul>
       <form id="composer">
         <div id="chat-controls">
           <span id="chat-model-label">Chat model</span>
@@ -112,7 +113,7 @@
           <span id="effort-policy"></span>
           <span id="model-policy"></span>
         </div>
-        <textarea id="input" rows="2" placeholder="Write a message…" disabled></textarea>
+        <textarea id="input" rows="2" aria-autocomplete="list" aria-controls="composer-popup" aria-expanded="false" placeholder="Write a message…" disabled></textarea>
         <input id="file-input" type="file" accept="image/*,video/*,audio/*,application/pdf,.pdf" multiple hidden>
         <button id="attach" type="button" class="icon-btn" disabled title="Attach image, video, audio or PDF" aria-label="Attach image, video, audio or PDF"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
         <button id="mic" type="button" class="icon-btn" disabled title="Record a voice message" aria-label="Record a voice message"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v4"/></svg><span id="mic-time" class="mic-time" hidden aria-live="off"></span></button>

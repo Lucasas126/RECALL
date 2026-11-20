@@ -7235,6 +7235,152 @@ async function dispatchMessage(content, attachments, edit = null) {
   }
 }
 
+// ---- composer popup: "/" at the start lists the slash commands, "@" (at the start or after a space) the other agents.
+// composerTrigger, composerFilter and composerMove are DOM-free and unit-tested.
+// The slash commands in one place (the server answers them in service/chat.py); descriptions go through tr().
+const COMPOSER_COMMANDS = [
+  { id: "dream", description: "Dream mode: status, start or cancel" },
+  { id: "compact", description: "Summarize the older part of this chat" },
+  { id: "usage", description: "Show the Claude plan usage" },
+];
+
+// The token that ends at the caret: {kind: "command"|"agent", query, start, end} or null.
+function composerTrigger(text, caret) {
+  const before = text.slice(0, caret);
+  const start = Math.max(before.lastIndexOf(" "), before.lastIndexOf("\n"), before.lastIndexOf("\t")) + 1;
+  const token = before.slice(start);
+  if (start === 0 && /^\/[\w-]*$/.test(token)) return { kind: "command", query: token.slice(1), start, end: caret };
+  if (/^@[\w.-]*$/.test(token)) return { kind: "agent", query: token.slice(1), start, end: caret };
+  return null;
+}
+
+// Items (with id and optional name) whose id or name starts with the query, then those that contain it.
+function composerFilter(items, query) {
+  const q = query.toLowerCase();
+  const rank = (item) => {
+    const fields = [item.id, item.name ?? ""].map((f) => f.toLowerCase());
+    if (fields.some((f) => f.startsWith(q))) return 0;
+    return fields.some((f) => f.includes(q)) ? 1 : 2;
+  };
+  return items.map((item, i) => ({ item, i, r: rank(item) })).filter((x) => x.r < 2)
+    .sort((a, b) => a.r - b.r || a.i - b.i).map((x) => x.item);
+}
+
+// The selected row after Up (-1) or Down (+1): wraps around; -1 when the list is empty.
+function composerMove(index, delta, count) {
+  if (count <= 0) return -1;
+  return (index + delta + count) % count;
+}
+
+// The text and caret after picking `item` for `trigger`.
+function composerInsert(text, trigger, item) {
+  const insert = `${trigger.kind === "command" ? "/" : "@"}${item.id} `;
+  const rest = text.slice(trigger.end).replace(/^[ ]/, "");
+  return { text: text.slice(0, trigger.start) + insert + rest, caret: trigger.start + insert.length };
+}
+
+const composerPopup = { trigger: null, items: [], index: 0, dismissed: null };
+
+function composerCandidates(trigger) {
+  const items = trigger.kind === "command"
+    ? COMPOSER_COMMANDS.map((c) => ({ id: c.id, description: tr(c.description) }))
+    : (state.user?.agents ?? []).filter((a) => a.id !== state.agentId);
+  return composerFilter(items, trigger.query);
+}
+
+function closeComposerPopup() {
+  composerPopup.trigger = null;
+  composerPopup.items = [];
+  $("composer-popup").hidden = true;
+  $("composer-popup").replaceChildren();
+  $("input").setAttribute("aria-expanded", "false");
+  $("input").removeAttribute("aria-activedescendant");
+}
+
+function renderComposerPopup() {
+  const list = $("composer-popup");
+  const { trigger, items, index } = composerPopup;
+  list.replaceChildren(...items.map((item, i) => {
+    const row = document.createElement("li");
+    row.id = `composer-option-${i}`;
+    row.setAttribute("role", "option");
+    row.setAttribute("aria-selected", String(i === index));
+    if (trigger.kind === "agent") {
+      const avatar = document.createElement("span");
+      avatar.className = "composer-avatar";
+      renderAvatar(avatar, item.avatar, item.name ?? item.id);
+      row.append(avatar);
+    }
+    const label = document.createElement("span");
+    label.className = "composer-label";
+    label.textContent = trigger.kind === "command" ? `/${item.id}` : (item.name ?? item.id);
+    const detail = document.createElement("span");
+    detail.className = "composer-detail";
+    detail.textContent = trigger.kind === "command" ? item.description : `@${item.id}`;
+    row.append(label, detail);
+    row.addEventListener("click", () => pickComposerItem(item));
+    return row;
+  }));
+  list.setAttribute("aria-label", tr("Suggestions"));
+  list.hidden = false;
+  $("input").setAttribute("aria-expanded", "true");
+  $("input").setAttribute("aria-activedescendant", `composer-option-${index}`);
+  list.children[index]?.scrollIntoView({ block: "nearest" });
+}
+
+function updateComposerPopup() {
+  const input = $("input");
+  const trigger = input.disabled || input.selectionStart !== input.selectionEnd ? null : composerTrigger(input.value, input.selectionStart);
+  const dismissed = composerPopup.dismissed;
+  if (!trigger || (dismissed && dismissed.start === trigger.start && dismissed.kind === trigger.kind)) {
+    if (!trigger) composerPopup.dismissed = null;
+    closeComposerPopup();
+    return;
+  }
+  const items = composerCandidates(trigger);
+  if (!items.length) { closeComposerPopup(); return; }
+  const same = composerPopup.trigger && composerPopup.trigger.kind === trigger.kind && composerPopup.trigger.start === trigger.start;
+  composerPopup.index = same ? Math.min(composerPopup.index, items.length - 1) : 0;
+  composerPopup.trigger = trigger;
+  composerPopup.items = items;
+  renderComposerPopup();
+}
+
+function pickComposerItem(item) {
+  const input = $("input");
+  const { text, caret } = composerInsert(input.value, composerPopup.trigger, item);
+  closeComposerPopup();
+  input.value = text;
+  input.setSelectionRange(caret, caret);
+  input.focus();
+  updateSendButton();
+}
+
+// Runs before the Enter handler below: with the list open Enter and Tab pick instead of sending.
+$("input").addEventListener("keydown", (e) => {
+  if (!composerPopup.items.length || e.isComposing) return;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    composerPopup.index = composerMove(composerPopup.index, e.key === "ArrowDown" ? 1 : -1, composerPopup.items.length);
+    renderComposerPopup();
+  } else if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    pickComposerItem(composerPopup.items[composerPopup.index]);
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    composerPopup.dismissed = { kind: composerPopup.trigger.kind, start: composerPopup.trigger.start };
+    closeComposerPopup();
+  }
+});
+$("input").addEventListener("input", updateComposerPopup);
+$("input").addEventListener("click", updateComposerPopup);
+$("input").addEventListener("keyup", (e) => {
+  if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) updateComposerPopup();
+});
+$("input").addEventListener("blur", closeComposerPopup);
+$("composer-popup").addEventListener("mousedown", (e) => e.preventDefault());   // keep the focus (and the caret) in the box
+
 // Touch screens have no Shift key: there Enter writes a new line and the Send button sends.
 const touchKeyboard = window.matchMedia("(pointer: coarse)");
 function enterSends(event, touch = touchKeyboard.matches) {
