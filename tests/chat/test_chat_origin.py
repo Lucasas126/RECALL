@@ -5,7 +5,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from fastapi.testclient import TestClient
 
@@ -53,6 +53,9 @@ class ChatOriginStoreTests(unittest.TestCase):
 class ChatOriginServiceTests(steering.SteeringFixture):
     def setUp(self) -> None:
         super().setUp()
+        patcher = patch("src.service.chat._EMPTY_CHAT_GRACE_SECONDS", 0)  # these tests build chats back to back
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.key = ("user-one", "agent-one")
         self.source = self.sources[self.key]
         self.service._all_agents = lambda: [self.key]

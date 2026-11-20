@@ -103,6 +103,7 @@ _ROUTING_INSTRUCTIONS = (
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _REASONING_SUPPORT_TTL_SECONDS = 600
+_EMPTY_CHAT_GRACE_SECONDS = 30  # an empty chat this young is not pruned: its page may not have named it as `keep` yet
 _REWIND_WAIT_SECONDS = 30  # how long an edit waits for a cancelled reply to stop
 _NAMING_PROMPT = (
     "Name the conversation below with a short title of at most six words, in the language used "
@@ -1128,7 +1129,7 @@ class ChatService:
         slot = self._slot(user_id, agent_id)
         self._remove_expired(user_id, agent_id)
         with slot.state:
-            conversations.prune_empty(self._kept_chats(slot, keep))
+            conversations.prune_empty(self._kept_chats(slot, keep), grace=_EMPTY_CHAT_GRACE_SECONDS)
         days = self._retention_days(user_id)
         with slot.state:
             busy = {chat_id for chat_id in conversations.chats() if self._chat_busy(slot, chat_id)}
@@ -1358,7 +1359,7 @@ class ChatService:
         conversations = self._conversations(user_id, agent_id)
         slot = self._slot(user_id, agent_id)
         with slot.state:
-            conversations.prune_empty(self._kept_chats(slot))
+            conversations.prune_empty(self._kept_chats(slot), grace=_EMPTY_CHAT_GRACE_SECONDS)
             return conversations.summary(conversations.create(disposable=disposable, origin=origin), self._retention_days(user_id))
 
     def set_chat_disposable(self, user_id: str, agent_id: str, chat_id: str, disposable: bool) -> dict:
