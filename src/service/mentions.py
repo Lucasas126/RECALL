@@ -23,6 +23,12 @@ def parse_mention(text: str) -> Optional[tuple[str, str]]:
     return match.group(1).lower(), text[match.end():]
 
 
+def mention_chat_title(origin_name: str, text: str, words: int = 6) -> str:
+    """Title of the mentioned agent's chat: where it comes from and the first words of the first request."""
+    head = " ".join(str(text or "").split()[:words])
+    return f"From {origin_name}: {head}" if head else f"From {origin_name}"
+
+
 def reply_label(agent_id: str, name: str) -> str:
     """How a mention reply copied into the originating chat reads for that chat's model."""
     return f"[reply from agent {agent_id} ({name})]" if name and name != agent_id else f"[reply from agent {agent_id}]"

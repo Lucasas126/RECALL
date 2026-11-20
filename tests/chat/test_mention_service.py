@@ -52,6 +52,8 @@ class MentionServiceTests(steering.SteeringFixture):
         list(self._send("@agent-two second"))
         second = self._wait_copy(2)[-1]["mention_reply"]["chat_id"]
         self.assertEqual(first, second)
+        title = next(c for c in self.service.list_chats("user-one", "agent-two") if c["id"] == first)["title"]
+        self.assertTrue(title.startswith("From ") and title.endswith(": first"), title)
         other = self.service.create_chat("user-one", "agent-one")["id"]
         list(self._send("@agent-two third", chat=other))
         deadline = time.monotonic() + 3

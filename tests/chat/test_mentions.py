@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.service.mentions import chat_excerpt, mention_prompt, parse_mention, reply_label
+from src.service.mentions import chat_excerpt, mention_chat_title, mention_prompt, parse_mention, reply_label
 
 
 class ParseMentionTests(unittest.TestCase):
@@ -47,3 +47,10 @@ class ExcerptTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ChatTitleTests(unittest.TestCase):
+    def test_title_names_the_origin_and_the_first_words(self) -> None:
+        self.assertEqual(mention_chat_title("Nova", "check the  weather for tomorrow morning please now"),
+                         "From Nova: check the weather for tomorrow morning")
+        self.assertEqual(mention_chat_title("Nova", "  "), "From Nova")

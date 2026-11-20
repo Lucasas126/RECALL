@@ -75,7 +75,7 @@ from src.agent.toolsets.delegate import TaskError
 from src.service.agent_admin import AgentAdmin
 from src.service.agent_permissions import AgentPermissions
 from src.service.tasks import TaskManager
-from src.service.mentions import MENTION_CONTEXT_CHARS, chat_excerpt, mention_prompt, parse_mention
+from src.service.mentions import MENTION_CONTEXT_CHARS, chat_excerpt, mention_chat_title, mention_prompt, parse_mention
 from src.agent.toolsets.processes import process_registry, process_wake_block, process_wake_frame
 from src.terminal.approvals import ApprovalBroker, ApprovalNotFound
 from src.terminal.output import clean, redact
@@ -1849,6 +1849,8 @@ class ChatService:
         if target_chat is None:
             target_chat = target_conversations.create(origin="mention")
             target_conversations.set_mention_source(target_chat, origin_id, origin_chat)
+            # a fixed title says where the chat comes from (the first turn starts with the call note, a poor title)
+            target_conversations.rename(target_chat, mention_chat_title(self._agent_name(user_id, origin_id), rest))
         excerpt = chat_excerpt(origin_conversations.load(origin_chat), MENTION_CONTEXT_CHARS)
         prompt = mention_prompt(rest, origin_id, self._agent_name(user_id, origin_id), excerpt)
         events = self.send(
