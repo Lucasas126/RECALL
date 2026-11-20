@@ -3403,9 +3403,7 @@ async function openChat(chatId) {
   const key = chatKey(agentId, chatId);
   if (isGenerating(agentId, chatId) && state.views.has(key)) {
     activateView(state.views.get(key));
-    const usage = state.usages.get(key);
-    if (usage) showUsage(usage);
-    else $("usage").hidden = true;
+    syncUsage();
   } else {
     forgetApprovals(agentId, chatId);
     renderMessages(data.messages, data.window);
@@ -3803,7 +3801,6 @@ async function selectModel(modelId, provider = state.modelProvider) {
     const models = await api(chatsUrl(`/${chatId}/models`), { cache: "no-store" });
     if (session !== state.session || agentId !== state.agentId || chatId !== state.chatId) return;
     applyChatModels(models);
-    $("usage").hidden = true;
     $("model-dialog").close();
   } catch (err) {
     if (session === state.session) $("model-error").textContent = err.message;
@@ -4191,6 +4188,8 @@ function renderMessages(messages, window = null, limit = CHAT_PAGE) {
   $("messages").replaceChildren(container);
   $("usage").hidden = true;
   drawMessages(container, messages, { usage: true });
+  // the stored history may carry no report (a reply still running, an older chat): keep this chat's last known one
+  if ($("usage").hidden) syncUsage();
   updateHistoryBar(container);
   scrollDown(true);
 }
@@ -4353,7 +4352,21 @@ function thousands(value) {
   return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 }
 
+// The report to show for a chat: its last known one, never another chat's (null when it has none).
+function lastUsageReport(usages, key) {
+  return key && usages.get(key) ? usages.get(key) : null;
+}
+
+// Shows the open chat's last known report, or hides the disclosure when it has none.
+function syncUsage() {
+  const report = lastUsageReport(state.usages, state.chatId ? chatKey(state.agentId, state.chatId) : null);
+  if (report) showUsage(report);
+  else $("usage").hidden = true;
+}
+
+// Fills the disclosure without touching its open state, so a refresh never folds it.
 function showUsage(report) {
+  if (state.chatId) state.usages.set(chatKey(state.agentId, state.chatId), report);
   $("usage").hidden = false;
   // the first line is the collapsed summary; the details below it do not repeat it
   const [summary, ...details] = report.split("\n");
@@ -7112,6 +7125,7 @@ async function dispatchMessage(content, attachments, edit = null) {
   if (edit) {
     while (edit.el.nextElementSibling) edit.el.nextElementSibling.remove();
     edit.el.remove();
+    state.usages.delete(key);  // the numbers of the removed replies no longer describe the chat
     $("usage").hidden = true;
   }
   const userMessage = addMessage("user", state.view);
@@ -7127,8 +7141,6 @@ async function dispatchMessage(content, attachments, edit = null) {
   };
   state.requests.add(request);
   state.latest = request;
-  state.usages.delete(key);
-  $("usage").hidden = true;
   updateBusy();
   scrollDown(true);
   try {
