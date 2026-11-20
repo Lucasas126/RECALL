@@ -430,6 +430,7 @@ class ChatService:
         self._approvals = ApprovalBroker(TERMINAL.approval_timeout_seconds)
         self._tasks = TaskManager(self, DATA_DIR, origins)  # subagent tasks launched by the `delegate` tools
         process_registry(DATA_DIR).subscribe_finish(self._wake_for_process)  # background terminal processes
+        process_registry(DATA_DIR).subscribe_seen(self._drop_seen_process_wake)
         self._automations = AutomationService(DATA_DIR, AutomationDependencies(
             launch=lambda *args, **kwargs: self._tasks.launch_unattended(*args, **kwargs),
             agent_exists=self._agent_exists,
@@ -669,6 +670,8 @@ class ChatService:
             return
         registry = process_registry(DATA_DIR)
         try:
+            if registry.get(record["user"], record["id"]).get("seen"):
+                return  # the agent already read its final state: the wake would only repeat it
             output = registry.read(record["user"], record["id"], 20)["output"]
             block = process_wake_block(registry.get(record["user"], record["id"]), clean(redact(output), 4000)[0])
             self.send_system(
@@ -678,6 +681,32 @@ class ChatService:
             pass  # the chat or the record is gone: nobody to tell
         except Exception:
             logger.exception("process wake failed")
+
+    def _drop_seen_process_wake(self, record: dict) -> None:
+        """The agent read the final state of a process whose wake is still queued: take that block out of the wake.
+
+        Only a QUEUED wake changes; one already generating or written stays (a repeat is better than a loss).
+        """
+        if not record.get("chat_id") or not record.get("agent"):
+            return
+        prefix = f"{record['id']} ["
+        slot = self._slot(record["user"], record["agent"])
+        with slot.state:
+            pending = slot.pending.get(record["chat_id"])
+            for queued in list(pending or ()):
+                if queued.source != "process" or queued.blocks is None or queued.block_runs is None or queued.frame is None:
+                    continue
+                keep = [i for i, block in enumerate(queued.blocks) if not block.startswith(prefix)]
+                if len(keep) == len(queued.blocks):
+                    continue
+                if not keep:
+                    queued.cancellation.cancel()
+                    queued.events.put(None)
+                    pending.remove(queued)
+                    continue
+                queued.blocks = [queued.blocks[i] for i in keep]
+                queued.block_runs = [queued.block_runs[i] for i in keep]
+                queued.text = queued.frame(queued.blocks)
 
     def start_task_poller(self) -> None:
         """Recover tasks now, then poll: commands queued by the other process for tasks run here (1 s), results to
