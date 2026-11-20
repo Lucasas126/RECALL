@@ -6,6 +6,7 @@ sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases b
 ## Unreleased
 
 - Fix: the usage line under the message box no longer vanishes while the agent replies, on send or on switching chats: it stays openable with the chat's last known report and updates when the reply finishes. It stays hidden in a new chat or one without a report, and never shows another chat's numbers.
+- Fix: a voice message's transcript now shows once, as small text under the player, right after it is transcribed (it used to appear only after a reload) and no longer repeats as a raw "[AUDIO] Audio transcription:" block in the message text or the edit box. The model still receives the block. Editing a voice message keeps the recording and its transcript. New `transcript` SSE event.
 
 ## 0.4.7
 
