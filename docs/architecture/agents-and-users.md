@@ -132,3 +132,24 @@ The `delegate` tool group (async `task_start`, the wake, task tools; see [delega
   `_handle_task_event` and registers the card under the parent chat. Approvals are shown only in the channel of the parent chat (no relay between channels). Unattended (`interactive=False`, for phase 7):
   the existing policy denies `manual` and dangerous, `smart` stays auto.
 - **Not built yet** (later phases): other agents as workers, cross-process commands.
+
+## @mentions of another agent
+
+A person's message in agent A's chat that starts with `@<agent_id>` of another agent of the same user is answered by
+that agent (B) instead of A; an unknown id or A's own id leaves it a normal message to A. Detection is in
+`ChatService.send`, so web, Telegram and the API behave alike; edits, task messages and task chats never mention.
+
+- **Permissions**: B runs through its normal path (its slot and agent factory) with its own SOUL, model, tool groups,
+  level, approval rules and memory. It is not capped by A, unlike a subagent task. A does not run on that turn and
+  never gets B's tools; only a person can trigger a mention.
+- **B's prompt**: a note that it was called from A's chat and that its reply is shown there and kept in its own
+  conversation, then up to `MENTION_CONTEXT_CHARS` (4000) characters of A's recent user/assistant turns inside an
+  `<untrusted_context>` block marked as context, not instructions, then the text without the `@id` prefix.
+- **Storage**: B answers in one chat of its own per originating A chat (origin `mention`, a `.mention.json` mark),
+  reused by later mentions from that chat. A's chat keeps the message as typed (`mention`) and a copy of B's reply
+  with `author_agent` and `author_name`; A's model reads it as `[reply from agent B (<name>)]`.
+- **Display and control**: A's chat stream is B's stream, opened by a `speaker` event (id, name, avatar). The web UI
+  draws the reply with B's name and picture, live and from history. While B runs, A's chat is active: a reload
+  follows B's run, Stop cancels it, and B's approval cards are listed there. Cards carry B's agent and chat ids,
+  so they are answered in B's chat and an "always" rule lands on B. Telegram opens the reply with "<B name>:".
+- The record of a running mention is in memory only; after a restart there is nothing left to follow.

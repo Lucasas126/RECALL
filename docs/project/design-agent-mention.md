@@ -1,6 +1,6 @@
 # Design: @mention of another agent in a chat
 
-Status: design (phase 1). Not implemented yet.
+Status: implemented (see the architecture page, section "@mentions of another agent"). The `@` autocomplete is built separately.
 
 ## Behaviour
 
