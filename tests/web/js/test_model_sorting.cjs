@@ -198,12 +198,13 @@ test("default STT picker uses its own catalog, prices and no LLM favorites or ca
   assert.deepEqual(Array.from(harness.state.modelFavorites), ["llm/favorite"]);
   const rows = harness.elements.get("model-list").children;
   assert.equal(rows.length, 2);
-  assert.equal(rows[0].children.length, 1);
+  assert.equal(rows[0].children.length, 3);  // choice, info toggle, details (no star for STT)
   const choice = rows[0].children[0];
   assert.equal(choice.children[1].textContent, "stt/cheap");
   assert.equal(choice.attributes["aria-pressed"], "true");
-  assert.match(choice.children[2].textContent, /USD \/ 1M tokens: input from \$2/);
-  assert.equal(choice.children[2].textContent.includes("output"), false);
+  const details = rows[0].children[2];
+  assert.match(details.textContent, /USD \/ 1M tokens: input from \$2/);
+  assert.equal(details.textContent.includes("output"), false);
 });
 
 test("resetting the LLM chat override calls the nullable endpoint without saving user preferences", async () => {

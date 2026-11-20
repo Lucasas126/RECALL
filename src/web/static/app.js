@@ -3694,27 +3694,42 @@ function renderModelList() {
     const name = document.createElement("strong");
     name.textContent = model.name;
     const id = document.createElement("small");
+    id.className = "model-id";
     id.textContent = model.id;
-    const providers = document.createElement("small");
-    providers.textContent = !available ? tr("Unavailable under the current filter")
+    const notes = [!available ? tr("Unavailable under the current filter")
       : subscription ? tr("Experimental: uses your own Claude Code login.")
       : cloud ? tr(zdrInPlay ? "Ollama cloud model: runs on Ollama's servers. Not ZDR." : "Ollama cloud model: runs on Ollama's servers.")
       : local ? tr("Runs on your Ollama server.")
       : !zdrInPlay ? ""
       : model.zdr_providers?.length ? `ZDR routes: ${model.zdr_providers.join(", ")}`
-      : "No active ZDR routes";
+      : "No active ZDR routes"];
+    const price = subscription || local ? "" : `${tokenPrice(model.pricing?.prompt)}`;
     const pricing = document.createElement("small");
-    pricing.textContent = subscription ? tr("Counts against your Claude plan limits; no per-token price.")
+    pricing.className = "model-price";
+    pricing.textContent = price.replace("from ", "");
+    const details = document.createElement("small");
+    details.className = "model-details";
+    details.hidden = true;
+    details.textContent = [...notes, subscription ? tr("Counts against your Claude plan limits; no per-token price.")
       : local ? tr("Local model; no per-token price.")
       : `USD / 1M tokens: input ${tokenPrice(model.pricing?.prompt)}`
-        + (stt ? "" : ` | output ${tokenPrice(model.pricing?.completion)}`);
-    choose.append(name);
+        + (stt ? "" : ` | output ${tokenPrice(model.pricing?.completion)}`), model.description]
+      .filter(Boolean).join("\n");
+    const badges = document.createElement("span");
+    badges.className = "model-badges";
+    if (model.input_modalities?.includes("image")) badges.append(Object.assign(document.createElement("small"), { className: "model-badge", textContent: "img", title: tr("Image input") }));
+    if (matchesCapabilities(model, { tools: true, images: false, reasoning: false })) badges.append(Object.assign(document.createElement("small"), { className: "model-badge", textContent: "tools", title: tr("Tools") }));
+    if (matchesCapabilities(model, { tools: false, images: false, reasoning: true })) badges.append(Object.assign(document.createElement("small"), { className: "model-badge", textContent: "reasoning", title: tr("Reasoning") }));
+    const line = document.createElement("span");
+    line.className = "model-line";
+    line.append(name);
     if (state.modelProvider === ANY_PROVIDER) {
-      choose.append(Object.assign(document.createElement("small"), {
+      line.append(Object.assign(document.createElement("small"), {
         className: "model-provider-tag", textContent: model.provider_label ?? providerName(provider),
       }));
     }
-    choose.append(id, pricing, providers);
+    line.append(badges, pricing);
+    choose.append(line, id);
     choose.addEventListener("click", () => selectModel(model.id, provider));
     const star = document.createElement("button");
     star.type = "button";
@@ -3726,8 +3741,20 @@ function renderModelList() {
     star.title = label;
     star.disabled = state.modelBusy || state.busy;
     star.addEventListener("click", () => toggleFavorite(model.id, provider));
-    row.append(choose);
+    const info = document.createElement("button");
+    info.type = "button";
+    info.className = "model-info-toggle";
+    info.textContent = "i";
+    info.setAttribute("aria-label", tr("Information"));
+    info.setAttribute("aria-expanded", "false");
+    info.title = tr("Information");
+    info.addEventListener("click", () => {
+      details.hidden = !details.hidden;
+      info.setAttribute("aria-expanded", String(!details.hidden));
+    });
+    row.append(choose, info);
     if (!stt) row.append(star);
+    row.append(details);
     list.append(row);
   }
 }
