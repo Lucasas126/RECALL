@@ -27,6 +27,21 @@ class ChatTitleTests(unittest.TestCase):
         self.assertEqual(self.source.set_generated_title(self.chat, "Generated"), "Mine")
         self.assertEqual(self.source.summary(self.chat)["title"], "Mine")
 
+    def test_generated_title_loses_a_leading_label(self) -> None:
+        cases = {
+            "Titulo sugerido: Plan de backups": "Plan de backups",
+            "Título sugerido: **Plan de backups**": "Plan de backups",
+            "Suggested title: \"Trip planning\"": "Trip planning",
+            "Title: Trip planning": "Trip planning",
+            "Title and scope of the report": "Title and scope of the report",
+            "Title:": "Title:",
+        }
+        for raw, expected in cases.items():
+            with self.subTest(raw=raw):
+                chat = self.source.create()
+                self.source.append(chat, "user", "q")
+                self.assertEqual(self.source.set_generated_title(chat, raw), expected)
+
     def test_rename_rejects_empty_and_too_long_titles(self) -> None:
         with self.assertRaises(InputError):
             self.source.rename(self.chat, "   ")
