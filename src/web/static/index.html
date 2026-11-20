@@ -1063,7 +1063,7 @@
       <label id="model-zdr-label" class="model-filter" title="Resets to your ZDR setting each time you open the selector">
         <input id="model-zdr" type="checkbox"> <span id="model-zdr-text">ZDR only (OpenRouter)</span>
       </label>
-      <label class="model-sort-label" for="model-sort">Sort
+      <label class="model-sort-label" for="model-sort"><span id="model-sort-text">Sort</span>
         <select id="model-sort">
           <option value="favorites">Favorites first</option>
           <option value="name">Name A-Z</option>
@@ -1075,9 +1075,9 @@
       </label>
     </div>
       <div id="model-capabilities" class="model-capabilities" role="group" aria-label="Model capabilities">
-        <label class="model-filter"><input id="model-tools" type="checkbox"> Tools</label>
-        <label class="model-filter"><input id="model-images" type="checkbox"> Image input</label>
-        <label class="model-filter"><input id="model-reasoning" type="checkbox"> Reasoning</label>
+        <label class="model-filter"><input id="model-tools" type="checkbox"> <span id="model-tools-text">Tools</span></label>
+        <label class="model-filter"><input id="model-images" type="checkbox"> <span id="model-images-text">Image input</span></label>
+        <label class="model-filter"><input id="model-reasoning" type="checkbox"> <span id="model-reasoning-text">Reasoning</span></label>
       </div>
     </details>
     <p id="model-zdr-warning" class="model-note" role="status" hidden>
@@ -1088,13 +1088,13 @@
     <button id="model-inherit" type="button" class="model-inherit">Use user default</button>
     <ul id="model-list"></ul>
     <details id="model-info" class="model-disclosure">
-      <summary>Information</summary>
+      <summary id="model-info-summary">Information</summary>
       <p id="model-scope-note" class="model-note">Choosing a model for a chat sets only that chat's override.
         The default entry removes it (the agent's default model, else yours). Defaults in Settings are saved with Save settings.
         Favorites are shared across your agents.</p>
-      <p class="model-note">Prices are starting rates in USD per 1M tokens; provider,
+      <p id="model-note-prices" class="model-note">Prices are starting rates in USD per 1M tokens; provider,
         context tiers, caching and extras may change charges.</p>
-      <p class="model-note">Capability filters use catalog metadata, not a routing guarantee.
+      <p id="model-note-capabilities" class="model-note">Capability filters use catalog metadata, not a routing guarantee.
         Image input describes the model; the composer also accepts image, video
         and audio attachments when the selected model declares support.
         PDFs are converted to text on the server and work with any model.

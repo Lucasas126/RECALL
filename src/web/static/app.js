@@ -492,6 +492,34 @@ function numberRow(id, getSpec, nullText) {
 }
 // ---- end number fields and setting rows
 
+const SORT_LABELS = {
+  favorites: "Favorites first", name: "Name A-Z", "prompt-asc": "Input price: low to high",
+  "prompt-desc": "Input price: high to low", "completion-asc": "Output price: low to high",
+  "completion-desc": "Output price: high to low",
+};
+const INFO_NOTES = [
+  "Prices are starting rates in USD per 1M tokens; provider, context tiers, caching and extras may change charges.",
+  "Capability filters use catalog metadata, not a routing guarantee. Image input describes the model; the composer also accepts image, video and audio attachments when the selected model declares support. PDFs are converted to text on the server and work with any model. Filters do not enable tools or reasoning in the agent.",
+];
+
+// static texts of the model picker dialog that translateInterface's id/text pairs do not reach
+function translateModelDialog() {
+  for (const option of $("model-sort").options) option.textContent = tr(SORT_LABELS[option.value]);
+  for (const [id, text] of [
+    ["model-sort-text", "Sort"], ["model-tools-text", "Tools"], ["model-images-text", "Image input"],
+    ["model-reasoning-text", "Reasoning"], ["model-info-summary", "Information"],
+    ["model-note-prices", INFO_NOTES[0]], ["model-note-capabilities", INFO_NOTES[1]],
+  ]) $(id).textContent = tr(text);
+  $("model-capabilities").setAttribute("aria-label", tr("Model capabilities"));
+  $("model-search").placeholder = tr("Search by model name or ID");
+  $("model-search").setAttribute("aria-label", tr("Search models"));
+  $("model-refresh").title = tr("Refresh");
+  $("model-refresh").setAttribute("aria-label", tr("Refresh"));
+  $("model-close").title = tr("Close");
+  $("model-close").setAttribute("aria-label", tr("Close model selector"));
+  updateModelControls();
+}
+
 function translateInterface() {
   renderVersion();
   for (const [id, text] of [
@@ -691,6 +719,7 @@ function translateInterface() {
   for (const option of $("automation-kind").options) option.textContent = tr(kindLabels[option.value]);
   $("automation-title").placeholder = tr("Short name (optional)");
   $("automation-instruction").placeholder = tr("What the agent must do when it fires. It will not have this screen: be specific.");
+  translateModelDialog();
   $("new-disposable-chat").title = tr("New disposable chat");
   $("new-disposable-chat").setAttribute("aria-label", tr("New disposable chat"));
   syncNavToggles();
@@ -3536,10 +3565,11 @@ function updateModelControls() {
   $("model-zdr-warning").hidden = $("model-zdr").checked || !zdrApplies || !state.user?.require_zdr;
   renderProviderTabs();
   $("model-favorites-only").setAttribute("aria-pressed", String(state.modelFavoritesOnly));
-  $("model-favorites-only").title = state.modelFavoritesOnly ? "Show all models" : "Show favorites only";
+  $("model-favorites-only").title = tr(state.modelFavoritesOnly ? "Show all models" : "Show favorites only");
+  $("model-favorites-only").setAttribute("aria-label", tr("Favorites only"));
   const activeFilters = ["model-tools", "model-images", "model-reasoning"]
     .filter((id) => $(id).checked).length;
-  $("model-filters-label").textContent = activeFilters ? `Filters (${activeFilters})` : "Filters";
+  $("model-filters-label").textContent = activeFilters ? `${tr("Filters")} (${activeFilters})` : tr("Filters");
   $("model-filters").dataset.active = String(activeFilters > 0);
 }
 
