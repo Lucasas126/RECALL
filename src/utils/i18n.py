@@ -1100,6 +1100,7 @@ _SPANISH = {
     "Level": "Nivel",
     "The level is a ceiling over what the agent may use: tools, MCP, terminal and delegation. Choose the lowest level that does the job. Only an administrator changes your maximum level.": "El nivel es un techo sobre lo que el agente puede usar: herramientas, MCP, terminal y delegación. Elige el nivel más bajo que haga el trabajo. Solo un administrador cambia tu nivel máximo.",
     "Approval rules": "Reglas de aprobación",
+    "Terminal approvals": "Aprobaciones del terminal",
     "Rules of this agent for commands and file operations. The strictest verdict wins: deny beats ask, ask beats allow. Hardline commands and protected paths are always refused.": "Reglas de este agente para comandos y operaciones de archivos. Gana el veredicto más estricto: denegar gana a preguntar, preguntar gana a permitir. Los comandos hardline y las rutas protegidas siempre se rechazan.",
     "Follow the user and installation defaults": "Seguir los valores por defecto del usuario y de la instalación",
     "Ask": "Preguntar",
