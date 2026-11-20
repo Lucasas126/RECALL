@@ -19,7 +19,7 @@ const state = {
   view: null, views: new Map(), usages: new Map(),
   attachments: [],
   model: null, modelCatalog: null, modelCatalogZdr: null, modelFavorites: [],
-  modelBusy: false, modelLoading: false, modelRequest: 0,
+  agentSwitch: 0, modelBusy: false, modelLoading: false, modelRequest: 0,
   modelFavoritesOnly: false,
   modelTarget: "chat-llm", modelCatalogKind: "llm",
   // provider tabs of the open model picker: availability rows, the selected provider, the one the catalog is for
@@ -1141,24 +1141,51 @@ async function selectAgent(agentId) {
   await refreshChats();
 }
 
-$("agent-select").addEventListener("change", async (e) => {
+// Switching agent opens a fresh chat with it. If that cannot finish (a busy flag appeared, the new chat failed), go
+// back to the agent and chat that were open instead of leaving the selector and the page disagreeing.
+async function switchAgent(agentId) {
   const session = state.session;
-  const agentId = e.target.value;
+  const token = ++state.agentSwitch;
+  const previous = { agentId: state.agentId, chatId: state.chatId };
+  const current = () => session === state.session && token === state.agentSwitch;
+  let error = null;
+  let opened = false;
+  try {
+    await savePreferences({ agent_id: agentId });
+    if (!current()) return;
+    await selectAgent(agentId);
+    if (!current()) return;
+    opened = await newChat();
+  } catch (err) {
+    error = err;
+  }
+  if (!current() || opened) return;
+  try {
+    if (state.agentId !== previous.agentId) {
+      await savePreferences({ agent_id: previous.agentId });
+      if (!current()) return;
+      await selectAgent(previous.agentId);
+    } else if (agentId !== previous.agentId) {
+      await savePreferences({ agent_id: previous.agentId });
+    }
+    if (!current()) return;
+    $("agent-select").value = state.agentId ?? "";
+    if (previous.chatId && state.agentId === previous.agentId && !state.chatId) await openChat(previous.chatId);
+  } catch (err) {
+    error ??= err;
+  }
+  if (current()) {
+    $("agent-select").value = state.agentId ?? "";
+    if (error) addMessage("assistant").error(error);
+  }
+}
+
+$("agent-select").addEventListener("change", (e) => {
   if (state.modelBusy || state.settingsBusy) {
     $("agent-select").value = state.agentId ?? "";
     return;
   }
-  try {
-    await savePreferences({ agent_id: agentId });
-    if (session !== state.session) return;
-    await selectAgent(agentId);
-    await newChat();
-  } catch (err) {
-    if (session === state.session) {
-      $("agent-select").value = state.agentId ?? "";
-      addMessage("assistant").error(err);
-    }
-  }
+  return switchAgent(e.target.value);
 });
 
 // Opening a chat from another agent makes that agent the active one, as the agent selector does.
@@ -3310,27 +3337,29 @@ function startRenameChat(chat, title) {
 }
 
 async function newChat({ disposable = false } = {}) {
-  if (state.modelBusy || state.settingsBusy || !state.user) return;
+  if (state.modelBusy || state.settingsBusy || !state.user) return false;
   const session = state.session;
   try {
     const preferences = await refreshPreferences();
-    if (session !== state.session || state.modelBusy || state.settingsBusy) return;
+    if (session !== state.session || state.modelBusy || state.settingsBusy) return false;
     if (!preferences.agent_id) {
       renderNoAgents();
-      return;
+      return false;
     }
     if (preferences.agent_id !== state.agentId) await selectAgent(preferences.agent_id);
     const agentId = state.agentId;
     const chat = await api(chatsUrl(), {
       method: "POST", ...(disposable ? { body: JSON.stringify({ disposable: true }) } : {}),
     });
-    if (session !== state.session || agentId !== state.agentId) return;
+    if (session !== state.session || agentId !== state.agentId) return false;
     // creating a chat discards the previous empty one; stop requesting its state while opening the new one
     state.chatId = null;
     state.reasoningEffort = null;
     await openChat(chat.id);
+    return state.chatId === chat.id;
   } catch (err) {
     if (session === state.session) addMessage("assistant").error(err);
+    return false;
   }
 }
 
