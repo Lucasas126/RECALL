@@ -387,13 +387,18 @@ class Agent:
         self.last_reply: str = ""
         # the user's own cap on associative fragments per turn (None = application default)
         self.associative_max_matches: int | None = None
+        self.associative_palace_slots: int | None = None
         self._load_recent_context()
         self._reconstruct_context()
         return chat_id
 
-    def refresh_user_models(self, models: ModelsConfig, associative_max_matches: int | None = None) -> None:
-        """Refresh inherited inference defaults and the user's associative cap without rebuilding the index."""
+    def refresh_user_models(
+        self, models: ModelsConfig, associative_max_matches: int | None = None,
+        associative_palace_slots: int | None = None,
+    ) -> None:
+        """Refresh inherited inference defaults and the user's associative settings without rebuilding the index."""
         self.associative_max_matches = associative_max_matches
+        self.associative_palace_slots = associative_palace_slots
         self._default_chat_model = models.chat
         selection = self.sources.conversations().model_selection(self.chat_id)
         model = selection.id if selection else models.chat

@@ -16,7 +16,7 @@ web UI and the Telegram bot after editing it. In Docker you can mount your own c
 | `video`, `pdf`, `speech_to_text` | frame sampling, OCR and transcription defaults | [files and media](../user-guide/files-and-media.md) |
 | `prompt_cache` | `enabled`, `anthropic_providers` | [prompt caching](#prompt-caching) |
 | `tavily` | `api_key` (variable name), `timeout_seconds`, `max_content_chars` | [shared web access](#shared-web-access-tavily) |
-| `associative_memory` | `context_messages`, `top_n`, `score_threshold`, `query_model`, `api_key`, `zdr` | [memory](../user-guide/memory.md#associative-memory) |
+| `associative_memory` | `context_messages`, `top_n`, `score_threshold`, `palace_slots`, `palace_threshold`, `palace_exclude`, `query_model`, `api_key`, `zdr` | [memory](../user-guide/memory.md#associative-memory) |
 | `chat_naming` | `model`, `api_key`, `zdr`, `min_messages` | [chat naming](#chat-naming) |
 | `approval_explain` | `enabled`, `model`, `api_key`, `zdr`, `max_context_chars` | [approval explanations](#approval-explanations) |
 | `mcp` | `connect_timeout_seconds`, `call_timeout_seconds`, `servers` (more servers can go in `<config_dir>/mcp_servers.yaml`) | [MCP servers](../user-guide/mcp.md) |

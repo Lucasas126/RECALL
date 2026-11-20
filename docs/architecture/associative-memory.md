@@ -101,8 +101,13 @@ nothing while rebuilding: pick the simpler, documented).
 ## associative results
 
 - exclude chunks from the current chat;
+- hybrid ranking: dense top 50 and BM25 top 50 (FTS5 table `chunks_fts` in the manifest, `unicode61
+  remove_diacritics 2`, the query's words quoted and joined with OR) fused by RRF (k=60); hits found only by
+  keyword get their cosine from the stored vector, and the gates always compare cosine;
 - keep `top_n` (the application default for the maximum, overridable per user in Settings with
-  `associative_max_matches`, 1-20) and the application-only `score_threshold`; show each hit with its address and up to
+  `associative_max_matches`, 1-20) and the application-only `score_threshold`; reserve `palace_slots` of them
+  (per user `associative_palace_slots`) for mind-palace chunks at or above `palace_threshold`, outside
+  `palace_exclude`, then fill the rest in hybrid order (`select_hits` in `src/agent/associative.py`); show each hit with its address and up to
   ~400 characters (was 200), cut at a sentence boundary when possible.
 
 ## web UI
@@ -125,7 +130,8 @@ recall mode, the Obsidian safe/auto overlay, a different embeddings model.
 - **manifest**: a SQLite file beside the Chroma data (`.index/manifest.sqlite3`)
   holds per-file `(mtime_ns, size, md5, chunks)`, per-chat `(byte offset, turns,
   mtime_ns, size, chunks)` and a few meta keys (generation, last reconciles, rebuild
-  flags, the collection's `index_id`). Chunk ids are `<address>::chunk<i>` for files and
+  flags, the collection's `index_id`, `fts_version`) and the keyword table `chunks_fts`, written and deleted
+  together with the Chroma chunks. Chunk ids are `<address>::chunk<i>` for files and
   `conversations:<chat>::turn<N>` (plus `.<k>` for the parts of a split exchange),
   where `N` is the line of the user turn. A chat whose file shrank is reindexed from
   the start; a trailing user turn without a reply waits for the next pass.

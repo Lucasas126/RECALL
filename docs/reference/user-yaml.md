@@ -274,6 +274,7 @@ holds what each setting follows when nothing is saved, for the Settings dialog's
 | Key | Value |
 | --- | --- |
 | `associative_max_matches` | `{default, min, max}`: `associative_memory.top_n` from `settings.yaml`, bounds 1-20 |
+| `associative_palace_slots` | `{default, min, max}`: `associative_memory.palace_slots` from `settings.yaml`, bounds 0-20 |
 | `disposable_retention_days` | `{default, min, max}`: 30, bounds 1-365 |
 | `orchestrator` | `orchestrator.enabled` from `settings.yaml` |
 | `show_thinking`, `show_agent_avatar`, `theme` | `true`, `true`, `"system"` (browser only) |
@@ -284,7 +285,7 @@ holds what each setting follows when nothing is saved, for the Settings dialog's
 | `default_llm_model`, `default_stt_model` | `models.chat` and `models.stt` of `user.yaml` |
 | `agents` | `[{id, name}]` of the user's agents, for the core-agent choice |
 
-Resetting a setting means saving `null` for it (`associative_max_matches`, `disposable_retention_days`, `orchestrator`,
+Resetting a setting means saving `null` for it (`associative_max_matches`, `associative_palace_slots`, `disposable_retention_days`, `orchestrator`,
 `default_agent_id`, `core_agent_id`, `default_llm_model`, `default_stt_model`): the value is stored as absent and keeps following the default. `show_thinking`
 and `language` always hold a value, so their reset saves the default value.
 

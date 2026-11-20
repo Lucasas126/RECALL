@@ -222,8 +222,13 @@ class AssociativeMemoryConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     context_messages: int = Field(default=8, ge=0, le=100, strict=True)
-    top_n: int = Field(default=3, ge=1, le=20, strict=True)
+    top_n: int = Field(default=5, ge=1, le=20, strict=True)
     score_threshold: float = Field(default=0.45, ge=0, le=1)
+    # of those, slots reserved for the agent's own mind palace; a palace chunk needs only `palace_threshold`
+    palace_slots: int = Field(default=2, ge=0, le=20, strict=True)
+    palace_threshold: float = Field(default=0.40, ge=0, le=1)
+    # mind-palace path prefixes that do not count for the reserved slots (they still compete as normal hits)
+    palace_exclude: list[Annotated[str, Field(min_length=1, max_length=256)]] = Field(default_factory=list, max_length=50)
     query_model: Optional[str] = Field(default="claude_subscription:haiku", strict=True, min_length=1, max_length=256)
     api_key: str = Field(default="OPENROUTER_API_KEY", pattern=_ENV_NAME)
     zdr: Optional[bool] = Field(default=None, strict=True)  # OpenRouter only; None follows the user's require_zdr

@@ -11,10 +11,6 @@ One list of ideas and planned work. Implemented behaviour is documented in the
 
 - **Level and tool groups in a running chat**: approval rules are re-read before every decision and apply at once, but a changed level, tool group or tool availability still applies only to new chats (the chat keeps the tools it was built with). Open: whether to rebuild the tools between turns of a running chat.
 
-### memory and retrieval
-
-- **Hybrid associative search with reserved note slots** (decided after an evaluation on real chats): (1) add keyword search to the index, an SQLite FTS5 table with BM25 next to the vector store in the same index folder, fused with the vector results by reciprocal rank fusion (k=60); the 0.45 cosine gate keeps deciding what is relevant enough, because fused ranks have no absolute scale. (2) Reserve slots for the agent's own mind palace: inject up to 5 fragments, of which up to 2 are mind-palace notes (outside `reference/`) with cosine >= 0.40, filled first and then completed by hybrid order. Per-user settings with these defaults for every user. In the evaluation (210 real queries, fragments graded by a model) the share of turns that received a useful fragment rose from 79% (hybrid alone, 5 fragments) to 93%; a quota for any document (including linked folders) added mostly noise.
-
 ### automation and behavior
 
 - **Agents shared between users** (idea): one agent that several users can open, with a memory (mind palace) shared by all of them, for example a household agent for two people. Users could also talk to each other through it, with the agent relaying or summarising. Open: who owns the agent and its files, per-user chats versus one shared chat, what each user may read of the other's messages, permission level and approvals (whose limit applies), and where the shared memory lives so private data of one user never leaks to the other.

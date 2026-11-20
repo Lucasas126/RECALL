@@ -12,6 +12,7 @@ from src.utils.i18n import UserMessageError
 
 # bounds of the numeric preferences; the interface reads them from the preferences `defaults` object
 ASSOCIATIVE_MAX_MATCHES_BOUNDS = (1, 20)
+ASSOCIATIVE_PALACE_SLOTS_BOUNDS = (0, 20)
 DISPOSABLE_RETENTION_DAYS_BOUNDS = (1, 365)
 
 
@@ -35,6 +36,8 @@ class UserPreferences(BaseModel):
     stt_language: Annotated[str, Field(strict=True, pattern=r"^[a-z]{2}(?:-[A-Z]{2})?$")] | None = None
     # most associative-memory fragments injected per turn; None follows settings.yaml `associative_memory.top_n`
     associative_max_matches: Annotated[int, Field(strict=True, ge=ASSOCIATIVE_MAX_MATCHES_BOUNDS[0], le=ASSOCIATIVE_MAX_MATCHES_BOUNDS[1])] | None = None
+    # of those, how many are reserved for the agent's mind palace; None follows settings.yaml `associative_memory.palace_slots`
+    associative_palace_slots: Annotated[int, Field(strict=True, ge=ASSOCIATIVE_PALACE_SLOTS_BOUNDS[0], le=ASSOCIATIVE_PALACE_SLOTS_BOUNDS[1])] | None = None
     # days of inactivity after which a disposable chat is deleted; None means the default (30)
     disposable_retention_days: Annotated[int, Field(strict=True, ge=DISPOSABLE_RETENTION_DAYS_BOUNDS[0], le=DISPOSABLE_RETENTION_DAYS_BOUNDS[1])] | None = None
     # Telegram orchestrator for this user; None follows settings.yaml `orchestrator.enabled`
