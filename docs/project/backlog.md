@@ -9,9 +9,13 @@ One list of ideas and planned work. Implemented behaviour is documented in the
 
 ### resilience
 
+- **Switching agent in the web UI breaks the chat** (reported 2026-11-20, not yet reproduced): changing the agent in the top selector of an open chat leaves it half broken. Intended behavior: choosing another agent opens a new chat with that agent automatically (the current chat stays as it was). Reproduce first in a browser demo, then fix.
+
 - **Level and tool groups in a running chat**: approval rules are re-read before every decision and apply at once, but a changed level, tool group or tool availability still applies only to new chats (the chat keeps the tools it was built with). Open: whether to rebuild the tools between turns of a running chat.
 
 ### automation and behavior
+
+- **@mention another agent in a chat**: typing `@` in the message box lists the user's agents; the message is sent to the chosen agent, and its reply is saved in both places, the mentioned agent's own conversation and the chat where the mention was made. Builds on messages between agents (`task_start` with `agent`). Open: whether the mentioned agent sees the current chat, permission levels, and how the reply is shown (a marked message from that agent).
 
 - **Automations** are being built in steps: the service (triggers `at`, `every`, `cron`, `process_end`; guards; catch-up) is done, see [automations](../user-guide/automations.md); the agent tools (group `automations`, level `assistant`) and the web tab (a second tab of the Tasks dialog) are done too. Left for later: sending a result to a chat. Calendar and conversation events are out of scope.
 - **Reminders and proactive messages**: a one-off message the agent sends while it works exists (`notify_telegram`) and an agent can schedule work for later with the `automations` tools (see above). Still open: a scheduled message delivered straight to Telegram and shown in the web without running the agent ("sending a result to a chat" in the automations item).
