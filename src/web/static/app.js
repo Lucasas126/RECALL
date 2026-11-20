@@ -1593,7 +1593,7 @@ function readRuleRows() {
 // The collapsed sections show how many rules they hold: "(7)".
 function updateRuleCounts() {
   $("agent-rules-count").textContent = `(${$("agent-rules-list").children.length})`;
-  $("agent-approval-rules-count").textContent = `(${state.agentForm.learnedEntries?.length ?? 0})`;
+  $("agent-approval-rules-count").textContent = `(${state.agentForm.learned?.length ?? 0})`;
 }
 
 function ruleEditorChanged() {
@@ -1611,7 +1611,6 @@ function renderRuleEditor(approvalRules) {
   $("agent-rules-empty").hidden = manual.length > 0;
   $("agent-rules-error").textContent = "";
   $("agent-rules-section").open = false;
-  state.agentForm.learnedEntries = [];
   updateRuleCounts();
   $("agent-rules-backends").replaceChildren(...(state.user?.terminal_backends ?? []).map((backend) => Object.assign(
     document.createElement("option"), { value: backend.name },
