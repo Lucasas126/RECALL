@@ -3,6 +3,10 @@
 The notes of each release are on the GitHub Releases page. This file groups what changed by topic, starting with 0.4.0, which
 sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases between 5 and 15 November.
 
+## Unreleased
+
+- Fix: the usage line under the message box no longer vanishes while the agent replies, on send or on switching chats: it stays openable with the chat's last known report and updates when the reply finishes. It stays hidden in a new chat or one without a report, and never shows another chat's numbers.
+
 ## 0.4.7
 
 - Fix: an empty chat deleted by the server while you wrote or recorded in it (another tab, the phone) no longer costs you the draft: the page keeps the text, the recording and the attachments, and sending still works (the reply arrives in a new chat that the page follows).

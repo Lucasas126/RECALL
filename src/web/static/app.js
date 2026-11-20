@@ -4188,8 +4188,8 @@ function renderMessages(messages, window = null, limit = CHAT_PAGE) {
   $("messages").replaceChildren(container);
   $("usage").hidden = true;
   drawMessages(container, messages, { usage: true });
-  // the stored history carries no report yet (a reply still running): keep this chat's last known one
-  if ($("usage").hidden && isGenerating(state.agentId, state.chatId)) syncUsage();
+  // the stored history may carry no report (a reply still running, an older chat): keep this chat's last known one
+  if ($("usage").hidden) syncUsage();
   updateHistoryBar(container);
   scrollDown(true);
 }
