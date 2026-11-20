@@ -870,6 +870,18 @@
             </div>
             <div class="setting-row">
               <div class="setting-main">
+                <label for="settings-assoc-palace" id="settings-assoc-palace-label">Fragments reserved for the mind palace</label>
+                <p id="settings-assoc-palace-hint" class="model-note">Of those fragments, how many are kept for the agent's own notes when they are relevant enough, so chats do not crowd them out. 0 turns this off.</p>
+              </div>
+              <div class="setting-control">
+                <input id="settings-assoc-palace" type="text" inputmode="numeric" autocomplete="off" data-number data-unit="matches">
+                <button type="button" class="icon-btn setting-reset">↺</button>
+              </div>
+              <p class="setting-default model-note"></p>
+              <p class="setting-error error" role="alert"></p>
+            </div>
+            <div class="setting-row">
+              <div class="setting-main">
                 <label for="settings-disposable-days" id="settings-disposable-days-label">Days to keep disposable chats</label>
                 <p id="settings-disposable-days-hint" class="model-note">Disposable chats are deleted after this many days without activity.</p>
               </div>

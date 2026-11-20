@@ -33,7 +33,7 @@ from src.config.models import (
 )
 from src.agent.tool_groups import DEFAULT_TOOL_GROUPS, TOOL_GROUP_CATALOG
 from src.config.preferences import (
-    ASSOCIATIVE_MAX_MATCHES_BOUNDS, DISPOSABLE_RETENTION_DAYS_BOUNDS, PreferencesError, UserPreferences,
+    ASSOCIATIVE_MAX_MATCHES_BOUNDS, ASSOCIATIVE_PALACE_SLOTS_BOUNDS, DISPOSABLE_RETENTION_DAYS_BOUNDS, PreferencesError, UserPreferences,
     UserPreferencesStore,
 )
 from src.config.field_defaults import agent_defaults
@@ -1009,6 +1009,10 @@ class ChatService:
                 "associative_max_matches": {
                     "default": ASSOC.top_n,
                     "min": ASSOCIATIVE_MAX_MATCHES_BOUNDS[0], "max": ASSOCIATIVE_MAX_MATCHES_BOUNDS[1],
+                },
+                "associative_palace_slots": {
+                    "default": ASSOC.palace_slots,
+                    "min": ASSOCIATIVE_PALACE_SLOTS_BOUNDS[0], "max": ASSOCIATIVE_PALACE_SLOTS_BOUNDS[1],
                 },
                 "avatar_style": "circle",
                 "disposable_retention_days": {
@@ -2668,6 +2672,7 @@ class ChatService:
             agent.refresh_user_models(
                 user_models(self._user(user_id), self._preferences, self._agent_config(user_id, agent_id)),
                 self._preferences.get(user_id).associative_max_matches,
+                self._preferences.get(user_id).associative_palace_slots,
             )
         agent.config.language = self.language(user_id)
         task = self._conversations(user_id, agent_id).task_mark(run.chat_id)

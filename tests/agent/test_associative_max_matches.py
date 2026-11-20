@@ -28,13 +28,12 @@ class AssociativeMaxMatchesTests(unittest.TestCase):
         agent = _agent(6)
         _, count = associative.recall(agent, "question")
         self.assertEqual(count, 6)
-        self.assertEqual(agent.query_memory.call_args.args[1], 6)
+        self.assertGreaterEqual(agent.query_memory.call_args.args[1], 6)  # more candidates than the cap
 
     def test_unset_follows_settings_top_n(self) -> None:
         agent = _agent(None)
         _, count = associative.recall(agent, "question")
         self.assertEqual(count, 3)
-        self.assertEqual(agent.query_memory.call_args.args[1], 3)
         self.config.top_n = 5
         self.assertEqual(associative.recall(agent, "question")[1], 5)
 

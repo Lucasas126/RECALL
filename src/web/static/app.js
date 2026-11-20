@@ -135,14 +135,14 @@ function renderVersion() {
 const SETTINGS_SECTIONS = {
   general: ["show_thinking", "show_agent_avatar", "language", "default_agent_id"],
   models: ["default_llm_model", "default_stt_model", "stt_language"],
-  chats: ["associative_max_matches", "disposable_retention_days"],
+  chats: ["associative_max_matches", "associative_palace_slots", "disposable_retention_days"],
   telegram: ["orchestrator", "core_agent_id"],
   connections: [],
 };
 // Saving null for these means "follow the default"; the others always hold a value.
 const NULLABLE_PREFERENCES = new Set([
-  "default_llm_model", "default_stt_model", "stt_language", "associative_max_matches", "disposable_retention_days",
-  "orchestrator", "core_agent_id", "default_agent_id",
+  "default_llm_model", "default_stt_model", "stt_language", "associative_max_matches", "associative_palace_slots",
+  "disposable_retention_days", "orchestrator", "core_agent_id", "default_agent_id",
 ]);
 
 // The agent new chats open with when none is picked: the saved default if the user still has it, else the first agent.
@@ -511,6 +511,8 @@ function translateInterface() {
     ["settings-agent-avatar-hint", "Shows the agent's profile picture at the start of its replies in the chat. Agents without a picture are not affected."],
     ["settings-assoc-max-label", "Maximum associative memory matches"],
     ["settings-assoc-max-hint", "Most memory fragments suggested to the agent per message. The minimum similarity is set by the application, not by you."],
+    ["settings-assoc-palace-label", "Fragments reserved for the mind palace"],
+    ["settings-assoc-palace-hint", "Of those fragments, how many are kept for the agent's own notes when they are relevant enough, so chats do not crowd them out. 0 turns this off."],
     ["settings-orchestrator-label", "Choose the agent automatically in Telegram"],
     ["settings-orchestrator-hint", "When a Telegram message starts a new chat, a fast model picks the best agent from the agents' descriptions. You can still override it with the buttons. The message text and the agents' names and descriptions are sent to the decision model's provider."],
     ["settings-default-agent-label", "Default agent"],
@@ -2516,6 +2518,7 @@ function settingsOriginalValues() {
     default_llm_model: saved.default_llm_model, default_stt_model: saved.default_stt_model,
     stt_language: saved.stt_language ?? null,
     associative_max_matches: saved.associative_max_matches ?? prefDefault("associative_max_matches"),
+    associative_palace_slots: saved.associative_palace_slots ?? prefDefault("associative_palace_slots"),
     disposable_retention_days: saved.disposable_retention_days ?? prefDefault("disposable_retention_days"),
     orchestrator: saved.orchestrator ?? saved.orchestrator_default ?? false,
     core_agent_id: saved.core_agent_id ?? null,
@@ -2533,6 +2536,7 @@ function settingsCurrentValues() {
     default_llm_model: state.settingsModelDraft.default_llm_model, default_stt_model: state.settingsModelDraft.default_stt_model,
     stt_language: $("settings-stt-language").value || null,
     associative_max_matches: number("settings-assoc-max", "associative_max_matches"),
+    associative_palace_slots: number("settings-assoc-palace", "associative_palace_slots"),
     disposable_retention_days: number("settings-disposable-days", "disposable_retention_days"),
     orchestrator: $("settings-orchestrator").checked, core_agent_id: $("settings-core-agent").value || null,
     default_agent_id: $("settings-default-agent").value || null,
@@ -2598,6 +2602,7 @@ function fillSettings() {
   $("settings-language").value = state.preferences.language;
   const original = settingsOriginalValues();
   setNumberValue($("settings-assoc-max"), original.associative_max_matches);
+  setNumberValue($("settings-assoc-palace"), original.associative_palace_slots);
   setNumberValue($("settings-disposable-days"), original.disposable_retention_days);
   $("settings-orchestrator").checked = original.orchestrator;
   const core = $("settings-core-agent");
@@ -8552,6 +8557,7 @@ for (const [id, key] of [["settings-llm", "default_llm_model"], ["settings-stt",
   });
 }
 numberRow("settings-assoc-max", () => state.preferences?.defaults?.associative_max_matches, () => "");
+numberRow("settings-assoc-palace", () => state.preferences?.defaults?.associative_palace_slots, () => "");
 numberRow("settings-disposable-days", () => state.preferences?.defaults?.disposable_retention_days, () => "");
 checkboxRow("settings-orchestrator", () => prefDefault("orchestrator"));
 registerRow("settings-core-agent", {

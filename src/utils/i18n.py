@@ -345,6 +345,8 @@ _SPANISH = {
     "Needs the Delegate tool group and level collaborator or higher. Worker tokens count toward the session.": "Necesita el grupo de herramientas Delegar y nivel colaborador o superior. Los tokens de los workers cuentan en la sesión.",
     "Time limit per session. One minute before it the agent is told to wrap up; at the limit the session is closed.": "Límite de tiempo por sesión. Un minuto antes se avisa al agente de que termine; al llegar al límite la sesión se cierra.",
     "Maximum associative memory matches": "Máximo de coincidencias de memoria asociativa",
+    "Fragments reserved for the mind palace": "Fragmentos reservados para el palacio mental",
+    "Of those fragments, how many are kept for the agent's own notes when they are relevant enough, so chats do not crowd them out. 0 turns this off.": "De esos fragmentos, cuántos se guardan para las notas propias del agente cuando son lo bastante relevantes, para que los chats no las desplacen. 0 lo desactiva.",
     "Leave empty to use the application default. The minimum similarity is set by the application, not by you.": "Déjalo vacío para usar el valor predeterminado de la aplicación. La similitud mínima la fija la aplicación, no tú.",
     "Alerts and errors": "Avisos y errores",
     "Save settings": "Guardar ajustes",

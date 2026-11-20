@@ -75,8 +75,11 @@ tavily:
 
 associative_memory:
   context_messages: 8       # recent messages the memory subagent sees (each cut to 600 chars)
-  top_n: 3                  # default maximum fragments injected per turn; each user can choose their own in Settings
+  top_n: 5                  # default maximum fragments injected per turn; each user can choose their own in Settings
   score_threshold: 0.45     # minimum similarity for a fragment to be injected (application-wide, not per user)
+  palace_slots: 2           # default slots of top_n reserved for the agent's mind palace; each user can choose their own
+  palace_threshold: 0.40    # minimum similarity for a mind-palace fragment to take a reserved slot (application-wide)
+  palace_exclude: []        # mind-palace path prefixes that never take a reserved slot, e.g. [archive/]
   query_model: claude_subscription:haiku  # small model that proposes the search query (the user's Claude subscription); null uses each chat's own model
   api_key: OPENROUTER_API_KEY      # shared env var NAME for the OpenRouter key when query_model is an OpenRouter model, never the secret
   # zdr: false                     # optional override of the user's require_zdr (user.yaml) for query requests; unset follows it

@@ -61,6 +61,9 @@ _FRAGMENT_LIMIT = 400
 _EXCERPT_LIMIT = _FRAGMENT_LIMIT  # the user sees as much of each fragment as the model got
 # longest message searched as is in `question_only` mode
 _QUESTION_LIMIT = 1000
+# candidates fetched per lookup, from which the reserved mind-palace slots and the rest are chosen
+_CANDIDATES = 50
+_PALACE = "mind_palace"
 
 
 class RecallResult(tuple):
@@ -87,6 +90,34 @@ def max_matches(agent: "Agent") -> int:
     return getattr(agent, "associative_max_matches", None) or ASSOC.top_n
 
 
+def palace_slots(agent: "Agent") -> int:
+    """Slots reserved for the mind palace: the user's own value when set, else `palace_slots`; never above the cap."""
+    own = getattr(agent, "associative_palace_slots", None)
+    return min(ASSOC.palace_slots if own is None else own, max_matches(agent))
+
+
+def select_hits(found: list[dict], limit: int, slots: int) -> list[dict]:
+    """Choose what to inject from hybrid-ordered candidates.
+
+    Up to `slots` mind-palace chunks (outside `palace_exclude`) with similarity >= `palace_threshold` are taken
+    first; the remaining places go to any candidate >= `score_threshold`. The result keeps the hybrid order.
+    """
+    def reserved(hit: dict) -> bool:
+        address = hit.get("address", "")
+        if hit.get("source", address.split(":", 1)[0]) != _PALACE or hit["score"] < ASSOC.palace_threshold:
+            return False
+        path = address.split(":", 1)[1] if ":" in address else address
+        return not any(path.startswith(prefix) for prefix in ASSOC.palace_exclude)
+
+    chosen = {id(hit) for hit in [h for h in found if reserved(h)][:max(0, min(slots, limit))]}
+    for hit in found:
+        if len(chosen) >= limit:
+            break
+        if id(hit) not in chosen and hit["score"] >= ASSOC.score_threshold:
+            chosen.add(id(hit))
+    return [hit for hit in found if id(hit) in chosen]
+
+
 def recall(
     agent: "Agent", user_input: str, cancellation: CancellationToken | None = None,
     history: list[dict] | None = None, chat_id: str | None = None,
@@ -110,12 +141,12 @@ def recall(
         return RecallResult(None, 0)
     limit = max_matches(agent)
     extra = {} if cancellation is None else {"cancellation": cancellation}
-    found = agent.query_memory(query, limit, exclude_chat=chat_id, **extra)
+    found = agent.query_memory(query, max(limit, _CANDIDATES), exclude_chat=chat_id, **extra)
     logger.info(
         "query=%r proposed in %.0f ms, memory search took %.0f ms",
         query, (proposed_at - started_at) * 1000, (perf_counter() - proposed_at) * 1000,
     )
-    hits = [h for h in found if h["score"] >= ASSOC.score_threshold][:limit]
+    hits = select_hits(found, limit, palace_slots(agent))
     if cancellation is not None:
         cancellation.raise_if_cancelled()
     if not hits:
