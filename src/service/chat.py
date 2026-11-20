@@ -274,13 +274,14 @@ class ChatEvent:
     expires_at) or `approval_resolved` (`data`: id, decision approved|denied, reason), `approval_explanation` (`data`: id, text; a
     short AI explanation of a card that is already shown), or `task_started` (a task was
     launched while its `task_start` call is still running, e.g. `wait=true`; `data`: task_id, goal, title, chat_id of the
-    worker). The reply resumes by itself
+    worker), or `transcript` (what speech-to-text heard in the message's recordings, `data`: transcripts, one per
+    recording in order, sent before the reply). The reply resumes by itself
     once the approval is answered through `resolve_approval`, times out or is cancelled.
     Non-streaming replies arrive as `tool` events followed by one `text` event. All events
     carry a generation id so adapters can distinguish overlapping deliveries.
     """
 
-    kind: Literal["reasoning", "text", "tool_start", "tool", "usage", "interrupted", "memory", "notice", "approval", "approval_resolved", "approval_explanation", "task_started"]
+    kind: Literal["reasoning", "text", "tool_start", "tool", "usage", "interrupted", "memory", "notice", "approval", "approval_resolved", "approval_explanation", "task_started", "transcript"]
     text: str = ""
     data: Optional[dict] = None
     generation_id: str = ""
@@ -1721,18 +1722,23 @@ class ChatService:
                 raise InputError("this is an internal task chat: steer the task instead")
         attachments = [ChatAttachment.model_validate(item).model_dump() for item in (attachments or [])]
         kept_documents: list[dict] = []
+        kept_recordings: list[dict] = []
         if rewind_to is not None:
             original = self._edit_target(conversations, chat_id, rewind_to)
             if not attachments:
                 attachments = self._stored_attachments(original.get("content"))
                 # a PDF only lives on the turn as `media` (the model gets its text): an edit keeps it
                 kept_documents = [m for m in original.get("media") or [] if m.get("modality") == "document"]
+                # a recording only lives on the turn as `media` too, with what was heard: the edit keeps both
+                kept_recordings = [
+                    m for m in original.get("media") or [] if m.get("modality") == "audio" and m.get("transcript")
+                ]
         # audio, video and PDFs are turned into text and frames for the model: keep the originals on the turn so the
         # person can play or open them back (images already stay in the turn's content)
         media = [
             {k: a[k] for k in ("name", "modality", "mime_type", "data_url")}
             for a in attachments if a["modality"] in ("audio", "video", "document")
-        ] + kept_documents
+        ] + kept_documents + kept_recordings
         if not media and rewind_to is not None and not attachments:
             media = list(original.get("media") or [])
         text, attachments, notice = self._decompose_videos(user_id, agent_id, chat_id, text, attachments)
@@ -1740,6 +1746,10 @@ class ChatService:
         text, attachments = self._transcribe_audio(
             user_id, agent_id, chat_id, text, attachments, transcripts,
         )
+        if kept_recordings:  # the model keeps hearing them; the web UI shows the text under each player instead
+            text = "\n\n".join(part for part in [text.strip(), *(
+                self._transcription_text(item["transcript"]) for item in kept_recordings
+            )] if part)
         text, attachments = self._extract_documents(text, attachments)
         if not text.strip() and not attachments:
             raise InputError("message is empty")
@@ -1751,11 +1761,13 @@ class ChatService:
         run = _MessageRun(chat_id, text, attachments, stream, meta=run_meta or None,
                            channel=channel if channel in ("web", "telegram") else None)
         # keep what the speech-to-text heard next to each recording, so the person can check it any time
-        recordings = [item for item in media if item["modality"] == "audio"]
+        recordings = [item for item in media if item["modality"] == "audio" and "transcript" not in item]
         for item, heard in zip(recordings, transcripts):
             item["transcript"] = heard
         if notice:
             run.events.put(ChatEvent("notice", text=notice, generation_id=run.generation_id))
+        if transcripts:
+            run.events.put(ChatEvent("transcript", data={"transcripts": transcripts}, generation_id=run.generation_id))
         deadline = monotonic() + _REWIND_WAIT_SECONDS
         while True:
             with slot.state:

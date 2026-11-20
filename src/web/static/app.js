@@ -4054,13 +4054,31 @@ function attachmentView(attachment) {
   caption.className = "attachment-label";
   caption.textContent = label;
   item.append(media, caption);
-  if (kind === "audio" && attachment.transcript) {
-    const heard = document.createElement("span");
+  if (kind === "audio" && attachment.transcript) showTranscript(item, attachment.transcript);
+  return item;
+}
+
+// The text speech-to-text heard, small, under a recording's player.
+function showTranscript(item, transcript) {
+  item._attachment.transcript = transcript;
+  let heard = item.querySelector(":scope > .attachment-transcript");
+  if (!heard) {
+    heard = document.createElement("span");
     heard.className = "attachment-transcript";
-    heard.textContent = attachment.transcript;
     item.append(heard);
   }
-  return item;
+  heard.textContent = transcript;
+}
+
+// The model reads a recording as "[AUDIO] Audio transcription:\n<text>" appended to the message; the person sees the text
+// under the player instead, so those blocks are left out of the message text when the turn's recordings carry it.
+function visibleUserText(text, media) {
+  if (typeof text !== "string") return text;
+  let shown = text;
+  for (const item of media || []) {
+    if (item.modality === "audio" && item.transcript) shown = shown.split(`[AUDIO] Audio transcription:\n${item.transcript}`).join("");
+  }
+  return shown === text ? text : shown.replace(/\n{3,}/g, "\n\n").trim();
 }
 
 // The viewer: an image opens large (click to zoom to full size), a PDF opens in the page; both can be downloaded.
@@ -4224,7 +4242,7 @@ function drawMessages(container, messages, { usage }) {
         else view.text(step.text);
       }
     } else {
-      view.text(m.content);
+      view.text(visibleUserText(m.content, m.media));
       if (m.media?.length) view.attachments(m.media);
     }
     if (m.interrupted) view.interrupted(null, m.interrupted_by);
@@ -6591,6 +6609,11 @@ function addMessage(role, parent = state.view ?? $("messages")) {
       renderBody();
     },
     attachments: (items) => renderAttachmentNames(items),
+    // what speech-to-text heard, one text per recording of the message in order (the reply's first event)
+    transcripts(texts) {
+      const players = attachmentBox ? [...attachmentBox.querySelectorAll(":scope > .attachment-audio")] : [];
+      players.forEach((item, position) => { if (texts[position]) showTranscript(item, texts[position]); });
+    },
     // Every reasoning burst is its own segment at its place in the timeline; chunks that follow it directly join it.
     thinking(chunk) {
       if (!thinking) {
@@ -7123,7 +7146,7 @@ async function dispatchMessage(content, attachments, edit = null) {
   const request = {
     userId: state.user.id, agentId: state.agentId, chatId: state.chatId,
     session: state.session, controller: new AbortController(), reply,
-    generationId: null, done: false,
+    generationId: null, done: false, userMessage,
   };
   state.requests.add(request);
   state.latest = request;
@@ -7358,6 +7381,7 @@ function handleEvent(raw, request) {
   else if (event === "tool") reply.action(payload);
   else if (event === "memory") reply.memory(payload);
   else if (event === "notice") reply.notice(payload);
+  else if (event === "transcript") request.userMessage?.transcripts(payload.transcripts || []);
   else if (event === "working") reply.working(payload);
   else if (event === "chat_replaced") adoptReplacedChat(request, payload);
   else if (event === "approval") reply.approval({ agent_id: request.agentId, chat_id: request.chatId, ...payload });
