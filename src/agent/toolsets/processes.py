@@ -145,6 +145,8 @@ def build_process_tools(
             return error
         data = registry.read(user_id, id, tail)
         out, _ = clean(data["output"], 20_000)
+        if data["state"] != RUNNING:
+            registry.mark_seen(user_id, id)
         cut = f"\n(showing the last {tail} of {data['output_lines']} lines)" if data["output_truncated"] else ""
         return f"{_summary(data)}{cut}\n" + (out if out.strip() else "(no output yet)")
 
@@ -162,6 +164,8 @@ def build_process_tools(
         registry.wait(user_id, id, timeout_s, cancelled=cancel)
         data = registry.read(user_id, id, 30)
         out, _ = clean(data["output"], 20_000)
+        if data["state"] != RUNNING:
+            registry.mark_seen(user_id, id)
         state = "" if data["state"] != RUNNING else f"\nstill running after {timeout_s}s"
         return f"{_summary(data)}{state}\n" + (out if out.strip() else "(no output yet)")
 

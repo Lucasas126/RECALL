@@ -65,6 +65,7 @@ class ProcessRegistry:
         self._live: dict[tuple[str, str], _Live] = {}
         self._lock = threading.RLock()
         self._on_finish: list = []  # callbacks(record) when a process ends (the wake hook of step d)
+        self._on_seen: list = []  # callbacks(record) when the agent has been shown a process that already ended
 
     # ---- storage
     def folder(self, user_id: str, *, create: bool = True) -> Path:
@@ -107,6 +108,30 @@ class ProcessRegistry:
 
     def subscribe_finish(self, callback) -> None:
         self._on_finish.append(callback)
+
+    def subscribe_seen(self, callback) -> None:
+        self._on_seen.append(callback)
+
+    def mark_seen(self, user_id: str, process_id: str) -> None:
+        """The agent was just shown the final state of this process (read or wait): its wake message is redundant.
+
+        Only ever called with an ended process. Losing a wake is worse than a repeated one, so this changes nothing
+        but the `seen` flag, and a failure here is ignored.
+        """
+        with self._lock:
+            try:
+                record = self.get(user_id, process_id)
+                if record["state"] == RUNNING:
+                    return
+                record["seen"] = True
+                self._save(record)
+            except (ProcessError, OSError):
+                return
+        for callback in list(self._on_seen):
+            try:
+                callback(dict(record))
+            except Exception:
+                logger.exception("process seen hook failed")
 
     # ---- start
     def start_local(
