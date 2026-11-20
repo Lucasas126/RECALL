@@ -73,6 +73,20 @@ def _is_blank(path: Path) -> bool:
     return True
 
 
+# a label the naming model sometimes writes before the title ("Title: ...", "Suggested title: ...", "Título sugerido: ...")
+_TITLE_LABEL = re.compile(
+    r"^\W*(?:(?:suggested|proposed|chat|conversation)\s+)?(?:title|name)(?:\s+(?:suggestion|suggested))?\s*:\s*"
+    r"|^\W*t[ií]tulo(?:\s+(?:sugerido|propuesto|del\s+chat))?\s*:\s*",
+    re.IGNORECASE,
+)
+
+
+def _strip_title_label(text: str) -> str:
+    """Drop a leading "Title:"-style label from a generated title, unless nothing else would remain."""
+    stripped = _TITLE_LABEL.sub("", text.strip(), count=1)
+    return stripped if stripped.strip(" \"'`*") else text
+
+
 def _normalize_title(text: str) -> str:
     """Collapse whitespace, drop wrapping quotes and cap the length for display."""
     title = " ".join(text.split()).strip(" \"'`*")
@@ -246,7 +260,7 @@ class ConversationsSource(Source):
         existing = self.generated_title(chat_id)
         if existing is not None:
             return existing
-        stored = _normalize_title(title)
+        stored = _normalize_title(_strip_title_label(title))
         if not stored:
             raise ValueError("chat title is empty")
         return self._write_title(chat_id, stored, generated=True)

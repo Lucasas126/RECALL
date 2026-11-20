@@ -107,7 +107,8 @@ _EMPTY_CHAT_GRACE_SECONDS = 30  # an empty chat this young is not pruned: its pa
 _REWIND_WAIT_SECONDS = 30  # how long an edit waits for a cancelled reply to stop
 _NAMING_PROMPT = (
     "Name the conversation below with a short title of at most six words, in the language used "
-    "in the conversation. Reply with the title only, without quotes or punctuation at the end."
+    "in the conversation. Reply with the title only: no label such as \"Title:\" or \"Suggested title:\", "
+    "no quotes, no markdown, no punctuation at the end."
 )
 _NAMING_TURN_CHARS = 1000
 _EXPLAIN_PROMPT = (
