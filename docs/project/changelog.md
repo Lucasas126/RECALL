@@ -5,6 +5,7 @@ sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases b
 
 ## unreleased
 
+- The model picker is compact: providers are one scrollable row of chips (a dot marks an unavailable or experimental provider, details in the tooltip), search, favorites and refresh share one row, sort and the ZDR and capability filters sit in the collapsed Filters section, "Use ... default" is a small first entry, and each model is one line with badges and a price, with its details behind an info button. The dialog texts are translated to Spanish.
 - Memory search is hybrid: keyword matches (BM25) are merged with the embedding matches, so exact names and model numbers are found. Existing indexes get their keyword table from the stored chunks, without new embedding calls.
 - Associative memory injects up to 5 fragments by default (was 3), and 2 of them are reserved for the agent's own mind palace when relevant enough (similarity 0.40). Each user can change both in Settings; new `settings.yaml` keys `palace_slots`, `palace_threshold`, `palace_exclude`.
 
