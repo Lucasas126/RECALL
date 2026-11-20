@@ -3,7 +3,19 @@
 The notes of each release are on the GitHub Releases page. This file groups what changed by topic, starting with 0.4.0, which
 sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases between 5 and 15 November.
 
-## Unreleased
+## 0.5.0
+
+Sums up the 0.4.x line (0.4.0 to 0.4.7, 16 to 19 November 2026) and adds what is new in this release.
+
+### The 0.4.x line in short
+
+- **Approval rules apply at once (0.4.3):** a rule added, removed, reset or denied is honoured by the next action in chats already running; level and tool groups still apply in new chats. One invalid agent file no longer breaks the web UI for its user, and a `user.yaml` whose id differs from its folder is refused with a clear error.
+- **Remote MCP servers (0.4.4 to 0.4.6):** catalog servers can use streamable HTTP with a per-user access token pasted in Settings > Connections (checked, stored with mode 600, never shown again); `<config_dir>/mcp_servers.yaml` adds servers for one installation and survives image updates.
+- **Agents can rename themselves (0.4.1):** the optional tool group `identity` with `set_display_name`, audited, no approval card.
+- **Open source (0.4.2):** the repository was cleaned for publication and legacy config keys were removed (agent files that still carry `max_steps` or `memory_limits` must drop them).
+- **Stop really stops (0.4.7):** Stop kills a running terminal command within about a second and aborts the associative-memory search; a draft survives when the server deletes an empty chat meanwhile.
+
+### New in this release
 
 - Message box: typing `/` at the start opens a list of the slash commands (`/dream`, `/compact`, `/usage`), and typing `@` at the start or after a space lists your other agents (with their picture). Up/Down move, Enter or Tab picks (Enter does not send while the list is open), Escape closes, a click picks; a command inserts `/name `, an agent `@agent_id `.
 - New: @mention another agent in a chat. A message that starts with `@<agent_id>` of another of your agents is answered by that agent, with its own permissions, model and memory (the chat's agent does not run). It sees a short, untrusted excerpt of the chat. The reply shows with its name and picture, is kept in both chats (in its own one chat per originating chat) and can be stopped; its approvals are answered as its own. New `speaker` SSE event and `author_agent`/`author_name` on history messages.
