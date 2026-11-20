@@ -5230,6 +5230,7 @@ function renderTaskTray() {
       const item = box.querySelector(`[data-task-id="${CSS.escape(row.id)}"]`);
       if (!item) continue;
       item.querySelector(".task-tray-time").textContent = row.elapsed;
+      item.querySelector(".process-meta").textContent = row.model;  // the model is stored a moment after the task starts
       item.querySelector(".task-open").hidden = !row.canOpenChat;  // the worker chat appears a moment after the task starts
     }
     return;
