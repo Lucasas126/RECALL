@@ -1499,21 +1499,12 @@ class ChatService:
         """
         conversations = self._conversations(user_id, agent_id)
         active = self.chat_active(user_id, agent_id, chat_id)  # asked BEFORE reading: a reply that ends meanwhile is read complete
-        turns = self._load(conversations, chat_id)
-        if active and turns and turns[-1].get("checkpoint") is True:
+        try:
             # a reply is running: its checkpoint (what it has done so far, stored as `interrupted`) is replayed whole by the
             # live stream the page attaches to next, so showing it here too would draw it twice and call it interrupted
-            turns = turns[:-1]
-        shown = [position for position, t in enumerate(turns) if t.get("role") in ("user", "assistant", "compaction")]
-        everything = shown
-        if before is not None:
-            shown = [position for position in shown if position < before]
-        chosen = shown if limit is None else shown[max(0, len(shown) - limit):]
-        spoken = lambda positions: sum(1 for position in positions if turns[position].get("role") != "compaction")
-        window = {
-            "total": spoken(everything), "hidden": spoken(shown[: len(shown) - len(chosen)]),
-            "first_index": chosen[0] if chosen else None,
-        }
+            turns, window = conversations.window(chat_id, limit=limit, before=before, drop_checkpoint=active)
+        except (FileNotFoundError, ValueError) as e:
+            raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from e
         messages = [
             {
                 # `index` is the turn's position in the stored file (tool turns count), the handle for edits
@@ -1531,7 +1522,7 @@ class ChatService:
                     if t.get(k) is not None
                 },
             }
-            for position, t in ((position, turns[position]) for position in chosen)
+            for position, t in turns
         ]
         return {
             "chat": {
