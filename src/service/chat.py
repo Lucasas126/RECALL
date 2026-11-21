@@ -843,7 +843,7 @@ class ChatService:
         return self._agent_view(user_id, created)
 
     def update_agent(self, user_id: str, agent_id: str, config: AgentConfig) -> dict:
-        """Save an idle agent's configuration; a changed id also moves its data folder and preference."""
+        """Save an agent's configuration (while it replies too; a changed id needs it idle) and move its data folder on rename."""
         user = self._owned_agent(user_id, agent_id)
         self._check_mcp(config)
         self._check_folders(config.folders)
@@ -856,11 +856,13 @@ class ChatService:
         config = self._check_agent_model(user, config, stored.chat_config.model)
         slot = self._slot(user_id, agent_id)
         with slot.state:
-            if slot.active or slot.pending:
+            busy = bool(slot.active or slot.pending)
+            if busy and config.id != agent_id:  # a rename moves the data folder under the running reply
                 raise AgentBusy("wait for this agent's active and queued replies before editing it")
             with slot.lock:
                 updated = self._agents.update(user_id, agent_id, config)
-                slot.agents.clear()
+                if not busy:  # a running reply keeps its agent; the next one rebuilds it from the changed files
+                    slot.agents.clear()
         if updated.id != agent_id:
             self._forget_slot(user_id, agent_id)
             self._replace_preferred_agent(user_id, agent_id, updated.id)

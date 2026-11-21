@@ -1166,3 +1166,5 @@ html.resizing-sidebar #app { transition: none; }
 .composer-avatar[data-avatar-style="free"] img { object-fit: contain; }
 .composer-label { flex-shrink: 0; font-weight: 600; }
 .composer-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); opacity: .75; font-size: .8125rem; }
+#agent-save-error { margin: 0; }
+#agent-save-error:empty { display: none; }

@@ -2406,6 +2406,7 @@ $("agent-form").addEventListener("submit", async (event) => {
   const soul = previousId ? "" : $("agent-prompt").value;
   setAgentBusy(true);
   $("agent-error").textContent = "";
+  $("agent-save-error").textContent = "";
   $("agent-terminal-error").textContent = "";
   $("agent-delegation-error").textContent = "";
   $("agent-rules-error").textContent = "";
@@ -2445,6 +2446,9 @@ $("agent-form").addEventListener("submit", async (event) => {
       } else {
         $("agent-error").textContent = err.message;
       }
+      // whatever the branch, say it where the button is: the other messages can be out of sight
+      $("agent-save-error").textContent = err.message;
+      $("agent-save-error").scrollIntoView({ block: "nearest" });
     }
   } finally {
     if (session === state.session) setAgentBusy(false);
