@@ -59,4 +59,4 @@ Addresses are `source:path`. Sources: `mind_palace` (your notes, writable), `con
 
 ## Config loading
 
-`load_agent` reads `user.yaml` and the agent yaml, resolves the provider key from the environment and returns a `ResolvedAgent`. Saving an agent through the UI/API is refused while its replies are active or queued; the cached runtime is rebuilt on the next message. `settings.yaml` is read at start-up: restart both processes after editing it.
+`load_agent` reads `user.yaml` and the agent yaml, resolves the provider key from the environment and returns a `ResolvedAgent`. Saving an agent through the UI/API works while its replies are active or queued (only a rename is refused); a running reply keeps its runtime and the next message rebuilds it. `settings.yaml` is read at start-up: restart both processes after editing it.

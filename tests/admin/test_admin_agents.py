@@ -169,11 +169,11 @@ class AgentCliTests(AdminFixture):
         self.assertEqual(code, 0, out)
         self.assertEqual(load_agent_config("user-a", "bot").chat_config.model, "ollama:llama3")
 
-    def test_set_is_refused_while_the_agent_is_busy(self) -> None:
+    def test_rename_is_refused_while_the_agent_is_busy(self) -> None:
         slot = self.service._slot("user-a", "bot")
         slot.active["chat"] = object()
         before = self.read("user-a/agents/bot.yaml")
-        code, _, err = self.run_cli(["agent", "set", "--user", "user-a", "--agent", "bot", "--set", "description=x"])
+        code, _, err = self.run_cli(["agent", "rename", "--user", "user-a", "--agent", "bot", "--new-id", "main"])
         slot.active.clear()
         self.assertEqual(code, 1)
         self.assertIn("wait", err)

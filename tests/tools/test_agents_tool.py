@@ -512,15 +512,19 @@ class UpdateChecks(AgentsFixture):
         config = load_agent_config("user-a", "ops")
         self.assertEqual((config.level, len(config.approval_rules.rules)), (Level.OPERATOR, 1))
 
-    def test_a_busy_agent_is_reported_and_nothing_changes(self) -> None:
+    def test_a_busy_agent_can_be_edited_but_not_renamed(self) -> None:
         slot = self.service._slot("user-a", "bot")
         with slot.state:
             slot.pending["chat"] = [object()]
-        text = self.call("agent_update", self.run_of(), agent_id="bot", description="busy")
-        self.assertIn("error:", text)
-        self.assertIn("Nothing was changed", text)
-        with slot.state:
-            slot.pending.clear()
+        try:
+            self.ok("agent_update", self.run_of(), agent_id="bot", description="busy")
+            text = self.call("agent_rename", self.run_of(), agent_id="bot", new_id="robot")
+            self.assertIn("error:", text)
+            self.assertIn("Nothing was changed", text)
+            self.assertIn("bot", self.agent_ids())
+        finally:
+            with slot.state:
+                slot.pending.clear()
 
 
 class RenameDelete(AgentsFixture):
