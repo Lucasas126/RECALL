@@ -3585,20 +3585,41 @@ function startRenameChat(chat, title) {
 
 async function newChat({ disposable = false } = {}) {
   if (state.modelBusy || state.settingsBusy || !state.user) return false;
+  const endLoading = beginLoading();
+  try {
+    return await newChatNow({ disposable });
+  } finally {
+    endLoading();
+  }
+}
+
+async function newChatNow({ disposable }) {
   const session = state.session;
   try {
-    const preferences = await refreshPreferences();
+    const create = (agentId) => api(`/api/agents/${encodeURIComponent(agentId)}/chats`, {
+      method: "POST", ...(disposable ? { body: JSON.stringify({ disposable: true }) } : {}),
+    });
+    // the preferences say which agent a new chat is for; the chat is created for the agent already open at the same time
+    // (the usual case), and only when they disagree is it made again for the right one. The chat's models arrive with the
+    // chat itself, so the preferences do not ask for them here.
+    const wanted = state.agentId;
+    const creating = wanted ? create(wanted) : null;
+    creating?.catch(() => {});  // its error is handled below, where it is awaited
+    const preferences = await refreshPreferences({ models: false });
     if (session !== state.session || state.modelBusy || state.settingsBusy) return false;
     if (!preferences.agent_id) {
       renderNoAgents();
       return false;
     }
-    if (preferences.agent_id !== state.agentId) await selectAgent(preferences.agent_id);
+    let chat = null;
+    if (creating && preferences.agent_id === wanted) {
+      chat = await creating;
+    } else {
+      await selectAgent(preferences.agent_id);
+      chat = await create(state.agentId);
+    }
     const agentId = state.agentId;
-    const chat = await api(chatsUrl(), {
-      method: "POST", ...(disposable ? { body: JSON.stringify({ disposable: true }) } : {}),
-    });
-    if (session !== state.session || agentId !== state.agentId) return false;
+    if (session !== state.session || agentId !== preferences.agent_id) return false;
     // creating a chat discards the previous empty one; stop requesting its state while opening the new one
     state.chatId = null;
     state.reasoningEffort = null;
@@ -3686,14 +3707,46 @@ async function setChatDisposable(disposable) {
 $("disposable-convert").addEventListener("click", () => setChatDisposable(false));
 $("chat-make-disposable").addEventListener("click", () => setChatDisposable(true));
 
+// A thin bar over the messages while a chat is opening or being created. It appears only after a short delay, so a
+// fast load never flickers; calls nest (a new chat opens its chat inside), and the bar goes when the last one ends.
+const LOADING_DELAY_MS = 120;
+let loadingDepth = 0;
+let loadingTimer = null;
+function beginLoading() {
+  loadingDepth += 1;
+  if (loadingDepth === 1) {
+    loadingTimer = setTimeout(() => { loadingTimer = null; $("messages-wrap").classList.add("loading"); }, LOADING_DELAY_MS);
+  }
+  let ended = false;
+  return () => {
+    if (ended) return;
+    ended = true;
+    loadingDepth = Math.max(0, loadingDepth - 1);
+    if (loadingDepth > 0) return;
+    if (loadingTimer !== null) { clearTimeout(loadingTimer); loadingTimer = null; }
+    $("messages-wrap").classList.remove("loading");
+  };
+}
+
 async function openChat(chatId) {
   if (state.modelBusy) return;
+  const endLoading = beginLoading();
+  try {
+    await openChatNow(chatId);
+  } finally {
+    endLoading();
+  }
+}
+
+async function openChatNow(chatId) {
   const session = state.session;
   const agentId = state.agentId;
   const revision = ++state.chatModelRevision;
-  // the preferences and the chat do not depend on each other, so they travel together (two round trips in series
-  // before anything is drawn were most of a chat switch on a slow link); the chat carries its own models
-  const [, data] = await Promise.all([refreshPreferences({ models: false }), api(chatsUrl(`/${chatId}${chatQuery()}`))]);
+  // the chat carries its own models, and the preferences were read when the page loaded and again when a chat is created
+  // or a setting saved, so nothing here waits for them: they refresh in the background (a language or default changed from
+  // another tab shows on the next switch) and never hold the chat back
+  refreshPreferences({ models: false }).catch(() => {});
+  const data = await api(chatsUrl(`/${chatId}${chatQuery()}`));
   if (session !== state.session || agentId !== state.agentId || revision !== state.chatModelRevision || state.modelBusy) return;
   state.chatId = chatId;
   state.chatInfo = data.chat;

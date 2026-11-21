@@ -1183,3 +1183,13 @@ html.resizing-sidebar #app { transition: none; }
 #agent-list .agent-section { margin: 12px 0 2px; padding: 0 0 0 8px; font: 600 .6875rem/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
 #agent-list .agent-section:first-child { margin-top: 4px; }
 #agent-list .agent-section-empty { padding: 4px 8px; font-size: .75em; color: var(--muted); }
+/* loading bar over the messages while a chat opens or is created (see beginLoading in app.js) */
+#messages-wrap.loading::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; z-index: 5; pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--accent) 40%, var(--accent-strong) 60%, transparent);
+  background-size: 40% 100%; background-repeat: no-repeat; animation: chat-loading 1s ease-in-out infinite;
+}
+@keyframes chat-loading { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  #messages-wrap.loading::before { animation: none; background-size: 100% 100%; opacity: .6; }
+}

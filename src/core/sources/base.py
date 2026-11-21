@@ -67,10 +67,17 @@ class Source:
         self.indexed = indexed
         self.root.mkdir(parents=True, exist_ok=True)
 
+    def _real_root(self) -> Path:
+        """The root with its links followed, worked out once: every path check compares against it."""
+        real = self.__dict__.get("_real_root_path")
+        if real is None:
+            real = self.__dict__["_real_root_path"] = self.root.resolve()
+        return real
+
     def resolve(self, rel_path: str) -> Path:
         """Resolve a path relative to the source root, rejecting anything that escapes it."""
         target = (self.root / rel_path).resolve()
-        root = self.root.resolve()
+        root = self._real_root()
         if target != root and root not in target.parents:
             raise ValueError(f"path escapes source '{self.name}': {rel_path!r}")
         return target

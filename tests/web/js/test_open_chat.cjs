@@ -7,17 +7,20 @@ const vm = require("node:vm");
 // openChat and the preference helpers it uses, loaded without the DOM and with every collaborator stubbed
 const source = readFileSync(path.join(__dirname, "..", "..", "..", "src", "web", "static", "app.js"), "utf8");
 const grab = (name) => source.match(new RegExp(`(?:async )?function ${name}\\([\\s\\S]*?\\r?\\n\\}\\r?\\n`))[0];
+const LOADING_CONSTANTS = "const LOADING_DELAY_MS = 120; let loadingDepth = 0; let loadingTimer = null;\n";
 
 function harness({ preferencesDelay = 0, chatDelay = 0 } = {}) {
   const log = [];
+  const bar = { classList: { add: (name) => log.push(`bar+${name}`), remove: (name) => log.push(`bar-${name}`) } };
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const state = {
     session: 1, agentId: "bot", chatId: "old", chatInfo: null, user: { id: "u" }, modelBusy: false, chatModelRevision: 0,
     preferencesRequest: 0, settingsBusy: false, views: new Map(), usages: new Map(), translations: {},
   };
   const context = vm.createContext({
-    state, log, wait,
-    $: () => ({ hidden: true, focus() { log.push("focus"); } }),
+    state, log, wait, setTimeout, clearTimeout,
+    bar,
+    $: (id) => (id === "messages-wrap" ? bar : { hidden: true, focus() { log.push("focus"); } }),
     chatsUrl: (suffix = "") => `/api/agents/bot/chats${suffix}`,
     chatQuery: () => "?limit=25",
     api: async (url) => {
@@ -39,19 +42,45 @@ function harness({ preferencesDelay = 0, chatDelay = 0 } = {}) {
     renderChatHeader: () => {}, refreshChats: async () => log.push("refreshChats"), activateView: () => {}, showUsage: () => {},
   });
   vm.runInContext(
-    `${grab("applyServerPreferences")}\n${grab("refreshPreferences")}\n${grab("openChat")}\n`
-    + "this.openChat = openChat; this.refreshPreferences = refreshPreferences;",
+    `${LOADING_CONSTANTS}${grab("beginLoading")}\n${grab("applyServerPreferences")}\n${grab("refreshPreferences")}\n${grab("openChat")}\n${grab("openChatNow")}\n`
+    + "this.openChat = openChat; this.refreshPreferences = refreshPreferences; this.beginLoading = beginLoading;",
     context,
   );
   return { context, log, state };
 }
 
-test("the preferences and the chat are requested together, before either answers", async () => {
-  const { context, log } = harness({ preferencesDelay: 20, chatDelay: 20 });
+test("the chat is drawn without waiting for the preferences", async () => {
+  const { context, log } = harness({ preferencesDelay: 60, chatDelay: 5 });
   await context.openChat("chat-1");
-  const starts = log.filter((entry) => entry.startsWith("start"));
-  assert.deepEqual(starts, ["start /api/preferences", "start /api/agents/bot/chats/chat-1?limit=25"]);
-  assert.ok(log.indexOf("start /api/agents/bot/chats/chat-1?limit=25") < log.indexOf("end preferences"), "the chat waited for the preferences");
+  assert.ok(log.indexOf("render") >= 0 && !log.includes("end preferences"), "the chat waited for the preferences");
+  assert.ok(log.indexOf("start /api/agents/bot/chats/chat-1?limit=25") >= 0);
+});
+
+test("a slow chat shows the loading bar after the delay and removes it when done", async () => {
+  const { context, log } = harness({ chatDelay: 250 });
+  await context.openChat("chat-1");
+  assert.deepEqual(log.filter((entry) => entry.startsWith("bar")), ["bar+loading", "bar-loading"]);
+  assert.ok(log.indexOf("bar+loading") < log.indexOf("end chat") && log.indexOf("end chat") < log.indexOf("bar-loading"));
+});
+
+test("a fast chat never shows the loading bar", async () => {
+  const { context, log } = harness({ chatDelay: 5 });
+  await context.openChat("chat-1");
+  assert.ok(!log.includes("bar+loading"), "the bar flashed on a fast load");
+});
+
+test("the loading bar nests and goes only when the last load ends, also after a failure", async () => {
+  const { context, log } = harness();
+  const outer = context.beginLoading();
+  const inner = context.beginLoading();
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  inner(); inner();
+  assert.ok(!log.includes("bar-loading"));
+  outer();
+  assert.deepEqual(log.filter((entry) => entry.startsWith("bar")), ["bar+loading", "bar-loading"]);
+  context.state.session = 2;  // the page changed session mid-load: the chat is not drawn but the bar still goes
+  await context.openChat("chat-1").catch(() => {});
+  assert.ok(!log.slice(-3).includes("bar+loading") || log.at(-1) === "bar-loading");
 });
 
 test("opening a chat does not ask for the models of the chat it is leaving", async () => {
