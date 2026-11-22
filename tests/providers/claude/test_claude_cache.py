@@ -13,6 +13,7 @@ from unittest.mock import patch
 from src.providers.claude_subscription import native
 from src.providers.claude_subscription.cache import (
     QueriedTurnMismatch, cache_ready, pin_message_breakpoint, restore_queried_turn, stable_request_context,
+    strip_account_reminder,
 )
 from src.providers.claude_subscription.provider import ClaudeSubscriptionProvider
 
@@ -115,6 +116,76 @@ class CacheTransformTests(unittest.TestCase):
                          {"type": "user", "message": {"role": "user", "content": [_text("Again")]}}]
         self.assertEqual(native.session_id("system", first), native.session_id("system", later))
         self.assertNotEqual(native.session_id("system", first), native.session_id("other system", first))
+
+
+ACCOUNT = ("<system-reminder>\nAs you answer the user's questions, you can use the following context:\n"
+           "# userEmail\nThe user's email address is user@example.com. Use it only to identify the user.\n"
+           "</system-reminder>")
+DATE = "<system-reminder>\n# currentDate\nToday's date is 2026-01-02.\n</system-reminder>"
+
+
+def _last_user(content) -> bytes:
+    return json.dumps({"messages": [
+        {"role": "user", "content": [_text("Time?")]},
+        {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_1", "name": "t", "input": {}}]},
+        {"role": "user", "content": content},
+    ]}).encode()
+
+
+def _result(content, **extra) -> dict:
+    return {"type": "tool_result", "tool_use_id": "toolu_1", "content": content, **extra}
+
+
+class StripAccountReminderTests(unittest.TestCase):
+    def last(self, payload: bytes):
+        return json.loads(payload)["messages"][-1]["content"]
+
+    def test_separate_trailing_text_block_is_removed(self) -> None:
+        payload = _last_user([_result("12:00"), _text(ACCOUNT)])
+        self.assertEqual(self.last(strip_account_reminder(payload)), [_result("12:00")])
+
+    def test_sibling_block_mark_moves_to_the_previous_block(self) -> None:
+        payload = _last_user([_result("12:00"), _text(ACCOUNT, cache_control=MARK)])
+        self.assertEqual(self.last(strip_account_reminder(payload)), [_result("12:00", cache_control=MARK)])
+
+    def test_trailing_block_inside_tool_result_list_is_removed(self) -> None:
+        payload = _last_user([_result([_text("12:00"), _text(ACCOUNT)])])
+        self.assertEqual(self.last(strip_account_reminder(payload)), [_result([_text("12:00")])])
+
+    def test_string_suffix_is_removed_only_when_it_is_exactly_the_block(self) -> None:
+        payload = _last_user([_result("12:00\n\n" + ACCOUNT)])
+        self.assertEqual(self.last(strip_account_reminder(payload)), [_result("12:00\n\n")])
+        for text in ("12:00\n" + ACCOUNT + "\nmore", ACCOUNT, ACCOUNT + "\n" + DATE.replace("<system-reminder>", "")):
+            payload = _last_user([_result(text)])
+            self.assertIs(strip_account_reminder(payload), payload)
+
+    def test_words_in_the_middle_of_a_tool_result_stay(self) -> None:
+        for content in ("see " + ACCOUNT + " end", [_text("a"), _text("x " + ACCOUNT + " y"), _text("b")]):
+            payload = _last_user([_result(content)])
+            self.assertIs(strip_account_reminder(payload), payload)
+
+    def test_other_reminders_stay(self) -> None:
+        for content in ([_result("12:00"), _text(DATE)], [_result([_text("12:00"), _text(DATE)])],
+                        [_result("12:00\n\n" + DATE)]):
+            payload = _last_user(content)
+            self.assertIs(strip_account_reminder(payload), payload)
+
+    def test_unexpected_shapes_return_the_same_bytes(self) -> None:
+        cases = [b"not json", b"[]", b"{}", json.dumps({"messages": []}).encode(),
+                 json.dumps({"messages": [{"role": "user", "content": ACCOUNT}]}).encode(),
+                 json.dumps({"messages": [{"role": "assistant", "content": [_text(ACCOUNT)]}]}).encode(),
+                 _last_user([_text(ACCOUNT, extra=1)]), _last_user(["x"]), _last_user([_text(ACCOUNT, cache_control=MARK)]),
+                 _last_user([_result([_text(ACCOUNT, cache_control=MARK)])])]
+        for payload in cases:
+            self.assertIs(strip_account_reminder(payload), payload)
+
+    def test_runs_when_the_queried_frame_does_not_match(self) -> None:
+        queried = [_result("12:00")]
+        payload = _last_user([{"type": "tool_result", "tool_use_id": "other", "content": "x"}, _text(ACCOUNT)])
+        out, unrestored = cache_ready(payload, queried)
+        self.assertEqual(unrestored, "the request does not uniquely match RECALL's tool results")
+        self.assertNotIn("userEmail", out.decode())
+        self.assertEqual(self.last(out)[0]["content"], "x")
 
 
 class _Recorder(BaseHTTPRequestHandler):
