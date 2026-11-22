@@ -113,9 +113,9 @@ aside .bar { display: flex; align-items: center; padding: 0 6px; }
 #chat-list li[data-dot] { padding-left: 32px; }   /* room for the activity dot only when there is one */
 #chat-list li:hover { background: var(--raised); }
 #chat-list .chat-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-#chat-list .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .875rem; line-height: 1.35; color: var(--muted); }
+#chat-list .title { overflow: hidden; text-overflow: ellipsis; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; font-size: .875rem; line-height: 1.35; color: var(--muted); }   /* a long title takes a second line; the agent name below always stays */
 #chat-list li:hover .title { color: var(--text); }
-#chat-list .chat-agent { font-size: var(--s-1); line-height: 1.3; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#chat-list .chat-agent { flex-shrink: 0; font-size: var(--s-1); line-height: 1.3; font-weight: 600; letter-spacing: .02em; color: var(--accent); opacity: .9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* the active row: a full-height accent bar on its left edge */
 #chat-list li.active { background: var(--raised); }
 #chat-list li.active .title { color: var(--text); font-weight: 560; }
@@ -576,7 +576,7 @@ details.msg.task-wake { align-self: flex-start; padding: 6px 12px; border-style:
 /* Active agent headline */
 #model-bar { flex-wrap: nowrap; }
 #model-bar > .nav-toggle { flex-shrink: 0; }
-#model-bar > #agent-banner { max-width: 100%; }
+#model-bar > #agent-banner { max-width: min(100%, 45%); flex-shrink: 0; }   /* the agent keeps its room; the chat title gets the rest */
 #agent-banner { position: relative; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 4px 12px 4px 6px; border-radius: 999px; }
 #agent-banner:hover { background: var(--raised); }
 #agent-banner:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -599,13 +599,13 @@ details.msg.task-wake { align-self: flex-start; padding: 6px 12px; border-style:
 #agent-title { font: 600 var(--s0)/1.1 var(--sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #agent-chevron { color: var(--muted); font-size: .7rem; flex-shrink: 0; }
 /* the open chat's name beside the agent, editable in place; desktop only (the narrow header has no room) */
-#chat-title-wrap { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 0 1 auto; }
+#chat-title-wrap { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 auto; }
 #chat-title-wrap::before { content: "/"; color: var(--line); font-size: 1.4em; font-weight: 300; line-height: 1; }
 #chat-title-wrap[hidden], #chat-title-input[hidden] { display: none; }
 #chat-title { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; padding: 4px 8px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--text); font: 500 var(--s0)/1.2 var(--sans); cursor: text; }
 #chat-title:hover:not(:disabled) { background: var(--raised); }
 #chat-title:disabled { color: var(--muted); cursor: default; }
-#chat-title-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#chat-title-text { overflow: hidden; text-overflow: ellipsis; overflow-wrap: anywhere; text-align: left; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }   /* the whole title shows (two lines at most; the tooltip has the rest) */
 #chat-title-text.empty { color: var(--muted); }
 #chat-title-edit { display: none; flex-shrink: 0; color: var(--muted); }
 #chat-title:hover:not(:disabled) #chat-title-edit, #chat-title:focus-visible #chat-title-edit { display: inline-grid; }
