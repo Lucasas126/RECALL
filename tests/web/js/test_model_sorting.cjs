@@ -27,6 +27,7 @@ function pickerHarness() {
       active: new Set(),
       toggle(name, enabled) { if (enabled) this.active.add(name); else this.active.delete(name); },
       add(name) { this.active.add(name); },
+      remove(name) { this.active.delete(name); },
       contains(name) { return this.active.has(name); },
     },
     addEventListener(name, callback) { this.listeners[name] = callback; },

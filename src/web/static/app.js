@@ -991,6 +991,36 @@ async function changeAvatar(path, file, errorElement) {
   }
 }
 
+// A tool call that changed the user's agents (an agent renamed itself, another was created...): its result says it was
+// applied. Read-only agent tools and failed or denied changes change nothing.
+const AGENT_CHANGE_TOOLS = new Set(["agent_create", "agent_update", "agent_rename", "agent_delete", "agent_set_level", "agent_set_tool_groups"]);
+function agentsChangedBy(action) {
+  if (!action || action.error || !AGENT_CHANGE_TOOLS.has(action.name)) return false;
+  try {
+    return JSON.parse(action.result)?.status === "applied";
+  } catch {
+    return false;
+  }
+}
+
+// The names, pictures and lists of agents everywhere in the page, without a reload: the selectors, the header, the input
+// placeholder, the Settings list (an open editor form is left as it is) and the chat list, which carries agent names.
+async function refreshAgentsAfterTool() {
+  const session = state.session;
+  try {
+    const me = await api("/api/me");
+    if (session !== state.session || !state.user) return;
+    state.user.agents = me.agents;
+    renderAgentOptions();
+    renderAgentsEmpty();
+    renderAgentBanner();
+    await loadAgentConfigs();
+    if (session === state.session) await refreshChats();
+  } catch {
+    // the next page load shows it; a failed refresh must not break the reply being drawn
+  }
+}
+
 // After an upload, a removal or a style change: the pictures come back with /api/me.
 async function refreshAvatars(session) {
   const me = await api("/api/me");
@@ -3467,11 +3497,20 @@ async function refreshChats() {
 }
 
 // Marks one chat of the sidebar as the open one without redrawing the list (a click shows at once, before the chat loads).
+// The open chat shows no unread or approval dot. Returns whether the list has that chat.
 function highlightChat(agentId, chatId) {
+  let found = false;
   for (const li of $("chat-list").children) {
     const del = li.querySelector(".del");
-    if (del) li.classList.toggle("active", del.dataset.agent === agentId && del.dataset.chat === chatId);
+    if (!del) continue;
+    const here = del.dataset.agent === agentId && del.dataset.chat === chatId;
+    li.classList.toggle("active", here);
+    if (here) {
+      found = true;
+      if (li.dataset.dot && li.dataset.dot !== "working") delete li.dataset.dot;
+    }
   }
+  return found;
 }
 
 // the date group a chat belongs to in the sidebar, from the day of its last activity (local time)
@@ -3488,18 +3527,28 @@ function chatSection(updated) {
 }
 
 // Saves a new title through the same endpoint for the sidebar and the header, then redraws both.
+// The new title shows at once in the header; the list is redrawn in the background once the server has it.
 async function saveChatTitle(chat, value) {
   const session = state.session;
+  const open = () => state.chatId === chat.id && state.agentId === chat.agent_id;
   try {
     if (value && value !== chat.title) {
-      await api(`/api/agents/${chat.agent_id}/chats/${chat.id}/title`, {
+      if (open() && headerChat) renderChatHeader({ ...headerChat, title: value });
+      const saved = await api(`/api/agents/${chat.agent_id}/chats/${chat.id}/title`, {
         method: "PUT", body: JSON.stringify({ title: value }),
       });
+      if (session === state.session && open() && saved) {
+        state.chatInfo = { ...(state.chatInfo ?? {}), ...saved };
+        renderChatHeader(state.chatInfo);
+      }
     }
   } catch (err) {
-    if (session === state.session) addMessage("assistant").error(err);
+    if (session === state.session) {
+      if (open()) renderChatHeader(state.chatInfo);  // the old title is back
+      addMessage("assistant").error(err);
+    }
   }
-  if (session === state.session) await refreshChats();
+  if (session === state.session) refreshChats().catch(() => {});
 }
 
 // ---- the open chat's name in the header (desktop): shows the title, edited in place like in the sidebar
@@ -3566,6 +3615,9 @@ function startRenameChat(chat, title) {
     if (finished) return;
     finished = true;
     const value = input.value.trim();
+    // the row shows the new title at once, not after the save and a redraw of the list
+    title.textContent = (save && value) || chat.title || tr("New chat");
+    input.replaceWith(title);
     await saveChatTitle(chat, save ? value : "");
   };
   input.addEventListener("click", (e) => e.stopPropagation());
@@ -3585,20 +3637,41 @@ function startRenameChat(chat, title) {
 
 async function newChat({ disposable = false } = {}) {
   if (state.modelBusy || state.settingsBusy || !state.user) return false;
+  const endLoading = beginLoading();
+  try {
+    return await newChatNow({ disposable });
+  } finally {
+    endLoading();
+  }
+}
+
+async function newChatNow({ disposable }) {
   const session = state.session;
   try {
-    const preferences = await refreshPreferences();
+    const create = (agentId) => api(`/api/agents/${encodeURIComponent(agentId)}/chats`, {
+      method: "POST", ...(disposable ? { body: JSON.stringify({ disposable: true }) } : {}),
+    });
+    // the preferences say which agent a new chat is for; the chat is created for the agent already open at the same time
+    // (the usual case), and only when they disagree is it made again for the right one. The chat's models arrive with the
+    // chat itself, so the preferences do not ask for them here.
+    const wanted = state.agentId;
+    const creating = wanted ? create(wanted) : null;
+    creating?.catch(() => {});  // its error is handled below, where it is awaited
+    const preferences = await refreshPreferences({ models: false });
     if (session !== state.session || state.modelBusy || state.settingsBusy) return false;
     if (!preferences.agent_id) {
       renderNoAgents();
       return false;
     }
-    if (preferences.agent_id !== state.agentId) await selectAgent(preferences.agent_id);
+    let chat = null;
+    if (creating && preferences.agent_id === wanted) {
+      chat = await creating;
+    } else {
+      await selectAgent(preferences.agent_id);
+      chat = await create(state.agentId);
+    }
     const agentId = state.agentId;
-    const chat = await api(chatsUrl(), {
-      method: "POST", ...(disposable ? { body: JSON.stringify({ disposable: true }) } : {}),
-    });
-    if (session !== state.session || agentId !== state.agentId) return false;
+    if (session !== state.session || agentId !== preferences.agent_id) return false;
     // creating a chat discards the previous empty one; stop requesting its state while opening the new one
     state.chatId = null;
     state.reasoningEffort = null;
@@ -3686,14 +3759,44 @@ async function setChatDisposable(disposable) {
 $("disposable-convert").addEventListener("click", () => setChatDisposable(false));
 $("chat-make-disposable").addEventListener("click", () => setChatDisposable(true));
 
+// A thin bar over the messages while a chat is opening or being created. It appears only after a short delay, so a
+// fast load never flickers; calls nest (a new chat opens its chat inside), and the bar goes when the last one ends.
+const LOADING_DELAY_MS = 120;
+let loadingDepth = 0;
+let loadingTimer = null;
+function beginLoading() {
+  loadingDepth += 1;
+  if (loadingDepth === 1) {
+    loadingTimer = setTimeout(() => { loadingTimer = null; $("messages-wrap").classList.add("loading"); }, LOADING_DELAY_MS);
+  }
+  let ended = false;
+  return () => {
+    if (ended) return;
+    ended = true;
+    loadingDepth = Math.max(0, loadingDepth - 1);
+    if (loadingDepth > 0) return;
+    if (loadingTimer !== null) { clearTimeout(loadingTimer); loadingTimer = null; }
+    $("messages-wrap").classList.remove("loading");
+  };
+}
+
 async function openChat(chatId) {
   if (state.modelBusy) return;
+  const endLoading = beginLoading();
+  try {
+    await openChatNow(chatId);
+  } finally {
+    endLoading();
+  }
+}
+
+async function openChatNow(chatId) {
   const session = state.session;
   const agentId = state.agentId;
   const revision = ++state.chatModelRevision;
-  // the preferences and the chat do not depend on each other, so they travel together (two round trips in series
-  // before anything is drawn were most of a chat switch on a slow link); the chat carries its own models
-  const [, data] = await Promise.all([refreshPreferences({ models: false }), api(chatsUrl(`/${chatId}${chatQuery()}`))]);
+  // the chat carries its own models, and the preferences were read when the page loaded and again when a chat is created
+  // or a setting saved, so a switch does not ask for them at all
+  const data = await api(chatsUrl(`/${chatId}${chatQuery()}`));
   if (session !== state.session || agentId !== state.agentId || revision !== state.chatModelRevision || state.modelBusy) return;
   state.chatId = chatId;
   state.chatInfo = data.chat;
@@ -3716,7 +3819,10 @@ async function openChat(chatId) {
   ensureTaskPolling();  // task cards and wake replies of this chat
   startProcessPolling();
   $("input").focus();
-  await refreshChats();
+  // the sidebar already lists this chat: mark it as the open one where it is instead of asking the server for the whole
+  // list again (the slowest request of a switch); the periodic refresh keeps titles and dots current. A chat the list does
+  // not show yet (just created) brings the list in the background, without holding the switch.
+  if (!highlightChat(agentId, chatId)) refreshChats().catch(() => {});
 }
 
 async function deleteChat(chat) {
@@ -4534,11 +4640,37 @@ function renderMessages(messages, window = null, limit = CHAT_PAGE) {
   state.view = container;
   $("messages").replaceChildren(container);
   $("usage").hidden = true;
+  if (!messages.length && !(window?.total > 0)) container.append(emptyChatHero());
   drawMessages(container, messages, { usage: true });
   // the stored history may carry no report (a reply still running, an older chat): keep this chat's last known one
   if ($("usage").hidden) syncUsage();
   updateHistoryBar(container);
   scrollDown(true);
+}
+
+// What an empty chat shows: the agent's name, large, over its picture faded behind it. It hides by itself (CSS) as soon
+// as the chat has anything else in it, so sending the first message needs no code here.
+function emptyChatHero() {
+  const hero = document.createElement("div");
+  hero.className = "empty-hero";
+  hero.setAttribute("aria-hidden", "true");  // decoration: the header and the input already name the agent
+  const name = currentAgentName();
+  const view = avatarView(currentAgentAvatar(), name);
+  if (view.src) {
+    const image = document.createElement("img");
+    image.className = "empty-hero-picture";
+    image.alt = "";
+    image.draggable = false;
+    if (view.free) image.dataset.avatarStyle = "free";
+    image.addEventListener("error", () => image.remove());
+    image.src = view.src;
+    hero.append(image);
+  }
+  const title = document.createElement("div");
+  title.className = "empty-hero-name";
+  title.textContent = name;
+  hero.append(title);
+  return hero;
 }
 
 // Draws stored messages into `parent`. `usage: false` (older messages loaded later) leaves the usage readout alone: it
@@ -7882,7 +8014,10 @@ function handleEvent(raw, request) {
   if (event === "text") reply.text(payload);
   else if (event === "reasoning") reply.thinking(payload);
   else if (event === "tool_start") reply.toolStart(payload);
-  else if (event === "tool") reply.action(payload);
+  else if (event === "tool") {
+    reply.action(payload);
+    if (agentsChangedBy(payload)) refreshAgentsAfterTool();
+  }
   else if (event === "memory") reply.memory(payload);
   else if (event === "notice") reply.notice(payload);
   else if (event === "speaker") reply.speaker(payload);

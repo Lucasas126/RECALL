@@ -4,8 +4,8 @@ import os
 from pathlib import Path
 from typing import Optional
 
-import yaml
 
+from src.config.yaml_files import load_yaml_file
 from src.config.agents import AgentStore, check_user_folder
 from src.config.levels import check_agent_level, effective_agent_level
 from src.config.models import AgentConfig, ModelsConfig, ResolvedAgent, UserConfig
@@ -23,8 +23,7 @@ logger = get_logger("config")
 def _load_yaml(path: Path) -> dict:
     if not path.exists():
         raise FileNotFoundError(f"config file not found: {path}")
-    with open(path, "r", encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
+    return load_yaml_file(path)
 
 
 def load_user(user_id: str) -> UserConfig:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import secrets
+import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -64,6 +65,51 @@ class ChatReasoningEffort(BaseModel):
 # `ConversationsSource._transcript_facts`: per transcript path, its (mtime_ns, size) and what `summary` read from it
 _FACTS: dict[str, tuple[tuple[int, int, int], tuple[str, int, str | None, float]]] = {}
 _FACTS_MAX = 2000
+
+# A transcript is only ever appended to, its last line replaced (a checkpoint) or the whole file replaced (new inode), so
+# what a read learns about its lines stays true until then. The index keeps, per transcript, where each line starts and
+# ends and its role: a window of a long chat is read by seeking to its lines instead of parsing the whole file.
+_INDEXES: dict[str, "_TranscriptIndex"] = {}
+_INDEXES_MAX = 400
+_INDEX_LOCK = threading.Lock()
+_ROLE_PREFIXES = tuple((f'{{"role": "{role}"'.encode(), role) for role in ("user", "assistant", "tool", "system", "compaction"))
+_SHOWN_ROLES = frozenset(("user", "assistant", "compaction"))
+
+
+class _TranscriptIndex:
+    """Where the lines of one transcript are (byte offsets of the non-blank ones, in order) and the role of each."""
+
+    __slots__ = ("inode", "size", "mtime_ns", "starts", "ends", "roles", "first_user")
+
+    def __init__(self, inode: int, mtime_ns: int) -> None:
+        self.inode, self.size, self.mtime_ns = inode, 0, mtime_ns
+        self.starts: list[int] = []
+        self.ends: list[int] = []
+        self.roles: list[str | None] = []
+        self.first_user: str | list | None = None  # the first user turn's content, read once
+
+
+def _line_role(line: bytes) -> str | None:
+    """A stored line's role; turns are written with the role first, so the usual line costs no JSON parsing."""
+    for prefix, role in _ROLE_PREFIXES:
+        if line.startswith(prefix):
+            return role
+    turn = json.loads(line)  # ValueError for a damaged line, as `load` raised
+    role = turn.get("role") if isinstance(turn, dict) else None
+    return role if isinstance(role, str) else None
+
+
+def _scan_lines(data: bytes, base: int, index: _TranscriptIndex) -> None:
+    pos, size = 0, len(data)
+    while pos < size:
+        newline = data.find(b"\n", pos)
+        end = size if newline < 0 else newline
+        line = data[pos:end].strip()
+        if line:
+            index.starts.append(base + pos)
+            index.ends.append(base + end)
+            index.roles.append(_line_role(line))
+        pos = end + 1
 
 
 def _is_blank(path: Path) -> bool:
@@ -589,7 +635,7 @@ class ConversationsSource(Source):
         if not path.is_file():
             raise FileNotFoundError(f"chat not found: {chat_id}")
         turns = []
-        for line in path.read_text(encoding="utf-8").splitlines():
+        for line in path.read_text(encoding="utf-8").split("\n"):  # not splitlines(): U+2028 inside a message is not a line end
             line = line.strip()
             if line:
                 turns.append(json.loads(line))
@@ -629,6 +675,97 @@ class ConversationsSource(Source):
         files = [p for p in self.root.iterdir() if p.suffix == ".jsonl" and p.stem not in hidden]
         return max(files, key=lambda p: p.stat().st_mtime).stem if files else None
 
+    def _index(self, chat_id: str) -> _TranscriptIndex:
+        """The transcript's line index, brought up to date by reading only what was added since it was last built."""
+        path = self._path(chat_id)
+        info = path.stat()  # FileNotFoundError for a missing chat
+        where = str(path)
+        with _INDEX_LOCK:
+            cached = _INDEXES.get(where)
+            if cached is not None and (cached.inode, cached.size, cached.mtime_ns) == (info.st_ino, info.st_size, info.st_mtime_ns):
+                return cached
+            index = _TranscriptIndex(info.st_ino, info.st_mtime_ns)
+            base = 0
+            if cached is not None and cached.inode == info.st_ino and cached.starts and info.st_size > cached.starts[-1]:
+                # same file, grown (or its last line replaced): every line before the last one is as it was
+                index.starts, index.ends, index.roles = cached.starts[:-1], cached.ends[:-1], cached.roles[:-1]
+                index.first_user = cached.first_user if cached.roles[:-1].count("user") else None
+                base = cached.starts[-1]
+            with open(path, "rb") as handle:
+                handle.seek(base)
+                data = handle.read()
+            _scan_lines(data, base, index)
+            index.size = base + len(data)
+            if len(_INDEXES) >= _INDEXES_MAX and where not in _INDEXES:
+                _INDEXES.clear()  # bounded: the next read rebuilds what it needs
+            _INDEXES[where] = index
+            return index
+
+    def _read_turn(self, chat_id: str, index: _TranscriptIndex, position: int) -> dict:
+        with open(self._path(chat_id), "rb") as handle:
+            return self._turn_at(handle, index, position)
+
+    @staticmethod
+    def _turn_at(handle, index: _TranscriptIndex, position: int) -> dict:
+        handle.seek(index.starts[position])
+        return json.loads(handle.read(index.ends[position] - index.starts[position]).strip())
+
+    def _facts_from_index(self, chat_id: str) -> tuple[str | list, int, str | None]:
+        index = self._index(chat_id)
+        if index.first_user is None and "user" in index.roles:
+            index.first_user = self._read_turn(chat_id, index, index.roles.index("user")).get("content", "")
+        last_ts = self._read_turn(chat_id, index, len(index.roles) - 1).get("ts") if index.roles else None
+        return (index.first_user if index.first_user is not None else ""), len(index.roles), last_ts
+
+    def window(
+        self, chat_id: str, *, limit: int | None = None, before: int | None = None, drop_checkpoint: bool = False,
+    ) -> tuple[list[tuple[int, dict]], dict]:
+        """The turns of a chat a client shows, as (stored position, turn), and what the answer leaves out.
+
+        Only the user, assistant and compaction turns are shown. Without `limit` all of them; with it the last `limit`
+        (or, with `before`, the `limit` ending right before that stored position; `before` alone: everything before it).
+        `window` is `{total, hidden, first_index}`: `total` and `hidden` count user and assistant turns, `first_index` is
+        the stored position of the first turn returned (null when none). `drop_checkpoint` leaves out a last turn that is
+        a checkpoint (a reply still running). Reads the lines of the window only, not the whole transcript.
+        """
+        try:
+            return self._window_indexed(chat_id, limit, before, drop_checkpoint)
+        except (ValueError, OSError, IndexError):
+            if not self._path(chat_id).is_file():
+                raise FileNotFoundError(f"chat not found: {chat_id}") from None
+            _INDEXES.pop(str(self._path(chat_id)), None)
+        turns = self.load(chat_id)  # a line the index could not place: the plain read decides (and raises) as before
+        if drop_checkpoint and turns and turns[-1].get("checkpoint") is True:
+            turns = turns[:-1]
+        roles = [t.get("role") for t in turns]
+        return self._cut_window(roles, limit, before, lambda chosen: [(p, turns[p]) for p in chosen])
+
+    def _window_indexed(self, chat_id: str, limit, before, drop_checkpoint: bool):
+        index = self._index(chat_id)
+        count = len(index.roles)
+        if drop_checkpoint and count and self._read_turn(chat_id, index, count - 1).get("checkpoint") is True:
+            count -= 1
+
+        def read(chosen: list[int]) -> list[tuple[int, dict]]:
+            if not chosen:
+                return []
+            with open(self._path(chat_id), "rb") as handle:
+                return [(p, self._turn_at(handle, index, p)) for p in chosen]
+
+        return self._cut_window(index.roles[:count], limit, before, read)
+
+    @staticmethod
+    def _cut_window(roles: list, limit, before, read) -> tuple[list[tuple[int, dict]], dict]:
+        everything = [p for p, role in enumerate(roles) if role in _SHOWN_ROLES]
+        shown = everything if before is None else [p for p in everything if p < before]
+        chosen = shown if limit is None else shown[max(0, len(shown) - limit):]
+        spoken = lambda positions: sum(1 for p in positions if roles[p] != "compaction")
+        window = {
+            "total": spoken(everything), "hidden": spoken(shown[: len(shown) - len(chosen)]),
+            "first_index": chosen[0] if chosen else None,
+        }
+        return read(chosen), window
+
     def _transcript_facts(self, chat_id: str) -> tuple[str, int, str | None, float]:
         """What `summary` needs from the transcript: the first user message's text, the number of turns, the last turn's
         timestamp and the file's mtime. Reading and parsing a whole transcript for that is the cost of listing the chats,
@@ -640,11 +777,15 @@ class ConversationsSource(Source):
         cached = _FACTS.get(where)
         if cached is not None and cached[0] == key:
             return cached[1]
-        turns = self.load(chat_id)
-        first_user = next((t["content"] for t in turns if t.get("role") == "user"), "")
+        try:
+            first_user, count, last_ts = self._facts_from_index(chat_id)
+        except (ValueError, OSError):  # a damaged or vanished line: the full read raises what it always raised
+            turns = self.load(chat_id)
+            first_user = next((t["content"] for t in turns if t.get("role") == "user"), "")
+            count, last_ts = len(turns), (turns[-1].get("ts") if turns else None)
         if isinstance(first_user, list):
             first_user = next((part.get("text", "") for part in first_user if part.get("type") == "text"), "[attachment]")
-        facts = (first_user, len(turns), turns[-1].get("ts") if turns else None, info.st_mtime)
+        facts = (first_user, count, last_ts, info.st_mtime)
         if len(_FACTS) >= _FACTS_MAX:
             _FACTS.clear()  # bounded: the next listing refills it from the files
         _FACTS[where] = (key, facts)
