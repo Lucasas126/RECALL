@@ -183,7 +183,8 @@ class DisposableToolTests(unittest.TestCase):
             | set(TOOL_GROUP_TOOLS["notify"])  # nor write to the user's phone
             | set(TOOL_GROUP_TOOLS["files_send"])  # nor hand files to the user
             | set(TOOL_GROUP_TOOLS["identity"])  # nor rename the agent
-            | set(TOOL_GROUP_TOOLS["automations"]),  # nor schedule anything
+            | set(TOOL_GROUP_TOOLS["automations"])  # nor schedule anything
+            | set(TOOL_GROUP_TOOLS["charts"]),  # nor write image files
         )
 
     def test_a_disposable_chat_never_builds_the_terminal_tools(self) -> None:

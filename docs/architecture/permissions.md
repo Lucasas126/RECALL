@@ -36,6 +36,7 @@ approval/sandbox split, Meta's *Agents Rule of Two*, OWASP LLM06 (excessive agen
 | `terminal` on a real machine, unprivileged | no | no | no | no | ask (always) | ask |
 | `terminal` on a real machine with sudo/root, and the `local` backend | no | no | no | no | no | ask |
 | `delegate`: hand tasks to the user's other agents | no | no | no | no | yes | yes |
+| `charts`: draw charts and diagrams as PNG files in a writable source | no | no | yes | yes | yes | yes |
 | `notify`: send the owner a short Telegram message | no | no | yes | yes | yes | yes |
 | `files_send`: send the owner a file the agent can already read | no | yes | yes | yes | yes | yes |
 | `identity`: change its own display name (`set_display_name`; nothing else, no approval) | no | yes | yes | yes | yes | yes |
