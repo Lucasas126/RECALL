@@ -54,4 +54,4 @@ A disposable chat is one the agent does not learn from. It is skipped by dreams 
 
 ## Hidden chats
 
-A hidden chat is only left out of the web chat list (unless "Show hidden chats" is on, or the API gets `include_hidden=true`). The chat an @mention opens with the mentioned agent is born hidden. Unlike a disposable chat it is indexed, searched and reviewed by dreams as usual.
+A hidden chat is only left out of the web chat list (unless the eye button at the right of the tabs is on, or the API gets `include_hidden=true`). The chat an @mention opens with the mentioned agent is born hidden. Unlike a disposable chat it is indexed, searched and reviewed by dreams as usual.

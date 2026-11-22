@@ -8,7 +8,7 @@ const vm = require("node:vm");
 const source = readFileSync(path.join(__dirname, "..", "..", "..", "src", "web", "static", "app.js"), "utf8");
 const code = source.match(/\/\/ ---- settings helpers[\s\S]*?\/\/ ---- end settings helpers/)[0];
 const context = vm.createContext({});
-vm.runInContext(`${code}\nthis.api = { selectableAgents, splitHiddenAgents, chatListQuery, readShowHiddenChats, writeShowHiddenChats };`, context);
+vm.runInContext(`${code}\nthis.api = { selectableAgents, splitHiddenAgents, chatListQuery, readShowHidden, writeShowHidden };`, context);
 const api = context.api;
 const plain = (value) => JSON.parse(JSON.stringify(value));
 const agents = [{ id: "nova" }, { id: "ghost", hidden: true }, { id: "sage", hidden: false }];
@@ -33,15 +33,16 @@ test("the chat list query keeps the open chat and asks for hidden chats only whe
   assert.equal(api.chatListQuery("c1", true), "?keep=c1&include_hidden=true");
 });
 
-test("the toggle is remembered in storage and is off by default or when storage fails", () => {
+test("the hidden button is remembered per key, with its own default, and survives broken storage", () => {
   const store = new Map();
   const storage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) };
-  assert.equal(api.readShowHiddenChats(storage), false);
-  api.writeShowHiddenChats(storage, true);
-  assert.equal(api.readShowHiddenChats(storage), true);
-  api.writeShowHiddenChats(storage, false);
-  assert.equal(api.readShowHiddenChats(storage), false);
+  assert.equal(api.readShowHidden(storage, "showHiddenChats", false), false);
+  assert.equal(api.readShowHidden(storage, "showHiddenAgents", true), true);
+  api.writeShowHidden(storage, "showHiddenChats", true);
+  api.writeShowHidden(storage, "showHiddenAgents", false);
+  assert.equal(api.readShowHidden(storage, "showHiddenChats", false), true);
+  assert.equal(api.readShowHidden(storage, "showHiddenAgents", true), false);
   const broken = { getItem() { throw new Error("blocked"); }, setItem() { throw new Error("blocked"); } };
-  assert.equal(api.readShowHiddenChats(broken), false);
-  api.writeShowHiddenChats(broken, true);
+  assert.equal(api.readShowHidden(broken, "showHiddenAgents", true), true);
+  api.writeShowHidden(broken, "showHiddenChats", true);
 });

@@ -10,6 +10,7 @@ const ICONS = {
   trash: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M3 6h18\"/><path d=\"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6\"/><path d=\"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2\"/></svg>",
   star: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><polygon points=\"12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2\"/></svg>",
   sun: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><circle cx=\"12\" cy=\"12\" r=\"4\"/><path d=\"M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41\"/></svg>",
+  eye: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg>",
   eyeOff: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24\"/><path d=\"M1 1l22 22\"/></svg>",
   moon: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z\"/></svg>",
 };
@@ -36,6 +37,8 @@ const state = {
   translations: null, toolGroupCatalog: [], levels: null, adminUsers: [],
   mcpServers: [], mcpTools: new Map(), connectionsPoll: null,
   showHiddenChats: false,
+  showHiddenAgents: true,
+  tab: "chats",
   agentConfigs: [], agentForm: { originalId: null, busy: false },
   dream: null,
 };
@@ -177,12 +180,12 @@ function chatListQuery(keepId, includeHidden) {
   return params.length ? `?${params.join("&")}` : "";
 }
 
-// "Show hidden chats" is remembered per browser; off by default.
-function readShowHiddenChats(storage) {
-  try { return storage.getItem("showHiddenChats") === "1"; } catch { return false; }
+// The hidden-items button is remembered per browser: hidden chats are off by default, hidden agents are on.
+function readShowHidden(storage, key, fallback) {
+  try { const v = storage.getItem(key); return v === null ? fallback : v === "1"; } catch { return fallback; }
 }
-function writeShowHiddenChats(storage, on) {
-  try { storage.setItem("showHiddenChats", on ? "1" : "0"); } catch { /* private mode: keep it for this page only */ }
+function writeShowHidden(storage, key, on) {
+  try { storage.setItem(key, on ? "1" : "0"); } catch { /* private mode: keep it for this page only */ }
 }
 
 // True when the scroll position is within `slack` pixels of the bottom (the user is following the latest content).
@@ -627,7 +630,7 @@ function translateInterface() {
     ["model-scope-note", "Choosing a model for a chat sets only that chat's override. The default entry removes it (the agent's default model, else yours). Defaults in Settings are saved with Save settings. Favorites are shared across your agents."],
     ["model-zdr-warning", "ZDR is not required for your next selection. Providers may retain your prompts and replies. Your OpenRouter account may still enforce ZDR."],
     ["tab-chats", "Chats"], ["tab-agents", "Agents"],
-    ["show-hidden-label", "Show hidden chats"], ["agent-hidden-label", "Hidden"],
+    ["agent-hidden-label", "Hidden"],
     ["agent-hidden-hint", "A hidden agent is left out of the agent selectors and listed under Hidden agents. You can still talk to it with @ and open a chat with it from here."],
     ["agent-open-chat", "Open chat with this agent"],
     ["agent-new-label", "New agent"], ["agents-empty", "Select an agent to edit it, or create a new one."],
@@ -774,6 +777,7 @@ function translateInterface() {
   translateModelDialog();
   $("new-disposable-chat").title = tr("New disposable chat");
   $("new-disposable-chat").setAttribute("aria-label", tr("New disposable chat"));
+  renderShowHiddenButton();
   syncNavToggles();
 }
 
@@ -1125,8 +1129,9 @@ async function showApp(user) {
   renderUserAvatar();
   renderThemeToggle();
   renderAgentOptions();
-  state.showHiddenChats = readShowHiddenChats(localStorage);
-  $("show-hidden-chats").checked = state.showHiddenChats;
+  state.showHiddenChats = readShowHidden(localStorage, "showHiddenChats", false);
+  state.showHiddenAgents = readShowHidden(localStorage, "showHiddenAgents", true);
+  renderShowHiddenButton();
   refreshClaudeUsage();
   showTab("chats");
   try {
@@ -1335,13 +1340,14 @@ function rememberChat(agentId, chatId, hasTurns) {
 
 function showTab(tab) {
   const agents = tab === "agents";
+  state.tab = tab;
+  renderShowHiddenButton();
   $("tab-chats").setAttribute("aria-pressed", String(!agents));
   $("tab-agents").setAttribute("aria-pressed", String(agents));
   $("chat-view").hidden = agents;
   $("agents-view").hidden = !agents;
   $("chat-list").hidden = agents;
   $("new-chat-row").hidden = agents;
-  $("show-hidden-row").hidden = agents;
   $("agent-list").hidden = !agents;
   $("agent-new").hidden = !agents;
   if (agents) return loadAgentConfigs();
@@ -1427,7 +1433,7 @@ function renderAgentList() {
   empty.textContent = tr("No hidden agents. Hide an agent in its editor to list it here.");
   $("agent-list").replaceChildren(
     heading("Agents"), ...shown.map(agentListItem),
-    heading("Hidden agents"), ...(hidden.length ? hidden.map(agentListItem) : [empty]),
+    ...(state.showHiddenAgents ? [heading("Hidden agents"), ...(hidden.length ? hidden.map(agentListItem) : [empty])] : []),
   );
 }
 
@@ -3604,9 +3610,27 @@ async function newChat({ disposable = false } = {}) {
   }
 }
 
-$("show-hidden-chats").addEventListener("change", (e) => {
-  state.showHiddenChats = e.target.checked;
-  writeShowHiddenChats(localStorage, state.showHiddenChats);
+function renderShowHiddenButton() {
+  const b = $("show-hidden");
+  const on = state.tab === "agents" ? state.showHiddenAgents : state.showHiddenChats;
+  const what = state.tab === "agents" ? "agents" : "chats";
+  b.setAttribute("aria-pressed", on ? "true" : "false");
+  b.classList.toggle("active", on);
+  b.innerHTML = on ? ICONS.eye : ICONS.eyeOff; // open eye: hidden items are shown; crossed eye: they are left out
+  b.title = tr(`${on ? "Hide" : "Show"} hidden ${what}`);
+  b.setAttribute("aria-label", b.title);
+}
+$("show-hidden").addEventListener("click", () => {
+  if (state.tab === "agents") {
+    state.showHiddenAgents = !state.showHiddenAgents;
+    writeShowHidden(localStorage, "showHiddenAgents", state.showHiddenAgents);
+    renderShowHiddenButton();
+    renderAgentList();
+    return;
+  }
+  state.showHiddenChats = !state.showHiddenChats;
+  writeShowHidden(localStorage, "showHiddenChats", state.showHiddenChats);
+  renderShowHiddenButton();
   return refreshChats();
 });
 

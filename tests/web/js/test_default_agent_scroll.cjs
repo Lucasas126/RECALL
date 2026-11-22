@@ -8,7 +8,7 @@ const vm = require("node:vm");
 const source = readFileSync(path.join(__dirname, "..", "..", "..", "src", "web", "static", "app.js"), "utf8");
 const code = source.match(/\/\/ ---- settings helpers[\s\S]*?\/\/ ---- end settings helpers/)[0];
 const context = vm.createContext({});
-vm.runInContext(`${code}\nthis.api = { defaultAgentId, selectableAgents, splitHiddenAgents, chatListQuery, readShowHiddenChats, writeShowHiddenChats, nearBottom, SETTINGS_SECTIONS, NULLABLE_PREFERENCES, settingsChanges };`, context);
+vm.runInContext(`${code}\nthis.api = { defaultAgentId, selectableAgents, splitHiddenAgents, chatListQuery, readShowHidden, writeShowHidden, nearBottom, SETTINGS_SECTIONS, NULLABLE_PREFERENCES, settingsChanges };`, context);
 const api = context.api;
 
 const agents = [{ id: "alpha", name: "Alpha" }, { id: "beta", name: "Beta" }];
