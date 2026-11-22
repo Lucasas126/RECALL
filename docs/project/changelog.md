@@ -6,6 +6,7 @@ sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases b
 ## Unreleased
 
 - Hidden chats and hidden agents: the chat opened by an @mention is hidden from the chat list (the eye button at the right of the tabs lists it; still indexed and searched), and an agent can be marked `hidden` to leave the web selectors and be listed under **Hidden agents** (still reachable with `@`); every agent's editor gets **Open chat with this agent**.
+- Web UI: the Worker chat dialog shows the name and picture of the agent that runs the worker on its replies, not those of the agent whose chat launched the task.
 
 ## 0.5.2
 
