@@ -1206,6 +1206,7 @@ html.resizing-sidebar #app { transition: none; }
 .chat-view:has(> :not(.empty-hero, .history-bar)) > .empty-hero { display: none; }
 .empty-hero-picture { grid-area: 1 / 1; width: 78%; height: 78%; object-fit: cover; border-radius: 50%; opacity: .16;
   -webkit-mask-image: radial-gradient(closest-side, #000 62%, transparent 100%); mask-image: radial-gradient(closest-side, #000 62%, transparent 100%); }
+.empty-hero-picture.crisp { image-rendering: pixelated; }
 .empty-hero-picture[data-avatar-style="free"] { object-fit: contain; border-radius: 0; opacity: .2; -webkit-mask-image: none; mask-image: none; }
 .empty-hero-name { grid-area: 1 / 1; position: relative; max-width: 100%; padding: 0 12px; overflow-wrap: anywhere; text-align: center;
   font-family: var(--serif); font-size: clamp(2.6rem, 1.6rem + 4vw, 4.6rem); font-weight: 600; font-variation-settings: "opsz" 144, "SOFT" 50;
