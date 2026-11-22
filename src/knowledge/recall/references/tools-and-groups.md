@@ -119,8 +119,8 @@ A dream writes only to `mind_palace` (needs `memory_edit`) and its own files (ne
 
 ## Behaviour to rely on
 
-- After a write, the changed file is reindexed in the background once the reply ends.
-- Read-only sources and folders return an error naming the source; write to `mind_palace` or an editable folder.
-- `edit`, `folder_edit` and `skill_manage` patch need the old text to appear exactly once; add context.
+- A changed file is reindexed in the background after the reply.
+- Read-only sources and folders return an error naming the source.
+- `edit`, `folder_edit` and `skill_manage` patch need the old text to appear exactly once; add context. Overwrites: see `references/memory-and-dream.md`.
 - In a disposable chat the write tools (`memory_edit`, `memory`, `skill_manage`, `soul_edit`, folder writes) and the `terminal`, `delegate`, `permissions` and `agents` groups are not offered. Read tools, web and MCP stay.
 - Tool errors come back as text starting with `error:`; read it and fix the call.

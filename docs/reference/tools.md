@@ -133,6 +133,12 @@ group is enabled and writable only with `folders_edit` (and not `read_only`).
 Edits made by tools (memory, folder and `skill_manage`) are reindexed in the
 background after the reply, together with the chat's new exchange.
 
+Write tools are safe to run from several chats and tasks of one agent at once: every change queues on the agent's lock
+(a user folder's own lock for folder tools), files are replaced atomically, and a whole-file write (`write`,
+`folder_write`, `soul_edit replace`, `skill_manage edit`/`write_file`) is refused unless this chat has read the current
+version of the file (`read`, `folder_read`, `skill_view`; the SOUL in the chat's prompt counts). `append`, `edit` and patches
+always apply to the current file. Details: [concurrent writes](../architecture/sources.md#concurrent-writes).
+
 The catalog is available through `GET /api/tool-groups`. Groups are an
 agent-level selection and do not bypass source isolation or the effective mode
 restrictions.

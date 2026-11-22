@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from src.utils.files import atomic_replace_bytes, atomic_replace_text
+
 
 def scan_files(root: Path, exts: set[str] | None = None, base: Path | None = None) -> dict[str, tuple[int, int]]:
     """Map each non-hidden file under `root` to its `(mtime_ns, size)`, keyed by its path relative to `base`.
@@ -101,7 +103,7 @@ class Source:
             raise PermissionError(f"source '{self.name}' is read-only")
         path = self.resolve(rel_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        atomic_replace_text(path, content)
         return path
 
     def write_bytes(self, rel_path: str, data: bytes) -> Path:
@@ -110,7 +112,7 @@ class Source:
             raise PermissionError(f"source '{self.name}' is read-only")
         path = self.resolve(rel_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
+        atomic_replace_bytes(path, data)
         return path
 
     def delete(self, rel_path: str) -> None:

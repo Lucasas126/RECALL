@@ -287,6 +287,10 @@ class AgentFilesSource(Source):
             raise FileNotFoundError(f"skill not found: {name}")
         shutil.rmtree(folder)
 
+    def skill_path(self, name: str, file_path: str = SKILL_FILE) -> Path:
+        """Where a skill file lives (SKILL.md by default), whether or not it exists yet."""
+        return self._skill_dir(name) / SKILL_FILE if file_path == SKILL_FILE else self._skill_path(name, file_path)
+
     def _skill_dir(self, name: str) -> Path:
         if not isinstance(name, str) or not _SKILL_NAME_RE.match(name):
             raise InputError(

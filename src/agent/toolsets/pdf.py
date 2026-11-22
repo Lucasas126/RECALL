@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from contextlib import nullcontext
 from typing import TYPE_CHECKING, Annotated, Callable
 
 from src.agent.tooling import tool
-from src.agent.toolsets.common import mark_written, readonly_error
+from src.agent.toolsets.common import mark_written, readonly_error, write_locks
 from src.utils.pdf_build import ELEMENT_TYPES, SpecError, build_pdf
 
 if TYPE_CHECKING:
@@ -26,12 +25,6 @@ def slugify(text: str) -> str:
 def build_pdf_tools(agent: Agent) -> list[Callable[..., str]]:
     """The `make_pdf` tool: a structured spec in, a PDF file in a writable source out (nothing is sent to the user)."""
     sources = agent.sources
-
-    def locked():
-        try:
-            return sources.agent_files().memory_lock()
-        except (KeyError, AttributeError):
-            return nullcontext()
 
     def load_image(address: str) -> bytes:
         source, rel = sources.resolve(address)
@@ -86,7 +79,7 @@ def build_pdf_tools(agent: Agent) -> list[Callable[..., str]]:
             )
             if len(built.data) > MAX_PDF_BYTES:
                 return f"error: the PDF is {len(built.data) // 1024} KiB; the limit is {MAX_PDF_BYTES // 1024 // 1024} MiB. Use smaller images or split it"
-            with locked():
+            with write_locks(sources, sources.resolve(target)[0]):  # a user folder's own lock, else the agent's
                 final = target if overwrite else free_address(target)
                 written = sources.write_bytes(final, built.data)
         except (SpecError, ValueError, KeyError, PermissionError, OSError) as exc:  # a bad spec or address: tell the agent

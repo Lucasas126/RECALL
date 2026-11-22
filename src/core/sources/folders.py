@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import time
 from pathlib import Path
 
 from src.core.sources.base import Source, scan_files
 from src.terminal.protected import ProtectedPaths, build_protected
+from src.utils.files import exclusive_file_lock
 from src.utils.i18n import InputError
 
 _RESERVED_SYSTEM = ("/proc", "/sys", "/dev")
@@ -119,6 +121,17 @@ class FolderSource(Source):
             rel: stat for rel, stat in scan_files(root, exts).items()
             if not self._is_protected(protected, root / rel)
         }
+
+    def write_lock(self):
+        """The lock the folder tools hold around each read-modify-write, shared by every agent that has this folder.
+
+        It lives in the data folder (one file per real folder path), never inside the user's folder."""
+        from src.config import settings  # late: tests point these directories at temporary folders
+
+        key = hashlib.sha256(str(self.root.resolve()).encode("utf-8")).hexdigest()[:32]
+        locks = settings.DATA_DIR / ".folder_locks"
+        locks.mkdir(parents=True, exist_ok=True)
+        return exclusive_file_lock(locks / f"{key}.lock")
 
     def resolve(self, rel_path: str) -> Path:
         target = super().resolve(rel_path)

@@ -5,6 +5,8 @@ sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases b
 
 ## Unreleased
 
+- Safe parallel memory writes: every write tool (palace, folders, `memory`, `skill_manage`, `soul_edit`) holds the agent's lock for its whole read-modify-write (folders have their own lock, outside the folder), files are replaced atomically (temporary file, `fsync`, rename, permissions kept), and a whole-file write is refused when the file changed since the chat last read it (or was never read), instead of silently dropping the other change. As a result, `remember` subagent tasks are no longer refused while the target agent replies elsewhere or runs another remember task. See [concurrent writes](../architecture/sources.md#concurrent-writes).
+
 - A subagent task may ask for up to 20 approvals per run (it was 10), so a worker that edits code under manual approvals can finish a normal task.
 - Fix (web): the running-subagents tray and the task cards did not appear when a finished task was continued with `task_send` while the chat was open (the page stopped asking once every task was final); it now keeps a slow look (every ~12 s, visible tab only) next to the 3 s poll while something runs.
 - A subagent task's worker chat can no longer be renamed or deleted through the chat endpoints (`PUT .../title`, `DELETE .../chats/<chat_id>`): they answer `400` "this is an internal task chat". It goes away with its task (retention pruning, or when the task is removed); a chat that must stay is created with an @mention.

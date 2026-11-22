@@ -25,8 +25,10 @@ Besides fresh workers you can hand a task to another agent of the same user with
 - `remember: true` on that target ("Can write its own memory"): the chat is a hidden but ordinary chat of the target, Dream may
   review it, and the target keeps `memory_read`, `memory_edit` and its `self` memory tools (never `soul_edit` or `skill_manage`),
   so it records what it learned in **its own** memory.
-- Memory files are not locked across chats, so a remember task (and a `task_send` follow-up on it) is refused while the target is
-  replying in another chat or already runs another remember task. Wait and try again; the error says so.
+- Several remember tasks may run at once, also while the target replies elsewhere: writes queue on the agent's lock and a
+  whole-file `write` over a stale view is refused (see "Parallel writers" in `references/memory-and-dream.md`).
+- When you launch several remember tasks, give each its own note or section (or tell them to use `append`), and consolidate
+  afterwards: they share one palace but not their context, so two may create near-duplicate notes.
 
 ## Good uses
 

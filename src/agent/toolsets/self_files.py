@@ -3,9 +3,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Annotated, Callable, Optional
 
 from src.agent.tooling import tool
-from src.agent.toolsets.common import mark_written
+from src.agent.read_ledger import file_digest
+from src.agent.toolsets.common import ledger_of, mark_written
 from src.config.settings import memory_limits
-from src.core.sources.agent_files import BUILTIN_SKILL, SKILL_FILE, join_memory
+from src.core.sources.agent_files import BUILTIN_SKILL, SKILL_FILE, SOUL_FILE, join_memory
 from src.utils.i18n import InputError
 
 if TYPE_CHECKING:
@@ -68,8 +69,14 @@ def apply_memory_operations(entries: list[str], operations: list[dict]) -> list[
 
 
 def build_self_tools(agent: Agent) -> list[Callable[..., str]]:
-    """Build the tools with which the agent edits its own SOUL.md, memories and skills."""
+    """Build the tools with which the agent edits its own SOUL.md, memories and skills.
+
+    Every change holds the agent's write lock (shared with its other chats, tasks and dreams), so concurrent changes
+    queue. Whole-file replacements (SOUL `replace`, skill `edit`, `write_file`) are refused when the file changed since
+    this chat last saw it (the SOUL in its prompt, a `skill_view`, or its own last write).
+    """
     sources = agent.sources
+    ledger = ledger_of(agent)
 
     def limit(target: str) -> int:
         limits = memory_limits()
@@ -135,8 +142,15 @@ def build_self_tools(agent: Agent) -> list[Callable[..., str]]:
                 if not inside:
                     raise FileNotFoundError(f"no files in {folder or 'the skill'}/ of skill {name}")
                 return f"[files in {folder or name}/]\n" + "\n".join(inside)
-            return files.read_skill_file(name, file_path)
-        text = files.skill_text(name)
+            with files.memory_lock():
+                text = files.read_skill_file(name, file_path)
+                if name != BUILTIN_SKILL:
+                    ledger.saw(files.skill_path(name, file_path))
+            return text
+        with files.memory_lock():
+            text = files.skill_text(name)
+            if name != BUILTIN_SKILL:
+                ledger.saw(files.skill_path(name, SKILL_FILE))
         extra = files.skill_files(name)
         if extra:
             text += "\n\n[supporting files: " + ", ".join(extra) + "; load them with skill_view(name, file_path)]"
@@ -159,40 +173,62 @@ def build_self_tools(agent: Agent) -> list[Callable[..., str]]:
         files = sources.agent_files()
         try:
             files.reject_builtin(name)
-            if action == "create":
-                try:
-                    files.skill_text(name)
-                except FileNotFoundError:
-                    pass
-                else:
-                    return f"error: skill '{name}' already exists; use edit or patch"
-                files.write_skill(name, content)
-            elif action == "edit":
-                files.skill_text(name)
-                files.write_skill(name, content)
-            elif action == "patch":
-                text = files.read_skill_file(name, file_path) if file_path else files.skill_text(name)
-                count = text.count(old_string) if old_string else 0
-                if count != 1:
-                    return f"error: old_string must appear exactly once (found {count}); add surrounding context"
-                patched = text.replace(old_string, new_string, 1)
-                if file_path:
-                    files.write_skill_file(name, file_path, patched)
-                else:
-                    files.write_skill(name, patched)
-            elif action == "delete":
-                files.delete_skill(name)
-            elif action == "write_file":
-                files.write_skill_file(name, file_path, file_content)
-            elif action == "remove_file":
-                files.remove_skill_file(name, file_path)
-            else:
-                return "error: unknown action; use create, edit, patch, delete, write_file or remove_file"
+            with files.memory_lock():  # queued with every other write of the agent; checks and write are one step
+                refusal = _skill_change(files, action, name, content, old_string, new_string, file_path, file_content)
         except InputError as exc:
             return f"error: {exc}"
+        if refusal:
+            return refusal
         target = file_path if action in ("write_file", "remove_file") or (action == "patch" and file_path) else SKILL_FILE
         mark_written(agent, f"agent:skills/{name}/{target}")
         return f"{action} done: skill '{name}' ({target}). {_APPLIES_LATER}"
+
+    def _skill_change(files, action, name, content, old_string, new_string, file_path, file_content) -> str | None:
+        """Apply one skill_manage action under the agent's lock; an error text, or None when it was applied."""
+        main = files.skill_path(name, SKILL_FILE)
+        if action == "create":
+            try:
+                files.skill_text(name)
+            except FileNotFoundError:
+                pass
+            else:
+                return f"error: skill '{name}' already exists; use edit or patch"
+            files.write_skill(name, content)
+            ledger.saw(main)
+        elif action == "edit":
+            files.skill_text(name)
+            if refusal := ledger.overwrite_refusal(main, f"skill '{name}' (SKILL.md)", f"skill_view('{name}')"):
+                return refusal
+            files.write_skill(name, content)
+            ledger.saw(main)
+        elif action == "patch":
+            path = files.skill_path(name, file_path) if file_path else main
+            before = file_digest(path)
+            text = files.read_skill_file(name, file_path) if file_path else files.skill_text(name)
+            count = text.count(old_string) if old_string else 0
+            if count != 1:
+                return f"error: old_string must appear exactly once (found {count}); add surrounding context"
+            patched = text.replace(old_string, new_string, 1)
+            if file_path:
+                files.write_skill_file(name, file_path, patched)
+            else:
+                files.write_skill(name, patched)
+            ledger.changed(path, before)
+        elif action == "delete":
+            files.delete_skill(name)
+        elif action == "write_file":
+            path = files.skill_path(name, file_path)
+            if refusal := ledger.overwrite_refusal(
+                path, f"skill '{name}' file {file_path}", f"skill_view('{name}', '{file_path}')",
+            ):
+                return refusal
+            files.write_skill_file(name, file_path, file_content)
+            ledger.saw(path)
+        elif action == "remove_file":
+            files.remove_skill_file(name, file_path)
+        else:
+            return "error: unknown action; use create, edit, patch, delete, write_file or remove_file"
+        return None
 
     @tool
     def soul_edit(
@@ -205,22 +241,31 @@ def build_self_tools(agent: Agent) -> list[Callable[..., str]]:
         explained changes for durable lessons only; facts go to memory and procedures to skills. The previous
         version is saved to soul_history/ (the last 5 are kept) so the user can restore it."""
         files = sources.agent_files()
-        current = files.soul() or ""
-        if action == "replace":
-            if not content.strip():
-                return "error: replace needs the full new SOUL.md in content"
-            updated = content
-        elif action == "patch":
-            count = current.count(old_string) if old_string else 0
-            if count != 1:
-                return f"error: old_string must appear exactly once in SOUL.md (found {count}); add surrounding context"
-            updated = current.replace(old_string, new_string, 1)
-        else:
+        if action not in ("replace", "patch"):
             return "error: action must be replace or patch"
-        try:
-            changed = files.write_soul(updated)
-        except InputError as exc:
-            return f"error: {exc}"
+        if action == "replace" and not content.strip():
+            return "error: replace needs the full new SOUL.md in content"
+        path = files.resolve(SOUL_FILE)
+        with files.memory_lock():  # queued with every other write of the agent; read, check and write are one step
+            current = files.soul() or ""
+            if action == "replace":
+                if refusal := ledger.overwrite_refusal(path, "SOUL.md", "read('agent:SOUL.md')"):
+                    return refusal
+                updated = content
+            else:
+                count = current.count(old_string) if old_string else 0
+                if count != 1:
+                    return f"error: old_string must appear exactly once in SOUL.md (found {count}); add surrounding context"
+                updated = current.replace(old_string, new_string, 1)
+            before = file_digest(path)
+            try:
+                changed = files.write_soul(updated)
+            except InputError as exc:
+                return f"error: {exc}"
+            if action == "replace":
+                ledger.saw(path)
+            else:
+                ledger.changed(path, before)
         if not changed:
             return "SOUL.md is unchanged."
         return f"SOUL.md updated ({len(updated)} chars); the previous version was saved. {_APPLIES_LATER}"

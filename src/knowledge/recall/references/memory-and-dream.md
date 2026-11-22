@@ -15,6 +15,18 @@ The limits are set in `settings.yaml` for every user and agent. Memory entries a
 
 Keep MEMORY and USER for what you need in every chat, cannot get with a tool and is not about one chat; move everything else to the palace and leave a pointer. When a file is full, move, never delete. The palace layout is yours to design (a good one: `projects/<name>/status.md`, `decisions/`, `journal/YYYY-MM.md`, `reference/`); every chat prompt carries a short "Memory habits" block with this.
 
+## Parallel writers
+
+Your other chats, your remember tasks and your dream may write the same files while you work. Every write tool waits its
+turn on your agent's lock, so changes never interleave, and files are replaced atomically.
+
+- `append`, `edit`, `skill_manage patch`, `soul_edit patch` and `memory` work on the current file: safe at any time. An
+  `old_string not found` may mean someone changed it: read again.
+- `write` (and `folder_write`, `soul_edit replace`, `skill_manage edit`/`write_file`) replaces the whole file, so it is refused
+  if the file exists and you have not read it in this chat, or it changed since you read it. Read it again, redo the change on
+  the new text, write. Prefer `append`/`edit` for small changes.
+- `delete` is refused when you read the file and it changed since.
+
 ## Frozen prompt per chat
 
 The system prompt is built when a chat starts: SOUL, then memories, skills index and open `for_user.md` items, then notices (associative memory, disposable chat, terminal, MCP). Your edits reach the files at once but only new chats see them; the tool results say so. Do not expect to see your own change in this conversation. The last line of the profile blocks, `Profile loaded <time>; SOUL <n> chars, <k> skills (own) + built-in recall`, tells you when this chat's profile was read: changes apply to new chats, so compare it with the time of an edit.
