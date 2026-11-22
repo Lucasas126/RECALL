@@ -130,7 +130,7 @@ class ApprovalCapTests(unittest.TestCase):
         lock = NonBlockingFileLock(Path("unused.lock"))
         return _LiveTask("u", "aaaaaaaaaaaa", "a", "c", LIMITS, timeout_s, lock)
 
-    def test_the_eleventh_approval_of_a_run_is_denied(self) -> None:
+    def test_the_approval_after_the_limit_is_denied(self) -> None:
         live = self.live()
         results = [live.approval_gate() for _ in range(tasks_module.MAX_APPROVALS_PER_RUN + 2)]
         self.assertEqual(results[: tasks_module.MAX_APPROVALS_PER_RUN], [None] * tasks_module.MAX_APPROVALS_PER_RUN)

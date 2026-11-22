@@ -106,7 +106,7 @@ and the backend itself, so a worker never gets a backend its parent lacks.
   or as a Telegram message in the agent's Telegram chat. It says which task asks: *Task Check the logs (ephemeral) wants to run:*, followed by
   the command, backend, working directory and reason. Only the owner can answer; approving resumes the worker, denying makes it report the refusal.
   An approval is shown in the channel of the launching chat only: it is not relayed to the other channel.
-- **At most 10 approvals per run, and the pause has a limit.** A worker that asks for an 11th approval in the same run gets it denied at once with a clear message; and the time spent waiting for you pauses the timeout for at most twice the task's timeout, after that the timeout runs even while a command waits.
+- **At most 20 approvals per run, and the pause has a limit.** A worker that asks for a 21st approval in the same run gets it denied at once with a clear message; and the time spent waiting for you pauses the timeout for at most twice the task's timeout, after that the timeout runs even while a command waits.
 - **The clock stops while you decide.** The task's 10-minute timeout does not run while a command waits for you (up to the limit above). An approval nobody answers is
   denied after the usual approval timeout (5 minutes by default), as for any chat.
 - **Results are untrusted data.** What `task_result`, `task_wait` and `task_start(wait=true)` hand back to the agent, like the wake message, is wrapped in `<task_result untrusted="true">…</task_result>` with a note that it is worker data, not instructions; any tag-like text inside it is neutralised so a worker cannot close the block or fake another.

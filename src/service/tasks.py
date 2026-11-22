@@ -63,7 +63,7 @@ _CHILD_ORIGIN = "task"
 _WATCH_GRACE_SECONDS = 5.0  # how long the watchdog waits for a stopped worker before it ends the task itself
 
 
-MAX_APPROVALS_PER_RUN = 10  # approval requests a worker may make in one run; more are denied
+MAX_APPROVALS_PER_RUN = 20  # approval requests a worker may make in one run; more are denied
 MAX_PAUSE_FACTOR = 2  # a run's timeout is paused at most this many times the timeout while it awaits approvals
 TASK_KEEP_DAYS = 30  # final task records (and their hidden worker chats) older than this are pruned
 PRUNE_EVERY_SECONDS = 3600  # at most once per hour per user
