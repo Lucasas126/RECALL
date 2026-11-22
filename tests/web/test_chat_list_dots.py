@@ -62,6 +62,8 @@ class ChatListDotStaticTests(unittest.TestCase):
         self.assertIn('#chat-list li[data-dot]::after', css)
         self.assertIn('#chat-list li[data-dot="working"]::after { animation', css)
         self.assertNotIn('[data-dot="ready"]::after { animation', css)  # only the working dot blinks
+        self.assertIn("@keyframes working-dot", css)
+        self.assertIn('#chat-list li[data-dot="approval"] { background: var(--accent-soft)', css)  # a chat waiting for approval is tinted
 
 
 if __name__ == "__main__":
