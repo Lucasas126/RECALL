@@ -25,4 +25,5 @@ dependencies = [
     "pymupdf>=1.26,<2",
     "croniter>=7.0.0",
     "reportlab>=5.1",
+    "vl-convert-python>=1.9.0.post1",
 ]
