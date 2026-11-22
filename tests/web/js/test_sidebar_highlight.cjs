@@ -9,10 +9,10 @@ const source = readFileSync(path.join(__dirname, "..", "..", "..", "src", "web",
 const highlight = source.match(/function highlightChat\([\s\S]*?\r?\n\}\r?\n/)[0];
 const handler = source.match(/li\.addEventListener\("click", async \(\) => \{[\s\S]*?\r?\n      \}\);/)[0];
 
-function row(agent, chat, active = false) {
+function row(agent, chat, active = false, dot = undefined) {
   const classes = new Set(active ? ["active"] : []);
   const del = { dataset: { agent, chat } };
-  return { classes, classList: { toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)), contains: (name) => classes.has(name) }, querySelector: () => del };
+  return { classes, dataset: dot ? { dot } : {}, classList: { toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)), contains: (name) => classes.has(name) }, querySelector: () => del };
 }
 
 function harness({ open, fails = false, busy = false } = {}) {
@@ -63,4 +63,15 @@ test("nothing is marked while the picker is busy: the click is ignored", async (
   await clicks.click();
   assert.deepEqual(log, []);
   assert.deepEqual(shown(rows), [true, false, false]);
+});
+
+test("the opened chat loses its unread or approval dot, a working dot stays, and a missing chat is reported", () => {
+  const { context, rows } = harness();
+  rows[1].dataset.dot = "ready";
+  rows[2].dataset.dot = "working";
+  assert.equal(context.highlightChat("a", "c2"), true);
+  assert.equal(rows[1].dataset.dot, undefined);
+  assert.equal(context.highlightChat("b", "c3"), true);
+  assert.equal(rows[2].dataset.dot, "working");
+  assert.equal(context.highlightChat("a", "new"), false);
 });
