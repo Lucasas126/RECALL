@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 
 import yaml
@@ -153,7 +154,46 @@ def _mcp_settings(raw: dict, local_file: Path) -> McpSettings:
     return McpSettings.model_validate(mcp_raw)
 
 
-MCP = _mcp_settings(_raw, MCP_LOCAL_FILE)
+MCP = _mcp_settings(_raw, MCP_LOCAL_FILE)  # catalog at import time; `current_mcp_settings()` follows the file
+
+
+class _McpCatalog:
+    """The MCP catalog, re-read when `mcp_servers.yaml` appears, disappears or changes."""
+
+    def __init__(self, raw: dict, local_file: Path, initial: McpSettings) -> None:
+        self._raw = raw
+        self._file = local_file
+        self._settings = initial
+        self._stamp = self._stat()
+        self._lock = threading.Lock()
+
+    def _stat(self) -> tuple[int, int] | None:
+        try:
+            info = self._file.stat()
+        except OSError:
+            return None
+        return info.st_mtime_ns, info.st_size
+
+    def current(self) -> McpSettings:
+        with self._lock:
+            stamp = self._stat()
+            if stamp != self._stamp:
+                self._stamp = stamp  # an invalid file is reported once per change, not on every call
+                try:
+                    self._settings = _mcp_settings(self._raw, self._file)
+                except (OSError, ValueError, yaml.YAMLError) as exc:  # pydantic's ValidationError is a ValueError
+                    from src.utils.logger import get_logger
+
+                    get_logger("config").error("%s is invalid, keeping the previous MCP catalog: %s", self._file, exc)
+            return self._settings
+
+
+_MCP_CATALOG = _McpCatalog(_raw, MCP_LOCAL_FILE, MCP)
+
+
+def current_mcp_settings() -> McpSettings:
+    """The MCP settings now: `MCP` plus the latest valid `mcp_servers.yaml` (a broken edit keeps the last good one)."""
+    return _MCP_CATALOG.current()
 
 # ------------------------------------------------------------------ claude subscription: who may use the default login
 # RECALL_CLAUDE_DEFAULT_LOGIN_USERS (comma-separated user ids), when set, replaces the yaml list: a local override

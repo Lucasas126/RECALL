@@ -208,8 +208,9 @@ class McpManager:
     which is also the process working directory, so users never share credentials.
     """
 
-    def __init__(self, settings: McpSettings, config_dir: Path) -> None:
-        self._settings = settings
+    def __init__(self, settings: McpSettings | Callable[[], McpSettings], config_dir: Path) -> None:
+        # a callable is asked on every use, so catalog edits apply without a restart
+        self._settings_source = settings if callable(settings) else lambda: settings
         self._config_dir = config_dir
         self._loop = _EventLoop()
         self._guard = threading.Lock()
@@ -218,6 +219,10 @@ class McpManager:
         self._auth: dict[tuple[str, str], _AuthFlow] = {}
 
     # ------------------------------------------------------------------ catalog & status
+
+    @property
+    def _settings(self) -> McpSettings:
+        return self._settings_source()
 
     @property
     def servers(self) -> dict[str, McpServerConfig]:

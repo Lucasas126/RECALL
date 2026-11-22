@@ -107,7 +107,7 @@ servers of `settings.yaml`, and an id that already exists there is refused. The
 timeouts stay in `settings.yaml`. A wrong file stops RECALL at start with a message
 naming the problem.
 
-Restart RECALL after changing the catalog.
+Changes to `mcp_servers.yaml` are picked up without a restart; an invalid edit is logged and the previous catalog stays in use. An agent that lists a server missing from the catalog still loads, without that server. Changes to `settings.yaml` still need a restart.
 
 ## connecting an account
 

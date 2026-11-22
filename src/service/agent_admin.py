@@ -276,6 +276,12 @@ class AgentAdmin:
         if config.chat_config.mcp and not mcp_allowed(caller_level):
             raise PermissionRefused(f"the template uses MCP servers, which your level '{caller_level.label}' does not allow")
 
+    def _check_mcp_catalog(self, added: set[str]) -> None:
+        """Refuse MCP server ids that are not in the current catalog."""
+        unknown = sorted(added - set(self._service._mcp.servers))
+        if unknown:
+            raise PermissionRefused(f"unknown MCP server(s): {', '.join(unknown)} (add them to the MCP catalog first)")
+
     def plan_create(
         self, user_id: str, caller_id: str, caller_level: Level, agent_id: object, name: object, description: object,
         template: object = "", model: object = "", level: object = "", soul: object = "",
@@ -302,6 +308,7 @@ class AgentAdmin:
         if description:
             config = config.model_copy(update={"description": description})
         self._check_template_fits(user, caller, chosen, config)
+        self._check_mcp_catalog(set(config.chat_config.mcp))
 
         needed, service = required_level_reason(config, user.terminal_backends)
         if level not in (None, ""):
@@ -412,6 +419,7 @@ class AgentAdmin:
                 except (AgentConfigError, ValueError) as exc:
                     raise PermissionRefused(f"invalid model: {clean_text(exc, 300)}") from exc
             self._check_bounds(user, target, updated, caller, is_self)
+            self._check_mcp_catalog(set(updated.chat_config.mcp) - set(target.chat_config.mcp))
         old_soul = self._soul(user_id, target.id) if soul is not None else None
         new_soul = self._soul_text(soul) if soul is not None else None
         before_plain, after_plain = _plain(target), _plain(updated)

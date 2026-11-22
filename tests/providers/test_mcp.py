@@ -215,6 +215,65 @@ class McpLocalCatalogTests(unittest.TestCase):
                 self._load()
 
 
+class McpCatalogReloadTests(unittest.TestCase):
+    """The catalog follows mcp_servers.yaml while the app runs."""
+
+    GOOD = "servers:\n  extra:\n    name: Extra\n    command: npx\n"
+
+    def setUp(self) -> None:
+        from src.config.settings import _McpCatalog, _mcp_settings
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.file = Path(self._tmp.name) / "mcp_servers.yaml"
+        raw = {"mcp": {"servers": {"cal": {"name": "Cal", "command": "npx"}}}}
+        self.catalog = _McpCatalog(raw, self.file, _mcp_settings(raw, self.file))
+
+    def _bump(self, text: str) -> None:
+        self.file.write_text(text, encoding="utf-8")
+        stat = self.file.stat()
+        os.utime(self.file, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))  # distinct mtime on coarse clocks
+
+    def test_a_new_file_and_later_edits_and_removal_are_picked_up(self) -> None:
+        self.assertEqual(list(self.catalog.current().servers), ["cal"])
+        self._bump(self.GOOD)
+        self.assertEqual(list(self.catalog.current().servers), ["cal", "extra"])
+        self._bump("")
+        self.assertEqual(list(self.catalog.current().servers), ["cal"])
+        self._bump(self.GOOD)
+        self.file.unlink()
+        self.assertEqual(list(self.catalog.current().servers), ["cal"])
+
+    def test_an_unchanged_file_is_not_read_again(self) -> None:
+        self._bump(self.GOOD)
+        first = self.catalog.current()
+        self.assertIs(self.catalog.current(), first)
+
+    def test_an_invalid_file_keeps_the_last_good_catalog_and_logs(self) -> None:
+        self._bump(self.GOOD)
+        good = self.catalog.current()
+        for text in ("servers: [a]\n", "servers: {unclosed", "servers:\n  s:\n    name: S\n"):
+            self._bump(text)
+            with patch("src.utils.logger.get_logger") as get_logger:
+                self.assertIs(self.catalog.current(), good, msg=text)
+            get_logger.return_value.error.assert_called_once()
+
+    def test_manager_reads_a_callable_each_time(self) -> None:
+        current = [McpSettings.model_validate({"servers": {"a": {"name": "A", "command": "x"}}})]
+        manager = McpManager(lambda: current[0], Path(self._tmp.name))
+        self.assertEqual(list(manager.servers), ["a"])
+        current[0] = McpSettings.model_validate({"servers": {"b": {"name": "B", "command": "x"}}})
+        self.assertEqual(list(manager.servers), ["b"])
+        self.assertEqual(manager.server("b").name, "B")
+        with self.assertRaises(UnknownMcpServer):
+            manager.server("a")
+
+    def test_toolset_skips_an_unknown_server(self) -> None:
+        manager = McpManager(McpSettings(), Path(self._tmp.name))
+        toolset = build_mcp_tools(manager, "u", {"gone": AgentMcpConfig()}, level=Level.ADMIN)
+        self.assertEqual((toolset.specs, toolset.notes), ([], []))
+
+
 class McpHttpManagerTests(unittest.TestCase):
     TOKEN = "of_good-token"
 
