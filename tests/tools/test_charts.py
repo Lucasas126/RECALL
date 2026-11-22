@@ -16,6 +16,7 @@ from src.config.levels import Level
 from src.config.models import FolderConfig
 from src.core.sources.registry import SourceRegistry
 from src.utils import charts_render
+from src.utils.charts_mermaid import INSTALL_HINT, MermaidError
 from src.utils.charts_render import ChartError, check_chart_spec, render_chart_png, render_dot_png, themed_dot
 from src.utils.charts_theme import THEMES, get_theme, themed_spec
 
@@ -249,10 +250,16 @@ class ChartToolTests(unittest.TestCase):
         self.assertIn("unknown theme", run(spec=BAR, theme="neon"))
         self.assertFalse((self.palace / "charts").exists())
 
-    def test_mermaid_is_planned_and_unknown_kinds_are_refused(self) -> None:
+    def test_unknown_kinds_are_refused(self) -> None:
         run = self.tools["render_diagram"]
-        self.assertIn("not available in this build yet", run(kind="mermaid", source="graph TD; A-->B"))
         self.assertIn("unknown kind", run(kind="plantuml", source="x"))
+        self.assertFalse((self.palace / "charts").exists())
+
+    def test_mermaid_errors_are_returned_and_nothing_is_written(self) -> None:
+        run = self.tools["render_diagram"]
+        self.assertIn("non-empty Mermaid", run(kind="mermaid", source=" "))
+        with mock.patch("src.agent.toolsets.charts.render_mermaid_png", side_effect=MermaidError(INSTALL_HINT)):
+            self.assertIn("Chromium is not installed", run(kind="mermaid", source="flowchart LR; A-->B"))
         self.assertFalse((self.palace / "charts").exists())
 
     @unittest.skipUnless(HAS_DOT, "Graphviz (`dot`) is not installed")
