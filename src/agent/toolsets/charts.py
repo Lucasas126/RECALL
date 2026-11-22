@@ -5,8 +5,9 @@ from typing import TYPE_CHECKING, Annotated, Callable
 from src.agent.tooling import tool
 from src.agent.toolsets.common import mark_written, readonly_error, write_locks
 from src.agent.toolsets.pdf import slugify
+from src.utils.charts_mermaid import render_mermaid_png
 from src.utils.charts_render import (
-    DIAGRAM_KINDS, PLANNED_DIAGRAM_KINDS, ChartError, png_size, render_chart_png, render_dot_png,
+    DIAGRAM_KINDS, ChartError, png_size, render_chart_png, render_dot_png,
 )
 
 if TYPE_CHECKING:
@@ -76,25 +77,24 @@ def build_chart_tools(agent: Agent) -> list[Callable[..., str]]:
 
     @tool
     def render_diagram(
-        kind: Annotated[str, "graphviz (DOT text); mermaid is planned and not available yet"],
-        source: Annotated[str, "the diagram text: DOT for graphviz, e.g. digraph G { rankdir=LR; a -> b }"],
+        kind: Annotated[str, "graphviz (DOT text) or mermaid (flowchart, sequence, gantt, sankey-beta...)"],
+        source: Annotated[str, "the diagram text: DOT for graphviz (digraph G { rankdir=LR; a -> b }) or Mermaid (flowchart LR; A --> B)"],
         path: Annotated[str, (
             "where to save it, as 'source:path' ending in .png, in a source you may write. "
             f"Default: {DEFAULT_FOLDER}/diagram.png"
         )] = "",
-        theme: Annotated[str, "dark (default) or light; your own attributes in the text win"] = "dark",
+        theme: Annotated[str, "dark (default) or light; for graphviz your own attributes in the text win"] = "dark",
         overwrite: Annotated[bool, "replace the file when it exists; by default a number is added to the name"] = False,
     ) -> str:
-        """Draw a diagram (graph, flow, tree) from text and save it as a PNG; it does not send it (use send_file).
+        """Draw a diagram (graph, flow, tree, sequence, Gantt, Sankey) from Graphviz or Mermaid text and save it as a PNG; it does not send it (use send_file).
         Returns the file's address and pixel size. Check it with view_image first. Examples: the recall skill, references/charts.md."""
         try:
             name = (kind or "").strip().lower()
-            if name in PLANNED_DIAGRAM_KINDS:
-                return f"error: kind '{name}' is not available in this build yet; use one of: {', '.join(DIAGRAM_KINDS)}"
             if name not in DIAGRAM_KINDS:
-                return f"error: unknown kind '{kind}'; use one of: {', '.join(DIAGRAM_KINDS)} (planned: {', '.join(PLANNED_DIAGRAM_KINDS)})"
+                return f"error: unknown kind '{kind}'; use one of: {', '.join(DIAGRAM_KINDS)}"
             target = checked_target(path, "diagram")
-            return save(render_dot_png(source, theme), target, overwrite)
+            data = render_mermaid_png(source, theme) if name == "mermaid" else render_dot_png(source, theme)
+            return save(data, target, overwrite)
         except (ChartError, ValueError, KeyError, PermissionError, OSError) as exc:
             return f"error: {exc}"
 

@@ -92,3 +92,26 @@ def graphviz_defaults(theme: dict[str, Any]) -> dict[str, str]:
         ),
         "edge": f'fontname="{font}", fontsize=11, color="{theme["edge"]}", fontcolor="{theme["edge_label"]}"',
     }
+
+
+def mermaid_config(theme: dict[str, Any]) -> dict[str, Any]:
+    """The Mermaid `initialize` options (base theme plus variables) built from a theme."""
+    font, text, line = theme["font"], theme["text"], theme["edge"]
+    return {
+        "startOnLoad": False, "securityLevel": "strict", "theme": "base", "fontFamily": font, "htmlLabels": False,
+        "themeVariables": {
+            "fontFamily": font, "fontSize": "15px", "background": theme["background"],
+            "mainBkg": theme["node_fill"], "primaryColor": theme["node_fill"], "primaryBorderColor": theme["node_border"],
+            "primaryTextColor": text, "textColor": text, "lineColor": line,
+            "secondaryColor": theme["grid"], "tertiaryColor": theme["node_fill"],
+            "actorBkg": theme["node_fill"], "actorBorder": theme["node_border"], "actorTextColor": text,
+            "signalColor": text, "signalTextColor": text,
+        },
+        "flowchart": {"htmlLabels": False},
+        "sequence": {
+            "wrap": False, "useMaxWidth": False, "messageFontFamily": font, "actorFontFamily": font,
+            "noteFontFamily": font, "messageFontSize": 15, "actorFontSize": 15,
+        },
+        "gantt": {"useMaxWidth": False},
+        "sankey": {"linkColor": line, "showValues": True, "width": 700, "height": 420},
+    }

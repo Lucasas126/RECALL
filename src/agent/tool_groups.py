@@ -16,7 +16,7 @@ TOOL_GROUP_CATALOG: Final[tuple[dict[str, str], ...]] = (
     {
         "id": "charts",
         "name": "Charts and diagrams",
-        "description": "Draw charts (Vega-Lite) and diagrams (Graphviz) as PNG images saved in a source.",
+        "description": "Draw charts (Vega-Lite) and diagrams (Graphviz, Mermaid) as PNG images saved in a source.",
     },
     {
         "id": "web",

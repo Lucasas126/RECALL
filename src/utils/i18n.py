@@ -822,7 +822,7 @@ _SPANISH = {
     "Automations": "Automatizaciones",
     "Schedule things for later: once, every N minutes, on a cron schedule or when a background process ends.": "Programar cosas para más tarde: una vez, cada N minutos, con un horario cron o cuando termine un proceso en segundo plano.",
     "Send files": "Enviar archivos",
-    "Draw charts (Vega-Lite) and diagrams (Graphviz) as PNG images saved in a source.": "Dibujar gráficos (Vega-Lite) y diagramas (Graphviz) como imágenes PNG guardadas en una fuente.",
+    "Draw charts (Vega-Lite) and diagrams (Graphviz, Mermaid) as PNG images saved in a source.": "Dibujar gráficos (Vega-Lite) y diagramas (Graphviz, Mermaid) como imágenes PNG guardadas en una fuente.",
     "Charts and diagrams": "Gráficos y diagramas",
     "Send you a file the agent can already read (a note, a document, an image), in the web chat and on Telegram.": "Enviarte un archivo que el agente ya puede leer (una nota, un documento, una imagen), en el chat web y en Telegram.",
     "Download": "Descargar",

@@ -1,4 +1,4 @@
-"""Render Vega-Lite specs and Graphviz DOT text to PNG bytes (the engine behind `render_chart` and `render_diagram`).
+"""Render Vega-Lite specs and Graphviz DOT text to PNG bytes (the engine behind `render_chart` and `render_diagram`; Mermaid is in `charts_mermaid`).
 
 No browser and no network: Vega-Lite goes through vl-convert, DOT through the system `dot` and then vl-convert's
 SVG rasteriser. The vl-convert work runs in a child process (`python -m src.utils.charts_render`) so a time limit
@@ -27,8 +27,7 @@ SCALE = 2
 MAX_LOGICAL_SIDE = MAX_SIDE // SCALE
 RENDER_TIMEOUT = 40
 DOT_TIMEOUT = 20
-DIAGRAM_KINDS = ("graphviz",)
-PLANNED_DIAGRAM_KINDS = ("mermaid",)
+DIAGRAM_KINDS = ("graphviz", "mermaid")
 ROOT = Path(__file__).resolve().parents[2]
 
 
