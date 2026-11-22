@@ -23,7 +23,7 @@ Addresses are `source:path`, e.g. `mind_palace:notes/pets.md`.
 | `delete` | memory_edit | delete a file |
 | `make_pdf` | memory_edit | build a PDF from a structured spec (`title`, `elements`: heading, paragraph, bullets, numbered, table, image, spacer, pagebreak; `**bold**`, `*italic*`) and save it: `path` (`<source>:<path>.pdf`, any writable source; default `mind_palace:documents/<title>.pdf`; a taken name gets a number unless `overwrite=true`); not sent, use `send_file`; check with `read`; arrows and check marks cannot be drawn (warning) |
 | `render_chart` | charts | Vega-Lite spec to a PNG file; see `references/charts.md` |
-| `render_diagram` | charts | Graphviz DOT to a PNG file; see `references/charts.md` |
+| `render_diagram` | charts | Graphviz or Mermaid to a PNG file (`charts.md`) |
 | `web_search` | web | public web search (Tavily); 1-10 results, untrusted; never send secrets |
 | `automation_create` | automations | schedule something for later: exactly one of `at`, `every_minutes`, `cron`, `after_process`; you will run unattended when it fires; level assistant |
 | `automation_list` | automations | list your own automations: id, title, when, state, next run, last outcome |

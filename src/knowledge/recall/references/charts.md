@@ -3,11 +3,11 @@
 Tool group `charts` (opt-in, level `assistant`): `render_chart` and `render_diagram` draw a PNG into a source you may write. Nothing is sent.
 
 - `render_chart(spec, path="", theme="dark", width=0, height=0, overwrite=false)`: `spec` is a Vega-Lite v5 JSON object with the rows inline in `data.values`. Remote or file data (`url`) is refused: no network, no file reads.
-- `render_diagram(kind, source, path="", theme="dark", overwrite=false)`: `kind: "graphviz"` with DOT text as `source`. `mermaid` is planned: it answers "not available in this build yet".
+- `render_diagram(kind, source, path="", theme="dark", overwrite=false)`: `kind: "graphviz"` (DOT text) or `"mermaid"` (Mermaid text) as `source`.
 - Default file: `mind_palace:charts/<title>.png`; a taken name gets `-2`, `-3`... unless `overwrite`. The path must end in `.png`. The result gives address and pixel size (rendered at 2x, at most 4000x4000).
 - Themes: `dark` (default) and `light`, font Open Sans. Colours, fonts and sizes can be overridden in the spec's own `config` (it wins over the theme). In DOT, attributes you set win over the theme.
-- Limits: spec 1 MB, DOT 200 KB, a render time limit. Errors come back as `error: ...`; fix the input and retry.
-- Missing Graphviz (`dot`) gives an error: tell the user it must be installed (`apt install graphviz`; the Docker image has it).
+- Limits: spec 1 MB, DOT 200 KB, Mermaid 100 KB, a render time limit. Errors come back as `error: ...`; fix the input and retry.
+- Missing Graphviz (`dot`) or Chromium (Mermaid) gives an error: tell the user it must be installed (`apt install graphviz chromium-headless-shell`; the Docker image has both).
 
 ## Workflow
 
@@ -77,6 +77,39 @@ digraph G {
   Process -> Output;
   Process -> Log [style=dashed];
 }
+```
+ 
+## Mermaid (`kind: "mermaid"`)
+
+Tested: flowchart, sequence, Gantt, Sankey. Same themes; no network. Syntax errors come back as `error: invalid Mermaid: ...`: fix and retry. Gantt: wide charts are hard to read, use fewer tasks or a short date range (the image viewer has zoom). Sankey: `sankey-beta`, rows `source,target,value`; accents in names are fine.
+
+```mermaid
+flowchart LR
+  A[Start] --> B{Ok?}
+  B -->|yes| C[Done]
+  B -->|no| A
+```
+
+```mermaid
+sequenceDiagram
+  Client->>Server: Request
+  Server-->>Client: Response
+```
+
+```mermaid
+gantt
+  dateFormat YYYY-MM-DD
+  section Plan
+  Design :a1, 2026-01-01, 10d
+  Build :after a1, 15d
+```
+
+```mermaid
+sankey-beta
+
+Salary,Rent,900
+Salary,Food,450
+Salary,Savings,300
 ```
 
 Do not use `image`, `imagepath`, `fontpath`, `shapefile`, `stylesheet` or `<img>`: diagrams cannot read files. Tool details: `references/tools-and-groups.md`.

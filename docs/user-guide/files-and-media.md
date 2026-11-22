@@ -176,7 +176,7 @@ With the `memory_edit` group an agent has `make_pdf`: it describes the document 
 
 ## charts and diagrams made by the agent
 
-With the opt-in `charts` group an agent has `render_chart` (Vega-Lite charts) and `render_diagram` (Graphviz) and saves PNG images like `make_pdf` saves PDFs (default `mind_palace:charts/`). It can look at the result with `view_image`; to receive it you also need `files_send`. Diagrams need Graphviz on the machine (included in the Docker image; otherwise `apt install graphviz`). Details: [tools](../reference/tools.md#charts).
+With the opt-in `charts` group an agent has `render_chart` (Vega-Lite charts) and `render_diagram` (Graphviz or Mermaid) and saves PNG images like `make_pdf` saves PDFs (default `mind_palace:charts/`). It can look at the result with `view_image`; to receive it you also need `files_send`. Graphviz diagrams need Graphviz and Mermaid diagrams need Chromium on the machine (both included in the Docker image; otherwise `apt install graphviz chromium-headless-shell`). Details: [tools](../reference/tools.md#charts).
 
 ## speech-to-text
 
