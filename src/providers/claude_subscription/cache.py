@@ -10,6 +10,8 @@ on or after that context. The next request replays the turn without it, so the c
 recurs and every call writes the whole history again. These transforms keep the request equal to what
 the next request replays and the breakpoint on content that recurs. Every function returns the payload
 unchanged when it does not parse or has an unexpected shape, so a CLI change costs cache, never a turn.
+The account-context reminder (a `<system-reminder>` with a `# userEmail` section) is also removed from the
+newest message when the tool-result frame could not be restored, never anything else in a tool result.
 """
 from __future__ import annotations
 
@@ -355,6 +357,75 @@ def restore_queried_turn(payload: bytes, queried: list[dict] | None) -> bytes:
         return unmatched()
 
 
+_REMINDER_OPEN, _REMINDER_CLOSE = "<system-reminder>", "</system-reminder>"
+
+
+def _is_account_reminder(text) -> bool:
+    """Exactly one system-reminder block with a `# userEmail` line (other reminders are not ours)."""
+    if not isinstance(text, str):
+        return False
+    body = text.strip()
+    return (body.startswith(_REMINDER_OPEN) and body.endswith(_REMINDER_CLOSE)
+            and body.count(_REMINDER_OPEN) == 1 and body.count(_REMINDER_CLOSE) == 1
+            and any(line.strip() == "# userEmail" for line in body.splitlines()))
+
+
+def strip_account_reminder(payload: bytes) -> bytes:
+    """Remove the account-context reminder Claude Code appends to the newest user message.
+
+    Only text Claude Code added is touched: bare text blocks of the newest message, and the trailing text
+    block (or trailing suffix of a string) of a tool result when that is exactly one such reminder. A
+    removed cache mark moves to the previous block of the same list. Any other shape returns the payload
+    unchanged, byte for byte.
+    """
+    def bare_text(block) -> bool:
+        return (isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str)
+                and set(block) <= {"type", "text", "cache_control"})
+
+    def drop_trailing(blocks: list, index: int) -> bool:
+        # remove blocks[index] (a reminder), keeping its cache mark on the block before it
+        mark = blocks[index].get("cache_control")
+        if mark is not None:
+            if index == 0 or not isinstance(blocks[index - 1], dict):
+                return False
+            blocks[index - 1].setdefault("cache_control", mark)
+        del blocks[index]
+        return True
+
+    try:
+        body = json.loads(payload)
+        messages = body.get("messages") if isinstance(body, dict) else None
+        if not isinstance(messages, list) or not messages:
+            return payload
+        newest = messages[-1]
+        if not isinstance(newest, dict) or newest.get("role") != "user" or not isinstance(newest.get("content"), list):
+            return payload
+        content = newest["content"]
+        if not all(isinstance(b, dict) for b in content):
+            return payload
+        changed = False
+        # tool results first, while the indexes of the outer list are still stable
+        for block in content:
+            if block.get("type") != "tool_result":
+                continue
+            inner = block.get("content")
+            if isinstance(inner, str):
+                start = inner.rfind(_REMINDER_OPEN)
+                if start > 0 and _is_account_reminder(inner[start:]) and inner[:start].strip():
+                    block["content"] = inner[:start]
+                    changed = True
+            elif isinstance(inner, list) and len(inner) > 1 and all(bare_text(b) for b in inner):
+                if _is_account_reminder(inner[-1]["text"]) and drop_trailing(inner, len(inner) - 1):
+                    changed = True
+        for index in range(len(content) - 1, -1, -1):
+            if bare_text(content[index]) and _is_account_reminder(content[index]["text"]):
+                if len(content) > 1 and drop_trailing(content, index):
+                    changed = True
+        return _dumps(body) if changed else payload
+    except (ValueError, TypeError, KeyError, AttributeError, IndexError):
+        return payload
+
+
 def cache_ready(payload: bytes, queried: list[dict] | None) -> tuple[bytes, str | None]:
     """All transforms in the relay's order; returns the payload and why tool results were not restored."""
     unrestored = None
@@ -363,6 +434,7 @@ def cache_ready(payload: bytes, queried: list[dict] | None) -> tuple[bytes, str 
     except QueriedTurnMismatch as exc:
         # hygiene, not a gate: an unprovable frame forwards as Claude Code built it (an uncached tail)
         unrestored = str(exc)
+    payload = strip_account_reminder(payload)
     payload = stable_request_context(payload, queried)
     payload = pin_message_breakpoint(payload, queried)
     return payload, unrestored
