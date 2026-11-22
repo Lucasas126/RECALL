@@ -56,6 +56,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # - tesseract-ocr (+ eng/spa data, matching pdf.ocr_languages): scanned PDF pages
 # - ffmpeg (includes ffprobe): video decomposition
 # - graphviz (`dot`) + fonts-open-sans + fontconfig: the opt-in `charts` tool group draws diagrams and charts
+# - chromium-headless-shell: required by `render_diagram` kind mermaid (driven by Playwright via executable_path, so no
+#   browser is downloaded at build or run time). Chosen over `playwright install --with-deps`: one apt line, Debian
+#   security updates, and its dependencies are pulled in without a second copy of Chromium and a large font set.
 # - tzdata: log timestamps honour the TZ env var
 # - file, diffutils: the `type: local` terminal backend (see docs/deployment/docker.md) runs commands inside this
 #   image; bash, coreutils (head, wc, tr, mktemp, dirname, mv, chmod), findutils, grep and awk (mawk) that the
@@ -66,6 +69,7 @@ RUN apt-get update \
       tesseract-ocr tesseract-ocr-eng tesseract-ocr-spa \
       ffmpeg \
       graphviz fonts-open-sans fontconfig \
+      chromium-headless-shell \
       openssh-client \
       file diffutils \
       tzdata \
