@@ -8,7 +8,7 @@ from typing import Callable
 from src.config.ceiling import mcp_allowed
 from src.config.levels import Level
 from src.config.models import AgentMcpConfig
-from src.providers.mcp import McpError, McpManager, McpTool
+from src.providers.mcp import McpError, McpManager, McpTool, UnknownMcpServer
 from src.utils.logger import get_logger
 
 logger = get_logger("agent")
@@ -64,7 +64,11 @@ def build_mcp_tools(
     allowed = set(allow) if allow is not None else None
     taken: dict[str, str] = {}
     for server_id, selection in selections.items():
-        server = manager.server(server_id)
+        try:
+            server = manager.server(server_id)
+        except UnknownMcpServer:
+            logger.warning("MCP server %s is enabled for the agent but not in the catalog; skipped", server_id)
+            continue
         try:
             tools = select_tools(manager.list_tools(user_id, server_id), selection)
         except McpError as exc:

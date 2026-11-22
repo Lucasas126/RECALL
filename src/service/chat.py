@@ -40,7 +40,7 @@ from src.config.field_defaults import agent_defaults
 from src.config.secrets import fingerprint as secrets_fingerprint, get_secret
 from src.config.zdr import chat_zdr, zdr_required
 from src.config.settings import (
-    AGENT_MAX_TOOL_HOPS, APPROVAL_EXPLAIN, ASSOC, CHAT_NAMING, CONFIG_DIR, DATA_DIR, MCP, ORCHESTRATOR, PDF, SPEECH_TO_TEXT, TAVILY, TELEGRAM_ALLOWED_USERS_ENV,
+    AGENT_MAX_TOOL_HOPS, APPROVAL_EXPLAIN, ASSOC, CHAT_NAMING, CONFIG_DIR, DATA_DIR, ORCHESTRATOR, PDF, SPEECH_TO_TEXT, TAVILY, TELEGRAM_ALLOWED_USERS_ENV, current_mcp_settings,
     SUBAGENTS, TERMINAL, VIDEO_DECOMPOSITION, WEB_PUBLIC_URL, memory_limits,
 )
 from src.core.index import VectorIndex
@@ -403,7 +403,7 @@ class ChatService:
         """`origins`: the chat origins this process drives (`web`, `telegram`); it delivers the wake of a subagent task
         for chats of those origins, whichever process ran the task. Empty (tests, CLI) = no cross-process role."""
         self._index_factory = index_factory or self._build_index
-        self._mcp = mcp or McpManager(MCP, CONFIG_DIR)
+        self._mcp = mcp or McpManager(current_mcp_settings, CONFIG_DIR)
         self._agent_factory = agent_factory or (
             lambda user_id, agent_id, chat_id: Agent.from_config(user_id, agent_id, chat_id, self._mcp)
         )

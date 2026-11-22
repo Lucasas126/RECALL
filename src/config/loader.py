@@ -11,7 +11,7 @@ from src.config.levels import check_agent_level, effective_agent_level
 from src.config.models import AgentConfig, ModelsConfig, ResolvedAgent, UserConfig
 from src.config.preferences import UserPreferencesStore
 from src.config.secrets import get_secret
-from src.config.settings import ASSOC, CHAT_NAMING, CONFIG_DIR, DATA_DIR, MCP, TERMINAL
+from src.config.settings import ASSOC, CHAT_NAMING, CONFIG_DIR, DATA_DIR, TERMINAL, current_mcp_settings
 from src.agent.tool_groups import DEFAULT_TOOL_GROUPS
 from src.terminal.resolve import resolve_backends
 from src.utils.i18n import InputError
@@ -94,9 +94,11 @@ def load_agent(user_id: str, agent_id: Optional[str] = None) -> ResolvedAgent:
     selected_tool_groups = agent.chat_config.tool_groups
     if selected_tool_groups is None and agent.chat_config.tools:
         selected_tool_groups = list(DEFAULT_TOOL_GROUPS)
-    unknown_mcp = sorted(set(agent.chat_config.mcp) - set(MCP.servers))
-    if unknown_mcp:
-        raise ValueError(f"agent '{agent.id}' enables unknown MCP servers: {', '.join(unknown_mcp)}")
+    unknown_mcp = sorted(set(agent.chat_config.mcp) - set(current_mcp_settings().servers))
+    if unknown_mcp:  # a missing server must not take the whole agent down: it is skipped, the file is left alone
+        logger.warning("agent %s/%s: ignoring unknown MCP servers: %s", user.id, agent.id, ", ".join(unknown_mcp))
+        known = {key: value for key, value in agent.chat_config.mcp.items() if key not in unknown_mcp}
+        agent = agent.model_copy(update={"chat_config": agent.chat_config.model_copy(update={"mcp": known})})
     terminal_backends = {}
     if "terminal" in (selected_tool_groups or ()):
         try:  # an unusable terminal block never breaks the agent: its tools are simply not built

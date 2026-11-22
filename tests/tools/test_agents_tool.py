@@ -498,6 +498,22 @@ class UpdateChecks(AgentsFixture):
                 self.assertEqual(run.cards, [])
         self.assertEqual(before, self.files_of("user-a"))
 
+    def test_new_unknown_mcp_servers_are_refused_but_existing_ones_do_not_block(self) -> None:
+        from src.config.models import McpSettings
+
+        catalog = McpSettings.model_validate({"servers": {"known": {"name": "Known", "command": "npx"}}})
+        with patch.object(type(self.service._mcp), "_settings", catalog):
+            for target in ("bot", "chief"):  # another agent and the caller itself
+                run = self.run_of()
+                text = self.call("agent_update", run, agent_id=target, settings={"mcp": {"known": {}, "b": {}, "a": {}}})
+                self.assertIn("unknown MCP server(s): a, b", text)
+                self.assertEqual(run.cards, [])
+            self.assertEqual(load_agent_config("user-a", "bot").chat_config.mcp, {})
+            self.ok("agent_update", self.run_of(), agent_id="ops", settings={"mcp": {"known": {}}})  # ops is an operator
+            self.assertEqual(list(load_agent_config("user-a", "ops").chat_config.mcp), ["known"])
+            self.write_agent("ops", self.read("user-a/agents/ops.yaml").replace("known: {}", "stale: {}"))
+            self.ok("agent_update", self.run_of(), agent_id="ops", description="unrelated")
+
     def test_invalid_values_and_sizes_are_refused(self) -> None:
         for args in ({"name": ""}, {"name": "n" * 101}, {"description": "d" * 501}, {"soul": ""}, {"soul": "s" * 100000},
                      {"settings": {"reasoning_tokens": "many"}}, {"settings": "x"}, {"settings": {"level": "nonsense"}}):
