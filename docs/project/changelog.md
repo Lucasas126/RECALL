@@ -5,7 +5,7 @@ sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases b
 
 ## Unreleased
 
-## 0.6.0
+## 0.5.5
 
 - Web UI image viewer: Ctrl+wheel (and trackpad pinch) and the new zoom buttons or the `+`, `-` and `0` keys zoom only the image (1x to 8x, drag to pan, double click resets) instead of the whole page; when a message has several images, the left and right arrow keys and two side buttons step through them, with a counter. Zoom uses the bundled Panzoom library (MIT).
 - New opt-in tool group `charts` (level `assistant`): `render_chart` draws Vega-Lite charts and `render_diagram` draws Graphviz diagrams as PNG files in a writable source, with a dark (default) or light theme and a bundled Open Sans font; no browser or network. `render_diagram` also draws Mermaid (flowchart, sequence, Gantt, Sankey) with a vendored Mermaid script in headless Chromium (new `playwright` dependency, no browser download). The Docker image now includes Graphviz and Chromium (`chromium-headless-shell`); installs outside Docker need Chromium for Mermaid.
