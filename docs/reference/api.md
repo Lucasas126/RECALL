@@ -115,7 +115,7 @@ user's is a `404` (`unknown_agent`) before anything is read. An agent never sees
 
 `PUT` takes the **raw image bytes** as the body (no multipart) with `Content-Type: image/png`, `image/jpeg`, `image/webp` or `image/gif`. The declared type is only
 checked against that list: the bytes are decoded with Pillow and the format is decided by their content. Limits: 5 MiB of body and 4096 x 4096
-pixels (checked from the header, before decoding). The stored file is a PNG of at most 256 px on its longest side, with the EXIF rotation applied
+pixels (checked from the header, before decoding). The stored file is a PNG of at most 512 px on its longest side, with the EXIF rotation applied
 and no metadata. An animation (GIF, animated WEBP or APNG) is kept as an animated WEBP with its frame durations and loop count, resized frame by
 frame; only the first 100 frames are kept, and one whose frames x width x height exceed 64 million pixels is refused (`invalid_image`). `url` is the route to `GET` (add `?v=<version>`), `has_alpha` is true when some pixel is transparent, and
 `version` changes with every upload. `GET` answers `Content-Type: image/png`, `X-Content-Type-Options: nosniff`,

@@ -1,4 +1,4 @@
-"""Profile pictures: what an upload becomes (PNG of at most 256 px, or animated WEBP, no metadata) and what is refused."""
+"""Profile pictures: what an upload becomes (PNG of at most 512 px, or animated WEBP, no metadata) and what is refused."""
 
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ class NormaliseImageTests(unittest.TestCase):
         png, _ = normalise_image(encode(source, "JPEG", exif=exif))
         self.assertEqual(decode(png).size, (20, 60))
 
-    def test_the_longest_side_is_cut_to_256_keeping_the_aspect_ratio(self) -> None:
+    def test_the_longest_side_is_cut_to_512_keeping_the_aspect_ratio(self) -> None:
         png, _ = normalise_image(encode(Image.new("RGB", (1000, 500), (9, 9, 9)), "PNG"))
         self.assertEqual(decode(png).size, (OUTPUT_SIDE, OUTPUT_SIDE // 2))
         png, _ = normalise_image(encode(Image.new("RGB", (300, 900), (9, 9, 9)), "JPEG"))

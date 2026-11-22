@@ -17,8 +17,8 @@ across the top on narrow screens); only one section shows at a time.
 
 **Settings > General > Profile picture** sets your own picture, shown instead of the first letter of your name at the bottom of the left
 panel (32 px). **Upload image** takes a PNG, JPEG, WEBP or GIF file of up to 5 MiB and 4096 x 4096 pixels; the server turns it into a PNG of at
-most 256 px on its longest side (EXIF rotation applied, metadata removed; SVG is refused). An animated GIF, WEBP or APNG stays animated: it is
-stored as an animated WEBP of at most 100 frames, each of at most 256 px. **Remove** goes back to the letter.
+most 512 px on its longest side (EXIF rotation applied, metadata removed; SVG is refused). An animated GIF, WEBP or APNG stays animated: it is
+stored as an animated WEBP of at most 100 frames, each of at most 512 px. **Remove** goes back to the letter.
 **No circle or border** shows the image as it is, with no circle, border or background (meant for transparent PNGs); without it the image
 is cropped to fill the accent-bordered circle. Like Appearance, these apply at once and do not count as unsaved changes; the style is
 saved as `avatar_style` in `preferences.json`. The file is `data/<user>/.avatars/_user.png`. Agents get their own picture in the
