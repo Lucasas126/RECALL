@@ -991,6 +991,36 @@ async function changeAvatar(path, file, errorElement) {
   }
 }
 
+// A tool call that changed the user's agents (an agent renamed itself, another was created...): its result says it was
+// applied. Read-only agent tools and failed or denied changes change nothing.
+const AGENT_CHANGE_TOOLS = new Set(["agent_create", "agent_update", "agent_rename", "agent_delete", "agent_set_level", "agent_set_tool_groups"]);
+function agentsChangedBy(action) {
+  if (!action || action.error || !AGENT_CHANGE_TOOLS.has(action.name)) return false;
+  try {
+    return JSON.parse(action.result)?.status === "applied";
+  } catch {
+    return false;
+  }
+}
+
+// The names, pictures and lists of agents everywhere in the page, without a reload: the selectors, the header, the input
+// placeholder, the Settings list (an open editor form is left as it is) and the chat list, which carries agent names.
+async function refreshAgentsAfterTool() {
+  const session = state.session;
+  try {
+    const me = await api("/api/me");
+    if (session !== state.session || !state.user) return;
+    state.user.agents = me.agents;
+    renderAgentOptions();
+    renderAgentsEmpty();
+    renderAgentBanner();
+    await loadAgentConfigs();
+    if (session === state.session) await refreshChats();
+  } catch {
+    // the next page load shows it; a failed refresh must not break the reply being drawn
+  }
+}
+
 // After an upload, a removal or a style change: the pictures come back with /api/me.
 async function refreshAvatars(session) {
   const me = await api("/api/me");
@@ -7984,7 +8014,10 @@ function handleEvent(raw, request) {
   if (event === "text") reply.text(payload);
   else if (event === "reasoning") reply.thinking(payload);
   else if (event === "tool_start") reply.toolStart(payload);
-  else if (event === "tool") reply.action(payload);
+  else if (event === "tool") {
+    reply.action(payload);
+    if (agentsChangedBy(payload)) refreshAgentsAfterTool();
+  }
   else if (event === "memory") reply.memory(payload);
   else if (event === "notice") reply.notice(payload);
   else if (event === "speaker") reply.speaker(payload);
