@@ -4799,6 +4799,8 @@ function emptyChatHero() {
     image.draggable = false;
     if (view.free) image.dataset.avatarStyle = "free";
     image.addEventListener("error", () => image.remove());
+    // a small picture (pixel art, a 50 px sprite) stretched to the hero size must stay crisp, not blurred by smoothing
+    image.addEventListener("load", () => { if (image.naturalWidth && image.naturalWidth < image.clientWidth) image.classList.add("crisp"); });
     image.src = view.src;
     hero.append(image);
   }

@@ -7,8 +7,8 @@ and the memory tools (all rooted in an agent's own folder) can neither list nor 
 dot, so it can never be named `.avatars`.
 
 Nothing the client says about an upload is trusted: the bytes are decoded with Pillow (PNG, JPEG, WEBP and GIF only),
-and what is stored is a fresh PNG of at most 256 px on the longest side, without metadata; an animation (GIF, animated
-WEBP, APNG) is kept as an animated WEBP of at most 100 frames, each of at most 256 px.
+and what is stored is a fresh PNG of at most 512 px on the longest side, without metadata; an animation (GIF, animated
+WEBP, APNG) is kept as an animated WEBP of at most 100 frames, each of at most 512 px.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from src.utils.i18n import InputError, UserMessageError
 
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 MAX_INPUT_SIDE = 4096  # pixels, either side of the uploaded image
-OUTPUT_SIDE = 256  # pixels, longest side of the stored image
+OUTPUT_SIDE = 512  # pixels, longest side of the stored image (the empty-chat picture is drawn at about 400 px)
 MAX_FRAMES = 100  # frames kept of an animation; the extra ones are dropped
 MAX_TOTAL_PIXELS = 64_000_000  # frames kept x width x height of the upload, checked from the headers
 ANIMATION_TARGET_BYTES = 1024 * 1024  # a lossless animation heavier than this is stored lossy instead
