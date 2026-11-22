@@ -4,7 +4,7 @@ import re
 from typing import TYPE_CHECKING, Annotated, Callable, Optional
 
 from src.agent.tooling import tool
-from src.agent.toolsets.common import cap_text, read_text, readable_sources
+from src.agent.toolsets.common import cap_text, note_read, read_text, readable_sources, write_locks
 from src.config.settings import INDEX_FILE_TYPES
 
 if TYPE_CHECKING:
@@ -129,6 +129,12 @@ def build_memory_tools(agent: Agent) -> list[Callable[..., str]]:
         """Retrieve the content of a specific memory by its 'source:path' address (a PDF is read as page text).
         Optionally limit the result to a [start, end] line range for large files. Long output is capped and ends
         with a note saying which lines to ask for next."""
-        return cap_text(read_text(sources, memory_path), lines)
+        source, rel = sources.resolve(memory_path)
+        if not (source.writable or source.name == "agent"):  # only files the agent can change need a recorded view
+            return cap_text(read_text(sources, memory_path), lines)
+        with write_locks(sources, source):  # the text shown and the version recorded are the same bytes
+            content = read_text(sources, memory_path)
+            note_read(agent, source, rel)
+        return cap_text(content, lines)
 
     return [query_memory, search, list_memories, read]

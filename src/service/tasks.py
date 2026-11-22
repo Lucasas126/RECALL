@@ -697,8 +697,6 @@ class TaskManager:
             "wake": {"state": "pending" if wake else "none"},
         }
         lock = self.store.run_lock(user_id, task_id)
-        if target is not None and target["remember"]:
-            self._check_idle(user_id, target)
         with self.store.lock(user_id):
             self._check_capacity(user_id, record["parent"], limits)
             if target is not None:
@@ -934,7 +932,10 @@ class TaskManager:
                 )
 
     def _check_target(self, parent: RunContext, target: dict) -> None:
-        """Refuse cycles and unsafe `remember` launches; the caller holds the store lock (records are read, not saved)."""
+        """Refuse cycles; the caller holds the store lock (records are read, not saved).
+
+        `remember` tasks may run next to each other and to the target's own chats: every memory write queues on the
+        agent's lock and a whole-file write over a stale view is refused (see docs/architecture/sources.md)."""
         user_id = parent.user_id
         running = [r for r in self.store.list(user_id) if r["status"] not in FINAL_STATES]
         for record in running:  # A -> B while B's chat waits on a task run by A: both would wait on each other
@@ -943,22 +944,6 @@ class TaskManager:
                     f"cycle refused: agent '{target['id']}' is waiting for a task that '{parent.agent_id}' is running; "
                     "do the work yourself or tell the user"
                 )
-        if not target["remember"]:
-            return
-        # memory files are edited without a cross-chat lock: a `remember` task runs only while nothing else of that agent runs
-        if any((r.get("target") or {}).get("remember") and r["child"]["agent_id"] == target["id"] for r in running):
-            raise TaskError(f"agent '{target['id']}' already runs a task that writes its memory; wait for it to finish")
-
-    def _check_idle(self, user_id: str, target: dict) -> None:
-        """A `remember` task needs its agent idle (called without the store lock: replies take the slot lock, then the store's)."""
-        slot = self._service._slot(user_id, target["id"])
-        with slot.state:
-            busy = bool(slot.active or slot.pending)
-        if busy:
-            raise TaskError(
-                f"agent '{target['id']}' is replying in another chat and this task may write its memory; "
-                "memory writes are not safe in parallel: try again when it is idle"
-            )
 
     def _start_threads(self, live: _LiveTask, text: str, meta: dict | None = None) -> None:
         for target, name in ((self._drive, "task"), (self._watch, "task-watch")):
@@ -1629,7 +1614,7 @@ class TaskManager:
         if (until := self.store.blocked_until(user_id)) is not None:
             raise TaskError(f"rate limit: no new work until {until:%H:%M}; do not retry")
         agent_id, chat_id = record["child"]["agent_id"], record["child"]["chat_id"]
-        if (record.get("target") or {}).get("remember"):  # its memory writes are only safe while that agent is otherwise idle
+        if (record.get("target") or {}).get("remember"):
             held = self._agent_groups(user_id, record["parent"]["agent_id"])
             granted = [g for g in (record.get("grant") or {}).get("groups") or [] if g in MEMORY_GROUPS]
             if lost := [g for g in granted if g not in held]:  # the launching agent lost them since: the worker must not keep them
@@ -1637,7 +1622,6 @@ class TaskManager:
                     f"task {record['id']} cannot be continued: its parent agent no longer holds {', '.join(lost)}; "
                     "start a new task"
                 )
-            self._check_idle(user_id, {"id": agent_id})
         conversations = self._service._conversations(user_id, agent_id)
         try:
             turns = conversations.load(chat_id)

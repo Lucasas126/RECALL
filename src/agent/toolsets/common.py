@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from contextlib import ExitStack, contextmanager, nullcontext
+
+from src.agent.read_ledger import ReadLedger, bytes_digest
+from src.core.sources.agent_files import SOUL_FILE
 from src.core.sources.base import Source, pdf_text
 from src.core.sources.registry import SourceRegistry
 
@@ -70,3 +74,56 @@ def read_text(sources: SourceRegistry, address: str) -> str:
         source, rel = sources.resolve(address)
         return pdf_text(source.read_bytes(rel), rel)
     return sources.read(address)
+
+
+def ledger_of(agent) -> ReadLedger:
+    """The chat's read ledger (created on first use). The SOUL shown in the chat's prompt counts as read."""
+    ledger = getattr(agent, "read_ledger", None)
+    if ledger is None:
+        ledger = ReadLedger()
+        try:
+            agent.read_ledger = ledger
+        except AttributeError:  # a host that cannot hold one: a fresh ledger per tool set
+            return ledger
+        soul = getattr(getattr(agent, "profile", None), "soul", "")
+        if soul:
+            try:
+                ledger.record(agent.sources.agent_files().resolve(SOUL_FILE), bytes_digest(soul.encode("utf-8")))
+            except (KeyError, AttributeError, ValueError):
+                pass
+    return ledger
+
+
+def note_read(agent, source: Source, rel: str) -> None:
+    """Record what the chat just read at `source:rel`, so a later whole-file write can tell if it changed since."""
+    try:
+        path = source.resolve(rel)
+    except ValueError:
+        return
+    ledger_of(agent).saw(path)
+
+
+def write_lock_for(sources: SourceRegistry, source: Source):
+    """The lock a read-modify-write of `source` must hold: a user folder's own lock, else the agent's folder lock
+    (the one its memory, SOUL, skills and dreams use)."""
+    folder_lock = getattr(source, "write_lock", None)
+    if folder_lock is not None:
+        return folder_lock()
+    try:
+        return sources.agent_files().memory_lock()
+    except (KeyError, AttributeError):  # a registry without the agent source (nothing shared to protect)
+        return nullcontext()
+
+
+@contextmanager
+def write_locks(sources: SourceRegistry, *involved: Source):
+    """Hold the write locks of every source involved, always in the same order (agent lock first, then folders by
+    name), so two writers that need the same pair cannot deadlock."""
+    agent_side = [source for source in involved if getattr(source, "write_lock", None) is None]
+    folders = sorted({source.name: source for source in involved if source not in agent_side}.values(), key=lambda s: s.name)
+    with ExitStack() as stack:
+        if agent_side:
+            stack.enter_context(write_lock_for(sources, agent_side[0]))
+        for folder in folders:
+            stack.enter_context(folder.write_lock())
+        yield

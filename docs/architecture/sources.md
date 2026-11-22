@@ -105,3 +105,33 @@ sources marked `indexed` feed the agent's vector index (`VectorIndex`, one Chrom
 implemented: the `SourceRegistry` (address resolution `source:path` + traversal guard), the `mind_palace`, `conversations`, `agent`, `dream` and user folder sources, read/write/list/delete over them, and the vector index (`query_memory`, associative memory). `list_memories` without a source lists only readable sources. the agent's own source roots are derived by convention as `data/<user_id>/<agent_id>/<source>`; user folders come from the agent's `folders:` list.
 
 planned: the `obsidian` source + safe/auto overlay, and tags in the index.
+
+## concurrent writes
+
+Several chats, subagent tasks (`remember` targets included) and a dream of the same agent may write its files at the same
+time, in one process or several (web and Telegram). Three rules keep every change:
+
+- **One queue per agent.** Every tool that changes the agent's files (`write`, `append`, `edit`, `move`, `delete`,
+  `make_pdf`, `memory`, `skill_manage`, `soul_edit`) does its whole read-modify-write while holding the agent's lock
+  (`AgentFilesSource.memory_lock()`, the file `.agent_files.lock` in the agent's data folder). A user folder has its own lock,
+  shared by every agent that has that folder, kept under `data/.folder_locks/` (never inside the folder). Writers wait for
+  the lock, so simultaneous changes are applied one after another; none is lost. `exclusive_file_lock` (`src/utils/files.py`)
+  is an OS lock (`flock`, `msvcrt.locking` on Windows), so it works across processes; it is re-entrant within one thread,
+  and a tool that needs two sources (a `move` between the palace and a folder) takes them in a fixed order (agent lock first,
+  then folders by name), so two writers cannot deadlock.
+- **No blind whole-file writes.** Each chat keeps a read ledger (`src/agent/read_ledger.py`): the sha256 of every file it
+  read (`read`, `folder_read`, `skill_view`, the SOUL in its prompt) or wrote. A whole-file replacement (`write`,
+  `folder_write`, `soul_edit replace`, `skill_manage edit` and `write_file`, `move overwrite=true` onto a read file)
+  is checked inside the lock: a file that exists and was never read in this chat, or whose bytes changed since this chat's
+  last view, is refused with an `error:` that says to read it again. Targeted changes (`append`, `edit`, patches, `memory`
+  operations) re-read the current file inside the lock, so they never need a fresh view; they fail loudly when their
+  `old_string` is gone. `delete` is refused when the chat read the file and it changed since. Hashes, not modification
+  times, so a rewrite with the same bytes is not a change and a change in the same clock tick is still caught.
+- **Atomic replacement.** `Source.write` and `write_bytes` write a temporary file in the same folder, `fsync` it and rename
+  it over the target (`atomic_replace_bytes`), keeping the old file's permissions. A reader never sees half a file and a
+  crash mid-write leaves the old version. On Windows a file held open by another program falls back to an in-place write.
+
+What it does not do: merge. Two chats that each want to rewrite the same note get one success and one refusal; the refused
+one reads the new version and redoes its change. Two tasks may still create two notes on the same topic (not corruption,
+a duplicate): agents search before writing, and dreams consolidate.
+

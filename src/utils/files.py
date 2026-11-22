@@ -1,4 +1,6 @@
 import os
+import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -10,9 +12,28 @@ else:
     import fcntl
 
 
+_held = threading.local()  # lock path -> how many times this thread holds it (re-entry never blocks on itself)
+_WINDOWS_LOCK_PATIENCE = 120.0  # seconds a Windows writer keeps retrying (msvcrt LK_LOCK alone gives up after ~10 s)
+
+
 @contextmanager
 def exclusive_file_lock(path: Path) -> Generator[None, None, None]:
-    """Serialize processes using a persistent lock file beside the protected file."""
+    """Serialize threads and processes using a persistent lock file beside the protected file.
+
+    Waiting writers queue on the OS lock. The lock is re-entrant within one thread: a holder that calls code taking
+    the same lock again (a tool that reads, checks and then calls a method that locks too) does not deadlock.
+    """
+    key = str(Path(path).resolve())
+    depth = getattr(_held, "depth", None)
+    if depth is None:
+        depth = _held.depth = {}
+    if depth.get(key):
+        depth[key] += 1
+        try:
+            yield
+        finally:
+            depth[key] -= 1
+        return
     with path.open("a+b") as lock:
         if os.name == "nt":
             lock.seek(0, os.SEEK_END)
@@ -20,12 +41,21 @@ def exclusive_file_lock(path: Path) -> Generator[None, None, None]:
                 lock.write(b"\0")
                 lock.flush()
             lock.seek(0)
-            msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+            deadline = time.monotonic() + _WINDOWS_LOCK_PATIENCE
+            while True:
+                try:
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+                    break
+                except OSError:
+                    if time.monotonic() > deadline:
+                        raise
         else:
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        depth[key] = 1
         try:
             yield
         finally:
+            depth.pop(key, None)
             if os.name == "nt":
                 lock.seek(0)
                 msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
@@ -98,3 +128,48 @@ def atomic_write_text(path: Path, content: str) -> None:
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
+
+
+def atomic_replace_bytes(path: Path, data: bytes) -> None:
+    """Replace a file atomically with `data`, keeping the permissions of the file it replaces.
+
+    A reader sees the old bytes or the new ones, never half a file, even if the process dies mid-write. A new file
+    gets the usual permissions (0666 minus the umask), not the private 0600 of a temporary file. On Windows, where a
+    file another program holds open cannot be replaced, it falls back to writing in place.
+    """
+    try:
+        mode = path.stat().st_mode & 0o7777
+    except FileNotFoundError:
+        mode = 0o666 & ~_UMASK
+    temporary_path: Path | None = None
+    try:
+        with NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}-", suffix=".tmp", delete=False) as temporary:
+            temporary_path = Path(temporary.name)
+            temporary.write(data)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.chmod(temporary_path, mode)
+        try:
+            temporary_path.replace(path)
+        except PermissionError:
+            if os.name != "nt":
+                raise
+            path.write_bytes(data)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
+def atomic_replace_text(path: Path, content: str) -> None:
+    """`atomic_replace_bytes` for UTF-8 text, with the newline translation of `Path.write_text`."""
+    atomic_replace_bytes(path, content.replace("\n", os.linesep).encode("utf-8"))
+
+
+def _read_umask() -> int:
+    """The process umask, read once at import (setting it is process-wide, so it is never touched later)."""
+    mask = os.umask(0o022)
+    os.umask(mask)
+    return mask
+
+
+_UMASK = _read_umask()

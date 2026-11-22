@@ -78,9 +78,10 @@ with `task_start(agent="<id>")`. It is opt-in and explicit:
   attribution and the Telegram status line show the target's name instead of "ephemeral".
 - **Memory.** By default the task is excluded from learning and the target cannot write memory, like a fresh worker. With **Can write its own memory**
   (`remember: true` on that target) the worker chat is a hidden but ordinary chat of the target: Dream may review it, and the target keeps its own
-  `memory_read`/`memory_edit`/`self` memory tools (never `soul_edit` or `skill_manage`) and writes to **its own** memory. Because memory
-  files are not locked against concurrent edits across chats, such a task is refused while the target is replying in another chat
-  (or already runs another memory-writing task), and the same applies to `task_send` follow-ups. The target gets only those of
+  `memory_read`/`memory_edit`/`self` memory tools (never `soul_edit` or `skill_manage`) and writes to **its own** memory. Several such
+  tasks may run at once, also while the target replies in another chat: every memory write queues on the agent's lock, and a
+  whole-file `write` over a file that changed since the task read it is refused instead of dropping the other change (see
+  [concurrent writes](../architecture/sources.md#concurrent-writes)). The target gets only those of
   these memory groups that the **launching** agent holds itself (a launcher without `memory_edit` cannot hand a target write access to memory); `task_send`
   re-checks this and is refused when the launcher has lost a group the task was granted.
 - **No loops.** Depth stays 1: a task never launches tasks. An agent cannot delegate to itself, and `A -> B` is refused while `B` is

@@ -55,6 +55,8 @@ Each `task_start` shows as a card in the reply: title, `ephemeral` or the agent'
 
 Delegate work that is big, independent and worth its own model run: reading and summarising many pages, researching one question in depth, drafting alternatives. Do not delegate what you can do in one or two steps, anything that needs this conversation's details (you would have to paste them all), or anything the user must approve or see step by step. Every task costs a full model run against the same plan as your own replies.
 
+Several tasks that write memory (`remember` targets) may run at once; their writes queue and a stale whole-file `write` is refused. Give each its own note or section, and consolidate when they end (`references/delegation-targets.md`).
+
 ## Where things are stored
 
 Task records live in `data/<user_id>/.tasks/<task_id>.json` (goal, status, usage, capped result; no secrets). The worker's conversation is a normal chat file in your own `conversations/` folder marked by `<chat_id>.task.json`: it is hidden from chat lists and the latest chat, never pruned while empty, not reviewed by Dream and not indexed, and it is removed with the user's disposable-chat retention. A disposable chat cannot launch tasks or use MCP. A `remember` target gets only the memory groups you hold yourself (`task_send` re-checks). If the process dies mid-task, it is later marked `failed` (`owner_lost`); nothing is resumed.

@@ -322,28 +322,24 @@ class RememberTests(AgentTargetFixture):
             pending = [item["chat_id"] for item in ReviewQueue(chats, state).pending()]
             self.assertEqual(pending, [remembered])
 
-    def test_remember_is_refused_while_the_target_is_replying_elsewhere(self) -> None:
+    def test_remember_runs_while_the_target_is_replying_elsewhere(self) -> None:
         started, release = self._gate("busy")
         self.service.send("user-one", "agent-two", self.service.create_chat("user-one", "agent-two")["id"], "busy")
         self.assertTrue(started.wait(3))
         try:
-            with self.assertRaises(TaskError) as caught:
-                self.to_agent(targets=[REMEMBER])
-            self.assertIn("not safe in parallel", str(caught.exception))
-            live = self.to_agent(targets=[TARGET])  # read-only targets may run next to another reply
+            live = self.to_agent(targets=[REMEMBER])  # memory writes queue on the agent's lock: no need to wait
             release.set()
             self.finish(live)
         finally:
             release.set()
 
-    def test_a_second_remember_task_waits_for_the_first(self) -> None:
+    def test_two_remember_tasks_run_side_by_side(self) -> None:
         self.target_hold = True
         first = self.to_agent(targets=[REMEMBER])
-        with self.assertRaises(TaskError) as caught:
-            self.to_agent(targets=[REMEMBER])
-        self.assertRegex(str(caught.exception), "already runs a task that writes its memory|not safe in parallel")
+        second = self.to_agent(targets=[REMEMBER])
         self.release_child.set()
         self.finish(first)
+        self.finish(second)
 
 
 class DelegationConfigTests(unittest.TestCase):

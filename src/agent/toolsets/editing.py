@@ -1,26 +1,24 @@
 from __future__ import annotations
 
-from contextlib import nullcontext
 from typing import TYPE_CHECKING, Annotated, Callable
 
+from src.agent.read_ledger import file_digest
 from src.agent.tooling import tool
-from src.agent.toolsets.common import mark_written, readonly_error
+from src.agent.toolsets.common import ledger_of, mark_written, readonly_error, write_locks
 
 if TYPE_CHECKING:
     from src.agent.agent import Agent
 
 
 def build_edit_tools(agent: Agent) -> list[Callable[..., str]]:
-    """Build tools that create, modify, move or delete memories."""
-    sources = agent.sources
+    """Build tools that create, modify, move or delete memories.
 
-    def locked():
-        """The agent's per-folder write lock (the one the self memory uses), so a task of the agent and a normal
-        chat of it, in this or in another process, cannot interleave their read-modify-write cycles."""
-        try:
-            return sources.agent_files().memory_lock()
-        except (KeyError, AttributeError):  # a registry without the agent source (nothing shared to protect)
-            return nullcontext()
+    Every change runs inside the agent's write lock (shared with its other chats, tasks and dreams, in any process),
+    so concurrent changes queue instead of interleaving. `write` and `delete` also check the chat's read ledger: a
+    file that changed since this chat last read it is refused, never silently overwritten.
+    """
+    sources = agent.sources
+    ledger = ledger_of(agent)
 
     @tool
     def write(
@@ -28,11 +26,17 @@ def build_edit_tools(agent: Agent) -> list[Callable[..., str]]:
         content: Annotated[str, "the full file contents"],
     ) -> str:
         """Create a new memory or overwrite an existing one at the given 'source:path' address.
+        Overwriting needs a read of the file in this chat, and is refused if the file changed since.
         Use edit or append for partial changes to avoid rewriting the whole file."""
         if error := readonly_error(sources, memory_path):
             return error
-        with locked():
-            path = sources.write(memory_path, content)
+        source, rel = sources.resolve(memory_path)
+        with write_locks(sources, source):
+            path = source.resolve(rel)
+            if refusal := ledger.overwrite_refusal(path, memory_path):
+                return refusal
+            path = source.write(rel, content)
+            ledger.saw(path)
         mark_written(agent, memory_path)
         return f"wrote {path}"
 
@@ -46,10 +50,13 @@ def build_edit_tools(agent: Agent) -> list[Callable[..., str]]:
         if error := readonly_error(sources, memory_path):
             return error
         source, rel = sources.resolve(memory_path)
-        with locked():
+        with write_locks(sources, source):
+            path = source.resolve(rel)
+            before = file_digest(path)
             existing = source.read(rel) if source.exists(rel) else ""
             joined = content if not existing else existing + ("" if existing.endswith("\n") else "\n") + content
             path = source.write(rel, joined)
+            ledger.changed(path, before)
         mark_written(agent, memory_path)
         return f"appended to {path}"
 
@@ -64,14 +71,17 @@ def build_edit_tools(agent: Agent) -> list[Callable[..., str]]:
         if error := readonly_error(sources, memory_path):
             return error
         source, rel = sources.resolve(memory_path)
-        with locked():
+        with write_locks(sources, source):
+            path = source.resolve(rel)
+            before = file_digest(path)
             content = source.read(rel)
             count = content.count(old_string)
             if count == 0:
-                return f"error: old_string not found in {memory_path}"
+                return f"error: old_string not found in {memory_path} (it may have changed since you read it; read it again)"
             if count > 1:
                 return f"error: old_string is not unique in {memory_path} ({count} matches); add surrounding context"
-            source.write(rel, content.replace(old_string, new_string, 1))
+            path = source.write(rel, content.replace(old_string, new_string, 1))
+            ledger.changed(path, before)
         mark_written(agent, memory_path)
         return f"edited {memory_path}"
 
@@ -87,26 +97,40 @@ def build_edit_tools(agent: Agent) -> list[Callable[..., str]]:
             return error
         source, rel = sources.resolve(memory_path)
         target, target_rel = sources.resolve(new_path)
-        with locked():
-            if source.resolve(rel) == target.resolve(target_rel):
+        with write_locks(sources, source, target):
+            origin, destination_path = source.resolve(rel), target.resolve(target_rel)
+            if origin == destination_path:
                 return f"error: {new_path} is the same file as {memory_path}; nothing to move"
-            if not source.resolve(rel).is_file():
+            if not origin.is_file():
                 return f"error: {memory_path} is not a file"
-            if target.exists(target_rel) and not overwrite:
-                return f"error: {new_path} already exists; pass overwrite=true to replace it"
-            destination = sources.write_bytes(new_path, source.read_bytes(rel))  # bytes: PDFs and images move too
+            if target.exists(target_rel):
+                if not overwrite:
+                    return f"error: {new_path} already exists; pass overwrite=true to replace it"
+                if refusal := ledger.delete_refusal(destination_path, new_path):  # overwrite=true is the consent
+                    return refusal.replace("Nothing was deleted", "Nothing was moved")
+            known = ledger.get(origin)
+            data = source.read_bytes(rel)
+            destination = sources.write_bytes(new_path, data)  # bytes: PDFs and images move too
             source.delete(rel)
+            ledger.forget(origin)
+            ledger.record(destination, known if known == file_digest(destination) else None)
         mark_written(agent, memory_path)
         mark_written(agent, new_path)
         return f"moved {memory_path} -> {destination}"
 
     @tool
     def delete(memory_path: Annotated[str, "the 'source:path' address to delete"]) -> str:
-        """Delete a memory at the given address. From your point of view it stops existing."""
+        """Delete a memory at the given address. From your point of view it stops existing.
+        Refused if you read the file in this chat and it changed since."""
         if error := readonly_error(sources, memory_path):
             return error
-        with locked():
-            sources.delete(memory_path)
+        source, rel = sources.resolve(memory_path)
+        with write_locks(sources, source):
+            path = source.resolve(rel)
+            if refusal := ledger.delete_refusal(path, memory_path):
+                return refusal
+            source.delete(rel)
+            ledger.forget(path)
         mark_written(agent, memory_path)
         return f"deleted {memory_path}"
 
