@@ -531,9 +531,9 @@ class ChatService:
                 cfg = self._agent_config(user_id, agent_id)
             except Exception as exc:  # one unreadable agent file must not hide the list
                 logger.error("agent list: %s/%s: %s", user_id, agent_id, describe_config_error(exc))
-                agents.append({"id": agent_id, "name": agent_id, "avatar": None})
+                agents.append({"id": agent_id, "name": agent_id, "avatar": None, "hidden": False})
                 continue
-            agents.append({"id": cfg.id, "name": cfg.name, "avatar": self._agent_avatar_view(user_id, cfg)})
+            agents.append({"id": cfg.id, "name": cfg.name, "avatar": self._agent_avatar_view(user_id, cfg), "hidden": cfg.hidden})
         return agents
 
     def list_agent_configs(self, user_id: str) -> list[dict]:
@@ -1164,14 +1164,17 @@ class ChatService:
 
     # ------------------------------------------------------------------ chats
 
-    def list_chats(self, user_id: str, agent_id: str, keep: Optional[str] = None) -> list[dict]:
-        """Chat summaries, most recently active first; unused empty chats (except `keep`) are removed."""
+    def list_chats(self, user_id: str, agent_id: str, keep: Optional[str] = None, include_hidden: bool = False) -> list[dict]:
+        """Chat summaries, most recently active first; unused empty chats (except `keep`) are removed.
+
+        Hidden chats (the ones an @mention opened) are left out unless `include_hidden`; each summary says `hidden`."""
         conversations = self._conversations(user_id, agent_id)
         slot = self._slot(user_id, agent_id)
         self._remove_expired(user_id, agent_id)
         with slot.state:
             conversations.prune_empty(self._kept_chats(slot, keep), grace=_EMPTY_CHAT_GRACE_SECONDS)
         days = self._retention_days(user_id)
+        hidden = conversations.hidden_chats()
         with slot.state:
             busy = {chat_id for chat_id in conversations.chats() if self._chat_busy(slot, chat_id)}
         registry = process_registry(DATA_DIR)
@@ -1188,14 +1191,15 @@ class ChatService:
                 "unread": conversations.has_unread(chat_id),  # a reply finished that nobody has opened (kept on the server)
             }
             for chat_id in conversations.chats()
+            if include_hidden or chat_id not in hidden
         ]
         return sorted(summaries, key=lambda s: s["updated"], reverse=True)
 
-    def list_all_chats(self, user_id: str, keep: Optional[str] = None) -> list[dict]:
+    def list_all_chats(self, user_id: str, keep: Optional[str] = None, include_hidden: bool = False) -> list[dict]:
         """Chat summaries across all of the user's agents, each labelled with its agent."""
         chats = []
         for agent in self.list_agents(user_id):
-            for chat in self.list_chats(user_id, agent["id"], keep):
+            for chat in self.list_chats(user_id, agent["id"], keep, include_hidden):
                 chats.append({**chat, "agent_id": agent["id"], "agent_name": agent["name"]})
         return sorted(chats, key=lambda chat: chat["updated"], reverse=True)
 
@@ -1281,7 +1285,7 @@ class ChatService:
 
         With `origin` only chats created for that origin (`web`, `telegram`) are considered.
         """
-        chats = self.list_all_chats(user_id)
+        chats = self.list_all_chats(user_id, include_hidden=True)  # a mention chat stays a candidate when no origin is asked
         if origin is not None:
             chats = [chat for chat in chats if chat.get("origin") == origin]
         return chats[0] if chats else None
@@ -1854,7 +1858,7 @@ class ChatService:
         target_conversations = self._conversations(user_id, target_id)
         target_chat = target_conversations.find_by_mention(origin_id, origin_chat)
         if target_chat is None:
-            target_chat = target_conversations.create(origin="mention")
+            target_chat = target_conversations.create(origin="mention", hidden=True)
             target_conversations.set_mention_source(target_chat, origin_id, origin_chat)
             # a fixed title says where the chat comes from (the first turn starts with the call note, a poor title)
             target_conversations.rename(target_chat, mention_chat_title(self._agent_name(user_id, origin_id), rest))

@@ -103,7 +103,7 @@ class InvalidEditResilienceTests(PickupFixture):
         self.assertIn("invalid", notices[0])
         self.assertIn("chat_config.stream", notices[0])
         self.assertIn("bot", "".join(logs.output))
-        self.assertEqual(self.service.list_agents("user-a"), [{"id": "bot", "name": "Bot", "avatar": None}])
+        self.assertEqual(self.service.list_agents("user-a"), [{"id": "bot", "name": "Bot", "avatar": None, "hidden": False}])
         self.assertEqual(self.service.list_agent_configs("user-a")[0]["name"], "Bot")
         self.assertEqual(self.built, ["Bot"])
         # fixing the file is picked up again
@@ -118,7 +118,7 @@ class InvalidEditResilienceTests(PickupFixture):
         self.assertIn("line", notices[0])
         self.write_agent("bot", "id: bot\nname: Bot\n")
         self.write_user("id: user-a\nname: User A\nmax_level: admin\nprovider: {name: nope}\nagents: [bot]\n")
-        self.assertEqual(self.service.list_agents("user-a"), [{"id": "bot", "name": "Bot", "avatar": None}])
+        self.assertEqual(self.service.list_agents("user-a"), [{"id": "bot", "name": "Bot", "avatar": None, "hidden": False}])
         self.assertEqual(self.service.login("user-a")["name"], "User A")
         reply, notices = self.say()
         self.assertEqual(reply, "reply from Bot")
@@ -138,7 +138,7 @@ class InvalidEditResilienceTests(PickupFixture):
         with self.assertRaises(Exception) as caught:
             fresh.get_agent("user-a", "bot")
         self.assertNotIn("Traceback", str(caught.exception))
-        self.assertEqual(fresh.list_agents("user-a"), [{"id": "bot", "name": "bot", "avatar": None}])
+        self.assertEqual(fresh.list_agents("user-a"), [{"id": "bot", "name": "bot", "avatar": None, "hidden": False}])
 
 
 if __name__ == "__main__":
@@ -170,7 +170,7 @@ class OneInvalidAgentFileTests(PickupFixture):
     def test_list_agents_is_unchanged(self) -> None:
         with self.assertLogs("recall.service", level="ERROR"):
             agents = self.fresh.list_agents("user-a")
-        self.assertEqual(agents, [{"id": "bot", "name": "Bot", "avatar": None}, {"id": "bad", "name": "bad", "avatar": None}])
+        self.assertEqual(agents, [{"id": "bot", "name": "Bot", "avatar": None, "hidden": False}, {"id": "bad", "name": "bad", "avatar": None, "hidden": False}])
 
 
 class UserFolderIdTests(PickupFixture):

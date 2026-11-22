@@ -8,7 +8,7 @@ const vm = require("node:vm");
 const source = readFileSync(path.join(__dirname, "..", "..", "..", "src", "web", "static", "app.js"), "utf8");
 const code = source.match(/\/\/ ---- settings helpers[\s\S]*?\/\/ ---- end settings helpers/)[0];
 const context = vm.createContext({});
-vm.runInContext(`${code}\nthis.api = { defaultAgentId, nearBottom, SETTINGS_SECTIONS, NULLABLE_PREFERENCES, settingsChanges };`, context);
+vm.runInContext(`${code}\nthis.api = { defaultAgentId, selectableAgents, splitHiddenAgents, chatListQuery, readShowHidden, writeShowHidden, nearBottom, SETTINGS_SECTIONS, NULLABLE_PREFERENCES, settingsChanges };`, context);
 const api = context.api;
 
 const agents = [{ id: "alpha", name: "Alpha" }, { id: "beta", name: "Beta" }];
@@ -51,4 +51,11 @@ test("nearBottom accepts a custom slack and treats short content as at the botto
   assert.equal(api.nearBottom(1000, 500, 400, 100), true);
   assert.equal(api.nearBottom(1000, 400, 400, 100), false);
   assert.equal(api.nearBottom(300, 0, 400), true);
+});
+
+test("defaultAgentId prefers an agent that is not hidden", () => {
+  const list = [{ id: "ghost", hidden: true }, { id: "nova" }];
+  assert.equal(api.defaultAgentId({}, list), "nova");
+  assert.equal(api.defaultAgentId({}, [{ id: "ghost", hidden: true }]), "ghost");
+  assert.equal(api.defaultAgentId({ default_agent_id: "ghost" }, list), "ghost");
 });

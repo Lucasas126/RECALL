@@ -78,7 +78,7 @@ Paths are relative to the repository root. In Docker the same tree sits under `/
 | `src/core/sources/base.py` | `Source` base: path guard, read/write/list/walk |
 | `src/core/sources/agent_files.py` | SOUL, history, memories, skills (and the built-in skill hook) |
 | `src/core/sources/mind_palace.py` | the notes source |
-| `src/core/sources/conversations.py` | chats as JSONL plus sidecars (title, model, disposable flag) |
+| `src/core/sources/conversations.py` | chats as JSONL plus sidecars (title, model, disposable and hidden flags) |
 | `src/core/sources/dream.py` | dream state, traces, lock |
 | `src/core/sources/folders.py` | user folders |
 | `src/core/index.py` | vector index (Chroma), reconcile and reindex |

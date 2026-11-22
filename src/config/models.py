@@ -862,6 +862,8 @@ class AgentConfig(BaseModel):
     approval_rules: Optional[ApprovalRuleList] = None  # the `agent` layer of the approval rules
     # profile picture style: `circle` crops it into the accent-bordered circle, `free` shows it as it is (transparent PNGs)
     avatar_style: Literal["circle", "free"] = "circle"
+    # UI-level only: a hidden agent is left out of the web agent pickers; @mention, delegation and chats work as for any agent
+    hidden: bool = False
 
     @model_validator(mode="after")
     def _delegate_group_has_a_block(self) -> "AgentConfig":

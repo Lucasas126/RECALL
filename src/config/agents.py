@@ -162,7 +162,8 @@ class AgentStore:
             user = self._read_user(user_id)
             old_path = self.path_for(user_id, agent_id)
             keep_style = "avatar_style" not in config.model_fields_set
-            if config.level is None or config.approval_rules is None or keep_style:
+            keep_hidden = "hidden" not in config.model_fields_set
+            if config.level is None or config.approval_rules is None or keep_style or keep_hidden:
                 # callers that do not know these fields (the web form) must not drop the stored level, the approval
                 # rules (hand-written ones and the ones learned from approval cards) or the picture style;
                 # `approval_rules: {rules: []}` clears
@@ -171,6 +172,7 @@ class AgentStore:
                     "level": stored.level if config.level is None else config.level,
                     "approval_rules": stored.approval_rules if config.approval_rules is None else config.approval_rules,
                     "avatar_style": stored.avatar_style if keep_style else config.avatar_style,
+                    "hidden": stored.hidden if keep_hidden else config.hidden,
                 })
             self._check_level(user, config)
             renamed = config.id != agent_id
@@ -451,6 +453,8 @@ class AgentStore:
         data = config.model_dump(mode="json", exclude_none=True)
         if data.get("avatar_style") == "circle":
             del data["avatar_style"]  # the default is not written
+        if data.get("hidden") is False:
+            del data["hidden"]
         text = yaml.dump(
             data,
             Dumper=_Dumper, sort_keys=False, allow_unicode=True,

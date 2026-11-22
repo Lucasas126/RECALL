@@ -48,6 +48,9 @@ the retention) and `expired_disposable`; `summary` reports `disposable` and `exp
 `ReviewQueue` skips these chats, the index skips them (and drops the chunks of a chat that became
 disposable on the next reconcile or at once via `forget_chat`), `build_tools(disposable=True)`
 omits the write tools, and `ChatService` deletes expired ones lazily and from the scheduler.
+A `<chat_id>.hidden.json` sidecar marks a hidden chat (`is_hidden`, `hidden_chats`, `set_hidden`, `create(hidden=True)`;
+`summary` reports `hidden`). It only filters the chat lists of `ChatService` (`include_hidden`): the chat is still indexed, searched,
+read by Dream and removed by `delete_chat`, unlike disposable and task chats.
 Missing metadata means the current user's LLM default; sidecars without `zdr`
 follow the user's `require_zdr`, and a stored flag is per chat and persists
 across restarts. Invalid metadata is an

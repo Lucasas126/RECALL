@@ -24,6 +24,7 @@ _DISPOSABLE_SUFFIX = ".disposable.json"
 _ORIGIN_SUFFIX = ".origin.json"
 _TASK_SUFFIX = ".task.json"
 _UNREAD_SUFFIX = ".unread.json"
+_HIDDEN_SUFFIX = ".hidden.json"  # a chat left out of the chat lists unless they ask for hidden ones
 _MENTION_SUFFIX = ".mention.json"  # a chat answering @mentions from another agent's chat
 DEFAULT_ORIGIN = "web"  # chats without an origin marker predate it and count as web chats
 _ORIGIN_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
@@ -311,6 +312,32 @@ class ConversationsSource(Source):
         except OSError as exc:
             raise ChatMetadataError("Could not save the disposable flag for chat {chat_id}.", chat_id=chat_id) from exc
 
+    def _hidden_path(self, chat_id: str) -> Path:
+        return self.resolve(f"{chat_id}{_HIDDEN_SUFFIX}")
+
+    def is_hidden(self, chat_id: str) -> bool:
+        """Whether the chat is hidden from the chat lists (still indexed, searchable and reachable by id)."""
+        self._path(chat_id)  # validates the id
+        return self._hidden_path(chat_id).is_file()
+
+    def hidden_chats(self) -> set[str]:
+        """The ids of every hidden chat that still has its transcript."""
+        marked = {p.name[: -len(_HIDDEN_SUFFIX)] for p in self.root.iterdir() if p.name.endswith(_HIDDEN_SUFFIX)}
+        return {chat_id for chat_id in marked if _CHAT_ID_RE.match(chat_id) and self.resolve(f"{chat_id}.jsonl").is_file()}
+
+    def set_hidden(self, chat_id: str, hidden: bool) -> None:
+        """Hide or show a chat in the chat lists; hiding an already hidden chat keeps its original stamp."""
+        if not self.exists_chat(chat_id):
+            raise FileNotFoundError(f"chat not found: {chat_id}")
+        path = self._hidden_path(chat_id)
+        try:
+            if not hidden:
+                path.unlink(missing_ok=True)
+            elif not path.is_file():
+                atomic_write_text(path, json.dumps({"since": datetime.now().astimezone().isoformat(timespec="seconds")}) + "\n")
+        except OSError as exc:
+            raise ChatMetadataError("Could not save the hidden flag for chat {chat_id}.", chat_id=chat_id) from exc
+
     def _unread_path(self, chat_id: str) -> Path:
         return self.resolve(f"{chat_id}{_UNREAD_SUFFIX}")
 
@@ -425,8 +452,11 @@ class ConversationsSource(Source):
                 continue
         return expired
 
-    def create(self, *, disposable: bool = False, origin: str = DEFAULT_ORIGIN, task: ChatTask | None = None) -> str:
-        """Create an empty chat and return its id; a `task` makes it the hidden, disposable chat of that task."""
+    def create(
+        self, *, disposable: bool = False, origin: str = DEFAULT_ORIGIN, task: ChatTask | None = None, hidden: bool = False,
+    ) -> str:
+        """Create an empty chat and return its id; a `task` makes it the internal, disposable chat of that task and
+        `hidden` leaves it out of the chat lists (unless they include hidden chats)."""
         chat_id = f"{datetime.now():%Y%m%d-%H%M%S}-{secrets.token_hex(3)}"
         path = self._path(chat_id)
         if task is not None:
@@ -439,6 +469,8 @@ class ConversationsSource(Source):
         if disposable:
             self.set_disposable(chat_id, True)
         self.set_origin(chat_id, origin)
+        if hidden:
+            self.set_hidden(chat_id, True)
         return chat_id
 
     def delete_chat(self, chat_id: str) -> None:
@@ -452,6 +484,7 @@ class ConversationsSource(Source):
         origin = self._origin_path(chat_id)
         task = self._task_path(chat_id)
         unread = self._unread_path(chat_id)
+        hidden = self._hidden_path(chat_id)
         removed = self._removed_path(chat_id)
         path.unlink()
         removed.unlink(missing_ok=True)
@@ -462,6 +495,7 @@ class ConversationsSource(Source):
         origin.unlink(missing_ok=True)
         task.unlink(missing_ok=True)
         unread.unlink(missing_ok=True)
+        hidden.unlink(missing_ok=True)
         self.resolve(f"{chat_id}{_MENTION_SUFFIX}").unlink(missing_ok=True)
 
     def _removed_path(self, chat_id: str) -> Path:
@@ -618,7 +652,7 @@ class ConversationsSource(Source):
 
     def summary(self, chat_id: str, retention_days: int = DEFAULT_DISPOSABLE_RETENTION_DAYS) -> dict:
         """Chat metadata: title (user-chosen or generated, else first user message), turn count, last activity
-        its `origin` (`web` when unmarked) and, for a disposable chat, `disposable` and the ISO time it will be removed (`expires_at`)."""
+        its `origin` (`web` when unmarked), whether it is `hidden` and, for a disposable chat, `disposable` and the ISO time it will be removed (`expires_at`)."""
         first_user, count, last_ts, mtime = self._transcript_facts(chat_id)
         title = self.generated_title(chat_id)
         if title is None:
@@ -631,4 +665,5 @@ class ConversationsSource(Source):
         return {
             "id": chat_id, "title": title, "turns": count, "updated": updated,
             "disposable": disposable, "expires_at": expires, "origin": self.origin(chat_id),
+            "hidden": self.is_hidden(chat_id),
         }
