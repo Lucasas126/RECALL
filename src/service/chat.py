@@ -1671,8 +1671,7 @@ class ChatService:
     def rename_chat(self, user_id: str, agent_id: str, chat_id: str, title: str) -> dict:
         """Replace a chat's title with a user-chosen one; automatic naming no longer changes it."""
         conversations = self._conversations(user_id, agent_id)
-        self._load(conversations, chat_id)
-        try:
+        try:  # `rename` checks the chat exists; the transcript itself is never read (it can be many megabytes)
             conversations.rename(chat_id, title)
         except FileNotFoundError as exc:
             raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc

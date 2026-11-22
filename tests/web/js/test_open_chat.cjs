@@ -9,7 +9,7 @@ const source = readFileSync(path.join(__dirname, "..", "..", "..", "src", "web",
 const grab = (name) => source.match(new RegExp(`(?:async )?function ${name}\\([\\s\\S]*?\\r?\\n\\}\\r?\\n`))[0];
 const LOADING_CONSTANTS = "const LOADING_DELAY_MS = 120; let loadingDepth = 0; let loadingTimer = null;\n";
 
-function harness({ preferencesDelay = 0, chatDelay = 0 } = {}) {
+function harness({ preferencesDelay = 0, chatDelay = 0, listed = true } = {}) {
   const log = [];
   const bar = { classList: { add: (name) => log.push(`bar+${name}`), remove: (name) => log.push(`bar-${name}`) } };
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -39,6 +39,7 @@ function harness({ preferencesDelay = 0, chatDelay = 0 } = {}) {
     markChatRead: () => {}, applyChatModels: () => log.push("applyChatModels"), rememberChat: () => {},
     chatKey: (a, c) => `${a}/${c}`, isGenerating: () => false, forgetApprovals: () => {}, renderMessages: () => log.push("render"),
     followReply: () => {}, updateBusy: () => {}, syncApprovals: () => {}, ensureTaskPolling: () => {}, startProcessPolling: () => {},
+    highlightChat: (agentId, chatId) => { log.push(`highlight ${agentId}/${chatId}`); return listed; },
     renderChatHeader: () => {}, refreshChats: async () => log.push("refreshChats"), activateView: () => {}, showUsage: () => {},
   });
   vm.runInContext(
@@ -90,11 +91,24 @@ test("opening a chat does not ask for the models of the chat it is leaving", asy
   assert.ok(log.includes("applyChatModels"), "the models of the opened chat were not applied");
 });
 
-test("the chat is drawn and the input focused before the sidebar refresh", async () => {
+test("a switch to a listed chat marks it in the sidebar without asking for the whole list again", async () => {
   const { context, log } = harness();
   await context.openChat("chat-1");
   assert.ok(log.indexOf("render") < log.indexOf("focus"));
-  assert.ok(log.indexOf("focus") < log.indexOf("refreshChats"));
+  assert.ok(log.indexOf("focus") < log.indexOf("highlight bot/chat-1"));
+  assert.ok(!log.includes("refreshChats"), "the whole chat list was fetched again");
+});
+
+test("a switch never asks for the preferences", async () => {
+  const { context, log } = harness();
+  await context.openChat("chat-1");
+  assert.ok(!log.includes("start /api/preferences"), "a switch asked for the preferences");
+});
+
+test("a chat the sidebar does not list yet (just created) brings the list in the background", async () => {
+  const { context, log } = harness({ listed: false });
+  await context.openChat("chat-1");
+  assert.ok(log.includes("refreshChats"));
 });
 
 test("refreshPreferences keeps refreshing the open chat's models by default", async () => {

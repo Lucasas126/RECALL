@@ -3467,11 +3467,20 @@ async function refreshChats() {
 }
 
 // Marks one chat of the sidebar as the open one without redrawing the list (a click shows at once, before the chat loads).
+// The open chat shows no unread or approval dot. Returns whether the list has that chat.
 function highlightChat(agentId, chatId) {
+  let found = false;
   for (const li of $("chat-list").children) {
     const del = li.querySelector(".del");
-    if (del) li.classList.toggle("active", del.dataset.agent === agentId && del.dataset.chat === chatId);
+    if (!del) continue;
+    const here = del.dataset.agent === agentId && del.dataset.chat === chatId;
+    li.classList.toggle("active", here);
+    if (here) {
+      found = true;
+      if (li.dataset.dot && li.dataset.dot !== "working") delete li.dataset.dot;
+    }
   }
+  return found;
 }
 
 // the date group a chat belongs to in the sidebar, from the day of its last activity (local time)
@@ -3488,18 +3497,28 @@ function chatSection(updated) {
 }
 
 // Saves a new title through the same endpoint for the sidebar and the header, then redraws both.
+// The new title shows at once in the header; the list is redrawn in the background once the server has it.
 async function saveChatTitle(chat, value) {
   const session = state.session;
+  const open = () => state.chatId === chat.id && state.agentId === chat.agent_id;
   try {
     if (value && value !== chat.title) {
-      await api(`/api/agents/${chat.agent_id}/chats/${chat.id}/title`, {
+      if (open() && headerChat) renderChatHeader({ ...headerChat, title: value });
+      const saved = await api(`/api/agents/${chat.agent_id}/chats/${chat.id}/title`, {
         method: "PUT", body: JSON.stringify({ title: value }),
       });
+      if (session === state.session && open() && saved) {
+        state.chatInfo = { ...(state.chatInfo ?? {}), ...saved };
+        renderChatHeader(state.chatInfo);
+      }
     }
   } catch (err) {
-    if (session === state.session) addMessage("assistant").error(err);
+    if (session === state.session) {
+      if (open()) renderChatHeader(state.chatInfo);  // the old title is back
+      addMessage("assistant").error(err);
+    }
   }
-  if (session === state.session) await refreshChats();
+  if (session === state.session) refreshChats().catch(() => {});
 }
 
 // ---- the open chat's name in the header (desktop): shows the title, edited in place like in the sidebar
@@ -3566,6 +3585,9 @@ function startRenameChat(chat, title) {
     if (finished) return;
     finished = true;
     const value = input.value.trim();
+    // the row shows the new title at once, not after the save and a redraw of the list
+    title.textContent = (save && value) || chat.title || tr("New chat");
+    input.replaceWith(title);
     await saveChatTitle(chat, save ? value : "");
   };
   input.addEventListener("click", (e) => e.stopPropagation());
@@ -3743,9 +3765,7 @@ async function openChatNow(chatId) {
   const agentId = state.agentId;
   const revision = ++state.chatModelRevision;
   // the chat carries its own models, and the preferences were read when the page loaded and again when a chat is created
-  // or a setting saved, so nothing here waits for them: they refresh in the background (a language or default changed from
-  // another tab shows on the next switch) and never hold the chat back
-  refreshPreferences({ models: false }).catch(() => {});
+  // or a setting saved, so a switch does not ask for them at all
   const data = await api(chatsUrl(`/${chatId}${chatQuery()}`));
   if (session !== state.session || agentId !== state.agentId || revision !== state.chatModelRevision || state.modelBusy) return;
   state.chatId = chatId;
@@ -3769,7 +3789,10 @@ async function openChatNow(chatId) {
   ensureTaskPolling();  // task cards and wake replies of this chat
   startProcessPolling();
   $("input").focus();
-  await refreshChats();
+  // the sidebar already lists this chat: mark it as the open one where it is instead of asking the server for the whole
+  // list again (the slowest request of a switch); the periodic refresh keeps titles and dots current. A chat the list does
+  // not show yet (just created) brings the list in the background, without holding the switch.
+  if (!highlightChat(agentId, chatId)) refreshChats().catch(() => {});
 }
 
 async function deleteChat(chat) {

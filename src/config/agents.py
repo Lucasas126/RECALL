@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from src.config.levels import Level, check_agent_level, effective_agent_level, parse_level, required_level
 from src.config.models import AgentConfig, UserConfig
+from src.config.yaml_files import load_yaml_file
 from src.terminal.rules import ApprovalRule, ApprovalRuleList, rule_key
 from src.utils.avatars import AvatarStore
 from src.utils.files import atomic_write_text, exclusive_file_lock
@@ -125,7 +126,7 @@ class AgentStore:
         if not candidate.is_file():  # the file name is only a convention: find the file whose `id` matches
             for path in self._agent_files(user_id):
                 try:
-                    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+                    data = load_yaml_file(path)
                 except (OSError, UnicodeError, yaml.YAMLError):
                     continue
                 if isinstance(data, dict) and data.get("id") == agent_id:
@@ -427,7 +428,10 @@ class AgentStore:
             raise AgentConfigError("Could not read the configuration file '{file}'.", file=path.name) from exc
 
     def _load_yaml(self, path: Path) -> object:
-        return yaml.safe_load(self._read_text(path))
+        try:
+            return load_yaml_file(path)
+        except (OSError, UnicodeError) as exc:
+            raise AgentConfigError("Could not read the configuration file '{file}'.", file=path.name) from exc
 
     def _read_user(self, user_id: str) -> UserConfig:
         path = self._user_file(user_id)
