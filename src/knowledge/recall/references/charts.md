@@ -15,7 +15,7 @@ Tool group `charts` (opt-in, level `assistant`): `render_chart` and `render_diag
 
 ## Tips
 
-- Give an explicit colour `scale.domain` so categories keep their colour. Panel size about 520x280.
+- Marks without a colour encoding use Vega's default blue, not the palette: set `mark.color` (as in the bar recipe). Give an explicit colour `scale.domain` so categories keep their colour. Panel size about 520x280.
 - In `hconcat`/`vconcat` add `"resolve": {"scale": {"color": "independent"}}` or legends merge.
 - Palette (dark): teal `#4FB3A6`, yellow `#E9C46A`, orange `#F4A261`, red `#E76F51`, green `#8AB17D`, blue `#7FA3B8`; background `#1B2230`.
 - Data is neutral example data below; replace it with the user's.
@@ -29,7 +29,7 @@ Multi-series line over time:
 
 Horizontal sorted bar:
 ```json
-{"title":"Spending by category","width":480,"data":{"values":[{"c":"Housing","v":900},{"c":"Food","v":450},{"c":"Travel","v":200},{"c":"Health","v":120}]},"mark":"bar","encoding":{"y":{"field":"c","type":"nominal","sort":"-x","title":null},"x":{"field":"v","type":"quantitative","title":null}}}
+{"title":"Spending by category","width":480,"data":{"values":[{"c":"Housing","v":900},{"c":"Food","v":450},{"c":"Travel","v":200},{"c":"Health","v":120}]},"mark":{"type":"bar","color":"#4FB3A6"},"encoding":{"y":{"field":"c","type":"nominal","sort":"-x","title":null},"x":{"field":"v","type":"quantitative","title":null}}}
 ```
 
 Donut (`stroke` = background colour; the pie is the same with `innerRadius` 0):
