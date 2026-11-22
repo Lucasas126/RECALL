@@ -638,12 +638,12 @@ class LimitErrorTests(SubagentFixture):
         from src.service.chat import AgentBusy
 
         with self.assertRaises(AgentBusy):
-            self.service.delete_chat("user-one", "agent-one", child)
+            self.service._delete_chat("user-one", "agent-one", child)
         # deleting the PARENT chat cancels its running tasks instead of refusing (their results are orphaned)
         self.service.delete_chat("user-one", "agent-one", self.chat)
         self.assertTrue(live.done.is_set())
         self.assertEqual((self.record(live.task_id)["status"], self.record(live.task_id)["wake"]["state"]), ("cancelled", "orphaned"))
-        self.service.delete_chat("user-one", "agent-one", child)
+        self.service._delete_chat("user-one", "agent-one", child)
 
 
 class TaskStartedEventTests(SubagentFixture):

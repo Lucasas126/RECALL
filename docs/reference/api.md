@@ -155,7 +155,7 @@ A chat can be hidden (a `<chat_id>.hidden.json` sidecar): chat summaries carry `
 mentioned agent (origin `mention`) is born hidden; a chat the person creates is not. `GET /api/chats` and `GET /api/agents/<agent_id>/chats`
 leave hidden chats out unless the query has `include_hidden=true`. A hidden chat stays reachable by id (`GET .../chats/<chat_id>`, sending
 into it keeps it hidden), is still indexed, searched and reviewed by Dream like any chat, and is deleted like any chat. It is a list filter,
-unrelated to the internal task chats of subagents, which are never listed.
+unrelated to the internal task chats of subagents, which are never listed and which the chat endpoints refuse to rename (`PUT .../title`) or delete (`DELETE .../chats/<chat_id>`) with `400` *this is an internal task chat*: they are viewed only through `GET /api/tasks/<task_id>/chat` and go away with their task.
 
 `POST /api/agents/<agent_id>/chats/<chat_id>/disposable` with `{"disposable": true|false}`
 converts the chat in either direction and returns its summary. Becoming disposable drops its

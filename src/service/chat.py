@@ -104,6 +104,8 @@ _ROUTING_INSTRUCTIONS = (
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _REASONING_SUPPORT_TTL_SECONDS = 600
+_TASK_CHAT_NO_RENAME = "this is an internal task chat: it cannot be renamed (use an @mention for a chat that stays)"
+_TASK_CHAT_NO_DELETE = "this is an internal task chat: it cannot be deleted (it goes away with its task; use an @mention for a chat that stays)"
 _EMPTY_CHAT_GRACE_SECONDS = 30  # an empty chat this young is not pruned: its page may not have named it as `keep` yet
 _REWIND_WAIT_SECONDS = 30  # how long an edit waits for a cancelled reply to stop
 _NAMING_PROMPT = (
@@ -1458,7 +1460,7 @@ class ChatService:
         removed = []
         for chat_id in conversations.expired_disposable(self._retention_days(user_id)):
             try:
-                self.delete_chat(user_id, agent_id, chat_id)
+                self._delete_chat(user_id, agent_id, chat_id)  # a task chat past its retention goes too
             except AgentBusy:
                 continue
             except UnknownChat:
@@ -1671,13 +1673,29 @@ class ChatService:
     def rename_chat(self, user_id: str, agent_id: str, chat_id: str, title: str) -> dict:
         """Replace a chat's title with a user-chosen one; automatic naming no longer changes it."""
         conversations = self._conversations(user_id, agent_id)
+        self._refuse_task_chat(conversations, chat_id, _TASK_CHAT_NO_RENAME)
         try:  # `rename` checks the chat exists; the transcript itself is never read (it can be many megabytes)
             conversations.rename(chat_id, title)
         except FileNotFoundError as exc:
             raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
         return conversations.summary(chat_id, self._retention_days(user_id))
 
+    @staticmethod
+    def _refuse_task_chat(conversations: ConversationsSource, chat_id: str, template: str) -> None:
+        """A subagent task's worker chat is internal: only the task code (and its retention pruning) may change it."""
+        try:
+            internal = conversations.is_task_chat(chat_id)
+        except ValueError:  # an invalid id is reported as an unknown chat by the caller
+            return
+        if internal:
+            raise InputError(template)
+
     def delete_chat(self, user_id: str, agent_id: str, chat_id: str) -> None:
+        """Delete a chat on a person's request; a task chat is refused (see `_delete_chat` for the internal path)."""
+        self._refuse_task_chat(self._conversations(user_id, agent_id), chat_id, _TASK_CHAT_NO_DELETE)
+        self._delete_chat(user_id, agent_id, chat_id)
+
+    def _delete_chat(self, user_id: str, agent_id: str, chat_id: str) -> None:
         conversations = self._conversations(user_id, agent_id)
         slot = self._slot(user_id, agent_id)
         with slot.state:
