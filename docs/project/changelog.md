@@ -9,6 +9,7 @@ sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases b
 - Fix (web): the running-subagents tray and the task cards did not appear when a finished task was continued with `task_send` while the chat was open (the page stopped asking once every task was final); it now keeps a slow look (every ~12 s, visible tab only) next to the 3 s poll while something runs.
 - A subagent task's worker chat can no longer be renamed or deleted through the chat endpoints (`PUT .../title`, `DELETE .../chats/<chat_id>`): they answer `400` "this is an internal task chat". It goes away with its task (retention pruning, or when the task is removed); a chat that must stay is created with an @mention.
 - Hidden chats and hidden agents: the chat opened by an @mention is hidden from the chat list (the eye button at the right of the tabs lists it; still indexed and searched), and an agent can be marked `hidden` to leave the web selectors and be listed under **Hidden agents** (still reachable with `@`); every agent's editor gets **Open chat with this agent**.
+- Web UI: the Worker chat dialog shows the name and picture of the agent that runs the worker on its replies, not those of the agent whose chat launched the task.
 
 ## 0.5.2
 

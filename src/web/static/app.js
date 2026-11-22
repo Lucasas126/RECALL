@@ -5923,7 +5923,13 @@ function taskBriefNode(info) {
   return node;
 }
 
-function renderTaskChatMessages(container, messages) {
+// Who answers in a worker chat: the agent that runs the worker (the server's `task.agent_id`, else the task record's
+// `child.agent_id`), not the agent whose chat launched it. For an ephemeral worker both are the launcher itself.
+function taskWorkerAuthor(data, record, agents, currentId) {
+  return replyAuthor(data?.task?.agent_id || record?.child?.agent_id, null, agents, currentId);
+}
+
+function renderTaskChatMessages(container, messages, author = null) {
   container.replaceChildren();
   let agent = "";  // the parent agent's name, known from the brief
   for (const m of messages) {
@@ -5938,7 +5944,7 @@ function renderTaskChatMessages(container, messages) {
       container.append(wakeBubble(m));
       continue;
     }
-    const view = addMessage(m.role, container);
+    const view = addMessage(m.role, container, m.role === "assistant" ? author : null);
     if (m.role === "assistant") {
       for (const step of historySteps(m)) {
         if (step.type === "reasoning") view.thinking(step.text);
@@ -5959,11 +5965,13 @@ async function openTaskChat(id) {
   stopTaskDialog();
   const run = taskDialogRun;
   const alive = () => run === taskDialogRun && dialog.open;
+  let author = taskWorkerAuthor(null, taskRecords.get(id), state.user?.agents, state.agentId);
   const load = async () => {
     try {
       const data = await api(taskUrl(id, "/chat"));
       if (!alive()) return false;
-      renderTaskChatMessages(box, data.messages);  // the stuck flag below keeps the bottom in view
+      author = taskWorkerAuthor(data, taskRecords.get(id), state.user?.agents, state.agentId);
+      renderTaskChatMessages(box, data.messages, author);  // the stuck flag below keeps the bottom in view
       return data.chat.active;
     } catch (err) {
       if (alive()) box.replaceChildren(element("div", { className: "task-error", textContent: err.message }));
@@ -5981,7 +5989,7 @@ async function openTaskChat(id) {
   while (alive()) {
     const active = await load();
     if (!alive() || !active) return;
-    const outcome = await streamTaskReply(id, box, run);
+    const outcome = await streamTaskReply(id, box, run, author);
     if (!alive()) return;
     pause = taskLiveNext(outcome) === "poll" ? 3000 : 500;
     await new Promise((resolve) => { taskDialogTimer = setTimeout(resolve, pause); });
@@ -6002,8 +6010,8 @@ function stopTaskDialog() {
 
 // Follows the worker's running reply read-only, drawn with the chat's own reply view in the dialog. Resolves with
 // `{unavailable, failed}` when the stream ended (the reply ended, the other process runs the task, or it broke).
-async function streamTaskReply(id, box, run) {
-  const reply = addMessage("assistant", box);
+async function streamTaskReply(id, box, run, author = null) {
+  const reply = addMessage("assistant", box, author);
   const request = {
     userId: state.user?.id, agentId: "", chatId: "", session: state.session, reply,
     generationId: null, done: false, unavailable: false,
