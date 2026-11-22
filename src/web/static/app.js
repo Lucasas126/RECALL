@@ -3316,6 +3316,7 @@ async function refreshChats() {
       const title = document.createElement("span");
       title.className = "title" + (chat.title ? "" : " empty");
       title.textContent = chat.title || tr("New chat");
+      li.title = chat.title || "";  // the full title as a tooltip when the row cuts it
       const agent = document.createElement("span");
       agent.className = "chat-agent";
       agent.textContent = chat.agent_name;
@@ -3418,7 +3419,7 @@ function renderChatHeader(chat) {
   const text = headerChat.title || tr("New chat");
   $("chat-title-text").textContent = text;
   $("chat-title-text").classList.toggle("empty", !headerChat.title);
-  $("chat-title").title = headerChat.turns > 0 ? tr("Rename chat") : text;
+  $("chat-title").title = headerChat.turns > 0 && headerChat.title ? `${headerChat.title}\n${tr("Rename chat")}` : headerChat.turns > 0 ? tr("Rename chat") : text;
   $("chat-title").disabled = !(headerChat.turns > 0);
   $("chat-title-edit").innerHTML = headerChat.turns > 0 ? ICONS.pencil : "";
 }
