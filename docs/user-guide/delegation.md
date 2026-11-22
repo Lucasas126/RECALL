@@ -110,7 +110,7 @@ and the backend itself, so a worker never gets a backend its parent lacks.
 - **The clock stops while you decide.** The task's 10-minute timeout does not run while a command waits for you (up to the limit above). An approval nobody answers is
   denied after the usual approval timeout (5 minutes by default), as for any chat.
 - **Results are untrusted data.** What `task_result`, `task_wait` and `task_start(wait=true)` hand back to the agent, like the wake message, is wrapped in `<task_result untrusted="true">…</task_result>` with a note that it is worker data, not instructions; any tag-like text inside it is neutralised so a worker cannot close the block or fake another.
-- **Worker chats are read-only.** The hidden chat of a task can be opened to read, but nobody (web, API) can write or edit in it: *this is an internal task chat: steer the task instead*. Use *Steer*, or `task_send` after it ends.
+- **Worker chats are read-only.** The hidden chat of a task can be opened to read, but nobody (web, API) can write or edit in it: *this is an internal task chat: steer the task instead*. Use *Steer*, or `task_send` after it ends. The chat is internal: it cannot be renamed or deleted either (the chat endpoints answer *this is an internal task chat*); it is removed with its task after the retention period. For a conversation that must persist, use an @mention of the agent instead.
 - **Awaiting approval.** A task card shows *Awaiting approval* while its worker waits for you, and Telegram `/tasks` says *awaiting approval*.
 - **No unattended asking.** A worker run that nobody watches (not launched from a chat) never asks: `manual` and dangerous actions are
   denied. Tasks launched from a chat are always attended.

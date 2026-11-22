@@ -263,6 +263,39 @@ class WorkerChatTests(base.AsyncFixture):
         with self.assertRaises(InputError):
             self.service.send(USER, AGENT, self.worker, "edited", rewind_to=0)
 
+    def test_the_service_refuses_to_rename_or_delete_a_worker_chat(self) -> None:
+        with self.assertRaises(InputError) as renamed:
+            self.service.rename_chat(USER, AGENT, self.worker, "mine")
+        self.assertIn("internal task chat", str(renamed.exception))
+        with self.assertRaises(InputError) as deleted:
+            self.service.delete_chat(USER, AGENT, self.worker)
+        self.assertIn("internal task chat", str(deleted.exception))
+        with self.assertRaises(InputError):
+            self.service.discard_chat(USER, AGENT, self.worker)
+        source = self.sources[(USER, AGENT)]
+        self.assertTrue(source.exists_chat(self.worker))
+
+    def test_the_web_routes_refuse_to_rename_or_delete_a_worker_chat(self) -> None:
+        client = TestClient(create_app(self.service))
+        client.__enter__()
+        self.addCleanup(client.__exit__, None, None, None)
+        login(client, USER)
+        renamed = client.put(f"/api/agents/{AGENT}/chats/{self.worker}/title", json={"title": "mine"})
+        deleted = client.delete(f"/api/agents/{AGENT}/chats/{self.worker}")
+        for response in (renamed, deleted):
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("internal task chat", json.dumps(response.json()))
+        self.assertTrue(self.sources[(USER, AGENT)].exists_chat(self.worker))
+
+    def test_an_ordinary_chat_is_still_renamed_and_deleted_and_the_worker_chat_is_not_listed(self) -> None:
+        chat = self.service.create_chat(USER, AGENT)["id"]
+        self.assertEqual(self.service.rename_chat(USER, AGENT, chat, "Mine")["title"], "Mine")
+        listed = [item["id"] for item in self.service.list_chats(USER, AGENT, include_hidden=True)]
+        self.assertIn(chat, listed)
+        self.assertNotIn(self.worker, listed)
+        self.service.delete_chat(USER, AGENT, chat)
+        self.assertFalse(self.sources[(USER, AGENT)].exists_chat(chat))
+
     def test_the_task_manager_still_drives_its_worker_chat(self) -> None:
         live = self.launch(wake=False)
         self.assertTrue(live.done.wait(5))

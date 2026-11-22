@@ -1028,6 +1028,8 @@ _SPANISH = {
     "scheduled": "programada",
     # subagents (review fixes)
     "this is an internal task chat: steer the task instead": "este es un chat interno de tarea: corrige la tarea en su lugar",
+    "this is an internal task chat: it cannot be renamed (use an @mention for a chat that stays)": "este es un chat interno de tarea: no se puede renombrar (usa una @mención para un chat que se conserve)",
+    "this is an internal task chat: it cannot be deleted (it goes away with its task; use an @mention for a chat that stays)": "este es un chat interno de tarea: no se puede borrar (desaparece con su tarea; usa una @mención para un chat que se conserve)",
     # subagents (live)
     "Compacting the chat…": "Compactando el chat…",
     "Thinking…": "Razonando…",
