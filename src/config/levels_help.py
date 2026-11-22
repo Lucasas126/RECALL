@@ -24,6 +24,7 @@ SERVICE_TEXT = {
     "memory_edit": "write the agent's memory (tool group memory_edit)",
     "self": "edit the agent's own MEMORY, USER, SOUL and skills (tool group self)",
     "web": "search the web (tool group web)",
+    "charts": "draw charts and diagrams as PNG files in a writable source (tool group charts)",
     "notify": "send the user a short Telegram message, at most 30 an hour (tool group notify)",
     "files_send": "send the user a file the agent can already read (tool group files_send)",
     "identity": "change its own display name, nothing else (tool group identity)",
