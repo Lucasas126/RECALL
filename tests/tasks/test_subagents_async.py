@@ -506,7 +506,7 @@ class FollowUpTests(AsyncFixture):
     def test_task_send_needs_the_worker_chat(self) -> None:
         live = self.finished()
         child = self.record(live.task_id)["child"]["chat_id"]
-        self.service.delete_chat(USER, AGENT, child)
+        self.service._delete_chat(USER, AGENT, child)  # the internal path: a person cannot delete a task chat
         with self.assertRaisesRegex(TaskError, "no longer exists"):
             self.manager.send(USER, live.task_id, "x", limits=base.LIMITS, owner=self.owner())
 
