@@ -4610,11 +4610,37 @@ function renderMessages(messages, window = null, limit = CHAT_PAGE) {
   state.view = container;
   $("messages").replaceChildren(container);
   $("usage").hidden = true;
+  if (!messages.length && !(window?.total > 0)) container.append(emptyChatHero());
   drawMessages(container, messages, { usage: true });
   // the stored history may carry no report (a reply still running, an older chat): keep this chat's last known one
   if ($("usage").hidden) syncUsage();
   updateHistoryBar(container);
   scrollDown(true);
+}
+
+// What an empty chat shows: the agent's name, large, over its picture faded behind it. It hides by itself (CSS) as soon
+// as the chat has anything else in it, so sending the first message needs no code here.
+function emptyChatHero() {
+  const hero = document.createElement("div");
+  hero.className = "empty-hero";
+  hero.setAttribute("aria-hidden", "true");  // decoration: the header and the input already name the agent
+  const name = currentAgentName();
+  const view = avatarView(currentAgentAvatar(), name);
+  if (view.src) {
+    const image = document.createElement("img");
+    image.className = "empty-hero-picture";
+    image.alt = "";
+    image.draggable = false;
+    if (view.free) image.dataset.avatarStyle = "free";
+    image.addEventListener("error", () => image.remove());
+    image.src = view.src;
+    hero.append(image);
+  }
+  const title = document.createElement("div");
+  title.className = "empty-hero-name";
+  title.textContent = name;
+  hero.append(title);
+  return hero;
 }
 
 // Draws stored messages into `parent`. `usage: false` (older messages loaded later) leaves the usage readout alone: it
