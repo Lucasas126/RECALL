@@ -228,6 +228,7 @@ delete the folder. Terms and limits: [Claude subscription](../user-guide/claude-
 - `tesseract-ocr` with English and Spanish data, matching the default
   `pdf.ocr_languages: eng+spa` ([Tesseract OCR](../user-guide/files-and-media.md#tesseract-ocr)). Other
   languages need a custom image.
+- `graphviz` (`dot`), `fontconfig` and `fonts-open-sans` for the opt-in [`charts` tool group](../reference/tools.md#charts) (diagrams need Graphviz; enable the group per agent in the Tools tab or with `tool_groups: [charts]`). Outside Docker install it with `apt install graphviz`; charts themselves need nothing else.
 - `ffmpeg`/`ffprobe` for [video input](../user-guide/files-and-media.md#video-input).
 - Node.js 22 (the `node` binary only, from the official `node:22-slim` image) and the Claude Code CLI, pinned by
   the `CLAUDE_CODE_VERSION` build argument of the `Dockerfile` (currently 2.1.316) and installed in `/opt/claude`,

@@ -5,6 +5,7 @@ sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases b
 
 ## Unreleased
 
+- New opt-in tool group `charts` (level `assistant`): `render_chart` draws Vega-Lite charts and `render_diagram` draws Graphviz diagrams as PNG files in a writable source, with a dark (default) or light theme and a bundled Open Sans font; no browser or network. The Docker image now includes Graphviz. Mermaid is planned.
 - Safe parallel memory writes: every write tool (palace, folders, `memory`, `skill_manage`, `soul_edit`) holds the agent's lock for its whole read-modify-write (folders have their own lock, outside the folder), files are replaced atomically (temporary file, `fsync`, rename, permissions kept), and a whole-file write is refused when the file changed since the chat last read it (or was never read), instead of silently dropping the other change. As a result, `remember` subagent tasks are no longer refused while the target agent replies elsewhere or runs another remember task. See [concurrent writes](../architecture/sources.md#concurrent-writes).
 
 - A subagent task may ask for up to 20 approvals per run (it was 10), so a worker that edits code under manual approvals can finish a normal task.

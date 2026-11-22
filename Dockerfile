@@ -55,6 +55,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # System programs RECALL shells out to:
 # - tesseract-ocr (+ eng/spa data, matching pdf.ocr_languages): scanned PDF pages
 # - ffmpeg (includes ffprobe): video decomposition
+# - graphviz (`dot`) + fonts-open-sans + fontconfig: the opt-in `charts` tool group draws diagrams and charts
 # - tzdata: log timestamps honour the TZ env var
 # - file, diffutils: the `type: local` terminal backend (see docs/deployment/docker.md) runs commands inside this
 #   image; bash, coreutils (head, wc, tr, mktemp, dirname, mv, chmod), findutils, grep and awk (mawk) that the
@@ -64,6 +65,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       tesseract-ocr tesseract-ocr-eng tesseract-ocr-spa \
       ffmpeg \
+      graphviz fonts-open-sans fontconfig \
       openssh-client \
       file diffutils \
       tzdata \
