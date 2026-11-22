@@ -228,6 +228,7 @@ delete the folder. Terms and limits: [Claude subscription](../user-guide/claude-
 - `tesseract-ocr` with English and Spanish data, matching the default
   `pdf.ocr_languages: eng+spa` ([Tesseract OCR](../user-guide/files-and-media.md#tesseract-ocr)). Other
   languages need a custom image.
+- `graphviz` (`dot`), `fontconfig` and `fonts-open-sans` for the opt-in [`charts` tool group](../reference/tools.md#charts) (Graphviz diagrams need Graphviz; enable the group per agent in the Tools tab or with `tool_groups: [charts]`) and `chromium-headless-shell`, a requirement of Mermaid diagrams (`render_diagram` with `kind: mermaid`; the Playwright Python package drives it and downloads no browser). Outside Docker install both with `apt install graphviz chromium-headless-shell` (or any Chromium on `PATH`, or point `RECALL_CHROMIUM_PATH` at it); Vega-Lite charts themselves need nothing else. Inside the container Chromium runs with `--no-sandbox` (its sandbox cannot start there); the page has no network or file access.
 - `ffmpeg`/`ffprobe` for [video input](../user-guide/files-and-media.md#video-input).
 - Node.js 22 (the `node` binary only, from the official `node:22-slim` image) and the Claude Code CLI, pinned by
   the `CLAUDE_CODE_VERSION` build argument of the `Dockerfile` (currently 2.1.316) and installed in `/opt/claude`,

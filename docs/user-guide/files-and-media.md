@@ -174,6 +174,10 @@ With the `memory_edit` group an agent has `make_pdf`: it describes the document 
 - **Reading it back:** `read` and `folder_read` return a PDF as text with a `[Page N]` marker per page (digital text, no OCR), and `view_image` lets a model that accepts images *look* at pages (one page, or up to 6 as a contact sheet), which is how an agent checks the layout of what it made. The picture is shrunk, shown to the model once and removed from its context at your next message; at most 6 per message. The index does not read PDFs.
 - **Limits:** standard fonts only, so accents and the usual Western punctuation work but arrows, check marks and similar symbols cannot be drawn: the agent gets a warning naming them. At most 500 elements, 2000 table cells, 200,000 characters of text and 10 MB per file.
 
+## charts and diagrams made by the agent
+
+With the opt-in `charts` group an agent has `render_chart` (Vega-Lite charts) and `render_diagram` (Graphviz or Mermaid) and saves PNG images like `make_pdf` saves PDFs (default `mind_palace:charts/`). It can look at the result with `view_image`; to receive it you also need `files_send`. Graphviz diagrams need Graphviz and Mermaid diagrams need Chromium on the machine (both included in the Docker image; otherwise `apt install graphviz chromium-headless-shell`). Details: [tools](../reference/tools.md#charts).
+
 ## speech-to-text
 
 Audio is always transcribed before the chat model is invoked. RECALL uses

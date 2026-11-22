@@ -14,6 +14,11 @@ TOOL_GROUP_CATALOG: Final[tuple[dict[str, str], ...]] = (
         "description": "Create, edit, move and delete memories, and make PDF files.",
     },
     {
+        "id": "charts",
+        "name": "Charts and diagrams",
+        "description": "Draw charts (Vega-Lite) and diagrams (Graphviz, Mermaid) as PNG images saved in a source.",
+    },
+    {
         "id": "web",
         "name": "Web search",
         "description": "Search and retrieve public web pages.",
@@ -104,6 +109,7 @@ TOOL_GROUP_TOOLS: Final[dict[str, tuple[str, ...]]] = {
         "query_memory", "search", "list_memories", "read", "list_tags", "find_notes_by_tag", "session_search", "view_image",
     ),
     "memory_edit": ("write", "append", "edit", "move", "delete", "make_pdf"),
+    "charts": ("render_chart", "render_diagram"),
     "web": ("web_search", "web_retrieve"),
     "self": ("memory", "skill_view", "skill_manage", "soul_edit"),
     "folders_read": ("folder_list", "folder_read", "folder_search"),
@@ -146,6 +152,7 @@ DISPOSABLE_BLOCKED_TOOLS: Final[frozenset[str]] = frozenset(
     | set(TOOL_GROUP_TOOLS["agents"])  # nor create, change or delete agents: same
     | set(TOOL_GROUP_TOOLS["secrets"])  # nor touch a secret: nobody is there to approve it
     | set(TOOL_GROUP_TOOLS["notify"])  # nor write to the user's phone
+    | set(TOOL_GROUP_TOOLS["charts"])  # nor write image files into a source
     | set(TOOL_GROUP_TOOLS["files_send"])  # nor hand files to the user
     | set(TOOL_GROUP_TOOLS["identity"])  # nor rename the agent: it writes the agent's persistent configuration
     | set(TOOL_GROUP_TOOLS["automations"])  # nor schedule anything: an automation's own task cannot create more automations

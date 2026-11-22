@@ -4513,26 +4513,137 @@ function visibleUserText(text, media) {
   return shown === text ? text : shown.replace(/\n{3,}/g, "\n\n").trim();
 }
 
-// The viewer: an image opens large (click to zoom to full size), a PDF opens in the page; both can be downloaded.
+// The viewer: an image opens large, a PDF opens in the page; both can be downloaded. Images zoom (Panzoom) and, when the
+// message has several, step with the arrow keys or the side buttons.
+const VIEWER_IMAGE_SELECTOR = ".attachment-image img, .msg .body img";
+const VIEWER_MIN_SCALE = 1;
+const VIEWER_MAX_SCALE = 8;
+const VIEWER_DRAG_PX = 4;  // a press that moved further than this was a drag, not a click
 let viewerUrl = null;
+let viewerPanzoom = null;
+let viewerKind = "image";
+let viewerImages = [];
+let viewerIndex = 0;
+let viewerPress = null;
 
-async function openViewer({ kind, src, name }) {
-  const dialog = $("viewer-dialog");
+// The pictures of one message, in page order, as {src, name}: the same ones a click opens (a linked picture is left alone).
+function collectMessageImages(message) {
+  if (!message) return [];
+  return [...message.querySelectorAll(VIEWER_IMAGE_SELECTOR)].filter((image) => !image.closest("a")).map(viewerImageInfo);
+}
+
+function viewerImageInfo(image) {
+  return { src: image.currentSrc || image.src, name: image.alt || image.closest(".attachment-image")?.querySelector(".attachment-label")?.textContent };
+}
+
+// The next index when stepping by `delta`: it stops at the ends (no wrap-around).
+function stepViewerIndex(index, count, delta) {
+  if (!count) return 0;
+  return Math.min(count - 1, Math.max(0, index + delta));
+}
+
+function viewerHasArrows(count, kind = "image") {
+  return kind === "image" && count > 1;
+}
+
+// What a key does in the viewer: "prev", "next", "zoom-in", "zoom-out", "reset" or null (leave the key alone).
+function viewerKeyAction(key, { count = 1, kind = "image", typing = false, modifier = false } = {}) {
+  if (typing || modifier || kind !== "image") return null;
+  if (key === "ArrowLeft" || key === "ArrowRight") {
+    if (!viewerHasArrows(count, kind)) return null;
+    return key === "ArrowLeft" ? "prev" : "next";
+  }
+  if (key === "+" || key === "=") return "zoom-in";
+  if (key === "-" || key === "_") return "zoom-out";
+  if (key === "0") return "reset";
+  return null;
+}
+
+// Ctrl+wheel (a trackpad pinch arrives the same way) zooms the picture, never the page; a plain wheel is left alone.
+function viewerWheelAction(event, kind = "image") {
+  return event.ctrlKey && kind === "image" ? "zoom" : null;
+}
+
+function resetViewerZoom() {
+  viewerPanzoom?.reset({ animate: false });
+}
+
+function destroyViewerPanzoom() {
+  if (viewerPanzoom) { viewerPanzoom.destroy(); viewerPanzoom = null; }
+}
+
+function zoomViewer(action) {
+  if (!viewerPanzoom) return;
+  if (action === "zoom-in") viewerPanzoom.zoomIn();
+  else if (action === "zoom-out") viewerPanzoom.zoomOut();
+  else if (action === "reset") viewerPanzoom.reset();
+}
+
+function updateViewerControls() {
+  const arrows = viewerHasArrows(viewerImages.length, viewerKind);
+  const zoomable = viewerKind === "image";
+  $("viewer-prev").hidden = !arrows;
+  $("viewer-next").hidden = !arrows;
+  $("viewer-prev").disabled = viewerIndex <= 0;
+  $("viewer-next").disabled = viewerIndex >= viewerImages.length - 1;
+  const count = $("viewer-count");
+  count.hidden = !arrows;
+  count.textContent = arrows ? `${viewerIndex + 1} / ${viewerImages.length}` : "";
+  for (const id of ["viewer-zoom-in", "viewer-zoom-out", "viewer-zoom-reset"]) $(id).hidden = !zoomable;
+}
+
+function showViewerImage({ src, name }) {
   const body = $("viewer-body");
-  body.classList.remove("zoomed");
+  destroyViewerPanzoom();  // a new picture always starts unzoomed
   $("viewer-title").textContent = name || "";
-  let href = src;
-  if (kind === "pdf") {  // a data: URL is not allowed in a frame everywhere; a blob: URL of the same bytes is
-    try { href = URL.createObjectURL(await (await fetch(src)).blob()); viewerUrl = href; } catch { href = src; }
-    body.replaceChildren(element("iframe", { src: href, title: name || "PDF" }));
-  } else {
-    const image = element("img", { src, alt: name || "" });
-    image.addEventListener("click", () => body.classList.toggle("zoomed"));
-    body.replaceChildren(image);
+  const image = element("img", { src, alt: name || "", draggable: false });
+  body.replaceChildren(image);
+  if (typeof Panzoom === "function") {
+    viewerPanzoom = Panzoom(image, { minScale: VIEWER_MIN_SCALE, maxScale: VIEWER_MAX_SCALE, step: 0.4, panOnlyWhenZoomed: true, cursor: "zoom-in" });
+    image.addEventListener("pointerdown", (event) => { viewerPress = { x: event.clientX, y: event.clientY }; });
+    image.addEventListener("click", (event) => {
+      const moved = viewerPress && Math.hypot(event.clientX - viewerPress.x, event.clientY - viewerPress.y) > VIEWER_DRAG_PX;
+      viewerPress = null;
+      if (moved || !viewerPanzoom) return;  // the end of a drag is not a click
+      if (viewerPanzoom.getScale() > VIEWER_MIN_SCALE) viewerPanzoom.reset();
+      else viewerPanzoom.zoomIn({ step: 1 });
+    });
+    image.addEventListener("dblclick", () => viewerPanzoom?.reset());
   }
   const download = $("viewer-download");
-  download.href = href;
-  download.download = name || (kind === "pdf" ? "document.pdf" : "image");
+  download.href = src;
+  download.download = name || "image";
+}
+
+function stepViewer(delta) {
+  const next = stepViewerIndex(viewerIndex, viewerImages.length, delta);
+  if (next === viewerIndex) return;
+  viewerIndex = next;
+  showViewerImage(viewerImages[viewerIndex]);
+  updateViewerControls();
+}
+
+async function openViewer({ kind, src, name, images = null, index = 0 }) {
+  const dialog = $("viewer-dialog");
+  const body = $("viewer-body");
+  viewerKind = kind === "pdf" ? "pdf" : "image";
+  destroyViewerPanzoom();
+  if (kind === "pdf") {  // a data: URL is not allowed in a frame everywhere; a blob: URL of the same bytes is
+    viewerImages = [];
+    viewerIndex = 0;
+    $("viewer-title").textContent = name || "";
+    let href = src;
+    try { href = URL.createObjectURL(await (await fetch(src)).blob()); viewerUrl = href; } catch { href = src; }
+    body.replaceChildren(element("iframe", { src: href, title: name || "PDF" }));
+    const download = $("viewer-download");
+    download.href = href;
+    download.download = name || "document.pdf";
+  } else {
+    viewerImages = images && images.length ? images : [{ src, name }];
+    viewerIndex = Math.min(Math.max(0, index), viewerImages.length - 1);
+    showViewerImage(viewerImages[viewerIndex]);
+  }
+  updateViewerControls();
   if (!dialog.open) dialog.showModal();
 }
 
@@ -4541,18 +4652,43 @@ function closeViewer() {
 }
 
 $("viewer-close").addEventListener("click", closeViewer);
+$("viewer-prev").addEventListener("click", () => stepViewer(-1));
+$("viewer-next").addEventListener("click", () => stepViewer(1));
+$("viewer-zoom-in").addEventListener("click", () => zoomViewer("zoom-in"));
+$("viewer-zoom-out").addEventListener("click", () => zoomViewer("zoom-out"));
+$("viewer-zoom-reset").addEventListener("click", () => zoomViewer("reset"));
 $("viewer-dialog").addEventListener("click", (event) => { if (event.target === $("viewer-dialog")) closeViewer(); });
+$("viewer-body").addEventListener("wheel", (event) => {
+  if (!viewerWheelAction(event, viewerKind)) return;
+  event.preventDefault();  // no page zoom
+  viewerPanzoom?.zoomWithWheel(event);
+}, { passive: false });
+$("viewer-dialog").addEventListener("keydown", (event) => {
+  const tag = event.target?.tagName;
+  const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || !!event.target?.isContentEditable;
+  const action = viewerKeyAction(event.key, { count: viewerImages.length, kind: viewerKind, typing, modifier: event.ctrlKey || event.metaKey || event.altKey });
+  if (!action) return;
+  event.preventDefault();
+  if (action === "prev") stepViewer(-1);
+  else if (action === "next") stepViewer(1);
+  else zoomViewer(action);
+});
 $("viewer-dialog").addEventListener("close", () => {
+  destroyViewerPanzoom();
+  viewerImages = [];
+  viewerIndex = 0;
   $("viewer-body").replaceChildren();
   if (viewerUrl) { URL.revokeObjectURL(viewerUrl); viewerUrl = null; }
 });
 
 // one listener for every picture and PDF in the messages (sent attachments, files from the agent, markdown images)
 $("messages").addEventListener("click", (event) => {
-  const image = event.target.closest(".attachment-image img, .msg .body img");
+  const image = event.target.closest(VIEWER_IMAGE_SELECTOR);
   if (image && !image.closest("a")) {
     event.preventDefault();
-    openViewer({ kind: "image", src: image.currentSrc || image.src, name: image.alt || image.closest(".attachment-image")?.querySelector(".attachment-label")?.textContent });
+    const images = collectMessageImages(image.closest(".msg"));
+    const at = [...(image.closest(".msg")?.querySelectorAll(VIEWER_IMAGE_SELECTOR) || [])].filter((item) => !item.closest("a")).indexOf(image);
+    openViewer({ kind: "image", ...viewerImageInfo(image), images: images.length ? images : null, index: Math.max(0, at) });
     return;
   }
   const pdf = event.target.closest("a.attachment-pdf");

@@ -1145,9 +1145,16 @@ html.resizing-sidebar #app { transition: none; }
 #viewer-dialog::backdrop { background: var(--backdrop); }
 #viewer-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1em; }
 .viewer-actions { display: flex; gap: 6px; flex: none; }
-#viewer-body { flex: 1; min-height: 0; overflow: auto; display: flex; border-radius: 8px; background: var(--raised); }
-#viewer-body img { margin: auto; max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; }
-#viewer-body.zoomed img { max-width: none; max-height: none; object-fit: none; cursor: zoom-out; }
+#viewer-body { flex: 1; min-height: 0; overflow: hidden; display: flex; border-radius: 8px; background: var(--raised); touch-action: none; }
+#viewer-body img { margin: auto; max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; user-select: none; -webkit-user-drag: none; }
+.viewer-heading { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.viewer-count { flex: none; color: var(--muted); font-size: 0.9em; }
+.viewer-arrow { position: absolute; top: 50%; transform: translateY(-50%); z-index: 1; color: var(--text); background: var(--bg); border: 1px solid var(--line-strong); }
+.viewer-arrow[hidden] { display: none; }
+.viewer-arrow:disabled { opacity: 0.35; }
+#viewer-prev { left: 22px; }
+#viewer-next { right: 22px; }
+@media (pointer: coarse) { .viewer-arrow { width: 48px; height: 48px; } }
 #viewer-body iframe { flex: 1; width: 100%; height: 100%; border: 0; background: #fff; }
 .attachment-image img, .msg .body img, a.attachment-pdf { cursor: zoom-in; }
 .attachment-pdf { gap: 6px; padding: 5px 12px 5px 6px; font-size: 1em; color: var(--text); text-decoration: none; cursor: pointer; }
