@@ -9,7 +9,7 @@ const source = readFileSync(path.join(__dirname, "..", "..", "..", "src", "web",
 const code = source.slice(source.indexOf("// ---- task cards: pure helpers"), source.indexOf("// ---- end task cards"));
 const context = vm.createContext({});
 vm.runInContext(
-  `${code}\nObject.assign(this, { taskStatusLabel, formatElapsed, taskElapsed, taskActionId, isTaskStartAction, taskCardState, isWakeMessage, wakeBubbleState, tasksNeedPolling, finishedProcessIds, shouldAttachWake });`,
+  `${code}\nObject.assign(this, { taskStatusLabel, formatElapsed, taskElapsed, taskActionId, isTaskStartAction, taskCardState, isWakeMessage, wakeBubbleState, tasksNeedPolling, nextTaskPollDelay, finishedProcessIds, shouldAttachWake });`,
   context,
 );
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -128,4 +128,12 @@ test("finishedProcessIds lists the processes gone from the list", () => {
   assert.deepEqual(Array.from(context.finishedProcessIds(["a", "b"], ["b", "c"])), ["a"]);
   assert.deepEqual(Array.from(context.finishedProcessIds([], ["a"])), []);
   assert.deepEqual(Array.from(context.finishedProcessIds(undefined, undefined)), []);
+});
+
+test("an idle chat keeps a slow task poll so a revived task is found", () => {
+  assert.equal(context.nextTaskPollDelay({ again: true, pollAgain: false, open: true }), 3000);
+  assert.equal(context.nextTaskPollDelay({ again: false, pollAgain: true, open: true }), 0);
+  assert.equal(context.nextTaskPollDelay({ again: false, pollAgain: false, open: true }), 12000);
+  assert.equal(context.nextTaskPollDelay({ again: false, pollAgain: false, open: false }), null);
+  assert.equal(context.nextTaskPollDelay({ again: true, pollAgain: false, open: false }), 3000);
 });
