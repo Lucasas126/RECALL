@@ -5362,6 +5362,16 @@ function tasksNeedPolling(response, expectWakeUntil = 0, nowMs = Date.now()) {
   return tasks.some((task) => !taskIsFinal(task.status)) || Boolean(response?.pending_wake) || nowMs < expectWakeUntil;
 }
 
+const TASK_IDLE_POLL_MS = 12000;
+
+// Delay of the next task poll: at once when a request came in meanwhile, every 3 s while something runs, else a slow
+// idle look (a task can be revived by the server, e.g. `task_send`, without any event reaching the page); null = stop.
+function nextTaskPollDelay({ again, pollAgain, open }, idleMs = TASK_IDLE_POLL_MS) {
+  if (pollAgain) return 0;
+  if (again) return 3000;
+  return open ? idleMs : null;
+}
+
 // The ids of the previous process list that are not in the new one: processes that just finished.
 function finishedProcessIds(previous, current) {
   const now = new Set(current ?? []);
@@ -5832,7 +5842,15 @@ async function taskPoll() {
     again = false;
   }
   taskPollRunning = false;
-  taskPollTimer = again || taskPollAgain ? setTimeout(taskPoll, taskPollAgain ? 0 : 3000) : null;
+  // nothing runs: keep a slow look so a task the server revives meanwhile (`task_send` on a finished one) shows up
+  const delay = nextTaskPollDelay({ again, pollAgain: taskPollAgain, open: Boolean(state.user && state.agentId && state.chatId) });
+  // an idle look is skipped while the tab is hidden; `visibilitychange` polls at once when it comes back
+  taskPollTimer = delay === null ? null : setTimeout(again || taskPollAgain ? taskPoll : idleTaskPoll, delay);
+}
+
+function idleTaskPoll() {
+  if (document.hidden) taskPollTimer = setTimeout(idleTaskPoll, TASK_IDLE_POLL_MS);
+  else taskPoll();
 }
 
 // A wake turn is being answered: draw the saved chat (it holds the wake bubble) and follow the reply live.

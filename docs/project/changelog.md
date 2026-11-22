@@ -5,6 +5,7 @@ sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases b
 
 ## Unreleased
 
+- Fix (web): the running-subagents tray and the task cards did not appear when a finished task was continued with `task_send` while the chat was open (the page stopped asking once every task was final); it now keeps a slow look (every ~12 s, visible tab only) next to the 3 s poll while something runs.
 - Hidden chats and hidden agents: the chat opened by an @mention is hidden from the chat list (the eye button at the right of the tabs lists it; still indexed and searched), and an agent can be marked `hidden` to leave the web selectors and be listed under **Hidden agents** (still reachable with `@`); every agent's editor gets **Open chat with this agent**.
 
 ## 0.5.2
