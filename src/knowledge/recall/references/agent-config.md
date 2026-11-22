@@ -29,6 +29,7 @@ Unknown keys are rejected in the agent yaml and most blocks (not in `chat_config
 | `approval_rules` | agent layer of approval rules `{default, rules}`; cards append exact `allow` rules (`references/terminal-and-approvals.md`) |
 | `level` | `minimal`, `reader`, `assistant`, `collaborator`, `operator` or `admin`; between what its tools need and the owner's `max_level`, else invalid. Unset = what its tools need |
 | `avatar_style` | `circle` (default) or `free` (the profile picture shown as it is, no circle). The user uploads the picture in the web form; agents never touch it |
+| `hidden` | `true` leaves the agent out of the web agent selectors and lists it under Hidden agents in Settings > Agents (default `false`). UI only: `@id` mentions, delegation and automations work as before. Every agent's editor has Hidden and Open chat with this agent |
 
 ### `chat_config` (Agents tab: Basic, Basic > Advanced and Tools)
 

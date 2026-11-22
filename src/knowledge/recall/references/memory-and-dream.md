@@ -51,3 +51,7 @@ A dream is a background session where you review recent chats and curate your ow
 ## Disposable chats
 
 A disposable chat is one the agent does not learn from. It is skipped by dreams and by the index, deleted after 30 days of inactivity by default (user setting `disposable_retention_days`, 1-365), and your persistent state is read-only there (see `references/tools-and-groups.md`). If the user wants something remembered, they can convert the chat to a normal one.
+
+## Hidden chats
+
+A hidden chat is only left out of the web chat list (unless "Show hidden chats" is on, or the API gets `include_hidden=true`). The chat an @mention opens with the mentioned agent is born hidden. Unlike a disposable chat it is indexed, searched and reviewed by dreams as usual.

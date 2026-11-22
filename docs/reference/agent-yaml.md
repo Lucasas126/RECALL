@@ -72,6 +72,7 @@ approval_rules:                      # optional: this agent's layer of approval 
     - {verdict: allow, tool: file_write, backend_kind: sandbox, path: "~/workspace/*"}
 level: collaborator                  # optional permission level (minimal|reader|assistant|collaborator|operator|admin); at most the owner's max_level
 avatar_style: circle                 # optional: circle (default, the picture cropped into the accent-bordered circle) | free (shown as it is, for transparent PNGs)
+hidden: false                        # optional: true leaves the agent out of the web agent selectors (not a security boundary)
 delegation:                          # the `delegate` tool group (see the delegation guide); optional, defaults apply when the group is selected
   enabled: true                      # false removes `task_start` without removing the group
   allowed_groups: [web]              # groups a task may be granted; only `web` is grantable (never memory, folders, terminal, mcp, delegate)
@@ -129,6 +130,15 @@ know the field) keeps the stored value; the web form always sends it. The pictur
 (Basic > Profile picture) or with `PUT /api/agents/<agent_id>/avatar` ([API](api.md#profile-pictures)) and stored as
 `data/<user_id>/.avatars/<agent_id>.png`, outside the agent's data folder. Renaming the agent moves it; deleting the agent keeps it, like the rest of the
 data. Change the style from the CLI with `python -m src.admin agent set --user U --agent A --set avatar_style=free`.
+
+## hidden
+
+`hidden` is a top-level boolean, `false` by default (written to the file only when `true`). It is a presentation flag: the web UI leaves a
+hidden agent out of the agent selectors (new chat, chat header, default and core agent choices) and lists it under **Hidden agents** in
+Settings > Agents. Nothing else changes: the agent can be reached with `@<agent_id>`, is a delegation target, runs automations and keeps its
+permissions, and the `@` list of the message box includes it. It is not a security boundary. A save without the field (an API client that does
+not know it) keeps the stored value; the web form always sends it. `GET /api/me` and `GET /api/agents` carry it. From the CLI:
+`python -m src.admin agent set --user U --agent A --set hidden=true`.
 
 ## level
 

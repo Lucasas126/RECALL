@@ -3,6 +3,10 @@
 The notes of each release are on the GitHub Releases page. This file groups what changed by topic, starting with 0.4.0, which
 sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases between 5 and 15 November.
 
+## Unreleased
+
+- Hidden chats and hidden agents: the chat opened by an @mention is hidden from the chat list (**Show hidden chats** lists it; still indexed and searched), and an agent can be marked `hidden` to leave the web selectors and be listed under **Hidden agents** (still reachable with `@`); every agent's editor gets **Open chat with this agent**.
+
 ## 0.5.2
 
 - Agent settings show the real application default (tool rounds per turn, delegation parallel tasks, time and tokens, read live from `settings.yaml`) instead of a vague text; reset empties those fields so they keep following the application.

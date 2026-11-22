@@ -52,6 +52,7 @@
         <button id="new-chat" class="primary"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg> New chat</button>
         <button id="new-disposable-chat" type="button" class="primary" title="New disposable chat" aria-label="New disposable chat"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></button>
       </div>
+      <label id="show-hidden-row" class="model-filter"><input id="show-hidden-chats" type="checkbox"> <span id="show-hidden-label">Show hidden chats</span></label>
       <button id="agent-new" type="button" class="primary" hidden><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg> <span id="agent-new-label">New agent</span></button>
       <ul id="chat-list"></ul>
       <ul id="agent-list" hidden></ul>
@@ -141,7 +142,7 @@
         <p id="agent-status" class="model-note" role="status"></p>
         <p id="agents-empty" class="model-note">Select an agent to edit it, or create a new one.</p>
         <div id="agent-editor" class="agent-form" hidden>
-          <h3><span id="agent-form-title">Edit agent</span> <span id="agent-form-level" class="level-badge" hidden></span></h3>
+          <h3><span id="agent-form-title">Edit agent</span> <span id="agent-form-hidden" class="hidden-icon" hidden></span> <span id="agent-form-level" class="level-badge" hidden></span></h3>
           <nav class="tabs agent-tabs" aria-label="Agent configuration">
             <button id="agent-tab-basic" type="button" aria-pressed="true">Basic</button>
             <button id="agent-tab-tools" type="button" aria-pressed="false">Tools</button>
@@ -165,6 +166,8 @@
                 <textarea id="agent-description" rows="2" maxlength="500"></textarea>
                 <span id="agent-description-hint" class="model-note">Optional. Shown in the agent list; not sent to the agent's chat model. The Telegram orchestrator reads it to pick agents: one or two sentences, what topics should this agent answer?</span>
               </label>
+              <label class="model-filter"><input id="agent-hidden" type="checkbox"> <span id="agent-hidden-label">Hidden</span></label>
+              <p id="agent-hidden-hint" class="model-note">A hidden agent is left out of the agent selectors and listed under Hidden agents. You can still talk to it with @ and open a chat with it from here.</p>
               <label id="agent-prompt-field">
                 <span id="agent-prompt-label">Personality (SOUL.md)</span>
                 <textarea id="agent-prompt" rows="10" maxlength="15000"></textarea>
@@ -679,6 +682,7 @@
           </div>
           <div class="agent-actions agent-form-actions">
             <button id="agent-save" type="submit" form="agent-form" class="primary">Save agent</button>
+            <button id="agent-open-chat" type="button">Open chat with this agent</button>
             <button id="agent-delete" type="button">Delete agent</button>
             <p id="agent-save-error" class="error" role="alert"></p>
           </div>

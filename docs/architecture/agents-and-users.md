@@ -135,6 +135,8 @@ The `delegate` tool group (async `task_start`, the wake, task tools; see [delega
 
 ## @mentions of another agent
 
+A hidden agent (`hidden: true` in its [config](../reference/agent-yaml.md#hidden)) can be mentioned like any other: hiding only affects the web selectors.
+
 A person's message in agent A's chat that starts with `@<agent_id>` of another agent of the same user is answered by
 that agent (B) instead of A; an unknown id or A's own id leaves it a normal message to A. Detection is in
 `ChatService.send`, so web, Telegram and the API behave alike; edits, task messages and task chats never mention.
@@ -146,7 +148,8 @@ that agent (B) instead of A; an unknown id or A's own id leaves it a normal mess
   conversation, then up to `MENTION_CONTEXT_CHARS` (4000) characters of A's recent user/assistant turns inside an
   `<untrusted_context>` block marked as context, not instructions, then the text without the `@id` prefix.
 - **Storage**: B answers in one chat of its own per originating A chat (origin `mention`, a `.mention.json` mark),
-  reused by later mentions from that chat. A's chat keeps the message as typed (`mention`) and a copy of B's reply
+  reused by later mentions from that chat. That chat is born hidden (a `.hidden.json` mark): chat lists leave it out unless they ask
+  for hidden chats, while indexing, search and Dream treat it as any chat. A's chat keeps the message as typed (`mention`) and a copy of B's reply
   with `author_agent` and `author_name`; A's model reads it as `[reply from agent B (<name>)]`.
 - **Display and control**: A's chat stream is B's stream, opened by a `speaker` event (id, name, avatar). The web UI
   draws the reply with B's name and picture, live and from history. While B runs, A's chat is active: a reload

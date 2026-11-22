@@ -86,7 +86,7 @@ New codes are set with `UserMessageError(..., code="...")` or a class-level `cod
 | `GET` | `/api/agents/defaults` | defaults and bounds of the agent form fields, generated from the configuration models: `{chat_config, dream, terminal}`, each field `{default, min, max}` (`null` where the model has no default or bound), e.g. `dream.max_tokens` `{default: 500000, min: 0, max: 100000000}`, `chat_config.max_tool_hops` `{default: null, min: 1, max: 100}` |
 | `POST` | `/api/agents` | creates `agents/<id>.yaml` and appends the id to `agents` in `user.yaml` (`201`) |
 | `GET` | `/api/agents/<agent_id>` | one agent's configuration, with the effective `level` and `avatar` |
-| `PUT` | `/api/agents/<agent_id>` | replaces the agent; the body `id` may differ, which renames it (its profile picture moves with it). A body without `level` keeps the stored level, and one without `avatar_style` keeps the stored style |
+| `PUT` | `/api/agents/<agent_id>` | replaces the agent; the body `id` may differ, which renames it (its profile picture moves with it). A body without `level` keeps the stored level, and ones without `avatar_style` or `hidden` keep the stored values |
 | `DELETE` | `/api/agents/<agent_id>` | removes the agent from `user.yaml` and deletes its file (`204`) |
 | `GET` | `/api/agents/<agent_id>/index` | memory index status: `sources`, `files`, `chats`, `chunks`, `last_reconcile`, `folders_reconciled_at`, `rebuilding`, `busy`, `model`, `error` |
 | `POST` | `/api/agents/<agent_id>/index/reindex` | queues a reconcile of every source, folders included (`202`); body `{"full": true}` drops the index and rebuilds it |
@@ -148,6 +148,14 @@ the ISO time a disposable chat will be deleted (last activity plus the user's
 `"origin"`: `"web"` (chats created by this API, and chats with no marker) or `"telegram"`
 (created by the Telegram bot; stored in a `<chat_id>.origin.json` sidecar). The Telegram bot only
 resumes chats whose origin is `telegram`; the API always creates `web` chats.
+
+## Hidden chats
+
+A chat can be hidden (a `<chat_id>.hidden.json` sidecar): chat summaries carry `"hidden": bool`. The chat an @mention opens with the
+mentioned agent (origin `mention`) is born hidden; a chat the person creates is not. `GET /api/chats` and `GET /api/agents/<agent_id>/chats`
+leave hidden chats out unless the query has `include_hidden=true`. A hidden chat stays reachable by id (`GET .../chats/<chat_id>`, sending
+into it keeps it hidden), is still indexed, searched and reviewed by Dream like any chat, and is deleted like any chat. It is a list filter,
+unrelated to the internal task chats of subagents, which are never listed.
 
 `POST /api/agents/<agent_id>/chats/<chat_id>/disposable` with `{"disposable": true|false}`
 converts the chat in either direction and returns its summary. Becoming disposable drops its

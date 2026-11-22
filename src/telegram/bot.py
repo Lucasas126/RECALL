@@ -2111,7 +2111,7 @@ def _chat_label(state: TelegramBotState, session: TelegramSession, event: dict) 
         return name
     title = chat_id[:8]
     try:
-        title = next((c.get("title") or title for c in state.service.list_chats(user_id, agent_id) if c.get("id") == chat_id), title)
+        title = next((c.get("title") or title for c in state.service.list_chats(user_id, agent_id, include_hidden=True) if c.get("id") == chat_id), title)
     except (ServiceError, OSError, ValueError, KeyError):
         pass
     return f"{name} · {title}"

@@ -49,7 +49,7 @@ MAX_DIFF_LINES = 24    # SOUL diff lines on a card
 MAX_DIFF_LINE_CHARS = 160
 # `agent_update(settings=...)`: any key of the agent's configuration, by its name in the yaml. Flat names of the chat
 # settings (`reasoning_effort`, `max_tool_hops`, `tool_groups`, `mcp`...) are accepted next to the top-level fields
-# (`level`, `approval_rules`, `terminal`, `delegation`, `folders`, `dream`, `avatar_style`) and a `chat_config` object.
+# (`level`, `approval_rules`, `terminal`, `delegation`, `folders`, `dream`, `avatar_style`, `hidden`) and a `chat_config` object.
 # The approval card is the control; the limits below are enforced by the service, not by the key list.
 _TOP_FIELDS = tuple(name for name in AgentConfig.model_fields if name not in ("id", "name", "description", "chat_config"))
 _CHAT_FIELDS = tuple(ChatConfig.model_fields)

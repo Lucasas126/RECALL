@@ -203,6 +203,8 @@ def _clean(config: AgentConfig) -> dict:
     data = config.model_dump(mode="json", exclude_none=True)
     if data.get("avatar_style") == "circle":
         del data["avatar_style"]  # the default is not written, as in the agent file
+    if data.get("hidden") is False:
+        del data["hidden"]
     return data
 
 

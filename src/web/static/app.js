@@ -10,6 +10,7 @@ const ICONS = {
   trash: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M3 6h18\"/><path d=\"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6\"/><path d=\"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2\"/></svg>",
   star: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><polygon points=\"12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2\"/></svg>",
   sun: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><circle cx=\"12\" cy=\"12\" r=\"4\"/><path d=\"M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41\"/></svg>",
+  eyeOff: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24\"/><path d=\"M1 1l22 22\"/></svg>",
   moon: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z\"/></svg>",
 };
 const state = {
@@ -34,6 +35,7 @@ const state = {
   preferences: null, preferencesRequest: 0, settingsBusy: false, settingsOriginal: null,
   translations: null, toolGroupCatalog: [], levels: null, adminUsers: [],
   mcpServers: [], mcpTools: new Map(), connectionsPoll: null,
+  showHiddenChats: false,
   agentConfigs: [], agentForm: { originalId: null, busy: false },
   dream: null,
 };
@@ -145,12 +147,42 @@ const NULLABLE_PREFERENCES = new Set([
   "disposable_retention_days", "orchestrator", "core_agent_id", "default_agent_id",
 ]);
 
-// The agent new chats open with when none is picked: the saved default if the user still has it, else the first agent.
+// The agent new chats open with when none is picked: the saved default if the user still has it, else the first
+// agent that is not hidden (the first one when all are).
 function defaultAgentId(preferences, agents) {
   const list = agents ?? [];
   const saved = preferences?.default_agent_id;
   if (saved && list.some((agent) => agent.id === saved)) return saved;
-  return list.length ? list[0].id : null;
+  const shown = list.find((agent) => !agent.hidden) ?? list[0];
+  return shown ? shown.id : null;
+}
+
+// The agents a selector offers to talk to: the ones that are not hidden, plus `keepId` (the open agent, or a saved
+// choice) even when hidden, so the selector never shows a value it has no option for. The @ list uses every agent.
+function selectableAgents(agents, keepId = null) {
+  return (agents ?? []).filter((agent) => !agent.hidden || agent.id === keepId);
+}
+
+// The Settings > Agents list: the agents that are shown and, below, the hidden ones (a broken file has no flag: shown).
+function splitHiddenAgents(agents) {
+  const list = agents ?? [];
+  return { shown: list.filter((agent) => !agent.hidden), hidden: list.filter((agent) => agent.hidden) };
+}
+
+// Query string of the chat list request: the open chat is kept (an empty one is not pruned) and hidden chats are asked for.
+function chatListQuery(keepId, includeHidden) {
+  const params = [];
+  if (keepId) params.push(`keep=${encodeURIComponent(keepId)}`);
+  if (includeHidden) params.push("include_hidden=true");
+  return params.length ? `?${params.join("&")}` : "";
+}
+
+// "Show hidden chats" is remembered per browser; off by default.
+function readShowHiddenChats(storage) {
+  try { return storage.getItem("showHiddenChats") === "1"; } catch { return false; }
+}
+function writeShowHiddenChats(storage, on) {
+  try { storage.setItem("showHiddenChats", on ? "1" : "0"); } catch { /* private mode: keep it for this page only */ }
 }
 
 // True when the scroll position is within `slack` pixels of the bottom (the user is following the latest content).
@@ -595,6 +627,9 @@ function translateInterface() {
     ["model-scope-note", "Choosing a model for a chat sets only that chat's override. The default entry removes it (the agent's default model, else yours). Defaults in Settings are saved with Save settings. Favorites are shared across your agents."],
     ["model-zdr-warning", "ZDR is not required for your next selection. Providers may retain your prompts and replies. Your OpenRouter account may still enforce ZDR."],
     ["tab-chats", "Chats"], ["tab-agents", "Agents"],
+    ["show-hidden-label", "Show hidden chats"], ["agent-hidden-label", "Hidden"],
+    ["agent-hidden-hint", "A hidden agent is left out of the agent selectors and listed under Hidden agents. You can still talk to it with @ and open a chat with it from here."],
+    ["agent-open-chat", "Open chat with this agent"],
     ["agent-new-label", "New agent"], ["agents-empty", "Select an agent to edit it, or create a new one."],
     ["agent-name-label", "Name"], ["agent-description-label", "Description"],
     ["agent-description-hint", "Optional. Shown in the agent list; not sent to the agent's chat model. The Telegram orchestrator reads it to pick agents: one or two sentences, what topics should this agent answer?"],
@@ -861,7 +896,7 @@ function showLogin() {
 
 function renderAgentOptions() {
   $("agent-select").replaceChildren(
-    ...state.user.agents.map((a) => {
+    ...selectableAgents(state.user.agents, state.agentId).map((a) => {
       const option = document.createElement("option");
       option.value = a.id;
       option.textContent = a.name;
@@ -1090,6 +1125,8 @@ async function showApp(user) {
   renderUserAvatar();
   renderThemeToggle();
   renderAgentOptions();
+  state.showHiddenChats = readShowHiddenChats(localStorage);
+  $("show-hidden-chats").checked = state.showHiddenChats;
   refreshClaudeUsage();
   showTab("chats");
   try {
@@ -1200,8 +1237,7 @@ async function selectAgent(agentId) {
   renderChatHeader(null);
   state.model = null;
   updateModelControls();
-  $("agent-select").value = agentId ?? "";
-  renderAgentBanner();
+  renderAgentOptions();  // a hidden agent opened from its editor is offered while it is the open one
   renderMessages([]);
   setComposer(false);
   if (!agentId && state.user && !state.user.agents.length) renderNoAgents();
@@ -1305,6 +1341,7 @@ function showTab(tab) {
   $("agents-view").hidden = !agents;
   $("chat-list").hidden = agents;
   $("new-chat-row").hidden = agents;
+  $("show-hidden-row").hidden = agents;
   $("agent-list").hidden = !agents;
   $("agent-new").hidden = !agents;
   if (agents) return loadAgentConfigs();
@@ -1335,38 +1372,62 @@ async function loadAgentConfigs() {
   }
 }
 
+function agentListItem(agent) {
+  const item = document.createElement("li");
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = agent.id === state.agentForm.originalId ? "active" : "";
+  const name = document.createElement("span");
+  name.className = "title";
+  name.textContent = agent.name;
+  if (agent.hidden) name.prepend(hiddenIcon(), " ");
+  if (agent.level) name.append(" ", levelBadge(agent.level));
+  button.append(name);
+  if (agent.description) {
+    const description = document.createElement("span");
+    description.className = "agent-description";
+    description.textContent = agent.description;
+    button.title = agent.description;
+    button.append(description);
+  }
+  if (agent.broken) {
+    const warning = document.createElement("span");
+    warning.className = "agent-description";
+    warning.textContent = `⚠ ${tr("Invalid configuration")}`;
+    button.title = agent.error || "";
+    button.append(warning);
+    button.disabled = true;
+  } else {
+    button.addEventListener("click", () => openAgent(agent.id));
+  }
+  item.append(button);
+  return item;
+}
+
+function hiddenIcon() {
+  const icon = document.createElement("span");
+  icon.className = "hidden-icon";
+  icon.innerHTML = ICONS.eyeOff;
+  icon.title = tr("Hidden agent");
+  return icon;
+}
+
+// Two sections, both always shown: the agents, then the hidden agents (with a hint while there are none).
 function renderAgentList() {
+  const { shown, hidden } = splitHiddenAgents(state.agentConfigs);
+  const heading = (text) => {
+    const li = document.createElement("li");
+    li.className = "agent-section";
+    li.setAttribute("role", "presentation");
+    li.textContent = tr(text);
+    return li;
+  };
+  const empty = document.createElement("li");
+  empty.className = "agent-section-empty";
+  empty.textContent = tr("No hidden agents. Hide an agent in its editor to list it here.");
   $("agent-list").replaceChildren(
-    ...state.agentConfigs.map((agent) => {
-      const item = document.createElement("li");
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = agent.id === state.agentForm.originalId ? "active" : "";
-      const name = document.createElement("span");
-      name.className = "title";
-      name.textContent = agent.name;
-      if (agent.level) name.append(" ", levelBadge(agent.level));
-      button.append(name);
-      if (agent.description) {
-        const description = document.createElement("span");
-        description.className = "agent-description";
-        description.textContent = agent.description;
-        button.title = agent.description;
-        button.append(description);
-      }
-      if (agent.broken) {
-        const warning = document.createElement("span");
-        warning.className = "agent-description";
-        warning.textContent = `⚠ ${tr("Invalid configuration")}`;
-        button.title = agent.error || "";
-        button.append(warning);
-        button.disabled = true;
-      } else {
-        button.addEventListener("click", () => openAgent(agent.id));
-      }
-      item.append(button);
-      return item;
-    })
+    heading("Agents"), ...shown.map(agentListItem),
+    heading("Hidden agents"), ...(hidden.length ? hidden.map(agentListItem) : [empty]),
   );
 }
 
@@ -1409,6 +1470,22 @@ function setAgentFormOpen(open) {
   renderAgentList();
 }
 
+function syncAgentHiddenIcon() {
+  const icon = $("agent-form-hidden");
+  icon.innerHTML = $("agent-hidden").checked ? ICONS.eyeOff : "";
+  icon.hidden = !$("agent-hidden").checked;
+  icon.title = tr("Hidden agent");
+}
+$("agent-hidden").addEventListener("change", syncAgentHiddenIcon);
+
+// A new, normal chat with the agent of the editor (hidden or not), shown in the chat view.
+$("agent-open-chat").addEventListener("click", async () => {
+  const agentId = state.agentForm.originalId;
+  if (!agentId || state.agentForm.busy || state.modelBusy || state.settingsBusy) return;
+  await showTab("chats");
+  await switchAgent(agentId);
+});
+
 function fillAgentForm(agent) {
   const config = agent.chat_config;
   $("agent-form-title").textContent = tr(state.agentForm.originalId ? "Edit agent" : "New agent");
@@ -1417,6 +1494,9 @@ function fillAgentForm(agent) {
   $("agent-name").value = agent.name;
   $("agent-description").value = agent.description ?? "";
   $("agent-avatar-free").checked = agent.avatar_style === "free";
+  $("agent-hidden").checked = Boolean(agent.hidden);
+  syncAgentHiddenIcon();
+  $("agent-open-chat").hidden = !state.agentForm.originalId;  // a new agent has no chat until it is saved
   $("agent-avatar-error").textContent = "";
   state.agentForm.avatar = agent.avatar ?? null;
   renderAgentAvatarField();
@@ -2288,6 +2368,7 @@ function agentFormBody() {
     name,
     description: $("agent-description").value.trim(),
     avatar_style: $("agent-avatar-free").checked ? "free" : "circle",
+    hidden: $("agent-hidden").checked,
     // edited in the Dream tab; sent back unchanged so saving the agent does not reset it
     ...(saved ? { dream: saved.dream } : {}),
     folders: agentFoldersBody(),
@@ -2347,7 +2428,7 @@ function syncCompactionUnits() {
 
 function setAgentBusy(busy) {
   state.agentForm.busy = busy;
-  for (const id of ["agent-new", "agent-save", "agent-delete"]) $(id).disabled = busy;
+  for (const id of ["agent-new", "agent-save", "agent-delete", "agent-open-chat"]) $(id).disabled = busy;
 }
 
 // Reloads the agent list and keeps the sidebar consistent after a save or delete.
@@ -2672,10 +2753,10 @@ function fillSettings() {
   setNumberValue($("settings-disposable-days"), original.disposable_retention_days);
   $("settings-orchestrator").checked = original.orchestrator;
   const core = $("settings-core-agent");
-  core.replaceChildren(new Option(tr("Same as default agent"), ""), ...(state.user?.agents ?? []).map((a) => new Option(a.name, a.id)));
+  core.replaceChildren(new Option(tr("Same as default agent"), ""), ...selectableAgents(state.user?.agents, state.preferences.core_agent_id).map((a) => new Option(a.name, a.id)));
   core.value = state.preferences.core_agent_id ?? "";
   const defaultAgent = $("settings-default-agent");
-  defaultAgent.replaceChildren(new Option(tr("First agent in the list"), ""), ...(state.user?.agents ?? []).map((a) => new Option(a.name, a.id)));
+  defaultAgent.replaceChildren(new Option(tr("First agent in the list"), ""), ...selectableAgents(state.user?.agents, state.preferences.default_agent_id).map((a) => new Option(a.name, a.id)));
   defaultAgent.value = state.preferences.default_agent_id ?? "";
   fillSttLanguage(state.preferences.stt_language ?? null);
   $("settings-theme").value = localStorage.getItem("theme") ?? "system";
@@ -3283,8 +3364,7 @@ function markChatRead(agentId, chatId) {
 async function refreshChats() {
   if (!state.user) return;
   const session = state.session;
-  const keep = state.chatId ? `?keep=${encodeURIComponent(state.chatId)}` : "";
-  const chats = await api(`/api/chats${keep}`);
+  const chats = await api(`/api/chats${chatListQuery(state.chatId, state.showHiddenChats)}`);
   if (session !== state.session) return;
   renderChatHeader(chats.find((chat) => chat.id === state.chatId && chat.agent_id === state.agentId) ?? state.chatInfo);
   const list = $("chat-list");
@@ -3332,6 +3412,13 @@ async function refreshChats() {
         e.stopPropagation();
         deleteChat(chat);
       });
+      if (chat.hidden) {
+        const badge = document.createElement("span");
+        badge.className = "chat-badge chat-hidden";
+        badge.innerHTML = ICONS.eyeOff;
+        badge.title = tr("Hidden chat");
+        li.append(badge);
+      }
       if (chat.disposable) {
         const badge = document.createElement("span");
         badge.className = "chat-badge";
@@ -3516,6 +3603,12 @@ async function newChat({ disposable = false } = {}) {
     return false;
   }
 }
+
+$("show-hidden-chats").addEventListener("change", (e) => {
+  state.showHiddenChats = e.target.checked;
+  writeShowHiddenChats(localStorage, state.showHiddenChats);
+  return refreshChats();
+});
 
 $("new-chat").addEventListener("click", () => newChat());
 $("new-disposable-chat").addEventListener("click", () => newChat({ disposable: true }));

@@ -1168,3 +1168,14 @@ html.resizing-sidebar #app { transition: none; }
 .composer-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); opacity: .75; font-size: .8125rem; }
 #agent-save-error { margin: 0; }
 #agent-save-error:empty { display: none; }
+
+/* hidden chats and hidden agents */
+#show-hidden-row { padding: 2px 8px; font-size: var(--s-1); color: var(--muted); cursor: pointer; }
+#show-hidden-row[hidden] { display: none; }
+#chat-list .chat-hidden { color: var(--muted); }
+.hidden-icon { display: inline-grid; place-items: center; vertical-align: middle; color: var(--muted); }
+.hidden-icon[hidden] { display: none; }
+.hidden-icon svg { width: 14px; height: 14px; }
+#agent-list .agent-section { margin: 12px 0 2px; padding: 0 0 0 8px; font: 600 .6875rem/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+#agent-list .agent-section:first-child { margin-top: 4px; }
+#agent-list .agent-section-empty { padding: 4px 8px; font-size: .75em; color: var(--muted); }

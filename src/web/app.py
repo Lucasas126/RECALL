@@ -535,12 +535,14 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
         service.delete_agent_avatar(user_id, agent_id)
 
     @app.get("/api/chats")
-    def list_all_chats(keep: Optional[str] = None, user_id: str = Depends(current_user)):
-        return service.list_all_chats(user_id, keep)
+    def list_all_chats(keep: Optional[str] = None, include_hidden: bool = False, user_id: str = Depends(current_user)):
+        return service.list_all_chats(user_id, keep, include_hidden)
 
     @app.get("/api/agents/{agent_id}/chats")
-    def list_chats(agent_id: str, keep: Optional[str] = None, user_id: str = Depends(current_user)):
-        return service.list_chats(user_id, agent_id, keep)
+    def list_chats(
+        agent_id: str, keep: Optional[str] = None, include_hidden: bool = False, user_id: str = Depends(current_user),
+    ):
+        return service.list_chats(user_id, agent_id, keep, include_hidden)
 
     @app.post("/api/agents/{agent_id}/chats", status_code=201)
     def create_chat(
