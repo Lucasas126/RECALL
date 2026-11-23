@@ -66,6 +66,8 @@ Basic holds Identity and Model and reasoning (`model`, `reasoning_effort`, `reas
 
 MCP entry fields: `tools` (list; omitted means all of the server's tools), `read_only`, `instructions`.
 
+Enabling a server for an agent is one of three steps (catalog, user connection, agent), see `troubleshooting.md` "Connecting an MCP server". In the web UI: Agents > agent > MCP tab > "Enable for this agent". Enabling it alone is not enough: the user must also connect it in Settings > Connections. A user cannot connect for another user.
+
 ### `dream` (Dream tab)
 
 | Field | Meaning (default) |

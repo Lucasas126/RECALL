@@ -21,7 +21,7 @@ Each process run writes a new folder `logs/<YYYYmmdd_HHMMSS+zzzz>_<run>/` where 
 | `model_unavailable` | the model is not in the provider's catalog | choose another model |
 | `rate_limited` | the upstream provider answered 429 | wait, or choose another model |
 | `agent_busy` | active or queued replies exist (also blocks editing or deleting the agent) | wait, then retry |
-| `mcp_not_connected` | an MCP tool needs an account not connected | connect it in Settings |
+| `mcp_not_connected` | the server is enabled for the agent but the user has not connected it, or the server rejected the token | Settings > Connections, see "Connecting an MCP server" |
 
 ## Checking a provider
 
@@ -40,8 +40,17 @@ Values are parsed as YAML: wrap text containing `": "` in quotes. String fields 
 - Unknown keys are rejected in the agent yaml. A leftover `vault` key must become `folders: [{name: vault, path: ...}]`.
 - `dream.tools: [terminal]` and `terminal.allow_in_dream` are rejected: dreams have no terminal.
 - `terminal.default_backend` is required with several backends and must be one of them; every backend key must exist in the user's `terminal_backends`.
-- Enabled MCP servers must exist in the `mcp.servers` catalog of `settings.yaml`.
+- Enabled MCP servers must exist in the catalog: `mcp.servers` of `settings.yaml` or `mcp_servers.yaml` in the config folder. A server missing from it is skipped, the agent still loads.
 - A folder path must exist when saving; if it disappears later (unmounted drive), the agent loads without it and the log says `folder ... not found ... skipped`.
+
+## Connecting an MCP server
+Three steps, each by a different person; a server gives tools only when all three are done:
+1. **Catalog** (administrator, file only): the server is listed in `mcp.servers` of `settings.yaml` or in `mcp_servers.yaml` in the config folder (picked up without a restart). stdio servers use `command`, http servers use `url`.
+2. **User connection** (each user for themself, web UI Settings > Connections). Nothing is shared between users and nobody can connect for another.
+   - Token servers (`auth: {type: token}`, http): the user first creates a personal token in the other service (the field help says where, read-only is usually enough), then pastes it in the server's field in Connections. RECALL connects once to check it before saving; a rejected token is not kept.
+   - Sign-in servers (stdio, such as a calendar): Connect shows a sign-in link, the user opens it and approves.
+3. **Agent** (the user, or an admin with `python -m src.admin agent set`): Agents > agent > MCP tab > "Enable for this agent"; `read_only` limits it to read tools. Needs level collaborator or higher.
+If tools are missing, check in this order: is the server in Settings > Connections at all (step 1), does it show connected (step 2), is it enabled on the agent (step 3); a new chat may be needed. Do not invent other steps; never ask the user to paste a token in the chat.
 
 ## Missing tools
 
