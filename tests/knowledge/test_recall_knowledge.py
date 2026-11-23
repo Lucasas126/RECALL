@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import tomllib
 import typing
@@ -10,6 +11,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
+
+os.environ.setdefault("RECALL_SESSION_SECRET", "x")
 
 import yaml
 from fastapi.testclient import TestClient
