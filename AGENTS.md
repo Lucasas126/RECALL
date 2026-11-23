@@ -11,6 +11,7 @@
 ## Working in the repository
 
 - Preserve unrelated work in the worktree. Inspect `git status` before editing and do not overwrite existing user changes.
+- Commit messages follow Conventional Commits: `type(optional scope): short imperative summary`, with type one of `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`; for example `fix(web): keep the chat scroll position` or `docs: explain MCP token setup`. Add `!` or a `BREAKING CHANGE:` footer for incompatible changes. Merge commits keep the form `Merge <branch>`. Release commits are `chore(release): <version>`.
 - Keep changes focused. When behavior or configuration changes, update the directly related documentation and examples.
 - Agents read their own manual from `src/knowledge/recall/` (the built-in `recall` skill). When you change behavior, config fields, tools or commands, update it too; `tests/knowledge/test_recall_knowledge.py` enforces part of it.
 - Never add credentials, `.env` contents, private user data, logs, or generated indexes to source control. API keys belong in environment variables; YAML may contain the variable name, never the secret.
