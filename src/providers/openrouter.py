@@ -347,8 +347,8 @@ class OpenRouterProvider(LLMProvider):
             logger.error(f"Unexpected error during streaming: {e}")
             raise
 
-    def invoke_sync(self, messages: list[dict], model: str, api_key: str, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None, *, zdr: bool = False) -> dict:
-        """Non-streaming variant — returns a dict with reasoning, response, usage and model."""
+    def invoke_sync(self, messages: list[dict], model: str, api_key: str, reasoning=False, reasoning_tokens=None, reasoning_effort=None, tools=None, cancellation: CancellationToken | None = None, *, zdr: bool = False, tool_choice=None) -> dict:
+        """Non-streaming variant — returns a dict with reasoning, response, usage and model; `tool_choice` forces a tool."""
         model = self.own_model(model)
         url = "https://openrouter.ai/api/v1/chat/completions"
         headers = {
@@ -364,6 +364,8 @@ class OpenRouterProvider(LLMProvider):
             payload["reasoning"] = _reasoning_payload(reasoning_effort, reasoning_tokens)
         if tools:
             payload["tools"] = tools
+            if tool_choice:
+                payload["tool_choice"] = tool_choice
         try:
             response_data = post_chat(url, payload, headers=headers, cancellation=cancellation)
             msg = response_data["choices"][0]["message"]

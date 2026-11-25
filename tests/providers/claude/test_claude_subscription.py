@@ -391,7 +391,7 @@ class ClaudeSubscriptionWiringTests(unittest.TestCase):
         conversations = Mock()
         conversations.generated_title.return_value = None
         provider = Mock()
-        provider.invoke.return_value = {"response": "A title"}
+        provider.invoke.return_value = {"response": "", "tool_calls": [{"id": "1", "name": "set_chat_title", "arguments": '{"title": "A title"}'}]}
         user = UserConfig(max_level="admin", id="u", name="U", provider={"name": "openrouter"}, agents=["a"],
                           claude_subscription={"claude_config_dir": "/login"})
         naming = ChatNamingConfig(model="claude_subscription:haiku", min_messages=1)
@@ -410,7 +410,7 @@ class ClaudeSubscriptionWiringTests(unittest.TestCase):
         conversations = Mock()
         conversations.generated_title.return_value = None
         provider = Mock()
-        provider.invoke.return_value = {"response": "A title"}
+        provider.invoke.return_value = {"response": "", "tool_calls": [{"id": "1", "name": "set_chat_title", "arguments": '{"title": "A title"}'}]}
         user = UserConfig(max_level="admin", id="u", name="U", provider={"name": "openrouter"}, agents=["a"],
                           require_zdr=True, claude_subscription={"claude_config_dir": "/login"})
         naming = ChatNamingConfig(model="claude_subscription:haiku", min_messages=1)

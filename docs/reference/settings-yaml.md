@@ -315,6 +315,9 @@ required before a title is generated. Behavior:
 - the title is generated once, after the reply that reaches `min_messages`, and stored
   in `<chat_id>.title.json` next to the chat's other metadata; it is not regenerated
 - shorter chats keep the first user message as their title
+- the model must call a `set_chat_title` tool; only a valid argument (one line, at most 35 characters, no
+  "Title:" label) is stored, never plain text. An invalid answer is retried once; if it fails again
+  nothing is stored and naming is tried again after the next reply
 - if the env var is unset or the naming request fails, a warning is logged and the
   chat keeps its previous title; the reply has already been delivered by then. An
   unreadable title file is an explicit error, not a fallback
