@@ -81,3 +81,24 @@ class StoreTests(unittest.TestCase):
 
     def test_expire_without_data_dir(self) -> None:
         self.assertEqual(UploadStore(self.root / "missing").expire(30), 0)
+
+
+class ServiceCleanupTests(unittest.TestCase):
+    def test_cleanup_uses_the_configured_days_and_never_raises(self) -> None:
+        from unittest.mock import Mock, patch
+
+        from src.service.chat import ChatService
+
+        service = ChatService.__new__(ChatService)
+        service._uploads = Mock()
+        service._uploads.expire.return_value = 3
+        with patch("src.service.chat.UPLOADS", Mock(retention_days=7)):
+            self.assertEqual(service.cleanup_uploads(), 3)
+            service._uploads.expire.assert_called_once_with(7)
+            service._uploads.expire.side_effect = OSError("boom")
+            self.assertEqual(service.cleanup_uploads(), 0)
+
+    def test_default_retention_is_thirty_days(self) -> None:
+        from src.config.settings import UPLOADS
+
+        self.assertEqual(UPLOADS.retention_days, 30)

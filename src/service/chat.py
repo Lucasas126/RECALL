@@ -42,7 +42,7 @@ from src.config.secrets import fingerprint as secrets_fingerprint, get_secret
 from src.config.zdr import chat_zdr, zdr_required
 from src.config.settings import (
     AGENT_MAX_TOOL_HOPS, APPROVAL_EXPLAIN, ASSOC, CHAT_NAMING, CONFIG_DIR, DATA_DIR, ORCHESTRATOR, PDF, SPEECH_TO_TEXT, TAVILY, TELEGRAM_ALLOWED_USERS_ENV, current_mcp_settings,
-    SUBAGENTS, TERMINAL, VIDEO_DECOMPOSITION, WEB_PUBLIC_URL, memory_limits,
+    SUBAGENTS, TERMINAL, UPLOADS, VIDEO_DECOMPOSITION, WEB_PUBLIC_URL, memory_limits,
 )
 from src.core.index import VectorIndex
 from src.core.sources.folders import folder_path_problem
@@ -145,6 +145,7 @@ _EXPLAIN_PROMPT = (
 _EXPLAIN_TURNS = 6
 _EXPLAIN_TURN_CHARS = 600
 _LANGUAGE_NAMES = {"en": "English", "es": "Spanish"}
+_UPLOADS_CLEANUP_SECONDS = 24 * 3600  # how often saved attachments past their retention are removed
 _CLEANUP_INTERVAL_SECONDS = 3600  # how often the scheduler removes expired disposable chats
 
 AgentFactory = Callable[[str, str, Optional[str]], Agent]
@@ -771,8 +772,12 @@ class ChatService:
             self._cleanup_stop.clear()
 
             def loop() -> None:
+                next_uploads = 0.0  # the first pass runs at start-up, then daily
                 while True:
                     self.cleanup_disposable_chats()
+                    if monotonic() >= next_uploads:
+                        self.cleanup_uploads()
+                        next_uploads = monotonic() + _UPLOADS_CLEANUP_SECONDS
                     if self._cleanup_stop.wait(_CLEANUP_INTERVAL_SECONDS):
                         return
 
@@ -1512,6 +1517,21 @@ class ChatService:
             removed.append(chat_id)
         if removed:
             logger.info("removed %d expired disposable chat(s) of %s/%s", len(removed), user_id, agent_id)
+        return removed
+
+    def cleanup_uploads(self) -> int:
+        """Remove saved attachments older than `uploads.retention_days`; a failure is logged, never raised.
+
+        A chat that still shows a removed file keeps working: the turn stores the attachment itself, and the model's
+        note only names a path.
+        """
+        try:
+            removed = self._uploads.expire(UPLOADS.retention_days)
+        except Exception:
+            logger.warning("uploaded files cleanup failed", exc_info=True)
+            return 0
+        if removed:
+            logger.info("removed %d saved attachment(s) past %d days", removed, UPLOADS.retention_days)
         return removed
 
     def cleanup_disposable_chats(self) -> int:
