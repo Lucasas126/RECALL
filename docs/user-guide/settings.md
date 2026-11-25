@@ -84,3 +84,14 @@ It is only shown to users whose own maximum is `admin` and the server checks it 
 - Every change is logged by the web service (`administrator <id> changed the max_level of user <id>: <old> -> <new>`). The same can be
   done from the shell with `python -m src.admin user set --user U --set max_level=<level>`; `python -m src.admin user list` prints
   what this section shows. Sessions already open are not closed when a maximum is lowered, but every agent change is checked against the new value.
+
+### Adding a user and onboarding them
+
+**Add user** (administrators only) opens a four-step wizard in the Users section:
+
+1. **Create the user**: id, name, language, maximum level (default `collaborator`) and a password. The same checks as `python -m src.admin create-user` apply. With the password field empty one is generated and shown **once** in the wizard; a typed password is never returned. A failed creation leaves no user folder behind.
+2. **Provider access**: either write an OpenRouter API key for the user, or sign them in to Claude. The key is write-only: it is stored in `secrets.env` under a variable of that user alone (`OPENROUTER_API_KEY_<USER>`), the user's `user.yaml` names the variable, and the value is never returned, shown, logged or audited. It is accepted only in the request body. For Claude, the administrator opens the sign-in link and pastes the code; the user gets their own login folder in their config folder. The key is only format-checked (it is not sent anywhere).
+3. **First agent**: pick a template and, optionally, a model from the list of that user's provider; the agent is created through the same path as the agent form.
+4. **Review** of what was done.
+
+Every step is an administrator-only route (`403 admin_required` otherwise) and writes one line without secrets to `<data>/<user>/admin_audit.jsonl` and to the log. The routes are in the [API reference](../reference/api.md#permission-levels-in-the-web-ui).
