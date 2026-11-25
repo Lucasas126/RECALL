@@ -2949,7 +2949,15 @@ function userAdminItem(user) {
 }
 
 // ---- user onboarding wizard (administrators): create the user, give provider access, first agent, review
-const wizard = { user: null, access: [], agent: null };
+const wizard = { user: null, access: [], agent: null, agentIdEdited: false };
+// the agent id suggested for a template: `default` -> assistant, else the template id limited to [A-Za-z0-9_-] and 64 characters
+function suggestAgentId(template) {
+  if (!template || template === "default") return "assistant";
+  return template.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64) || "assistant";
+}
+function wizardSuggestAgentId() {
+  if (!wizard.agentIdEdited) $("wizard-agent-id").value = suggestAgentId($("wizard-template").value);
+}
 function wizardShow(step) {
   for (let i = 1; i <= 4; i += 1) $(`wizard-step-${i}`).hidden = i !== step;
   $("wizard-steps").textContent = tr("Step {step} of {total}", { step, total: 4 });
@@ -2959,7 +2967,7 @@ function wizardError(err) {
   $("wizard-error").textContent = err ? (err.message ?? String(err)) : "";
 }
 function wizardOpen() {
-  Object.assign(wizard, { user: null, access: [], agent: null });
+  Object.assign(wizard, { user: null, access: [], agent: null, agentIdEdited: false });
   for (const id of ["wizard-id", "wizard-name", "wizard-password", "wizard-key", "wizard-claude-code", "wizard-agent-id", "wizard-agent-name"]) $(id).value = "";
   $("wizard-language").value = state.preferences?.language === "es" ? "es" : "en";
   const levels = state.levels?.levels ?? [];
@@ -3068,6 +3076,7 @@ async function wizardToAgent() {
   } catch (err) {
     wizardError(err);
   }
+  wizardSuggestAgentId();
   try {
     const models = await api(wizardPath("/models"));
     $("wizard-model").replaceChildren(
@@ -3118,6 +3127,8 @@ $("wizard-claude-send").addEventListener("click", wizardClaudeSend);
 $("wizard-claude-cancel").addEventListener("click", wizardClaudeCancel);
 $("wizard-next-agent").addEventListener("click", wizardToAgent);
 $("wizard-agent-create").addEventListener("click", wizardCreateAgent);
+$("wizard-agent-id").addEventListener("input", () => { wizard.agentIdEdited = true; });
+$("wizard-template").addEventListener("change", wizardSuggestAgentId);
 $("wizard-skip-agent").addEventListener("click", wizardReview);
 $("wizard-close").addEventListener("click", wizardClose);
 // ---- end user onboarding wizard

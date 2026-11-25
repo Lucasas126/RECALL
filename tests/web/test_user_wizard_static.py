@@ -33,6 +33,12 @@ class UserWizardStaticTests(unittest.TestCase):
         shown = re.search(r"function wizardShow[\s\S]*?\n\}\n", WIZARD).group(0)
         self.assertIn('$("user-wizard").scrollIntoView({ block: "start", behavior: "instant" });', shown)
 
+    def test_the_agent_id_is_suggested_until_the_user_types_one(self) -> None:
+        self.assertIn("if (!wizard.agentIdEdited) $(\"wizard-agent-id\").value = suggestAgentId(", WIZARD)
+        self.assertIn('$("wizard-agent-id").addEventListener("input", () => { wizard.agentIdEdited = true; });', WIZARD)
+        self.assertIn('$("wizard-template").addEventListener("change", wizardSuggestAgentId);', WIZARD)
+        self.assertIn("agentIdEdited: false", WIZARD)  # reset when the wizard opens
+
     def test_texts_have_spanish_translations(self) -> None:
         for text in re.findall(r'tr\("([^"]+)"', WIZARD):
             self.assertIn(text, _SPANISH, text)
