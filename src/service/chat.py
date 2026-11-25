@@ -1763,6 +1763,7 @@ class ChatService:
         stream: Optional[bool] = None, attachments: Optional[list[dict]] = None,
         rewind_to: Optional[int] = None, internal_task: bool = False, meta: Optional[dict] = None,
         channel: Optional[str] = None, mention_meta: Optional[dict] = None,
+        recordings: Optional[list[Optional[str]]] = None, transcripts_in_text: bool = False,
     ) -> Iterator[ChatEvent]:
         """Send a user message to a chat and yield the reply as events.
 
@@ -1778,6 +1779,12 @@ class ChatService:
         removed (kept in the chat's `.removed.json` sidecar) and `text` is sent in its place, as one atomic
         step with respect to the chat's worker. When `attachments` is empty the original turn's
         attachments are kept; long-term memory (Dream) is not rewound.
+
+        `recordings` (edits only, when no new files are attached) decides what happens to the recordings the edited
+        turn already has, one entry per recording in order: a text replaces what speech-to-text heard, None (or an
+        empty text) removes the recording. When omitted every recording is kept as it was. With `transcripts_in_text`
+        the person already edited what was heard as part of `text`: the recordings stay as players only, without a
+        transcript of their own, and nothing is appended to the message.
 
         `channel` (`web` or `telegram`) is where the person wrote; it is stored on the turn and shown to the model.
 
@@ -1800,6 +1807,7 @@ class ChatService:
             if is_task_chat:
                 raise InputError("this is an internal task chat: steer the task instead")
         attachments = [ChatAttachment.model_validate(item).model_dump() for item in (attachments or [])]
+        attachments_given = bool(attachments)
         kept_documents: list[dict] = []
         kept_recordings: list[dict] = []
         if rewind_to is not None:
@@ -1820,6 +1828,11 @@ class ChatService:
         ] + kept_documents
         if rewind_to is not None and not attachments:  # an edit without new files keeps all the originals
             media = list(original.get("media") or [])
+            if recordings is not None:
+                media, kept_recordings = self._edit_recordings(media, recordings)
+                if transcripts_in_text:
+                    media = [{k: v for k, v in m.items() if k != "transcript"} if m in kept_recordings else m for m in media]
+                    kept_recordings = []
         text, attachments, notice = self._decompose_videos(user_id, agent_id, chat_id, text, attachments)
         transcripts: list[str] = []
         text, attachments = self._transcribe_audio(
@@ -1842,8 +1855,10 @@ class ChatService:
         run = _MessageRun(chat_id, text, attachments, stream, meta=run_meta or None,
                            channel=channel if channel in ("web", "telegram") else None)
         # keep what the speech-to-text heard next to each recording, so the person can check it any time
-        recordings = [item for item in media if item["modality"] == "audio" and "transcript" not in item]
-        for item, heard in zip(recordings, transcripts):
+        unheard = [item for item in media if item["modality"] == "audio" and "transcript" not in item]
+        if rewind_to is not None and transcripts_in_text and not attachments_given:
+            unheard = []  # an edit that moved the heard text into the message: the players stay without a transcript
+        for item, heard in zip(unheard, transcripts):
             item["transcript"] = heard
         if notice:
             run.events.put(ChatEvent("notice", text=notice, generation_id=run.generation_id))
@@ -2426,6 +2441,33 @@ class ChatService:
                 "mime_type": mime, "format": fmt[:16], "data_url": url,
             })
         return attachments
+
+    @staticmethod
+    def _edit_recordings(media: list[dict], edits: list[Optional[str]]) -> tuple[list[dict], list[dict]]:
+        """Apply an edit to a turn's recordings: `(media, recordings whose heard text still reaches the model)`.
+
+        `edits` has one entry per recording of the turn, in order. None removes the recording; a text replaces what
+        was heard (blank: the recording stays as a player without a transcript). Recordings beyond the list stay.
+        """
+        result: list[dict] = []
+        kept: list[dict] = []
+        position = 0
+        for item in media:
+            if item.get("modality") != "audio":
+                result.append(item)
+                continue
+            edit = edits[position] if position < len(edits) else item.get("transcript") or ""
+            position += 1
+            if edit is None:
+                continue
+            text = edit.strip()
+            item = {k: v for k, v in item.items() if k != "transcript"}
+            if text:
+                item["transcript"] = text
+            result.append(item)
+            if text:
+                kept.append(item)
+        return result, kept
 
     @staticmethod
     def _transcription_text(transcription: str) -> str:

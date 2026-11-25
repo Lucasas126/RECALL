@@ -654,11 +654,18 @@ details.thinking { border-left: 2px solid var(--line); padding-left: 10px; displ
 .icon-btn { display: inline-grid; place-items: center; flex-shrink: 0; width: 36px; height: 36px; padding: 0; border-color: transparent; background: none; color: var(--muted); border-radius: 50%; }
 .icon-btn.recording { color: #fff; background: #c0392b; animation: mic-pulse 1.2s ease-in-out infinite; }
 @keyframes mic-pulse { 50% { opacity: .6; } }
+.icon-btn.recording:hover:not(:disabled) { color: #fff; background: #c0392b; border-color: transparent; }  /* the generic button hover must not turn it grey */
 /* while recording the button grows to show the elapsed time, and the composer outline turns red */
 .icon-btn.recording { display: inline-flex; align-items: center; gap: 6px; width: auto; padding: 0 12px; border-radius: 18px; }
 .mic-time { font-variant-numeric: tabular-nums; font-size: .85em; font-weight: 600; }
 #composer:has(#mic.recording), #composer:has(#mic.recording):focus-within { border-color: #c0392b; box-shadow: 0 0 0 1px #c0392b; }
-.attachment-transcript { max-width: 100%; color: var(--muted); font-size: .85em; white-space: pre-wrap; }
+.attachment-transcript { max-width: 100%; color: var(--text); font-size: 1.18em; white-space: pre-wrap; }  /* 1.18 x .85 of the attachment box = the message text size */
+.mic-level { display: inline-flex; align-items: center; gap: 2px; height: 22px; }
+.mic-level i { display: block; width: 3px; height: 20%; min-height: 3px; border-radius: 2px; background: currentColor; transition: height 60ms linear; }
+.icon-btn.recording.silent .mic-level { opacity: .45; }
+.icon-btn.recording.silent::after { content: "!"; font-weight: 700; }
+.msg-edit-recordings { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 6px; }
+.msg.editing .attachment-audio { display: none; }  /* the chip and the text box of the editor stand in for it */
 .attachment-image, .attachment-audio, .attachment-video { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 6px; border-radius: 8px; max-width: min(100%, 360px); }
 .attachment-image img, .attachment-video video { max-width: min(320px, 70vw); max-height: 220px; border-radius: 6px; display: block; }   /* not a percentage: a percentage makes the bubble size itself from the picture's full width and leaves empty space on the right */
 .attachment-audio audio { width: min(100%, 300px); height: 36px; }

@@ -64,6 +64,10 @@ class MessageIn(BaseModel):
     attachments: list[ChatAttachment] = Field(default_factory=list)
     # rewind the chat to this stored turn (a user message) and answer `content` in its place
     edit_index: int | None = Field(default=None, strict=True, ge=0)
+    # edits only: what to do with the recordings of the edited message, in order (new transcript, or null to remove)
+    recordings: list[str | None] | None = Field(default=None, max_length=20)
+    # edits only: the heard text was edited inside `content`, so recordings stay as players without a transcript
+    transcripts_in_text: bool = False
 
 
 class AutomationTriggerIn(BaseModel):
@@ -693,6 +697,8 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
             events = service.send(
                 user_id, agent_id, chat_id, body.content, stream=True,
                 attachments=attachments, rewind_to=body.edit_index, channel="web",
+                recordings=body.recordings if body.edit_index is not None else None,
+                transcripts_in_text=body.transcripts_in_text and body.edit_index is not None,
             )
         except UnknownChat:
             if body.edit_index is not None or not _GENERATED_CHAT_ID.match(chat_id):
