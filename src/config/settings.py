@@ -7,7 +7,7 @@ from pathlib import Path
 import yaml
 
 from src.config.models import (
-    ApprovalExplainConfig, AssociativeMemoryConfig, ChatNamingConfig, ClaudeLoginSettings, IndexConfig, McpSettings, MemoryLimits, OrchestratorConfig, PdfConfig, PromptCacheConfig, SpeechToTextConfig, TavilyConfig, TerminalSettings,
+    ApprovalExplainConfig, AssociativeMemoryConfig, ChatNamingConfig, ClaudeLoginSettings, IndexConfig, McpSettings, MemoryLimits, OrchestratorConfig, PdfConfig, PromptCacheConfig, SpeechToTextConfig, TavilyConfig, TerminalSettings, UploadsConfig,
     SubagentSettings, VideoDecompositionConfig,
 )
 
@@ -117,6 +117,9 @@ VIDEO_DECOMPOSITION = VideoDecompositionConfig.model_validate(_video)
 
 # ------------------------------------------------------------------ pdf text extraction
 PDF = PdfConfig.model_validate(_pdf)
+
+# ------------------------------------------------------------------ uploaded attachments kept on disk
+UPLOADS = UploadsConfig.model_validate(_raw.get("uploads") or {})
 
 # ------------------------------------------------------------------ prompt caching
 PROMPT_CACHE = PromptCacheConfig.model_validate(_raw.get("prompt_cache", {}))

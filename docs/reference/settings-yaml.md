@@ -14,6 +14,7 @@ web UI and the Telegram bot after editing it. In Docker you can mount your own c
 | `web` | `host`, `port`, `session_secret_env`, `public_url` | [web authentication](#web-authentication) |
 | `telegram` | `allowed_users_env` (default `TELEGRAM_ALLOWED_USERS`), `chat_idle_minutes` (default `60`, 1-10080; `RECALL_TELEGRAM_CHAT_IDLE_MINUTES` overrides it) | [Telegram](../user-guide/telegram.md#telegram-access) |
 | `video`, `pdf`, `speech_to_text` | frame sampling, OCR and transcription defaults | [files and media](../user-guide/files-and-media.md) |
+| `uploads` | `retention_days` (default `30`, 1-3650): how long the server keeps a copy of each file sent in a chat | [files and media](../user-guide/files-and-media.md#saved-copies-of-your-files) |
 | `prompt_cache` | `enabled`, `anthropic_providers` | [prompt caching](#prompt-caching) |
 | `tavily` | `api_key` (variable name), `timeout_seconds`, `max_content_chars` | [shared web access](#shared-web-access-tavily) |
 | `associative_memory` | `context_messages`, `top_n`, `score_threshold`, `palace_slots`, `palace_threshold`, `palace_exclude`, `query_model`, `api_key`, `zdr` | [memory](../user-guide/memory.md#associative-memory) |

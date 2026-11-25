@@ -154,6 +154,24 @@ on HTTPS or `localhost`; where it is unavailable the button stays disabled.
   the audio is not stored; the error says no speech was detected. Each transcription is logged
   with file name, format, MIME type, size, model, language and characters returned.
 
+## saved copies of your files
+
+Every file you send in a chat (image, PDF, audio, video or any document, from the web or Telegram) is also saved as it
+arrived, before RECALL converts it: the PDF itself, the original recording, the original video. Copies live in
+`data/<user_id>/.uploads/<chat_id>/<timestamp>-<name>`; names are cleaned (no folders, no leading dots, at most 80
+characters) and an existing file is never overwritten. No new size limit applies.
+
+- **What the agent sees:** one line per file appended to your message for the model, such as
+  `[FILE] Original of 'report.pdf' saved at /abs/path/... (read-only source address: uploads:<chat_id>/<file>)`. The
+  absolute path works with a `local` terminal backend; the `uploads:` address works with `read` and `send_file`. The line
+  is part of the stored message text, so it is visible in the chat history.
+- **Who can read them:** every agent of the same user whose level and tool groups allow reading files (`memory_read` or
+  `files_send`) gets the read-only source `uploads`, which is not indexed. Agents cannot write or delete copies, and other
+  users never see them. To use a file on another machine, the agent copies it with the terminal tool.
+- **Retention:** `uploads.retention_days` in [settings.yaml](../reference/settings-yaml.md) (default 30, for every file type).
+  Expired copies are removed at start-up and then daily. A chat that mentions a removed file still opens: the message keeps
+  its own attachment, only the saved copy is gone. Deleting a chat does not remove its copies; the retention does.
+
 ## files and notices from the agent
 
 An agent can hand you a file and message you on Telegram, with two tool groups you pick per agent (see [tools](../reference/tools.md#files_send)):

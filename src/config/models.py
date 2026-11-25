@@ -312,6 +312,14 @@ class PdfConfig(BaseModel):
     tesseract_cmd: str | None = Field(default=None, min_length=1, max_length=512)
 
 
+class UploadsConfig(BaseModel):
+    """Server-side copies of the files users attach to chats (settings.yaml `uploads`)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    retention_days: int = Field(default=30, ge=1, le=3650, strict=True)  # a copy older than this is removed, any file type
+
+
 class ProviderConfig(BaseModel):
     name: str
     api_key: Optional[str] = None  # name of the env var holding the actual key (not needed for local providers)
@@ -814,7 +822,7 @@ class MemoryLimits(BaseModel):
 
 
 # source names the agent's own data already uses; a folder cannot take them
-RESERVED_SOURCE_NAMES = frozenset({"mind_palace", "conversations", "agent", "dream"})
+RESERVED_SOURCE_NAMES = frozenset({"mind_palace", "conversations", "agent", "dream", "uploads"})
 FOLDER_NAME_PATTERN = r"^[a-z0-9_-]{1,32}$"
 
 

@@ -183,3 +183,31 @@ class VoiceEditAndMeterStaticTests(unittest.TestCase):
         self.assertIn('id="mic-level"', html)
         self.assertIn(".mic-level", style)
         self.assertNotIn("font-size: .85em; white-space: pre-wrap", style)  # the heard text is normal-sized
+
+
+class SavedOriginalsTests(models_tests.ModelFixture):
+    _PDF = SentPdfServiceTests._PDF
+
+    def _context_text(self) -> str:
+        return str(self.service.get_chat("user-one", "agent-one", self.chat)["messages"][0]["content"])
+
+    def test_pdf_original_is_kept_and_the_model_is_told_where(self) -> None:
+        with patch("src.service.chat.extract_pdf_text") as extract:
+            extract.return_value.render.return_value = "page text"
+            list(self.service.send("user-one", "agent-one", self.chat, "mira", attachments=[dict(self._PDF)]))
+        folder = self.root / "uploads-data" / "user-one" / ".uploads" / self.chat
+        [saved] = list(folder.iterdir())
+        self.assertTrue(saved.name.endswith("-informe.pdf"))
+        self.assertEqual(saved.read_bytes(), b"ABC" * 12)  # the bytes as sent, not the extracted text
+        text = self._context_text()
+        self.assertIn(str(saved.resolve()), text)
+        self.assertIn(f"uploads:{self.chat}/{saved.name}", text)
+        self.assertIn("page text", text)
+
+    def test_edit_without_new_files_does_not_save_again(self) -> None:
+        with patch("src.service.chat.extract_pdf_text") as extract:
+            extract.return_value.render.return_value = "page text"
+            list(self.service.send("user-one", "agent-one", self.chat, "mira", attachments=[dict(self._PDF)]))
+            list(self.service.send("user-one", "agent-one", self.chat, "otra vez", rewind_to=0))
+        folder = self.root / "uploads-data" / "user-one" / ".uploads" / self.chat
+        self.assertEqual(len(list(folder.iterdir())), 1)

@@ -357,14 +357,14 @@ class FolderTests(AgentFilesFixture):
         self.assertIn("folders", str(legacy.exception))
 
     def test_chat_and_dream_folder_options(self) -> None:
-        self.assertEqual(chat_folder_options(_config(tool_groups=["folders_edit"])), {"recall_docs": True})
+        self.assertEqual(chat_folder_options(_config(tool_groups=["folders_edit"])), {"recall_docs": True, "uploads": False})
         self.assertEqual(
             chat_folder_options(_config(folders=self.folders, tool_groups=["memory_read"])),
-            {"recall_docs": True, "folders": self.folders, "folders_readable": False, "folders_writable": False},
+            {"recall_docs": True, "uploads": True, "folders": self.folders, "folders_readable": False, "folders_writable": False},
         )
         self.assertEqual(
             chat_folder_options(_config(folders=self.folders, tool_groups=["folders_read"])),
-            {"recall_docs": True, "folders": self.folders, "folders_readable": True, "folders_writable": False},
+            {"recall_docs": True, "uploads": False, "folders": self.folders, "folders_readable": True, "folders_writable": False},
         )
         self.assertEqual(
             chat_folder_options(_config(folders=self.folders, tool_groups=["folders_edit"]))["folders_writable"], True,

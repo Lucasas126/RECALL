@@ -42,7 +42,7 @@ from src.config.secrets import fingerprint as secrets_fingerprint, get_secret
 from src.config.zdr import chat_zdr, zdr_required
 from src.config.settings import (
     AGENT_MAX_TOOL_HOPS, APPROVAL_EXPLAIN, ASSOC, CHAT_NAMING, CONFIG_DIR, DATA_DIR, ORCHESTRATOR, PDF, SPEECH_TO_TEXT, TAVILY, TELEGRAM_ALLOWED_USERS_ENV, current_mcp_settings,
-    SUBAGENTS, TERMINAL, VIDEO_DECOMPOSITION, WEB_PUBLIC_URL, memory_limits,
+    SUBAGENTS, TERMINAL, UPLOADS, VIDEO_DECOMPOSITION, WEB_PUBLIC_URL, memory_limits,
 )
 from src.core.index import VectorIndex
 from src.core.sources.folders import folder_path_problem
@@ -88,6 +88,7 @@ from src.utils.logger import get_logger
 from src.utils.media import VideoDecomposition, decompose_video
 from src.utils.pdf import extract_pdf_text, run_tesseract
 from src.utils.avatars import USER_KEY, Avatar, AvatarStore, normalise_avatar
+from src.utils.uploads import UploadStore
 from src.utils.i18n import InputError, UserMessageError, error_message, message
 from src.web.auth import verify_password
 
@@ -144,6 +145,7 @@ _EXPLAIN_PROMPT = (
 _EXPLAIN_TURNS = 6
 _EXPLAIN_TURN_CHARS = 600
 _LANGUAGE_NAMES = {"en": "English", "es": "Spanish"}
+_UPLOADS_CLEANUP_SECONDS = 24 * 3600  # how often saved attachments past their retention are removed
 _CLEANUP_INTERVAL_SECONDS = 3600  # how often the scheduler removes expired disposable chats
 
 AgentFactory = Callable[[str, str, Optional[str]], Agent]
@@ -455,6 +457,7 @@ class ChatService:
         self._favorites = ModelFavorites(CONFIG_DIR)
         self._preferences = UserPreferencesStore(CONFIG_DIR)
         self._agents = AgentStore(CONFIG_DIR, DATA_DIR)
+        self._uploads = UploadStore(DATA_DIR)  # server-side copies of the files users attach
         self._avatars = AvatarStore(DATA_DIR)  # profile pictures, beside (never inside) the agents' data folders
         self._permissions = AgentPermissions(self._agents)
         self._agent_admin = AgentAdmin(self)  # the `agents` tools: the web form's own create/update/delete
@@ -769,8 +772,12 @@ class ChatService:
             self._cleanup_stop.clear()
 
             def loop() -> None:
+                next_uploads = 0.0  # the first pass runs at start-up, then daily
                 while True:
                     self.cleanup_disposable_chats()
+                    if monotonic() >= next_uploads:
+                        self.cleanup_uploads()
+                        next_uploads = monotonic() + _UPLOADS_CLEANUP_SECONDS
                     if self._cleanup_stop.wait(_CLEANUP_INTERVAL_SECONDS):
                         return
 
@@ -1512,6 +1519,21 @@ class ChatService:
             logger.info("removed %d expired disposable chat(s) of %s/%s", len(removed), user_id, agent_id)
         return removed
 
+    def cleanup_uploads(self) -> int:
+        """Remove saved attachments older than `uploads.retention_days`; a failure is logged, never raised.
+
+        A chat that still shows a removed file keeps working: the turn stores the attachment itself, and the model's
+        note only names a path.
+        """
+        try:
+            removed = self._uploads.expire(UPLOADS.retention_days)
+        except Exception:
+            logger.warning("uploaded files cleanup failed", exc_info=True)
+            return 0
+        if removed:
+            logger.info("removed %d saved attachment(s) past %d days", removed, UPLOADS.retention_days)
+        return removed
+
     def cleanup_disposable_chats(self) -> int:
         """Remove expired disposable chats of every configured agent; failures are logged, never raised."""
         removed = 0
@@ -1808,6 +1830,7 @@ class ChatService:
                 raise InputError("this is an internal task chat: steer the task instead")
         attachments = [ChatAttachment.model_validate(item).model_dump() for item in (attachments or [])]
         attachments_given = bool(attachments)
+        saved_lines = self._save_uploads(user_id, conversations, chat_id, attachments)  # the originals, before any conversion
         kept_documents: list[dict] = []
         kept_recordings: list[dict] = []
         if rewind_to is not None:
@@ -1843,6 +1866,8 @@ class ChatService:
                 self._transcription_text(item["transcript"]) for item in kept_recordings
             )] if part)
         text, attachments = self._extract_documents(text, attachments)
+        if saved_lines:
+            text = "\n\n".join(part for part in [text.strip(), *saved_lines] if part)
         if not text.strip() and not attachments:
             raise InputError("message is empty")
         slot = self._slot(user_id, agent_id)
@@ -2441,6 +2466,34 @@ class ChatService:
                 "mime_type": mime, "format": fmt[:16], "data_url": url,
             })
         return attachments
+
+    def _save_uploads(
+        self, user_id: str, conversations: ConversationsSource, chat_id: str, attachments: list[dict],
+    ) -> list[str]:
+        """Keep the original bytes of each new attachment on disk; one line per file tells the model where.
+
+        Copies live under the user's uploads folder (`uploads:<chat_id>/<file>` for the file tools, plus the absolute
+        path for a local terminal). A chat that does not exist is skipped: the send fails right after.
+        """
+        if not attachments:
+            return []
+        try:
+            if not conversations.exists_chat(chat_id):
+                return []
+        except ValueError:
+            return []
+        lines = []
+        for attachment in attachments:
+            try:
+                data = base64.b64decode(attachment["data_url"].split(",", 1)[1], validate=True)
+            except (IndexError, binascii.Error) as exc:
+                raise InputError("invalid file data for '{name}'", name=attachment["name"]) from exc
+            path = self._uploads.save(user_id, chat_id, attachment["name"], data)
+            lines.append(
+                f"[FILE] Original of '{attachment['name']}' saved at {path.resolve()} "
+                f"(read-only source address: uploads:{chat_id}/{path.name})"
+            )
+        return lines
 
     @staticmethod
     def _edit_recordings(media: list[dict], edits: list[Optional[str]]) -> tuple[list[dict], list[dict]]:
