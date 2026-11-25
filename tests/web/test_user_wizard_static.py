@@ -29,6 +29,10 @@ class UserWizardStaticTests(unittest.TestCase):
         self.assertIn('$("wizard-key").value = ""', WIZARD)
         self.assertIn('$("wizard-generated").textContent = ""', WIZARD)
 
+    def test_a_step_change_scrolls_the_wizard_to_its_top_without_animation(self) -> None:
+        shown = re.search(r"function wizardShow[\s\S]*?\n\}\n", WIZARD).group(0)
+        self.assertIn('$("user-wizard").scrollIntoView({ block: "start", behavior: "instant" });', shown)
+
     def test_texts_have_spanish_translations(self) -> None:
         for text in re.findall(r'tr\("([^"]+)"', WIZARD):
             self.assertIn(text, _SPANISH, text)

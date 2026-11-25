@@ -2953,6 +2953,7 @@ const wizard = { user: null, access: [], agent: null };
 function wizardShow(step) {
   for (let i = 1; i <= 4; i += 1) $(`wizard-step-${i}`).hidden = i !== step;
   $("wizard-steps").textContent = tr("Step {step} of {total}", { step, total: 4 });
+  $("user-wizard").scrollIntoView({ block: "start", behavior: "instant" });
 }
 function wizardError(err) {
   $("wizard-error").textContent = err ? (err.message ?? String(err)) : "";
