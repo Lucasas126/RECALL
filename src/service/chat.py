@@ -58,6 +58,8 @@ from src.providers.ollama import OllamaUnavailable
 from src.providers.openrouter import OpenRouterProvider
 from src.providers.claude_subscription import claude_subscription_provider
 from src.providers.claude_subscription.login import login_allowed, resolved_settings
+from src.admin import users as admin_users
+from src.agent import templates as agent_templates
 from src.config import user_keys
 from src.providers.claude_subscription import signin as claude_signin
 from src.providers.claude_subscription.status import cli_status
@@ -81,7 +83,7 @@ from src.agent.toolsets.processes import process_registry, process_wake_block, p
 from src.terminal.approvals import ApprovalBroker, ApprovalNotFound
 from src.terminal.output import clean, redact
 from src.terminal.processes import ProcessError
-from src.terminal.audit import audit_path, audit_writable, write_rule_audit
+from src.terminal.audit import audit_path, audit_writable, write_audit, write_rule_audit
 from src.terminal.rules import LEARNED_REASON, ApprovalRule
 from src.terminal.context import RunContext, run_context
 from src.utils.logger import get_logger
@@ -105,6 +107,7 @@ _ROUTING_INSTRUCTIONS = (
 )
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+ADMIN_AUDIT_FILE = "admin_audit.jsonl"  # <data_dir>/<user>/: what administrators did to that user
 _REASONING_SUPPORT_TTL_SECONDS = 600
 _TASK_CHAT_NO_RENAME = "this is an internal task chat: it cannot be renamed (use an @mention for a chat that stays)"
 _TASK_CHAT_NO_DELETE = "this is an internal task chat: it cannot be deleted (it goes away with its task; use an @mention for a chat that stays)"
@@ -282,6 +285,12 @@ class OwnMaxLevel(InputError):
     """An administrator tried to change their own maximum level."""
 
     code = "max_level_self_change"
+
+
+class InvalidManagedUser(InputError):
+    """The id given for a new user is not valid."""
+
+    code = "user_create_failed"
 
 
 class NoAvatar(ServiceError):
@@ -2293,6 +2302,115 @@ class ChatService:
             raise UnknownManagedUser("unknown user: {user_id}", user_id=user_id) from exc
         logger.info("administrator %s changed the max_level of user %s: %s -> %s", admin_id, user_id, old.label, level.label)
         return next(row for row in self.list_users(admin_id) if row["id"] == user_id)
+
+    def create_user(
+        self, admin_id: str, user_id: str, *, name: str | None = None, language: str = "en",
+        max_level: str | None = None, password: str | None = None,
+    ) -> dict:
+        """An administrator creates a user (the CLI's `create-user` rules). The password is typed (never returned) or
+        generated and returned once as `generated_password`. Nothing is left behind when it fails."""
+        self._require_administrator(admin_id)
+        self._check_id("user", user_id, InvalidManagedUser)
+        try:
+            result = admin_users.create_user(
+                user_id, name=name or None, language=language, max_level=max_level, password=password or None,
+                generate=not password,
+            )
+        except admin_users.AdminError as exc:
+            raise InputError(str(exc), code="user_create_failed") from exc
+        logger.info("administrator %s created user %s (max_level %s)", admin_id, user_id, result["max_level"])
+        self._admin_audit(admin_id, user_id, "create_user", max_level=result["max_level"])
+        row = next(row for row in self.user_overview() if row["id"] == user_id)
+        return {**row, "self": False, "generated_password": result["generated"]}
+
+    def _admin_audit(self, admin_id: str, user_id: str, action: str, **fields) -> None:
+        """One line per administrator action on a user, in that user's data folder; never a secret value."""
+        path = Path(DATA_DIR) / user_id / ADMIN_AUDIT_FILE
+        if not write_audit(path, event="admin_action", action=action, actor=admin_id, user=user_id, **fields):
+            logger.error("the administrator audit file for user %s could not be written", user_id)
+
+    def _managed_user(self, admin_id: str, user_id: str) -> UserConfig:
+        self._require_administrator(admin_id)
+        self._check_id("user", user_id, UnknownManagedUser)
+        try:
+            return load_user(user_id)
+        except FileNotFoundError as exc:
+            raise UnknownManagedUser("unknown user: {user_id}", user_id=user_id) from exc
+
+    def admin_set_user_key(self, admin_id: str, user_id: str, key: str) -> dict:
+        """An administrator writes another user's own provider key (write-only: the value is never returned or logged)."""
+        self._managed_user(admin_id, user_id)
+        user_keys.save_user_key(user_id, key, verify=False)
+        self._availability.forget()
+        logger.info("administrator %s set the provider key of user %s", admin_id, user_id)
+        self._admin_audit(admin_id, user_id, "set_provider_key", variable=user_keys.variable_for(user_id))
+        return user_keys.key_state(user_id, user_keys.variable_for(user_id))
+
+    def admin_list_models(self, admin_id: str, user_id: str, query: str = "") -> list[dict]:
+        """The chat models the target user can pick (their own provider and key)."""
+        self._managed_user(admin_id, user_id)
+        return self.list_models(user_id, query)
+
+    def admin_agent_templates(self, admin_id: str) -> list[dict]:
+        self._require_administrator(admin_id)
+        return [
+            {"template": name, "description": item.description, "default_name": item.display_name or None,
+             "min_level": item.min_level.label if item.min_level else None}
+            for name, item in agent_templates.templates().items()
+        ]
+
+    def admin_create_agent(
+        self, admin_id: str, user_id: str, agent_id: str, *, template: str = "default", name: str = "", model: str = "",
+    ) -> dict:
+        """An administrator creates the user's first agent from a template, through the same path as the web form."""
+        user = self._managed_user(admin_id, user_id)
+        if not _ID_RE.match(agent_id or ""):
+            raise InputError("Invalid agent id: use 1-64 letters, digits, '_' or '-'.")
+        available = agent_templates.templates()
+        if template not in available:
+            raise InputError("Unknown template '{name}'.", name=template)
+        chosen = available[template]
+        if chosen.min_level is not None and chosen.min_level > user.max_level:
+            raise InputError(
+                "The template '{name}' needs the level '{level}', above the user's maximum '{maximum}'.",
+                name=template, level=chosen.min_level.label, maximum=user.max_level.label,
+            )
+        config, soul, _ = agent_templates.build(template, agent_id, name.strip() or chosen.display_name or agent_id)
+        if model:
+            config = config.model_copy(update={"chat_config": config.chat_config.model_copy(update={"model": model})})
+        created = self.create_agent(user_id, config)
+        if soul != agent_templates.templates()["default"].soul:
+            self.update_soul(user_id, agent_id, soul)
+        self._admin_audit(admin_id, user_id, "create_agent", agent=agent_id, template=template)
+        logger.info("administrator %s created agent %s for user %s", admin_id, agent_id, user_id)
+        return created
+
+    def _admin_login_user(self, admin_id: str, user_id: str) -> UserConfig:
+        """The target user, given their own Claude login folder first when they have none."""
+        user = self._managed_user(admin_id, user_id)
+        if not user.claude_subscription.claude_config_dir:
+            admin_users.give_claude_login(user_id)
+            self._good_users.pop(user_id, None)
+            self._admin_audit(admin_id, user_id, "give_claude_login_folder")
+            user = load_user(user_id)
+        return user
+
+    def admin_claude_login_start(self, admin_id: str, user_id: str) -> dict:
+        user = self._admin_login_user(admin_id, user_id)
+        self._admin_audit(admin_id, user_id, "claude_login_start")
+        return claude_signin.start(user.id, resolved_settings(user.id, user.claude_subscription))
+
+    def admin_claude_login_code(self, admin_id: str, user_id: str, code: str) -> dict:
+        user = self._admin_login_user(admin_id, user_id)
+        status = claude_signin.submit(user.id, code, resolved_settings(user.id, user.claude_subscription))
+        self._availability.forget()
+        self._admin_audit(admin_id, user_id, "claude_login_done")
+        return {"logged_in": status["logged_in"], "subscription": status.get("subscription")}
+
+    def admin_claude_login_cancel(self, admin_id: str, user_id: str) -> dict:
+        self._managed_user(admin_id, user_id)
+        claude_signin.cancel(user_id)
+        return {"status": "cancelled"}
 
     def learn_approval_rules(self, user_id: str, agent_id: str, rules: list[ApprovalRule], *, chat_id: str = "") -> list[ApprovalRule]:
         """Save narrow allow rules from an approval card to the agent (validated like a form edit, audited).

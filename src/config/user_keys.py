@@ -63,10 +63,16 @@ def _point_user_at(user_id: str, variable: str) -> None:
             atomic_write_text(path, yaml.safe_dump(data, sort_keys=False, allow_unicode=True, default_flow_style=False))
 
 
-def save_user_key(user_id: str, key: str) -> str:
-    """Check and store `key` for `user_id`; returns the variable name used."""
+def save_user_key(user_id: str, key: str, *, verify: bool = True) -> str:
+    """Check and store `key` for `user_id`; returns the variable name used.
+
+    `verify=False` only checks the format (an administrator setting up another user's key; no request is made with it).
+    """
     key = (key or "").strip()
-    check_key(key)
+    if verify:
+        check_key(key)
+    elif not _KEY.match(key):
+        raise InputError("That does not look like an OpenRouter API key.", code="openrouter_key_bad_format")
     variable = variable_for(user_id)
     try:
         secrets.save_secret(variable, key)
