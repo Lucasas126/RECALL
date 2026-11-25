@@ -12,7 +12,9 @@ from src.core.sources.dream import DreamStateSource
 from src.core.sources.folders import FolderSource, folder_path_problem
 from src.core.sources.mind_palace import MindPalaceSource
 from src.core.sources.recall_docs import RECALL_DOCS, RecallDocsSource
+from src.core.sources.uploads import UPLOADS, UploadsSource
 from src.utils.logger import get_logger
+from src.utils.uploads import UPLOADS_DIR
 
 logger = get_logger("sources")
 
@@ -29,7 +31,7 @@ class SourceRegistry:
     def for_agent(
         cls, user_id: str, agent_id: str, *, folders: Sequence[FolderConfig] = (),
         folders_readable: bool = False, folders_writable: bool = False, data_dir: Path | None = None,
-        recall_docs: bool = False,
+        recall_docs: bool = False, uploads: bool = False,
     ) -> "SourceRegistry":
         """Build an agent's sources; each of `folders` becomes a source named after it.
 
@@ -45,6 +47,8 @@ class SourceRegistry:
             "agent": AgentFilesSource(base),
             "dream": DreamStateSource(base / "dream"),
         }
+        if uploads:  # the user's own folder, shared by all of their agents and nobody else's
+            sources[UPLOADS] = UploadsSource((data_dir or DATA_DIR) / user_id / UPLOADS_DIR)
         if recall_docs:
             sources[RECALL_DOCS] = RecallDocsSource()
         unavailable: set[str] = set()

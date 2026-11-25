@@ -25,6 +25,7 @@ from src.agent.tool_groups import AUTOMATION_EXTRA_GROUPS, DISPOSABLE_BLOCKED_TO
 
 AUTOMATION_EXTRA_TOOLS = tuple(name for group in AUTOMATION_EXTRA_GROUPS for name in TOOL_GROUP_TOOLS[group])
 from src.config.ceiling import group_allowed, restrict_config, tool_allowed
+from src.config.levels import Level
 from src.config.models import ResolvedAgent
 from src.providers.tavily import TavilyClient
 
@@ -54,11 +55,19 @@ TOOL_ORDER = _ORDER  # every built-in tool name; MCP tools must not reuse one
 
 
 def chat_folder_options(config: ResolvedAgent) -> dict:
-    """Registry options for a chat: every folder is registered; the folder tool groups decide access."""
-    docs = {"recall_docs": config.recall_knowledge}
+    """Registry options for a chat: every folder is registered; the folder tool groups decide access.
+
+    The user's saved attachments (`uploads`) are registered, read-only, for an agent whose level and tool groups let it
+    read files (`memory_read`: `read`; `files_send`: `send_file`); a lower one never sees them.
+    """
+    groups = set(config.tool_groups or ()) if config.tools else set()
+    docs = {
+        "recall_docs": config.recall_knowledge,
+        "uploads": any(group in groups and group_allowed(getattr(config, "level", None) or Level.MINIMAL, group)
+                       for group in ("memory_read", "files_send")),
+    }
     if not config.folders:
         return docs
-    groups = set(config.tool_groups or ()) if config.tools else set()
     return {
         **docs,
         "folders": config.folders,

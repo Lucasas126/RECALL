@@ -88,6 +88,7 @@ from src.utils.logger import get_logger
 from src.utils.media import VideoDecomposition, decompose_video
 from src.utils.pdf import extract_pdf_text, run_tesseract
 from src.utils.avatars import USER_KEY, Avatar, AvatarStore, normalise_avatar
+from src.utils.uploads import UploadStore
 from src.utils.i18n import InputError, UserMessageError, error_message, message
 from src.web.auth import verify_password
 
@@ -455,6 +456,7 @@ class ChatService:
         self._favorites = ModelFavorites(CONFIG_DIR)
         self._preferences = UserPreferencesStore(CONFIG_DIR)
         self._agents = AgentStore(CONFIG_DIR, DATA_DIR)
+        self._uploads = UploadStore(DATA_DIR)  # server-side copies of the files users attach
         self._avatars = AvatarStore(DATA_DIR)  # profile pictures, beside (never inside) the agents' data folders
         self._permissions = AgentPermissions(self._agents)
         self._agent_admin = AgentAdmin(self)  # the `agents` tools: the web form's own create/update/delete
@@ -1808,6 +1810,7 @@ class ChatService:
                 raise InputError("this is an internal task chat: steer the task instead")
         attachments = [ChatAttachment.model_validate(item).model_dump() for item in (attachments or [])]
         attachments_given = bool(attachments)
+        saved_lines = self._save_uploads(user_id, conversations, chat_id, attachments)  # the originals, before any conversion
         kept_documents: list[dict] = []
         kept_recordings: list[dict] = []
         if rewind_to is not None:
@@ -1843,6 +1846,8 @@ class ChatService:
                 self._transcription_text(item["transcript"]) for item in kept_recordings
             )] if part)
         text, attachments = self._extract_documents(text, attachments)
+        if saved_lines:
+            text = "\n\n".join(part for part in [text.strip(), *saved_lines] if part)
         if not text.strip() and not attachments:
             raise InputError("message is empty")
         slot = self._slot(user_id, agent_id)
@@ -2441,6 +2446,34 @@ class ChatService:
                 "mime_type": mime, "format": fmt[:16], "data_url": url,
             })
         return attachments
+
+    def _save_uploads(
+        self, user_id: str, conversations: ConversationsSource, chat_id: str, attachments: list[dict],
+    ) -> list[str]:
+        """Keep the original bytes of each new attachment on disk; one line per file tells the model where.
+
+        Copies live under the user's uploads folder (`uploads:<chat_id>/<file>` for the file tools, plus the absolute
+        path for a local terminal). A chat that does not exist is skipped: the send fails right after.
+        """
+        if not attachments:
+            return []
+        try:
+            if not conversations.exists_chat(chat_id):
+                return []
+        except ValueError:
+            return []
+        lines = []
+        for attachment in attachments:
+            try:
+                data = base64.b64decode(attachment["data_url"].split(",", 1)[1], validate=True)
+            except (IndexError, binascii.Error) as exc:
+                raise InputError("invalid file data for '{name}'", name=attachment["name"]) from exc
+            path = self._uploads.save(user_id, chat_id, attachment["name"], data)
+            lines.append(
+                f"[FILE] Original of '{attachment['name']}' saved at {path.resolve()} "
+                f"(read-only source address: uploads:{chat_id}/{path.name})"
+            )
+        return lines
 
     @staticmethod
     def _edit_recordings(media: list[dict], edits: list[Optional[str]]) -> tuple[list[dict], list[dict]]:

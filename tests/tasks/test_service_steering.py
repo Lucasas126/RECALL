@@ -14,6 +14,7 @@ from src.core.sources.conversations import ConversationsSource
 from src.providers.cancellation import CancellationToken
 from src.providers.provider import LLMProvider
 from src.service.chat import ChatService, UnknownAgent, UnknownChat, UnknownUser
+from src.utils.uploads import UploadStore
 from tests.support.auth_helpers import TEST_PASSWORD_HASH
 
 
@@ -61,6 +62,7 @@ class SteeringFixture(unittest.TestCase):
         config_patch.start()
         self.addCleanup(config_patch.stop)
         self.service = ChatService(agent_factory=self._factory)
+        self.service._uploads = UploadStore(self.root / "uploads-data")  # never the real data folder
         self.addCleanup(self._finish_workers)
         self.chat = self.service.create_chat("user-one", "agent-one")["id"]
 

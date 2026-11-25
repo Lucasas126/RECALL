@@ -228,6 +228,7 @@ _SPANISH = {
     "agent '{agent_id}' is not owned by user '{user_id}'": "El agente '{agent_id}' no pertenece al usuario '{user_id}'.",
     "invalid {kind} id: {value!r}": "Identificador de {kind} no válido: {value!r}",
     "invalid audio data for '{name}'": "Datos de audio no válidos para '{name}'.",
+    "invalid file data for '{name}'": "Datos de archivo no válidos para '{name}'.",
     "invalid PDF data for '{name}'": "Datos de PDF no válidos para '{name}'.",
     "invalid video data for '{name}'": "Datos de vídeo no válidos para '{name}'.",
     "Could not read preferences; check the user's preferences.json.": "No se han podido leer los ajustes; comprueba el archivo preferences.json del usuario.",
