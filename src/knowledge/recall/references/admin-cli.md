@@ -47,7 +47,7 @@ python -m src.admin agent create --user user-a --id travel --name Travel --set d
 
 `python -m src.admin task run --user U --agent A --goal "..." [--context C] [--instructions I] [--notify AGENT:CHAT] [--wait]` starts an **unattended** subagent task with no parent chat: prints `task: <id>` (`--wait`: also status, result). Manual and dangerous terminal actions are denied, `smart` normal ones run; limits and the daily token budget apply; without `--wait` it stops on exit. See `delegation-processes.md`.
 
-Creating users and passwords stays with `python -m src.admin create-user [--max-level L]` (default `collaborator`) and `python -m src.admin set-password`, which the user runs himself (hidden prompt). `python -m src.admin version` prints the running version (and the image build id when set). Other checks: `python -m src.admin terminal-test --user U --backend B` (ssh backends) and `python -m src.admin route-test "text" --user U`.
+Creating users and passwords stays with `python -m src.admin create-user [--max-level L]` (default `collaborator`) and `python -m src.admin set-password`, which the user runs himself (hidden prompt). Administrators (`max_level: admin`) can also create users in the web UI: Settings > Users > Add user (wizard: user, provider key or Claude sign-in, first agent; `POST /api/admin/users` and siblings; the key is write-only and audited without its value in `<data>/<user>/admin_audit.jsonl`). `python -m src.admin version` prints the running version (and the image build id when set). Other checks: `python -m src.admin terminal-test --user U --backend B` (ssh backends) and `python -m src.admin route-test "text" --user U`.
 
 ## Secrets
 

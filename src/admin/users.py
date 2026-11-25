@@ -21,6 +21,7 @@ import argparse
 import getpass
 import re
 import secrets
+import shutil
 import sys
 from pathlib import Path
 
@@ -78,15 +79,22 @@ def _read_password() -> str:
     return first
 
 
-def _hash_new_password(generate: bool) -> tuple[str, str | None]:
-    """(argon2 hash, the generated plaintext or None). Plaintext is only returned for --generate."""
-    password = generate_password() if generate else _read_password()
+def _hash_new_password(generate: bool, password: str | None = None) -> tuple[str, str | None]:
+    """(argon2 hash, the generated plaintext or None). Plaintext is only returned when it was generated here.
+
+    A `password` given by the caller (the web admin panel) is used as typed; without one it is generated or asked.
+    """
+    if password is None:
+        password = generate_password() if generate else _read_password()
+        generate_shown = generate
+    else:
+        generate_shown = False
     check_password_strength(password)
     try:
         hashed = hash_password(password)
     except ValueError as exc:
         raise AdminError(str(exc)) from exc
-    return hashed, password if generate else None
+    return hashed, password if generate_shown else None
 
 
 def _write_yaml(path: Path, data: dict) -> None:
@@ -99,9 +107,13 @@ def _user_file(user_id: str) -> Path:
 
 def create_user(
     user_id: str, *, name: str | None = None, language: str = "en", api_key_env: str = DEFAULT_API_KEY_ENV,
-    claude_login: bool = False, generate: bool = False, max_level: str | None = None,
+    claude_login: bool = False, generate: bool = False, max_level: str | None = None, password: str | None = None,
 ) -> dict:
-    """Create `<CONFIG_DIR>/<user_id>/user.yaml`; returns what the caller needs to print."""
+    """Create `<CONFIG_DIR>/<user_id>/user.yaml`; returns what the caller needs to print.
+
+    `password` is a typed password (never returned); without it one is generated (`generate`) or asked on the terminal.
+    A failed creation removes everything it made, the user folder included.
+    """
     path = _user_file(user_id)
     if path.exists():
         raise AdminError(f"User '{user_id}' already exists; use `set-password` to change the password.")
@@ -113,7 +125,7 @@ def create_user(
         level = parse_level(max_level) if max_level is not None else Level.COLLABORATOR
     except ValueError as exc:
         raise AdminError(f"Invalid --max-level: {exc}") from exc
-    hashed, generated = _hash_new_password(generate)
+    hashed, generated = _hash_new_password(generate, password)
     login_dir = (CONFIG_DIR / user_id / "claude-login").resolve()
     models = ModelsConfig()
     data: dict = {
@@ -128,19 +140,41 @@ def create_user(
     }
     if claude_login:
         data["claude_subscription"] = {"claude_config_dir": login_dir.as_posix()}
+    folder_existed = path.parent.exists()
     path.parent.mkdir(parents=True, exist_ok=True)
-    _write_yaml(path, data)
     try:
+        _write_yaml(path, data)
         load_user(user_id)
         if claude_login:
             login_dir.mkdir(parents=True, exist_ok=True)
     except Exception as exc:  # never leave a user file that the app cannot load
         path.unlink(missing_ok=True)
+        if not folder_existed:
+            shutil.rmtree(path.parent, ignore_errors=True)
         raise AdminError(f"The generated user.yaml is not valid, nothing was kept: {exc}") from exc
     return {
         "user_id": user_id, "generated": generated, "max_level": level.label,
         "login_dir": login_dir.as_posix() if claude_login else None,
     }
+
+
+def give_claude_login(user_id: str) -> str:
+    """Point an existing user at their own Claude login folder inside their config folder; returns the folder."""
+    path = _user_file(user_id)
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise AdminError(f"{path} is not a valid user.yaml.")
+    login_dir = (CONFIG_DIR / user_id / "claude-login").resolve()
+    previous = path.read_text(encoding="utf-8")
+    data["claude_subscription"] = {**(data.get("claude_subscription") or {}), "claude_config_dir": login_dir.as_posix()}
+    _write_yaml(path, data)
+    try:
+        load_user(user_id)
+    except Exception as exc:
+        atomic_write_text(path, previous)
+        raise AdminError(f"user.yaml would not load, the previous file was restored: {exc}") from exc
+    login_dir.mkdir(parents=True, exist_ok=True)
+    return login_dir.as_posix()
 
 
 def set_password(user_id: str, *, generate: bool = False) -> str | None:

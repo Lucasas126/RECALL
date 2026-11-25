@@ -161,6 +161,25 @@ class MaxLevelIn(BaseModel):
     max_level: LevelField
 
 
+class UserCreateIn(BaseModel):
+    id: str = Field(max_length=64)
+    name: str = Field(default="", max_length=200)
+    language: str = Field(default="en", max_length=10)
+    max_level: LevelField | None = None  # default: collaborator
+    password: str = Field(default="", max_length=400)  # empty: one is generated and returned once
+
+
+class UserAgentIn(BaseModel):
+    id: str = Field(max_length=64)
+    template: str = Field(default="default", max_length=64)
+    name: str = Field(default="", max_length=200)
+    model: str = Field(default="", max_length=300)
+
+
+class UserKeyIn(BaseModel):
+    key: str = Field(max_length=600)
+
+
 class TaskSteerIn(BaseModel):
     text: str
 
@@ -819,6 +838,41 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     @app.put("/api/admin/users/{target_id}/max-level")
     def admin_set_max_level(target_id: str, body: MaxLevelIn, user_id: str = Depends(current_user)):
         return service.set_user_max_level(user_id, target_id, body.max_level)
+
+    @app.post("/api/admin/users", status_code=201)
+    def admin_create_user(body: UserCreateIn, user_id: str = Depends(current_user)):
+        level = body.max_level.label if body.max_level is not None else None
+        return service.create_user(
+            user_id, body.id, name=body.name, language=body.language, max_level=level, password=body.password,
+        )
+
+    @app.put("/api/admin/users/{target_id}/provider-key")
+    def admin_set_user_key(target_id: str, body: UserKeyIn, user_id: str = Depends(current_user)):
+        return service.admin_set_user_key(user_id, target_id, body.key)
+
+    @app.get("/api/admin/users/{target_id}/models")
+    def admin_user_models(target_id: str, q: str = "", user_id: str = Depends(current_user)):
+        return service.admin_list_models(user_id, target_id, q)
+
+    @app.get("/api/admin/agent-templates")
+    def admin_agent_templates(user_id: str = Depends(current_user)):
+        return service.admin_agent_templates(user_id)
+
+    @app.post("/api/admin/users/{target_id}/agents", status_code=201)
+    def admin_create_user_agent(target_id: str, body: UserAgentIn, user_id: str = Depends(current_user)):
+        return service.admin_create_agent(user_id, target_id, body.id, template=body.template, name=body.name, model=body.model)
+
+    @app.post("/api/admin/users/{target_id}/claude/login/start")
+    def admin_claude_login_start(target_id: str, user_id: str = Depends(current_user)):
+        return service.admin_claude_login_start(user_id, target_id)
+
+    @app.post("/api/admin/users/{target_id}/claude/login/code")
+    def admin_claude_login_code(target_id: str, body: ClaudeLoginCode, user_id: str = Depends(current_user)):
+        return service.admin_claude_login_code(user_id, target_id, body.code)
+
+    @app.delete("/api/admin/users/{target_id}/claude/login/start")
+    def admin_claude_login_cancel(target_id: str, user_id: str = Depends(current_user)):
+        return service.admin_claude_login_cancel(user_id, target_id)
 
     # ------------------------------------------------------------------ subagent tasks
 

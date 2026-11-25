@@ -979,6 +979,62 @@
         <section id="users-admin" class="connections settings-section" aria-labelledby="settings-tab-users" hidden>
           <h3 id="users-title">Users</h3>
           <p id="users-note" class="model-note">The maximum level is the highest permission level a user may give their agents. Only administrators change it, never their own. A level cannot go below the level of one of the user's agents.</p>
+          <p><button id="user-add" type="button" hidden>Add user</button></p>
+          <div id="user-wizard" class="avatar-block" hidden>
+            <h3 id="wizard-title">Add user</h3>
+            <p id="wizard-steps" class="model-note" role="status"></p>
+            <div id="wizard-step-1">
+              <label for="wizard-id" id="wizard-id-label" class="model-note">User id</label>
+              <input id="wizard-id" type="text" autocomplete="off" spellcheck="false" maxlength="64">
+              <label for="wizard-name" id="wizard-name-label" class="model-note">Name</label>
+              <input id="wizard-name" type="text" autocomplete="off" maxlength="200">
+              <label for="wizard-language" id="wizard-language-label" class="model-note">Language</label>
+              <select id="wizard-language"><option value="en">English</option><option value="es">Español</option></select>
+              <label for="wizard-level" id="wizard-level-label" class="model-note">Maximum level</label>
+              <select id="wizard-level"></select>
+              <label for="wizard-password" id="wizard-password-label" class="model-note">Password (leave empty to generate one)</label>
+              <input id="wizard-password" type="password" autocomplete="new-password" spellcheck="false" maxlength="400">
+              <button id="wizard-create" type="button">Create user</button>
+            </div>
+            <div id="wizard-step-2" hidden>
+              <p id="wizard-created" class="model-note"></p>
+              <p id="wizard-generated-box" hidden><span id="wizard-generated-label" class="model-note">Generated password (shown only once):</span> <code id="wizard-generated"></code></p>
+              <h4 id="wizard-access-title">Provider access</h4>
+              <label for="wizard-key" id="wizard-key-label" class="model-note">OpenRouter API key for this user (write-only)</label>
+              <input id="wizard-key" type="password" autocomplete="off" spellcheck="false" maxlength="600">
+              <button id="wizard-key-save" type="button">Save key</button>
+              <p id="wizard-key-state" class="model-note" role="status"></p>
+              <button id="wizard-claude-start" type="button">Sign in to Claude for this user</button>
+              <div id="wizard-claude-step" hidden>
+                <p id="wizard-claude-note" class="model-note">Open the link, sign in to Claude, then paste the code it shows.</p>
+                <p><a id="wizard-claude-link" href="#" target="_blank" rel="noopener noreferrer">Open Claude sign-in</a></p>
+                <input id="wizard-claude-code" type="text" autocomplete="off" spellcheck="false" aria-labelledby="wizard-claude-note">
+                <button id="wizard-claude-send" type="button">Send code</button>
+                <button id="wizard-claude-cancel" type="button">Cancel</button>
+              </div>
+              <p id="wizard-claude-state" class="model-note" role="status"></p>
+              <button id="wizard-next-agent" type="button">Next: first agent</button>
+            </div>
+            <div id="wizard-step-3" hidden>
+              <h4 id="wizard-agent-title">First agent</h4>
+              <label for="wizard-agent-id" id="wizard-agent-id-label" class="model-note">Agent id</label>
+              <input id="wizard-agent-id" type="text" autocomplete="off" spellcheck="false" maxlength="64">
+              <label for="wizard-agent-name" id="wizard-agent-name-label" class="model-note">Name</label>
+              <input id="wizard-agent-name" type="text" autocomplete="off" maxlength="200">
+              <label for="wizard-template" id="wizard-template-label" class="model-note">Template</label>
+              <select id="wizard-template"></select>
+              <label for="wizard-model" id="wizard-model-label" class="model-note">Model (optional; the list needs the user's key or login)</label>
+              <select id="wizard-model"><option value="">Default</option></select>
+              <button id="wizard-agent-create" type="button">Create agent</button>
+              <button id="wizard-skip-agent" type="button">Skip</button>
+            </div>
+            <div id="wizard-step-4" hidden>
+              <h4 id="wizard-review-title">Review</h4>
+              <ul id="wizard-review"></ul>
+            </div>
+            <p id="wizard-error" class="error" role="alert"></p>
+            <button id="wizard-close" type="button">Close</button>
+          </div>
           <ul id="users-list" class="users-list"></ul>
           <p id="users-status" class="model-note" role="status"></p>
           <p id="users-error" class="error" role="alert"></p>

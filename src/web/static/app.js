@@ -666,7 +666,17 @@ function translateInterface() {
     ["agent-rules-default-ask", "Ask"], ["agent-rules-default-deny", "Deny"], ["agent-rules-default-allow", "Allow"],
     ["agent-rules-empty", "This agent has no rules of its own."], ["agent-rules-add", "Add rule"],
     ["agent-rules-effective-summary", "Effective rules (read only)"],
-    ["settings-tab-users-text", "Users"], ["users-title", "Users"],
+    ["settings-tab-users-text", "Users"], ["users-title", "Users"], ["user-add", "Add user"], ["wizard-title", "Add user"],
+    ["wizard-id-label", "User id"], ["wizard-name-label", "Name"], ["wizard-language-label", "Language"], ["wizard-level-label", "Maximum level"],
+    ["wizard-password-label", "Password (leave empty to generate one)"], ["wizard-create", "Create user"],
+    ["wizard-generated-label", "Generated password (shown only once):"], ["wizard-access-title", "Provider access"],
+    ["wizard-key-label", "OpenRouter API key for this user (write-only)"], ["wizard-key-save", "Save key"],
+    ["wizard-claude-start", "Sign in to Claude for this user"], ["wizard-claude-note", "Open the link, sign in to Claude, then paste the code it shows."],
+    ["wizard-claude-link", "Open Claude sign-in"], ["wizard-claude-send", "Send code"], ["wizard-claude-cancel", "Cancel"],
+    ["wizard-next-agent", "Next: first agent"], ["wizard-agent-title", "First agent"], ["wizard-agent-id-label", "Agent id"],
+    ["wizard-agent-name-label", "Name"], ["wizard-template-label", "Template"],
+    ["wizard-model-label", "Model (optional; the list needs the user's key or login)"], ["wizard-agent-create", "Create agent"],
+    ["wizard-skip-agent", "Skip"], ["wizard-review-title", "Review"], ["wizard-close", "Close"],
     ["users-note", "The maximum level is the highest permission level a user may give their agents. Only administrators change it, never their own. A level cannot go below the level of one of the user's agents."],
     ["agent-approval-rules-label", "Learned approvals"], ["agent-approval-rules-hint", "Saved when you choose Always for this agent on an approval card. Remove one to be asked again, or reset them all."],
     ["agent-approval-rules-empty", "No learned approvals."], ["agent-approval-rules-reset", "Reset to defaults"],
@@ -2889,6 +2899,7 @@ async function loadUsersAdmin() {
 }
 
 function renderUsersAdmin() {
+  $("user-add").hidden = !isAdministrator(state.user);
   $("users-list").replaceChildren(...state.adminUsers.map(userAdminItem));
 }
 
@@ -2936,6 +2947,196 @@ function userAdminItem(user) {
   item.append(row, note);
   return item;
 }
+
+// ---- user onboarding wizard (administrators): create the user, give provider access, first agent, review
+const wizard = { user: null, access: [], agent: null, agentIdEdited: false };
+// the agent id suggested for a template: `default` -> assistant, else the template id limited to [A-Za-z0-9_-] and 64 characters
+function suggestAgentId(template) {
+  if (!template || template === "default") return "assistant";
+  return template.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64) || "assistant";
+}
+function wizardSuggestAgentId() {
+  if (!wizard.agentIdEdited) $("wizard-agent-id").value = suggestAgentId($("wizard-template").value);
+}
+const WIZARD_AGENT_ID = /^[A-Za-z0-9_-]{1,64}$/;
+function wizardShow(step) {
+  for (let i = 1; i <= 4; i += 1) $(`wizard-step-${i}`).hidden = i !== step;
+  $("wizard-steps").textContent = tr("Step {step} of {total}", { step, total: 4 });
+  $("user-wizard").scrollIntoView({ block: "start", behavior: "instant" });
+}
+function wizardError(err) {
+  $("wizard-error").textContent = err ? (err.message ?? String(err)) : "";
+}
+function wizardOpen() {
+  Object.assign(wizard, { user: null, access: [], agent: null, agentIdEdited: false });
+  for (const id of ["wizard-id", "wizard-name", "wizard-password", "wizard-key", "wizard-claude-code", "wizard-agent-id", "wizard-agent-name"]) $(id).value = "";
+  $("wizard-language").value = state.preferences?.language === "es" ? "es" : "en";
+  const levels = state.levels?.levels ?? [];
+  $("wizard-level").replaceChildren(...levels.map((level) => Object.assign(document.createElement("option"), { value: level.name, textContent: `${level.title} (${level.number})` })));
+  $("wizard-level").value = "collaborator";
+  for (const id of ["wizard-key-state", "wizard-claude-state", "wizard-generated"]) $(id).textContent = "";
+  $("wizard-generated-box").hidden = true;
+  $("wizard-claude-step").hidden = true;
+  wizardError("");
+  wizardShow(1);
+  $("user-wizard").hidden = false;
+  $("wizard-id").focus();
+}
+function wizardClose() {
+  $("user-wizard").hidden = true;
+  $("wizard-generated").textContent = "";  // the generated password is shown once and not kept
+  $("wizard-password").value = "";
+  $("wizard-key").value = "";
+  wizard.user = null;
+}
+const wizardPath = (tail) => `/api/admin/users/${encodeURIComponent(wizard.user.id)}${tail}`;
+async function wizardCreate() {
+  wizardError("");
+  $("wizard-create").disabled = true;
+  try {
+    const body = {
+      id: $("wizard-id").value.trim(), name: $("wizard-name").value.trim(), language: $("wizard-language").value,
+      max_level: $("wizard-level").value, password: $("wizard-password").value,
+    };
+    const created = await api("/api/admin/users", { method: "POST", body: JSON.stringify(body) });
+    wizard.user = created;
+    state.adminUsers = [...state.adminUsers.filter((item) => item.id !== created.id), { ...created, generated_password: undefined }];
+    renderUsersAdmin();
+    $("wizard-password").value = "";
+    $("wizard-created").textContent = tr("User {user} created.", { user: created.id });
+    $("wizard-generated-box").hidden = !created.generated_password;
+    $("wizard-generated").textContent = created.generated_password ?? "";
+    wizardShow(2);
+  } catch (err) {
+    wizardError(err);
+  } finally {
+    $("wizard-create").disabled = false;
+  }
+}
+async function wizardSaveKey() {
+  const key = $("wizard-key").value.trim();
+  if (!key) return;
+  wizardError("");
+  $("wizard-key-save").disabled = true;
+  try {
+    await api(wizardPath("/provider-key"), { method: "PUT", body: JSON.stringify({ key }) });
+    $("wizard-key").value = "";
+    $("wizard-key-state").textContent = tr("Key saved. It is not shown again.");
+    if (!wizard.access.includes("key")) wizard.access.push("key");
+  } catch (err) {
+    wizardError(err);
+  } finally {
+    $("wizard-key-save").disabled = false;
+  }
+}
+async function wizardClaudeStart() {
+  wizardError("");
+  $("wizard-claude-start").disabled = true;
+  try {
+    const { url } = await api(wizardPath("/claude/login/start"), { method: "POST" });
+    $("wizard-claude-link").href = url;
+    $("wizard-claude-step").hidden = false;
+    $("wizard-claude-code").focus();
+  } catch (err) {
+    wizardError(err);
+  } finally {
+    $("wizard-claude-start").disabled = false;
+  }
+}
+async function wizardClaudeSend() {
+  const code = $("wizard-claude-code").value.trim();
+  if (!code) return;
+  wizardError("");
+  $("wizard-claude-send").disabled = true;
+  try {
+    const status = await api(wizardPath("/claude/login/code"), { method: "POST", body: JSON.stringify({ code }) });
+    $("wizard-claude-state").textContent = status.subscription ? tr("Connected ({plan})", { plan: status.subscription }) : tr("Connected");
+    if (!wizard.access.includes("claude")) wizard.access.push("claude");
+  } catch (err) {
+    wizardError(err);
+  } finally {
+    $("wizard-claude-code").value = "";
+    $("wizard-claude-step").hidden = true;
+    $("wizard-claude-send").disabled = false;
+  }
+}
+async function wizardClaudeCancel() {
+  $("wizard-claude-code").value = "";
+  $("wizard-claude-step").hidden = true;
+  try { await api(wizardPath("/claude/login/start"), { method: "DELETE" }); } catch { /* nothing waits any more */ }
+}
+async function wizardToAgent() {
+  wizardError("");
+  wizardShow(3);
+  try {
+    const templates = await api("/api/admin/agent-templates");
+    const reach = levelRank(wizard.user.max_level);
+    $("wizard-template").replaceChildren(...templates.filter((item) => !item.min_level || levelRank(item.min_level) <= reach).map((item) => Object.assign(
+      document.createElement("option"), { value: item.template, textContent: `${item.template}: ${item.description}` },
+    )));
+  } catch (err) {
+    wizardError(err);
+  }
+  wizardSuggestAgentId();
+  try {
+    const models = await api(wizardPath("/models"));
+    $("wizard-model").replaceChildren(
+      Object.assign(document.createElement("option"), { value: "", textContent: tr("Default") }),
+      ...models.slice(0, 200).map((item) => Object.assign(document.createElement("option"), { value: item.id, textContent: item.name ? `${item.name} (${item.id})` : item.id })),
+    );
+  } catch {
+    $("wizard-model").replaceChildren(Object.assign(document.createElement("option"), { value: "", textContent: tr("Default") }));
+  }
+}
+function levelRank(name) {
+  const index = (state.levels?.levels ?? []).findIndex((level) => level.name === name);
+  return index < 0 ? 0 : index;
+}
+async function wizardCreateAgent() {
+  const id = $("wizard-agent-id").value.trim();
+  if (!WIZARD_AGENT_ID.test(id)) {
+    wizardError(tr("Enter an agent id: 1-64 letters, digits, '_' or '-'."));
+    $("wizard-agent-id").focus();
+    return;
+  }
+  wizardError("");
+  $("wizard-agent-create").disabled = true;
+  try {
+    wizard.agent = await api(wizardPath("/agents"), {
+      method: "POST", body: JSON.stringify({
+        id, name: $("wizard-agent-name").value.trim(), template: $("wizard-template").value, model: $("wizard-model").value,
+      }),
+    });
+    wizardReview();
+  } catch (err) {
+    wizardError(err);
+  } finally {
+    $("wizard-agent-create").disabled = false;
+  }
+}
+function wizardReview() {
+  const items = [tr("User {user} created.", { user: wizard.user.id })];
+  items.push(wizard.access.includes("key") ? tr("API key saved.") : null);
+  items.push(wizard.access.includes("claude") ? tr("Claude login done.") : null);
+  if (!wizard.access.length) items.push(tr("No provider access set up yet."));
+  items.push(wizard.agent ? tr("First agent: {agent}.", { agent: wizard.agent.name ?? wizard.agent.id }) : tr("No agent created yet."));
+  $("wizard-review").replaceChildren(...items.filter(Boolean).map((text) => Object.assign(document.createElement("li"), { textContent: text })));
+  wizardShow(4);
+  loadUsersAdmin();
+}
+$("user-add").addEventListener("click", wizardOpen);
+$("wizard-create").addEventListener("click", wizardCreate);
+$("wizard-key-save").addEventListener("click", wizardSaveKey);
+$("wizard-claude-start").addEventListener("click", wizardClaudeStart);
+$("wizard-claude-send").addEventListener("click", wizardClaudeSend);
+$("wizard-claude-cancel").addEventListener("click", wizardClaudeCancel);
+$("wizard-next-agent").addEventListener("click", wizardToAgent);
+$("wizard-agent-create").addEventListener("click", wizardCreateAgent);
+$("wizard-agent-id").addEventListener("input", () => { wizard.agentIdEdited = true; });
+$("wizard-template").addEventListener("change", wizardSuggestAgentId);
+$("wizard-skip-agent").addEventListener("click", wizardReview);
+$("wizard-close").addEventListener("click", wizardClose);
+// ---- end user onboarding wizard
 
 async function setUserMaxLevel(user, level, button, note) {
   const session = state.session;
