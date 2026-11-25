@@ -53,6 +53,51 @@ class VoiceMessageServiceTests(models_tests.ModelFixture):
         self.assertEqual(turn["content"], "and more\n\n[AUDIO] Audio transcription:\nHello there")
         self.assertEqual([m["transcript"] for m in turn["media"]], ["Hello there"])
 
+    def _edit(self, text: str, recordings):
+        resolved = Mock(provider_name="openrouter", api_key="test")
+        with patch("src.service.chat.load_agent", return_value=resolved):
+            list(self.service.send("user-one", "agent-one", self.chat, text, rewind_to=0, recordings=recordings))
+        return self.service.get_chat("user-one", "agent-one", self.chat)["messages"][0]
+
+    def test_editing_the_heard_text_changes_what_the_model_and_the_page_get(self) -> None:
+        self._send_audio("Hello there")
+        turn = self._edit("and more", ["Hello, Alex"])
+        self.assertEqual(turn["content"], "and more\n\n[AUDIO] Audio transcription:\nHello, Alex")
+        self.assertEqual([m["transcript"] for m in turn["media"]], ["Hello, Alex"])
+        self.assertEqual(turn["media"][0]["data_url"], _AUDIO["data_url"])
+
+    def test_heard_text_edited_inside_the_message_leaves_a_plain_player(self) -> None:
+        self._send_audio("Hello there")
+        resolved = Mock(provider_name="openrouter", api_key="test")
+        with patch("src.service.chat.load_agent", return_value=resolved):
+            list(self.service.send("user-one", "agent-one", self.chat, "mine\n\nHello, Alex", rewind_to=0,
+                                   recordings=["Hello there"], transcripts_in_text=True))
+        turn = self.service.get_chat("user-one", "agent-one", self.chat)["messages"][0]
+        self.assertEqual(turn["content"], "mine\n\nHello, Alex")  # nothing appended
+        self.assertEqual(len(turn["media"]), 1)
+        self.assertNotIn("transcript", turn["media"][0])
+
+    def test_removing_a_recording_drops_it_and_its_text(self) -> None:
+        self._send_audio("Hello there")
+        turn = self._edit("just text", [None])
+        self.assertEqual(turn["content"], "just text")
+        self.assertEqual(turn.get("media") or [], [])
+
+    def test_a_blank_heard_text_keeps_a_plain_player(self) -> None:
+        self._send_audio("Hello there")
+        turn = self._edit("just text", [""])
+        self.assertEqual(turn["content"], "just text")
+        self.assertEqual(len(turn["media"]), 1)
+        self.assertNotIn("transcript", turn["media"][0])
+
+    def test_removing_the_only_recording_of_an_empty_message_is_refused(self) -> None:
+        self._send_audio("Hello there")
+        before = self.service.get_chat("user-one", "agent-one", self.chat)["messages"]
+        resolved = Mock(provider_name="openrouter", api_key="test")
+        with patch("src.service.chat.load_agent", return_value=resolved), self.assertRaises(InputError):
+            self.service.send("user-one", "agent-one", self.chat, "", rewind_to=0, recordings=[None])
+        self.assertEqual(self.service.get_chat("user-one", "agent-one", self.chat)["messages"], before)
+
     def test_empty_transcription_gives_a_clear_error_and_logs_it(self) -> None:
         with self.assertLogs("recall.service", level="WARNING") as logs:
             with self.assertRaises(InputError) as caught:
@@ -125,3 +170,16 @@ class AgentFilesPlacementTests(unittest.TestCase):
         self.assertIn("function renderAgentFiles", script)
         self.assertIn("el.lastElementChild !== agentFilesBox", script)
         self.assertIn("view.agentFiles(m.media)", script)
+
+
+class VoiceEditAndMeterStaticTests(unittest.TestCase):
+    def test_edit_form_lists_recordings_and_the_recorder_shows_a_level_meter(self) -> None:
+        script = (_STATIC / "app.js").read_text(encoding="utf-8")
+        html = (_STATIC / "index.html").read_text(encoding="utf-8")
+        style = (_STATIC / "style.css").read_text(encoding="utf-8")
+        self.assertIn("msg-edit-recording", script)
+        self.assertIn("recordings", script)
+        self.assertIn("createAnalyser", script)
+        self.assertIn('id="mic-level"', html)
+        self.assertIn(".mic-level", style)
+        self.assertNotIn("font-size: .85em; white-space: pre-wrap", style)  # the heard text is normal-sized

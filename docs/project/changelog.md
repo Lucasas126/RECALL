@@ -5,6 +5,8 @@ sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases b
 
 ## Unreleased
 
+- Web UI voice messages: editing a message that has a recording now shows what was heard inside the one text box (correct it like any text), and the recording appears as a chip with its name and a cross to discard it, like a file waiting to be sent; the player stays after saving. The heard text is shown at the normal message size. While recording, the red button shows a small live level meter (8 bars) next to the elapsed time, and after 2.5 s without sound it dims, shows "!" and its tooltip asks to check the microphone. The edit request accepts `recordings` and `transcripts_in_text`.
+
 ## 0.5.5
 
 - Web UI image viewer: Ctrl+wheel (and trackpad pinch) and the new zoom buttons or the `+`, `-` and `0` keys zoom only the image (1x to 8x, drag to pan, double click resets) instead of the whole page; when a message has several images, the left and right arrow keys and two side buttons step through them, with a counter. Zoom uses the bundled Panzoom library (MIT).

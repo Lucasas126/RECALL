@@ -4312,7 +4312,7 @@ $("model-zdr").addEventListener("change", () => refreshModels());
 // ------------------------------------------------------------------ messages
 
 // The voice recorder's state (see the voice message section below); declared first because setComposer reads it.
-const voice = { recorder: null, stream: null, chunks: [], timer: null, startedAt: 0, discard: false };
+const voice = { recorder: null, stream: null, chunks: [], timer: null, startedAt: 0, discard: false, meter: null };
 
 function setComposer(enabled) {
   $("input").disabled = !enabled || state.modelBusy;
@@ -4916,6 +4916,39 @@ function startEdit(el) {
   cancel.textContent = tr("Cancel editing");
   actions.append(save, cancel);
   form.append(field, notice, actions);
+  // the heard text of each recording joins the message text in the one box; each recording can still be removed
+  const recordingEdits = [];
+  const heardTexts = [];
+  const attachmentRow = document.createElement("div");
+  attachmentRow.className = "msg-edit-recordings";
+  for (const item of el.querySelectorAll(".message-attachments .attachment-audio")) {
+    if (item._attachment?.transcript) heardTexts.push(item._attachment.transcript);
+    // the same chip as a file waiting to be sent: its name and a cross to discard it
+    const row = document.createElement("span");
+    row.className = "pending-attachment msg-edit-recording";
+    const name = document.createElement("span");
+    name.textContent = item._attachment?.name || tr("voice message");
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "×";
+    remove.title = tr("Remove {name}", { name: name.textContent });
+    remove.setAttribute("aria-label", remove.title);
+    const entry = { item, row, removed: false, transcript: item._attachment?.transcript || "" };
+    remove.addEventListener("click", () => {
+      entry.removed = true;
+      // removing a recording takes its heard text out of the box
+      if (entry.transcript) field.value = field.value.split(entry.transcript).join("").replace(/\n{3,}/g, "\n\n").trim();
+      row.remove();
+    });
+    row.append(name, remove);
+    recordingEdits.push(entry);
+    attachmentRow.append(row);
+  }
+  if (recordingEdits.length) form.insertBefore(attachmentRow, field);
+  if (heardTexts.length) {
+    field.value = [field.value.trim(), ...heardTexts].filter(Boolean).join("\n\n");
+    field.rows = Math.min(12, Math.max(3, field.value.split("\n").length));
+  }
   const close = () => {
     form.remove();
     body.hidden = false;
@@ -4924,11 +4957,19 @@ function startEdit(el) {
   };
   const submit = () => {
     const text = field.value.trim();
+    const edited = new Map(recordingEdits.map((entry) => [entry.item, entry]));
+    const recordings = recordingEdits.map((entry) => (entry.removed ? null : ""));
     const attachments = [...el.querySelectorAll(".message-attachments .attachment-name")]
-      .map((n) => n._attachment ?? { name: n.textContent });
+      .filter((n) => !edited.get(n)?.removed)
+      .map((n) => {
+        const attachment = n._attachment ?? { name: n.textContent };
+        if (!edited.has(n)) return attachment;
+        const { transcript, ...player } = attachment;  // the heard text now lives in the message text
+        return player;
+      });
     if (!text && !attachments.length) return;
     if (state.busy || state.modelBusy) return;
-    dispatchMessage(text, [], { index, el, shown: attachments });
+    dispatchMessage(text, [], { index, el, shown: attachments, recordings: recordingEdits.length ? recordings : null, transcriptsInText: recordingEdits.length > 0 });
   };
   save.addEventListener("click", submit);
   cancel.addEventListener("click", close);
@@ -7624,7 +7665,61 @@ function voiceSupported() {
   return Boolean(navigator.mediaDevices?.getUserMedia) && typeof MediaRecorder !== "undefined";
 }
 
+// Live input level while recording: bars that follow the voice, so a muted or wrong microphone shows before sending.
+const METER_BARS = 5;
+const METER_SILENT_MS = 2500;  // this long without any sound marks the meter as silent
+function voiceMeterStart(stream) {
+  const Context = window.AudioContext || window.webkitAudioContext;
+  const box = $("mic-level");
+  if (!Context || !box) return;
+  try {
+    const context = new Context();
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 512;
+    context.createMediaStreamSource(stream).connect(analyser);
+    const samples = new Uint8Array(analyser.fftSize);
+    const bars = [...box.children];
+    const meter = { context, frame: 0, heardAt: Date.now() };
+    const draw = () => {
+      analyser.getByteTimeDomainData(samples);
+      let peak = 0;
+      for (const sample of samples) peak = Math.max(peak, Math.abs(sample - 128) / 128);
+      const level = Math.min(1, Math.sqrt(peak) * 1.6);  // speech peaks well below full scale: a square root lifts the quiet end
+      if (level > 0.04) meter.heardAt = Date.now();
+      const silent = Date.now() - meter.heardAt > METER_SILENT_MS;
+      $("mic").classList.toggle("silent", silent);
+      $("mic").title = silent ? tr("No sound detected: check the microphone") : $("mic").title;
+      bars.forEach((bar, i) => {
+        const threshold = (i + 1) / bars.length;
+        bar.style.height = `${25 + 75 * Math.min(1, Math.max(0, (level - (threshold - 1 / bars.length)) * bars.length))}%`;
+      });
+      meter.frame = requestAnimationFrame(draw);
+    };
+    box.hidden = false;
+    voice.meter = meter;
+    draw();
+  } catch (err) {
+    voice.meter = null;  // the meter is a nicety: recording works without it
+  }
+}
+
+function voiceMeterStop() {
+  const meter = voice.meter;
+  voice.meter = null;
+  if (meter) {
+    cancelAnimationFrame(meter.frame);
+    meter.context.close().catch(() => {});
+  }
+  const box = $("mic-level");
+  if (box) {
+    box.hidden = true;
+    for (const bar of box.children) bar.style.height = "";
+  }
+  $("mic").classList.remove("silent");
+}
+
 function voiceStopTracks() {
+  voiceMeterStop();
   voice.stream?.getTracks().forEach((track) => track.stop());
   clearInterval(voice.timer);
   voice.recorder = voice.stream = voice.timer = null;
@@ -7639,7 +7734,7 @@ function voiceTick() {
   const seconds = Math.floor((Date.now() - voice.startedAt) / 1000);
   const time = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
   $("mic-time").textContent = time;
-  $("mic").title = tr("Stop recording ({time})", { time });
+  if (!$("mic").classList.contains("silent")) $("mic").title = tr("Stop recording ({time})", { time });
 }
 
 async function voiceStart() {
@@ -7669,6 +7764,7 @@ async function voiceStart() {
   });
   voice.recorder.start();
   voice.startedAt = Date.now();
+  voiceMeterStart(voice.stream);
   $("mic").classList.add("recording");
   $("mic-time").hidden = false;
   $("mic").setAttribute("aria-label", tr("Stop recording"));
@@ -7809,7 +7905,7 @@ async function dispatchMessage(content, attachments, edit = null) {
   updateBusy();
   scrollDown(true);
   try {
-    await streamReply(content, attachments, request, edit?.index ?? null);
+    await streamReply(content, attachments, request, edit?.index ?? null, edit?.recordings ?? null, edit?.transcriptsInText ?? false);
   } catch (err) {
     request.controller.abort();
     if (sameSession(request) && err.name !== "AbortError") {
@@ -8006,7 +8102,7 @@ $("input").addEventListener("keydown", (e) => {
   }
 });
 
-async function streamReply(content, attachments, request, editIndex = null) {
+async function streamReply(content, attachments, request, editIndex = null, recordings = null, transcriptsInText = false) {
   // Serialize acceptance, not generation, so rapid sends reach the service in order.
   const response = state.sendQueue.then(async () => {
     if (!sameSession(request)) throw new DOMException("Session changed", "AbortError");
@@ -8019,6 +8115,7 @@ async function streamReply(content, attachments, request, editIndex = null) {
         content,
         attachments: attachments.map(({ size, ...attachment }) => attachment),
         ...(editIndex == null ? {} : { edit_index: editIndex }),
+        ...(editIndex == null || !recordings ? {} : { recordings, transcripts_in_text: transcriptsInText }),
       }),
       signal: request.controller.signal,
     });
