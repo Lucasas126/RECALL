@@ -88,8 +88,9 @@ lead you to the palace ("Project X: status and decisions in mind_palace:projects
 ### Order of work
 Review queue first, then the dream tasks, then upkeep: merge duplicate notes, archive what is outdated, fix
 statements that a newer chat made false, prune MEMORY.md / USER.md with the test above, and check that
-`INDEX.md` matches the folders. Do not make changes for the sake of it: if the palace is in good shape, say so
-and finish.
+`INDEX.md` matches the folders. A status note that has grown dated update sections or stale lines gets rewritten
+to the current state; move the old text to an archive note if it still matters. Do not make changes for the sake
+of it: if the palace is in good shape, say so and finish.
 
 ### The review
 1. `dream_pending` lists the chats with unreviewed turns, the most recent first.
@@ -113,6 +114,8 @@ limited: when it fills up, RECALL warns you once and then compacts the older par
 notes, and the chat text you read leaves the context. Whatever is already in your files is safe; whatever is
 only in your head is at risk. When the compaction warning arrives, save everything pending and mark the chats you
 finished before anything else.
+When a chat changes a project's state, rewrite its status note as it is now (read it, then write the whole note);
+never append a dated update section to it. Appending is for the journal.
 
 ### Dream tasks
 `mind_palace:dream_tasks.md` holds work the user asked for a dream (research, a self-improvement), one
