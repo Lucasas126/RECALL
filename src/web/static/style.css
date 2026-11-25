@@ -1220,3 +1220,9 @@ html.resizing-sidebar #app { transition: none; }
   letter-spacing: -.02em; line-height: 1.05; color: var(--text); opacity: .9; }
 @media (prefers-reduced-motion: no-preference) { .empty-hero { animation: empty-hero-in .35s ease-out both; } }
 @keyframes empty-hero-in { from { opacity: 0; transform: scale(.97); } }
+
+/* user onboarding wizard (Settings, Users): one field per line */
+#user-wizard label { display: block; margin-top: 8px; }
+#user-wizard input, #user-wizard select { width: 100%; box-sizing: border-box; }
+#user-wizard button { margin-top: 8px; }
+#user-wizard code { overflow-wrap: anywhere; }
