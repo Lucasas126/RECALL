@@ -38,6 +38,15 @@ class UserWizardStaticTests(unittest.TestCase):
         self.assertIn('$("wizard-agent-id").addEventListener("input", () => { wizard.agentIdEdited = true; });', WIZARD)
         self.assertIn('$("wizard-template").addEventListener("change", wizardSuggestAgentId);', WIZARD)
         self.assertIn("agentIdEdited: false", WIZARD)  # reset when the wizard opens
+        self.assertIn(r"/^[A-Za-z0-9_-]{1,64}$/", WIZARD)  # the backend rule (_ID_RE in the service)
+
+    def test_an_empty_or_invalid_agent_id_shows_an_error_and_focuses_the_field(self) -> None:
+        created = re.search(r"async function wizardCreateAgent[\s\S]*?\n\}\n", WIZARD).group(0)
+        check = created[:created.index("wizardError(\"\")")]
+        self.assertIn("WIZARD_AGENT_ID.test(id)", check)
+        self.assertIn("wizardError(tr(", check)
+        self.assertIn('$("wizard-agent-id").focus();', check)
+        self.assertIn("Enter an agent id: 1-64 letters, digits, '_' or '-'.", _SPANISH)
 
     def test_texts_have_spanish_translations(self) -> None:
         for text in re.findall(r'tr\("([^"]+)"', WIZARD):

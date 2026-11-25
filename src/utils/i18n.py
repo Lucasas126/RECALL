@@ -1120,6 +1120,7 @@ _SPANISH = {
     "No agents.": "Sin agentes.",
     "Maximum level of {user}": "Nivel máximo de {user}",
     "Set maximum level": "Fijar nivel máximo",
+    "Enter an agent id: 1-64 letters, digits, '_' or '-'.": "Escribe un id de agente: de 1 a 64 letras, dígitos, '_' o '-'.",
     "Add user": "Añadir usuario",
     "User id": "Id de usuario",
     "Language": "Idioma",

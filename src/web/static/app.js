@@ -2958,6 +2958,7 @@ function suggestAgentId(template) {
 function wizardSuggestAgentId() {
   if (!wizard.agentIdEdited) $("wizard-agent-id").value = suggestAgentId($("wizard-template").value);
 }
+const WIZARD_AGENT_ID = /^[A-Za-z0-9_-]{1,64}$/;
 function wizardShow(step) {
   for (let i = 1; i <= 4; i += 1) $(`wizard-step-${i}`).hidden = i !== step;
   $("wizard-steps").textContent = tr("Step {step} of {total}", { step, total: 4 });
@@ -3093,7 +3094,11 @@ function levelRank(name) {
 }
 async function wizardCreateAgent() {
   const id = $("wizard-agent-id").value.trim();
-  if (!id) return;
+  if (!WIZARD_AGENT_ID.test(id)) {
+    wizardError(tr("Enter an agent id: 1-64 letters, digits, '_' or '-'."));
+    $("wizard-agent-id").focus();
+    return;
+  }
   wizardError("");
   $("wizard-agent-create").disabled = true;
   try {
