@@ -48,6 +48,9 @@ pdf:
   ocr_languages: eng+spa      # Tesseract language packs, joined with +; they must be installed
   tesseract_cmd: null         # optional path to the tesseract executable; null uses PATH, then the default Windows folder
 
+uploads:
+  retention_days: 30          # days a server-side copy of a file sent in a chat is kept (every file type); older ones are removed
+
 speech_to_text:
   # zdr: false  # optional override of the user's require_zdr (user.yaml) for transcription; unset follows it
   # Instance default spoken language (ISO-639-1 code, e.g. es); a user's models.stt_language in user.yaml wins.
