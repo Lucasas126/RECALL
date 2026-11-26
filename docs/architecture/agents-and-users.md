@@ -49,6 +49,26 @@ Model ids and providers belong to the **user**, not the agent: the user's defaul
 `chat_config.model` or a chat has its own selection (precedence: chat > agent > user; see
 [models and providers](../user-guide/models-and-providers.md)). Embeddings use the user configuration.
 
+## Shared agents (spaces)
+
+A space is a pseudo-user (`kind: space`, id `space-<8 hex>`) that owns agents shared by several member users; it has no
+password and never logs in. Design and plan: [shared agents](../project/design-shared-agents.md).
+
+Implemented:
+
+- A space's `max_level` is derived: the lowest `max_level` of its members. A missing or invalid member makes the space
+  unusable (fail closed: its agents answer 404 and are left out of listings, even if it was valid before).
+- Data stays keyed by `(owner, agent)`, where the owner is the user or the space. Every `/api/agents/{agent_id}/...` route
+  resolves the owner with `ChatService.agent_owner(person, agent)`: the person's own agent first, else the agent of a
+  space they belong to, else the person's own id (so a non-member gets the same 404 as for another user's agent).
+  What is per person (preferences, language, usage, audit) keeps using the logged-in person.
+- `GET /api/agents` and `GET /api/chats` include the space agents and their chats with `shared: true` and `space_id`; all
+  members see the same chats and approvals.
+- The admin user list (`/api/admin/users`, `user_overview`) does not list spaces; the admin CLI has `space` commands.
+- The list of spaces is cached and reused while the `space-*` folders and their `user.yaml` files are unchanged.
+
+Planned: the editing UI for shared agents, per-person attribution of messages and billing in the web, and Telegram.
+
 ## isolation
 
 Isolation is enforced in one place: the per-agent `SourceRegistry` (path resolution and traversal guard) and the per-agent
