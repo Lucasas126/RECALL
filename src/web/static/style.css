@@ -1054,7 +1054,7 @@ select.warning { border-color: var(--warn); color: var(--warn); }
 #chat-list .chat-section:hover { background: none; }
 
 /* Prompt overlay: the textarea has no placeholder (it would wrap and grow the box); this line shows "Message <agent>..." with an ellipsis, or a slow marquee when it is wider than the box (app.js measures) */
-#input-hint { grid-area: input; align-self: start; box-sizing: border-box; min-width: 0; min-height: 36px; padding: 7px 6px; overflow: hidden; white-space: nowrap; font-size: .9375rem; line-height: 1.5; color: var(--muted); pointer-events: none; user-select: none; }
+#input-hint { grid-area: input; align-self: end; box-sizing: border-box; min-width: 0; min-height: 36px; padding: 7px 6px; overflow: hidden; white-space: nowrap; font-size: .9375rem; line-height: 1.5; color: var(--muted); pointer-events: none; user-select: none; }
 #input-hint-text { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 #input:not(:placeholder-shown) ~ #input-hint, #input:focus:not(:placeholder-shown) ~ #input-hint { visibility: hidden; }
 #input-hint.scrolling #input-hint-text { display: inline-block; max-width: none; overflow: visible; text-overflow: clip; animation: input-hint-marquee var(--hint-duration, 12s) ease-in-out infinite; }
