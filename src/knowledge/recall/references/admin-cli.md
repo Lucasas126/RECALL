@@ -51,7 +51,7 @@ Creating users and passwords stays with `python -m src.admin create-user [--max-
 
 ## Spaces
 
-Shared agents, in progress: no web UI yet. A space (`space-<8 hex>`) is a pseudo-user with `members`; it never logs in and its `max_level` is the lowest of its members.
+Shared agents (see `shared-agents.md`; the web UI invites people, the CLI is for admins). A space (`space-<8 hex>`) is a pseudo-user with `members`; it never logs in and its `max_level` is the lowest of its members.
 
 | Command | Does |
 | --- | --- |
@@ -59,6 +59,7 @@ Shared agents, in progress: no web UI yet. A space (`space-<8 hex>`) is a pseudo
 | `space create --billing-user U [--member V ...] [--name N]` | copies U's provider, models, Claude login and backends settings (NAMES only) |
 | `space add-member` / `remove-member --space S --user U` | refused on agent id clash or a level below an agent; removing the payer needs `--new-billing-user` |
 | `space delete --space S --yes` | only a space without agents |
+| `agent share --user U --agent A --with V` / `agent unshare --space S --agent A --yes` | move an agent into a space, or give it back (copies to each member) |
 
 ## Secrets
 

@@ -22,6 +22,7 @@ Documentation map. The root [README](../README.md) gives the short pitch; [AGENT
 - [Terminal sandbox](user-guide/terminal.md): commands and file edits in an SSH sandbox, with approvals and an audit file.
 - [Delegating tasks](user-guide/delegation.md): the `delegate` tool group, a worker in a hidden chat with limits (phase 1: synchronous).
 - [Automations](user-guide/automations.md): things an agent does later (`at`, `every`, `cron`, when a process ends), started as unattended tasks; the service, the agent tools and the web tab are built.
+- [Shared agents](user-guide/shared-agents.md): one agent for several users: invitations, what members share, who pays, leaving and unsharing.
 - [Admin CLI](user-guide/admin-cli.md): `python -m src.admin` for users, agents, templates (the setup guide, which manages agents with the `agents` tools) and credentials (`set-secret`).
 
 ## reference
