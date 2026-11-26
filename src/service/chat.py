@@ -41,6 +41,7 @@ from src.config.preferences import (
 from src.config.field_defaults import agent_defaults
 from src.config.secrets import fingerprint as secrets_fingerprint, get_secret
 from src.config.zdr import chat_zdr, zdr_required
+from src.service.invitations import ACCEPTED, DECLINED, PENDING, REVOKED, InvitationStore
 from src.config.spaces import SpaceError, is_space_id, resolve_owner, scaled_user_chars, spaces_of
 from src.config.settings import (
     AGENT_MAX_TOOL_HOPS, APPROVAL_EXPLAIN, ASSOC, CHAT_NAMING, CONFIG_DIR, DATA_DIR, ORCHESTRATOR, PDF, SPEECH_TO_TEXT, TAVILY, TELEGRAM_ALLOWED_USERS_ENV, current_mcp_settings,
@@ -247,6 +248,14 @@ class UnknownUser(ServiceError):
 
 class UnknownAgent(ServiceError):
     code = "unknown_agent"
+
+
+class InvitationError(ServiceError, ValueError):
+    """An invitation or leave request that cannot be done (bad invitee, duplicate, not shared)."""
+
+
+class UnknownInvitation(ServiceError):
+    code = "unknown_invitation"
 
 
 class UnknownChat(ServiceError):
@@ -470,6 +479,7 @@ class ChatService:
         self._favorites = ModelFavorites(CONFIG_DIR)
         self._preferences = UserPreferencesStore(CONFIG_DIR)
         self._agents = AgentStore(CONFIG_DIR, DATA_DIR)
+        self._invitations = InvitationStore(DATA_DIR)
         self._uploads = UploadStore(DATA_DIR)  # server-side copies of the files users attach
         self._avatars = AvatarStore(DATA_DIR)  # profile pictures, beside (never inside) the agents' data folders
         self._permissions = AgentPermissions(self._agents)
@@ -1074,6 +1084,154 @@ class ChatService:
                 raise AgentBusy("wait for this agent's active and queued replies before unsharing it")
             with slot.lock:
                 return self._agent_mover().unshare_agent(space_id, agent_id, person)
+
+    # ------------------------------------------------------------------ invitations to share an agent
+
+    def _invitation_store(self) -> InvitationStore:
+        return self._invitations
+
+    def _audit_invitation(self, owner_ids: list[str], action: str, **fields) -> None:
+        for owner in dict.fromkeys(owner_ids):
+            if not write_audit(Path(DATA_DIR) / owner / ADMIN_AUDIT_FILE, event="admin_action", action=action, **fields):
+                logger.error("the audit file for %s could not be written", owner)
+
+    def _held_owner(self, person: str, agent_id: str) -> str:
+        """The owner (the person or one of their spaces) that really holds the agent; UnknownAgent otherwise."""
+        owner = self.agent_owner(person, agent_id)
+        self._owned_agent(owner, agent_id)
+        return owner
+
+    def invite(self, person: str, agent_id: str, invitee_id: str) -> dict:
+        """`person` (owner or member) invites a user to share the agent; nothing moves until the invitee accepts."""
+        owner = self._held_owner(person, agent_id)
+        owner_user = self._user(owner)
+        try:
+            invitee = self._user(invitee_id)
+        except (UnknownUser, SpaceError) as exc:
+            raise InvitationError("unknown user: {user_id}", user_id=invitee_id) from exc
+        if invitee.kind != "user":
+            raise InvitationError("unknown user: {user_id}", user_id=invitee_id)
+        if invitee_id == person:
+            raise InvitationError("you cannot invite yourself")
+        if invitee_id == owner or invitee_id in owner_user.members:
+            raise InvitationError("'{user_id}' already has this agent", user_id=invitee_id)
+        store = self._invitation_store()
+        with store.lock:
+            for record in store.all():
+                if record["status"] == PENDING and record["agent_id"] == agent_id and record["invitee"] == invitee_id:
+                    raise InvitationError("'{user_id}' already has a pending invitation for this agent", user_id=invitee_id)
+            billing = owner_user.billing_user if owner_user.kind == "space" else owner
+            record = store.create(
+                agent_id=agent_id, agent_name=self._agent_config(owner, agent_id).name, owner=owner, inviter=person,
+                invitee=invitee_id, billing_user=billing,
+            )
+        self._audit_invitation([owner, person, invitee_id], "invite_to_agent", agent=agent_id, actor=person,
+                               invitee=invitee_id, invitation=record["id"])
+        return record
+
+    def _invitation(self, invitation_id: str, *, pending: bool = True) -> dict:
+        record = self._invitation_store().get(invitation_id)
+        if record is None or (pending and record["status"] != PENDING):
+            raise UnknownInvitation("unknown invitation")
+        return record
+
+    def _can_manage_invitation(self, person: str, record: dict) -> bool:
+        if record["inviter"] == person:
+            return True
+        return resolve_owner(person, record["agent_id"], CONFIG_DIR) is not None
+
+    def list_invitations(self, person: str) -> dict:
+        """Pending invitations for the person (`incoming`) and those they can revoke (`outgoing`), plus the count."""
+        self._user(person)
+        incoming, outgoing = [], []
+        for record in self._invitation_store().all():
+            if record["status"] != PENDING:
+                continue
+            if record["invitee"] == person:
+                incoming.append({
+                    "id": record["id"], "agent_id": record["agent_id"], "agent_name": record["agent_name"],
+                    "inviter": record["inviter"], "inviter_name": self._display_name(record["inviter"]),
+                    "billing_user": record["billing_user"], "created": record["created"],
+                })
+            elif self._can_manage_invitation(person, record):
+                outgoing.append({
+                    "id": record["id"], "agent_id": record["agent_id"], "invitee": record["invitee"],
+                    "status": record["status"], "created": record["created"],
+                })
+        return {"incoming": incoming, "outgoing": outgoing, "pending_count": len(incoming)}
+
+    def _display_name(self, user_id: str) -> str:
+        try:
+            return self._user(user_id).name
+        except (UnknownUser, SpaceError):
+            return user_id
+
+    def accept(self, person: str, invitation_id: str) -> dict:
+        """The invitee joins: the agent moves into the space of its members plus the invitee. Errors leave it pending."""
+        store = self._invitation_store()
+        with store.lock:
+            record = self._invitation(invitation_id)
+            if record["invitee"] != person:
+                raise UnknownInvitation("unknown invitation")
+            agent_id = record["agent_id"]
+            try:
+                owner = self._held_owner(record["inviter"], agent_id)
+            except (UnknownAgent, UnknownUser) as exc:
+                raise InvitationError("this agent is no longer available for sharing") from exc
+            owner_user = self._user(owner)
+            if owner_user.kind == "space":
+                if person in owner_user.members:
+                    raise InvitationError("'{user_id}' already has this agent", user_id=person)
+                space_id = self._regroup(record["inviter"], owner, agent_id, [*owner_user.members, person])
+            else:
+                space_id = self.share_agent(owner, agent_id, [person])
+            record = {**record, "status": ACCEPTED, "space_id": space_id}
+            store.save(record)
+        self._audit_invitation([space_id, record["inviter"], person], "accept_invitation", agent=agent_id,
+                               actor=person, invitation=invitation_id, space=space_id)
+        return {"id": invitation_id, "agent_id": agent_id, "space_id": space_id}
+
+    def _regroup(self, person: str, space_id: str, agent_id: str, members: list[str]) -> str:
+        slot = self._slot(space_id, agent_id)
+        with slot.state:
+            if slot.active or slot.pending:
+                raise AgentBusy("wait for this agent's active and queued replies before changing who shares it")
+            with slot.lock:
+                return self._agent_mover().regroup_agent(space_id, agent_id, members, person)
+
+    def decline(self, person: str, invitation_id: str) -> None:
+        store = self._invitation_store()
+        with store.lock:
+            record = self._invitation(invitation_id)
+            if record["invitee"] != person:
+                raise UnknownInvitation("unknown invitation")
+            store.save({**record, "status": DECLINED})
+        self._audit_invitation([record["inviter"], person], "decline_invitation", agent=record["agent_id"],
+                               actor=person, invitation=invitation_id)
+
+    def revoke(self, person: str, invitation_id: str) -> None:
+        """The inviter, or any member of the agent's space, withdraws a pending invitation."""
+        store = self._invitation_store()
+        with store.lock:
+            record = self._invitation(invitation_id)
+            if not self._can_manage_invitation(person, record):
+                raise UnknownInvitation("unknown invitation")
+            store.save({**record, "status": REVOKED})
+        self._audit_invitation([record["inviter"], person, record["invitee"]], "revoke_invitation",
+                               agent=record["agent_id"], actor=person, invitation=invitation_id)
+
+    def leave_shared(self, person: str, agent_id: str) -> str:
+        """A member leaves a shared agent: it moves to the space of the remaining members; returns that space id."""
+        owner = self._held_owner(person, agent_id)
+        space = self._user(owner)
+        if space.kind != "space" or person not in space.members:
+            raise InvitationError("agent '{agent_id}' is not shared", agent_id=agent_id)
+        remaining = [m for m in space.members if m != person]
+        if not remaining:
+            raise InvitationError("you are the only member; unshare the agent instead")
+        target = self._regroup(person, owner, agent_id, remaining)
+        self._audit_invitation([target, person], "leave_shared_agent", agent=agent_id, actor=person, space=target)
+        return target
 
     def _purge_folder_chunks(self, user_id: str, agent_id: str) -> None:
         """After folders were removed or un-indexed: queue a reconcile that drops their chunks (best effort)."""
