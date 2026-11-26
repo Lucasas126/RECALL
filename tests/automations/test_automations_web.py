@@ -101,8 +101,14 @@ class AutomationsPageTests(unittest.TestCase):
         self.script = (_STATIC / "app.js").read_text(encoding="utf-8")
 
     def test_the_tab_and_the_form_exist(self) -> None:
-        for needle in ('id="tasks-tab-automations"', 'id="automations-pane"', 'id="automation-form"', 'id="automation-kind"', 'id="automations-list"'):
+        for needle in ('id="automations-pane"', 'id="automation-form"', 'id="automation-kind"', 'id="automations-list"'):
             self.assertIn(needle, self.html)
+
+    def test_the_dialog_is_only_automations(self) -> None:
+        for gone in ("tasks-tabs", "tasks-filter", "tasks-list", "tasks-empty", "taskPanelRefresh"):
+            self.assertNotIn(gone, self.html + self.script)
+        self.assertIn('<h2 id="tasks-title">Automations</h2>', self.html)
+        self.assertIn('id="tasks-open" type="button" class="icon-btn" aria-haspopup="dialog" title="Automations" aria-label="Automations"', self.html)
 
     def test_the_page_talks_to_the_api(self) -> None:
         for needle in ('api("/api/automations")', "/pause", "/resume", 'method: "DELETE"', 'method: "PATCH"', "function automationPanelRefresh"):
