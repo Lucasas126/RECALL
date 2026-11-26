@@ -75,3 +75,10 @@ class MakeDisposableNarrowTests(unittest.TestCase):
         self.assertNotIn("display: none", block.group(0))  # hidden visually only, still in the accessibility tree
         js = (STATIC / "app.js").read_text(encoding="utf-8")
         self.assertIn('$("chat-make-disposable").setAttribute("aria-label"', js)
+
+
+class InputHintAlignmentTests(unittest.TestCase):
+    def test_hint_sits_on_the_same_baseline_as_the_input(self):
+        css = (Path(__file__).resolve().parents[2] / "src/web/static/style.css").read_text(encoding="utf-8")
+        hint = next(line for line in css.splitlines() if line.startswith("#input-hint {"))
+        self.assertIn("align-self: end", hint)
