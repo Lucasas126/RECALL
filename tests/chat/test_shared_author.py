@@ -50,13 +50,14 @@ class AuthorStorageTests(steering.SteeringFixture):
             self.assertTrue(sent[0].startswith("[ANA] ") and sent[1].startswith("[BEN] ") and sent[2].startswith("[ANA] "))
 
     def test_get_chat_returns_the_author_name(self) -> None:
-        with patch("src.agent.agent.load_user", _users), patch.object(self.service, "_user", side_effect=_users) as lookup:
+        with patch("src.agent.agent.load_user", _users):
             list(self.service.send("user-one", "agent-one", self.chat, "First", author="user-a"))
             list(self.service.send("user-one", "agent-one", self.chat, "Second", author="user-a"))
-            lookup.reset_mock()
+        real = self.service._user
+        with patch.object(self.service, "_user", side_effect=lambda uid: _users(uid) if uid == "user-a" else real(uid)) as lookup:
             users = [m for m in self.service.get_chat("user-one", "agent-one", self.chat)["messages"] if m["role"] == "user"]
         self.assertEqual([m["author_name"] for m in users], ["Ana", "Ana"])
-        self.assertEqual(lookup.call_count, 1)  # resolved once per call
+        self.assertEqual([c.args[0] for c in lookup.call_args_list].count("user-a"), 1)  # resolved once per call
 
     def test_private_chat_has_no_author_name(self) -> None:
         list(self._send("Hello"))
