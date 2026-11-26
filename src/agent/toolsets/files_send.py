@@ -7,8 +7,12 @@ from typing import TYPE_CHECKING, Annotated, Callable
 from src.agent.tooling import tool
 from src.agent.toolsets import notify as notify_module
 from src.agent.toolsets.fileaccess import FileAccessError, fetch_file
-from src.config.settings import TELEGRAM_ALLOWED_USERS_ENV
+from src.config.settings import CONFIG_DIR, TELEGRAM_ALLOWED_USERS_ENV
+from src.config.spaces import notification_targets
+from src.utils.logger import get_logger
 from src.providers.telegram_notify import TelegramNotifier
+
+logger = get_logger("files_send")
 
 if TYPE_CHECKING:
     from src.agent.agent import Agent
@@ -78,16 +82,24 @@ def build_files_send_tools(
         notifier = factory()
         if notifier is None:
             return "error: Telegram is not set up on this server (no bot token), so nothing was sent"
-        if not notifier.linked(user_id):
+        people = [person for person in notification_targets(user_id, CONFIG_DIR) if notifier.linked(person)]
+        if not people:
             return "error: this user has no Telegram account linked, so nothing was sent"
-        wait = notify_module._take_slot(user_id, agent_id)
-        if wait is not None:
-            return f"error: limit of {notify_module.MAX_PER_HOUR} Telegram messages an hour reached; try again in {wait // 60 + 1} minutes"
-        try:
-            notifier.send_file(user_id, name, data, modality_of(mime), caption.strip()[:1000] or None)
-        except Exception as exc:
-            notify_module._forget_slot(user_id, agent_id)
-            return f"error: Telegram did not accept the file ({exc})"
+        delivered, errors = 0, []
+        for person in people:
+            wait = notify_module._take_slot(person, agent_id)
+            if wait is not None:
+                errors.append(f"limit of {notify_module.MAX_PER_HOUR} Telegram messages an hour reached; try again in {wait // 60 + 1} minutes")
+                continue
+            try:
+                notifier.send_file(person, name, data, modality_of(mime), caption.strip()[:1000] or None)
+                delivered += 1
+            except Exception as exc:  # one member's failure never stops the others
+                notify_module._forget_slot(person, agent_id)
+                logger.warning("send_file to Telegram failed for %s/%s (member %s): %s", user_id, agent_id, person, exc)
+                errors.append(f"Telegram did not accept the file ({exc})")
+        if not delivered:
+            return f"error: {errors[0]}"
         return f"sent {name} ({len(data)} bytes) to the user's Telegram chat"
 
     return [send_file]

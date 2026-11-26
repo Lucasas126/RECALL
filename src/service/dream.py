@@ -10,6 +10,8 @@ from typing import Callable, Iterable, Literal, Optional
 from src.agent.dream import DreamIndex, DreamRunner, dream_folder_options
 from src.agent.profile import DREAM_TASKS_FILE, open_items
 from src.config.models import DreamConfig, ResolvedAgent
+from src.config.settings import CONFIG_DIR
+from src.config.spaces import notification_targets
 from src.core.review import ReviewQueue
 from src.core.sources.registry import SourceRegistry
 from src.providers.provider import LLMProvider
@@ -189,12 +191,13 @@ class DreamManager:
         if self._deps.notifier is None:
             logger.info("dream notification skipped for %s: no Telegram bot token is configured", config.user_id)
             return
-        language = self._deps.language(config.user_id)
-        text = dream_notification(language, config.name, summary, session_link(self._deps.public_url, config.id, summary["id"]))
-        try:
-            self._deps.notifier(config.user_id, text)
-        except Exception:  # a notification never breaks the session
-            logger.exception("could not send the dream notification to %s", config.user_id)
+        for person in notification_targets(config.user_id, CONFIG_DIR):  # a space's dream reaches every member
+            try:
+                language = self._deps.language(person)
+                text = dream_notification(language, config.name, summary, session_link(self._deps.public_url, config.id, summary["id"]))
+                self._deps.notifier(person, text)
+            except Exception:  # a notification never breaks the session, nor the other members' copies
+                logger.exception("could not send the dream notification to %s", person)
 
     def wait(self, user_id: str, agent_id: str, timeout: float | None = None) -> bool:
         """Wait for the agent's running session (if any) to finish; False on timeout."""
