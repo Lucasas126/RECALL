@@ -944,9 +944,10 @@ function notifyShouldShow({ kind, bell, supported, permission, hidden, focused }
 }
 
 // Generic text plus the chat or automation title; never message content. One tag per chat (an approval replaces a reply).
-function notifyContent(kind, title, trFn, agentId, id) {
+function notifyContent(kind, title, trFn, agentId, id, agentName) {
   const tag = kind === "automation" ? `automation:${id}` : `chat:${agentId}:${id}`;
-  return { title: trFn(NOTIFY_HEADS[kind]), body: String(title || ""), tag, data: { kind, agent_id: agentId || "", id: id || "" } };
+  const head = trFn(NOTIFY_HEADS[kind]);
+  return { title: agentName ? `${agentName} · ${head}` : head, body: String(title || ""), tag, data: { kind, agent_id: agentId || "", id: id || "" } };
 }
 
 // Compares the chat list with the last one seen: a reply that ended (unread appeared) or more approvals waiting.
@@ -9698,7 +9699,8 @@ async function notifyShow(event) {
     kind: event.kind, bell: notifyActive(), supported: notifySupported(window), permission: notifyPermission(),
     hidden: document.hidden, focused: document.hasFocus(),
   })) return;
-  const content = notifyContent(event.kind, event.title || (event.kind === "automation" ? "" : tr("New chat")), tr, event.agent_id, event.id);
+  const content = notifyContent(event.kind, event.title || (event.kind === "automation" ? "" : tr("New chat")), tr, event.agent_id, event.id,
+    (state.user?.agents || []).find((a) => a.id === event.agent_id)?.name);
   const options = { body: content.body, tag: content.tag, data: content.data, icon: "/static/icons/icon-192.png" };
   try {
     const registration = "serviceWorker" in navigator ? await navigator.serviceWorker.getRegistration() : null;

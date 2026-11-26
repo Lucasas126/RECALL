@@ -52,6 +52,8 @@ test("the text is generic, with the title only, and tagged per chat", () => {
   assert.equal(context.notifyContent("approval", "My chat", tr, "a1", "c1").tag, "chat:a1:c1");
   assert.equal(context.notifyContent("automation", "Daily", tr, "", "x9").tag, "automation:x9");
   assert.equal(context.notifyContent("automation", "Daily", tr, "", "x9").title, "T:Automation finished");
+  assert.equal(context.notifyContent("reply", "My chat", tr, "a1", "c1", "Atlas").title, "Atlas · T:Reply ready");
+  assert.equal(context.notifyContent("reply", "My chat", tr, "a1", "c1", "Atlas").body, "My chat");
 });
 
 test("chat changes: nothing on the first look, then replies and approvals once", () => {
