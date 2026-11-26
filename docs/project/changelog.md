@@ -3,7 +3,7 @@
 The notes of each release are on the GitHub Releases page. This file groups what changed by topic, starting with 0.4.0, which
 sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases between 5 and 15 November.
 
-## Unreleased
+## 0.6.0 (26 November 2026)
 
 - Web UI: optional in-browser notifications (a bell in the side panel footer, per device, off by default; no Web Push). The page itself shows "Reply ready", "Approval needed" and "Automation finished" with the chat or automation title, only while it is in the background; clicking opens the chat or the Automations dialog. New `GET /api/automations/events` lists runs that ended since a marker (ids, title and status only). Telegram notifications of automations are unchanged. Removed the Tasks tab of the former Tasks dialog (a list of background tasks nobody used); the dialog is now **Automations** only.
 - Web UI: a new version is announced by a small in-page banner ("A new version of RECALL is available", Reload and dismiss) instead of being applied silently. The service worker no longer calls `skipWaiting` on install; Reload posts `SKIP_WAITING` and reloads on `controllerchange`. The page checks for a new worker on focus (at most every 5 minutes). No notifications or push.
