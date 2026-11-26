@@ -154,6 +154,101 @@ function tr(template, values = {}) {
   return text.replace(/\{(\w+)\}/g, (_, key) => values[key]);
 }
 
+// ---- code blocks (copy button and syntax colours; the helpers take what they touch as arguments so tests run them without a browser)
+const CODE_HIGHLIGHT_MAX = 20000;   // longer blocks stay plain: colouring them would stall the page
+const CODE_FEEDBACK_MS = 1500;
+
+// "python" from <code class="language-python">; "" when the fence had no language
+function codeLanguage(code) {
+  const match = /(?:^|\s)language-([\w+#.-]+)/.exec(code?.className || "");
+  return match ? match[1].toLowerCase() : "";
+}
+
+// true while the text ends inside a fence that is not closed yet (a reply still being written)
+function endsInOpenFence(text) {
+  const fences = String(text || "").match(/^ {0,3}(?:`{3,}|~{3,})/gm);
+  return Boolean(fences) && fences.length % 2 === 1;
+}
+
+// Colours one <code> in place when its language is known (never guessed), once. `toHtml(text, language)` returns
+// safe markup or null when it cannot colour that language.
+function highlightCode(code, toHtml) {
+  const language = codeLanguage(code);
+  if (!language || code.dataset.highlighted) return false;
+  const text = code.textContent;
+  if (text.length > CODE_HIGHLIGHT_MAX) return false;
+  const html = toHtml(text, language);
+  if (typeof html !== "string") return false;
+  code.innerHTML = html;
+  code.classList.add("hljs");
+  code.dataset.highlighted = "1";
+  return true;
+}
+
+// Puts every <pre> under `root` in a .code-block with a header (language and Copy button), once; colours the code
+// unless `options.holdLast` asks to leave the last block alone (it is still being written).
+function decorateCodeBlocks(root, options) {
+  const { doc, translate, toHtml, holdLast = false } = options;
+  const blocks = [...root.querySelectorAll("pre")];
+  blocks.forEach((pre, index) => {
+    const code = pre.querySelector("code");
+    if (!code) return;
+    if (toHtml && !(holdLast && index === blocks.length - 1)) highlightCode(code, toHtml);
+    if (pre.parentElement?.classList.contains("code-block")) return;
+    const wrapper = doc.createElement("div");
+    wrapper.className = "code-block";
+    const head = doc.createElement("div");
+    head.className = "code-head";
+    const label = doc.createElement("span");
+    label.className = "code-lang";
+    label.textContent = codeLanguage(code) || "text";
+    const button = doc.createElement("button");
+    button.type = "button";
+    button.className = "code-copy";
+    button.textContent = translate("Copy");
+    button.setAttribute("aria-label", translate("Copy code"));
+    head.append(label, button);
+    pre.before(wrapper);
+    wrapper.append(head, pre);
+  });
+}
+
+// Copies with the clipboard API where the page is secure, else with a hidden textarea (plain http has no navigator.clipboard).
+async function copyToClipboard(text, env) {
+  const { nav, doc, secure, host } = env;
+  if (secure && nav?.clipboard?.writeText) {
+    try {
+      await nav.clipboard.writeText(text);
+      return true;
+    } catch (error) { /* fall through to the textarea */ }
+  }
+  const box = doc.createElement("textarea");
+  box.value = text;
+  box.setAttribute("readonly", "");
+  box.style.cssText = "position:fixed;top:0;left:0;opacity:0;pointer-events:none";
+  const focused = doc.activeElement;
+  (host || doc.body).append(box);
+  box.select();
+  let ok = false;
+  try { ok = Boolean(doc.execCommand("copy")); } catch (error) { ok = false; }
+  box.remove();
+  focused?.focus?.();
+  return ok;
+}
+
+// Click on a .code-copy button: copies the code (not the header) and shows the result on the button for a moment.
+async function copyCodeBlock(button, env) {
+  const code = button.closest(".code-block")?.querySelector("code");
+  if (!code) return false;
+  const ok = await copyToClipboard(code.textContent, { ...env, host: button.closest("dialog") });
+  const idle = button.dataset.idle ?? (button.dataset.idle = button.textContent);
+  clearTimeout(Number(button.dataset.timer));
+  button.textContent = env.translate(ok ? "Copied" : "Failed to copy");
+  button.dataset.timer = String(env.later(() => { button.textContent = idle; delete button.dataset.idle; }, CODE_FEEDBACK_MS));
+  return ok;
+}
+// ---- end code blocks
+
 // ---- version line
 // "RECALL v0.1.0", plus the build id (a short git sha) when the server reports one
 function versionText(info, translate) {
@@ -7364,11 +7459,7 @@ function addMessage(role, parent = state.view ?? $("messages"), author = null) {
   parent.append(el);
   function renderOne(target, text) {
     if (role === "assistant") {
-      target.innerHTML = DOMPurify.sanitize(marked.parse(text, { breaks: true }));
-      for (const a of target.querySelectorAll("a")) {
-        a.target = "_blank";
-        a.rel = "noopener noreferrer";
-      }
+      renderMarkdown(target, text, true);
     } else {
       target.textContent = text;
     }
@@ -8557,13 +8648,39 @@ function descriptionList(rows) {
   return list;
 }
 
+// Markdown of a message: sanitized first, then wrapped and coloured (colours come from highlight.js, which escapes the text).
+const highlightCache = new Map();
+function codeToHtml(text, language) {
+  if (typeof hljs === "undefined" || !hljs.getLanguage(language)) return null;
+  const key = `${language}\n${text}`;
+  if (!highlightCache.has(key)) {
+    if (highlightCache.size >= 300) highlightCache.delete(highlightCache.keys().next().value);
+    let html = null;
+    try { html = DOMPurify.sanitize(hljs.highlight(text, { language, ignoreIllegals: true }).value); } catch (error) { html = null; }
+    highlightCache.set(key, html);
+  }
+  return highlightCache.get(key);
+}
+function renderMarkdown(target, text, streaming = false) {
+  target.innerHTML = DOMPurify.sanitize(marked.parse(text ?? "", { breaks: true }));
+  for (const a of target.querySelectorAll("a")) {
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+  }
+  decorateCodeBlocks(target, { doc: document, translate: tr, toHtml: codeToHtml, holdLast: streaming && endsInOpenFence(text) });
+}
+document.addEventListener("click", (event) => {
+  const button = event.target.closest?.(".code-copy");
+  if (!button) return;
+  copyCodeBlock(button, {
+    nav: navigator, doc: document, secure: window.isSecureContext, translate: tr,
+    later: (fn, ms) => setTimeout(fn, ms),
+  });
+});
+
 function markdown(text) {
   const body = element("div", { className: "body" });
-  body.innerHTML = DOMPurify.sanitize(marked.parse(text ?? "", { breaks: true }));
-  for (const link of body.querySelectorAll("a")) {
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-  }
+  renderMarkdown(body, text);
   return body;
 }
 
