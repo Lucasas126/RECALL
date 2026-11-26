@@ -78,7 +78,10 @@ class MakeDisposableNarrowTests(unittest.TestCase):
 
 
 class InputHintAlignmentTests(unittest.TestCase):
-    def test_hint_sits_on_the_same_baseline_as_the_input(self):
+    def test_touch_input_and_hint_match_the_44px_buttons(self):
         css = (Path(__file__).resolve().parents[2] / "src/web/static/style.css").read_text(encoding="utf-8")
         hint = next(line for line in css.splitlines() if line.startswith("#input-hint {"))
-        self.assertIn("align-self: end", hint)
+        self.assertNotIn("align-self", hint)
+        rule = next(line for line in css.splitlines() if "@media (pointer: coarse) { #input, #input-hint" in line)
+        self.assertIn("min-height: 44px", rule)
+        self.assertIn("padding-block: calc((44px - 1.5 * .9375rem) / 2)", rule)
