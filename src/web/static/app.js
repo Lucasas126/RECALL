@@ -5226,7 +5226,8 @@ function drawMessages(container, messages, { usage }) {
       continue;
     }
     const author = m.role === "assistant" && m.author_agent
-      ? replyAuthor(m.author_agent, m.author_name, state.user?.agents, state.agentId) : null;
+      ? replyAuthor(m.author_agent, m.author_name, state.user?.agents, state.agentId)
+      : m.role === "user" && m.author ? { name: m.author_name || m.author } : null;
     const view = addMessage(m.role, container, author);
     if (m.role === "user" && m.index != null) setEditable(view.el, m.index);
     if (m.associative_skipped) view.memory({ state: "skipped" });
@@ -7352,6 +7353,7 @@ function addMessage(role, parent = state.view ?? $("messages"), author = null) {
   el.className = `msg ${role}`;
   if (role === "assistant") el.dataset.author = author ? author.name : currentAgentName();
   else if (role === "command") el.dataset.author = "RECALL";
+  else if (role === "user" && author) el.dataset.author = author.name;  // a shared agent: who wrote it
   let body = document.createElement("div");
   body.className = "body";
   let raw = "";

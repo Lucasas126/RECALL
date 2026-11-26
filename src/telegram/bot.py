@@ -1965,6 +1965,7 @@ async def _send_generation(
         return
     agent_id, chat_id = session.agent_id, session.chat_id
     user_id = _owner(state.service, session, agent_id)  # a shared agent's data lives under its space
+    author = {"author": session.user_id} if user_id != session.user_id else {}  # a shared agent: who is speaking
     chat = update.effective_chat
     stream = _ReplyStream(context.bot, chat.id, use_draft=chat.type == ChatType.PRIVATE)
     await stream.start()
@@ -1983,7 +1984,7 @@ async def _send_generation(
             events = await asyncio.to_thread(
                 state.service.send,
                 user_id, agent_id, chat_id, text,
-                stream=True, attachments=attachments, channel="telegram",
+                stream=True, attachments=attachments, channel="telegram", **author,
             )
         except UnknownChat:
             # the empty chat was pruned before its first message (e.g. by a chat listing): start a fresh one
@@ -1999,7 +2000,7 @@ async def _send_generation(
             events = await asyncio.to_thread(
                 state.service.send,
                 user_id, agent_id, chat_id, text,
-                stream=True, attachments=attachments, channel="telegram",
+                stream=True, attachments=attachments, channel="telegram", **author,
             )
         while True:
             has_event, event = await _next_event(events)

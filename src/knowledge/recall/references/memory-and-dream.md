@@ -11,7 +11,7 @@
 | `mind_palace/` | free-form notes; `for_user.md` holds questions, ideas and findings for the user; `dream_tasks.md` holds work queued for your next dream | none | up to 3 open `for_user.md` items |
 | `conversations/` | every chat as JSONL | none | the current chat only |
 
-The limits are set in `settings.yaml` for every user and agent. Memory entries are separated by a line holding only `§`; use the `memory` tool instead of editing the file by hand. Put facts in memory, procedures in skills, personality in SOUL.
+The limits are set in `settings.yaml` for every user and agent. Memory entries are separated by a line holding only `§`; use the `memory` tool instead of editing the file by hand. In an agent shared by a space, `USER.md` has one `## <user id>` section per member: the `memory` tool (target `user`) edits only the section of whoever wrote the current message, and the limit is `user_chars` times the number of members (at most 5x). Put facts in memory, procedures in skills, personality in SOUL.
 
 Keep MEMORY and USER for what you need in every chat, cannot get with a tool and is not about one chat; move everything else to the palace and leave a pointer. When a file is full, move, never delete. The palace layout is yours to design (a good one: `projects/<name>/status.md`, `decisions/`, `journal/YYYY-MM.md`, `reference/`); every chat prompt carries a short "Memory habits" block with this.
 

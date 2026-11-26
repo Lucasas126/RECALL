@@ -79,8 +79,11 @@ def build_self_tools(agent: Agent) -> list[Callable[..., str]]:
     ledger = ledger_of(agent)
 
     def limit(target: str) -> int:
-        limits = memory_limits()
-        return limits.memory_chars if target == "memory" else limits.user_chars
+        from src.agent.user_sections import user_limit
+
+        return memory_limits().memory_chars if target == "memory" else user_limit(agent.config)
+
+    sections = bool(getattr(getattr(agent, "config", None), "space_members", None))  # USER.md of a space agent has one section per member
 
     @tool
     def memory(
@@ -111,10 +114,20 @@ def build_self_tools(agent: Agent) -> list[Callable[..., str]]:
         with files.memory_lock():
             current = files.memory_entries(target)
             try:
-                updated = apply_memory_operations(current, operations)
+                if sections and target == "user":
+                    from src.agent.user_sections import apply_user_operations
+
+                    # a chat has a `speaker` (default: the billing member); a dream host has none and may edit all
+                    speaker = (getattr(agent, "speaker", None) or agent.config.space_billing_user) if hasattr(agent, "speaker") else None
+                    text, count = apply_user_operations(
+                        files.memory_text(target), operations, list(agent.config.space_members), speaker,
+                    )
+                    updated = [""] * count
+                else:
+                    updated = apply_memory_operations(current, operations)
+                    text = join_memory(updated)
             except MemoryOperationError as exc:
                 return f"error: {exc}. Nothing was saved."
-            text = join_memory(updated)
             if len(text) > limit(target):
                 listing = "\n".join(f"- {entry}" for entry in current) or "(empty)"
                 return (

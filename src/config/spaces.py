@@ -166,3 +166,20 @@ def members_conflict(space: UserConfig, new_member: str, config_dir: Path) -> st
         if owner is not None:
             return f"agent '{agent_id}' of space '{space.id}' clashes with an agent of '{owner}'"
     return None
+
+
+MAX_USER_MD_SCALE = 5  # USER.md of a space agent grows with its members, up to this many times the normal limit
+
+
+def scaled_user_chars(base: int, member_count: int) -> int:
+    """USER.md char limit of a space agent: `base` times the number of members (at least 1), capped at 5x."""
+    return base * max(1, min(member_count, MAX_USER_MD_SCALE))
+
+
+def member_names(space: UserConfig, config_dir: Path) -> dict[str, str]:
+    """Member id -> display name (the user's `name`; the id itself when the user cannot be read), in member order."""
+    names = {}
+    for member in space.members:
+        user = _read(config_dir, member)
+        names[member] = user.name if user is not None else member
+    return names

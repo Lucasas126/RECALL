@@ -41,7 +41,7 @@ from src.config.preferences import (
 from src.config.field_defaults import agent_defaults
 from src.config.secrets import fingerprint as secrets_fingerprint, get_secret
 from src.config.zdr import chat_zdr, zdr_required
-from src.config.spaces import SpaceError, is_space_id, resolve_owner, spaces_of
+from src.config.spaces import SpaceError, is_space_id, resolve_owner, scaled_user_chars, spaces_of
 from src.config.settings import (
     AGENT_MAX_TOOL_HOPS, APPROVAL_EXPLAIN, ASSOC, CHAT_NAMING, CONFIG_DIR, DATA_DIR, ORCHESTRATOR, PDF, SPEECH_TO_TEXT, TAVILY, TELEGRAM_ALLOWED_USERS_ENV, current_mcp_settings,
     SUBAGENTS, TERMINAL, UPLOADS, VIDEO_DECOMPOSITION, WEB_PUBLIC_URL, memory_limits,
@@ -411,10 +411,12 @@ class _MessageRun:
     stream: Optional[bool]
     continuation: bool = False
     channel: Optional[str] = None  # where the user wrote it: "web" or "telegram" (None for system turns)
+    author: Optional[str] = None  # who wrote it in a shared (space) agent: a user id
     source: Optional[str] = None  # "task" for a wake turn written by the system, not the user
     meta: Optional[dict] = None  # persisted on the user turn (source, task_ids)
     blocks: Optional[list[str]] = None  # a wake turn's task blocks: later results merge into a queued wake
     frame: Optional[Callable[[list[str]], str]] = None  # composes `text` from `blocks`
+    speaker: Optional[str] = None  # space agents: the member who wrote it (their USER.md section); None = the space's billing user
     compact: Optional[str] = None  # a `/compact` run: its instructions ("" for none); not a reply
     compact_percent: Optional[int] = None  # a `/compact N` run: the share of the conversation to keep (None = 20)
     block_runs: Optional[list[list[str]]] = None  # the task runs each block of `blocks` reports (to drop a block already read)
@@ -1681,6 +1683,7 @@ class ChatService:
                         "role", "content", "ts", "reasoning", "actions", "timeline", "interrupted", "interrupted_by", "checkpoint", "media",
                         "associative_matches", "associative_skipped", "usage", "usage_report",
                         "associative_fragments", "associative_query",
+                        "author",  # who wrote it in a shared agent
                         "source", "task_ids",  # a wake turn: a subagent result, not written by the user
                         "task_brief", "task_message",  # a worker chat's first message / follow-up, structured for the UI
                         "tokens_before", "tokens_after", "manual", "kept_percent",
@@ -1691,6 +1694,15 @@ class ChatService:
             }
             for position, t in turns
         ]
+        names: dict[str, str] = {}  # each author's display name, resolved once per call
+        for message in messages:
+            if message.get("author"):
+                if message["author"] not in names:
+                    try:
+                        names[message["author"]] = self._user(message["author"]).name or message["author"]
+                    except Exception:  # a member who left: the id stands in
+                        names[message["author"]] = message["author"]
+                message["author_name"] = names[message["author"]]
         return {
             "chat": {
                 **conversations.summary(chat_id, self._retention_days(user_id)),
@@ -1890,6 +1902,7 @@ class ChatService:
         rewind_to: Optional[int] = None, internal_task: bool = False, meta: Optional[dict] = None,
         channel: Optional[str] = None, mention_meta: Optional[dict] = None,
         recordings: Optional[list[Optional[str]]] = None, transcripts_in_text: bool = False,
+        author: Optional[str] = None,
     ) -> Iterator[ChatEvent]:
         """Send a user message to a chat and yield the reply as events.
 
@@ -1913,6 +1926,10 @@ class ChatService:
         transcript of their own, and nothing is appended to the message.
 
         `channel` (`web` or `telegram`) is where the person wrote; it is stored on the turn and shown to the model.
+
+        `author` (a user id) is who wrote it in a shared (space) agent: stored on the turn and shown to the model as
+        a `[NAME]` prefix. Callers set it only when the owner is not the person; an edit without it keeps the
+        original turn's author.
 
         A person's message starting with `@<agent_id>` of another agent of the same user is answered by that agent
         instead (see `_send_mention`). `mention_meta` is only set by that path and stored on the mentioned agent's turn.
@@ -1939,6 +1956,7 @@ class ChatService:
         kept_recordings: list[dict] = []
         if rewind_to is not None:
             original = self._edit_target(conversations, chat_id, rewind_to)
+            author = author or original.get("author") or None
             if not attachments:
                 attachments = self._stored_attachments(original.get("content"))
                 # a PDF only lives on the turn as `media` (the model gets its text): an edit keeps it
@@ -1982,7 +2000,7 @@ class ChatService:
         if media:
             run_meta["media"] = media
         run = _MessageRun(chat_id, text, attachments, stream, meta=run_meta or None,
-                           channel=channel if channel in ("web", "telegram") else None)
+                           channel=channel if channel in ("web", "telegram") else None, author=author)
         # keep what the speech-to-text heard next to each recording, so the person can check it any time
         unheard = [item for item in media if item["modality"] == "audio" and "transcript" not in item]
         if rewind_to is not None and transcripts_in_text and not attachments_given:
@@ -3073,6 +3091,8 @@ class ChatService:
             result = agent.invoke(
                 run.text, stream=run.stream, cancellation=run.cancellation,
                 continuation=run.continuation, attachments=run.attachments, meta=run.meta, channel=run.channel,
+                author=run.author,
+                speaker=run.speaker or run.author,
             )
             if memory := agent.memory_event():  # a search that already finished (replies that are not streamed)
                 yield ChatEvent("memory", data=memory, generation_id=run.generation_id)
@@ -3523,22 +3543,27 @@ class ChatService:
             raise UnknownDreamSession("unknown SOUL version: {version}", version=version) from exc
         return self.get_soul(user_id, agent_id)
 
-    def get_memory(self, user_id: str, agent_id: str, target: MemoryTarget) -> dict:
-        self._owned_agent(user_id, agent_id)
+    @staticmethod
+    def _memory_limit(owner: UserConfig, target: MemoryTarget) -> int:
+        """Char limit of a memory file; USER.md of a space agent scales with the members (as the memory tool does)."""
         limits = memory_limits()
+        if target == "memory":
+            return limits.memory_chars
+        return scaled_user_chars(limits.user_chars, len(owner.members)) if owner.kind == "space" else limits.user_chars
+
+    def get_memory(self, user_id: str, agent_id: str, target: MemoryTarget) -> dict:
+        owner = self._owned_agent(user_id, agent_id)
         files = self._agent_files(user_id, agent_id)
         content = files.memory_text(target)
         return {
             "target": target, "content": content, "chars": len(content),
-            "limit": limits.memory_chars if target == "memory" else limits.user_chars,
+            "limit": self._memory_limit(owner, target),
             "entries": files.memory_entries(target),
         }
 
     def update_memory(self, user_id: str, agent_id: str, target: MemoryTarget, content: str) -> dict:
         """Replace MEMORY.md or USER.md; entries are separated by a line holding only `§`."""
-        self._owned_agent(user_id, agent_id)
-        limits = memory_limits()
-        limit = limits.memory_chars if target == "memory" else limits.user_chars
+        limit = self._memory_limit(self._owned_agent(user_id, agent_id), target)
         if len(content) > limit:
             raise InputError(
                 "the {target} memory cannot exceed {limit} characters; shorten it; the limit is set in settings.yaml (memory_limits)",
