@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from fastapi.testclient import TestClient
 
 from tests.tasks import test_service_steering as steering
+from src.config.models import ClaudeSubscriptionConfig
 from src.providers.cancellation import GenerationCancelled
 from src.web.app import create_app
 from tests.support.auth_helpers import login
@@ -100,6 +101,31 @@ class WebSteeringTests(steering.SteeringFixture):
         self.assertIn("Week: 14%", events[0]["data"])
         history = self.client.get(f"/api/agents/agent-one/chats/{self.chat}").json()["messages"]
         self.assertEqual(history, [])
+
+    def test_usage_answer_names_the_subscription_account_and_plan(self) -> None:
+        windows = {"available": True, "windows": [{"key": "session", "percent": 6.4, "resets_at": None}]}
+        status = {"logged_in": True, "subscription": "pro", "account_email": "user@example.com"}
+        with steering.patch("src.service.chat.login_allowed", return_value=True), \
+                steering.patch("src.service.chat.resolved_settings", return_value=ClaudeSubscriptionConfig()), \
+                steering.patch("src.service.chat.fetch_usage", return_value=dict(windows)), \
+                steering.patch("src.service.chat.cli_status", return_value=status):
+            report = self.client.get("/api/claude/usage").json()
+            cached = self.client.get("/api/claude/usage").json()
+        self.assertEqual(report["provider"], "claude_subscription")
+        self.assertEqual((report["label"], report["plan"], report["account_email"]), ("Claude subscription", "pro", "user@example.com"))
+        self.assertEqual(report["windows"], windows["windows"])
+        self.assertEqual(cached, report)
+
+    def test_usage_answer_omits_account_fields_the_cli_does_not_report(self) -> None:
+        windows = {"available": True, "windows": [{"key": "week", "percent": 1.0, "resets_at": None}]}
+        with steering.patch("src.service.chat.login_allowed", return_value=True), \
+                steering.patch("src.service.chat.resolved_settings", return_value=ClaudeSubscriptionConfig()), \
+                steering.patch("src.service.chat.fetch_usage", return_value=dict(windows)), \
+                steering.patch("src.service.chat.cli_status", return_value={"logged_in": None}):
+            report = self.client.get("/api/claude/usage").json()
+        self.assertEqual(report["label"], "Claude subscription")
+        self.assertNotIn("account_email", report)
+        self.assertNotIn("plan", report)
 
     def test_usage_command_without_login_explains_why(self) -> None:
         report = {"available": False, "reason": "no_own_login"}

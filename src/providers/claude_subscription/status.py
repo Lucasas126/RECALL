@@ -11,8 +11,10 @@ from src.providers.claude_subscription.catalog import parse_version
 from src.providers.claude_subscription.login import command_for
 
 LOGIN_HINT = "Run `claude auth login` on the computer running RECALL, as the account RECALL runs as."
-# the only fields of `claude auth status` passed on; the account e-mail and organization never leave here
-_AUTH_FIELDS = {"authMethod": "auth_method", "subscriptionType": "subscription"}
+# the only fields of `claude auth status` passed on; the organization never leaves here. The account e-mail is
+# passed on only for the logged-in user's own usage panel (ChatService.claude_usage): it is never logged and never
+# part of the provider list or the login status answers.
+_AUTH_FIELDS = {"authMethod": "auth_method", "subscriptionType": "subscription", "email": "account_email"}
 
 
 def _run(command: list[str], env: dict[str, str], timeout: float) -> subprocess.CompletedProcess:
