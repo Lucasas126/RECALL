@@ -1,6 +1,6 @@
 # Design: agents shared between users
 
-Status: step 1 done on branch `feat/shared-agents-space` (model, derived level, login refusal, `resolve_owner`, admin CLI, tests); the rest is planned. Steps are built one branch at a time off `feat/shared-agents`; each step lists what is done.
+Status: step 1 done on branch `feat/shared-agents-space` (model, derived level, login refusal, `resolve_owner`, admin CLI, tests); step 2 done on branch `feat/shared-web-tests` (web: `agent_owner` dependency on every `/api/agents/{id}/...` route, space agents in the listings with `shared`/`space_id`, spaces left out of the user overview, cached `all_spaces`, tests in `tests/web/test_shared_agents_web.py`; a space with an unreadable member now fails closed even after it was valid once); the rest is planned. Steps are built one branch at a time off `feat/shared-agents`; each step lists what is done.
 
 ## Goal
 

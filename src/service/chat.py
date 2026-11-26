@@ -3610,6 +3610,9 @@ class ChatService:
         except FileNotFoundError as e:
             self._good_users.pop(user_id, None)
             raise UnknownUser("unknown user: {user_id}", user_id=user_id) from e
+        except SpaceError:  # a space with a missing member is unusable: never fall back to its previous good config
+            self._good_users.pop(user_id, None)
+            raise
         except Exception as exc:  # invalid after an outside edit: keep serving the previous good config
             good = self._good_users.get(user_id)
             if good is None:
