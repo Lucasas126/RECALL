@@ -6,8 +6,10 @@ A space is a `user.yaml` with `kind: space`. This module holds what needs more t
 
 from __future__ import annotations
 
+import os
 import re
 import secrets
+import threading
 from pathlib import Path
 
 import yaml
@@ -68,16 +70,57 @@ def resolve_space(user: UserConfig, config_dir: Path) -> UserConfig:
     return user.model_copy(update={"max_level": derived_max_level(user, config_dir)})
 
 
+_SPACES_CACHE: dict[str, tuple[tuple, list[UserConfig]]] = {}
+_SPACES_LOCK = threading.Lock()
+
+
+def _space_signature(config_dir: Path) -> tuple:
+    """What decides the list of spaces: each `space-*` folder and the state of its `user.yaml` (None when absent).
+
+    One directory listing and one `stat` per space folder; no file is read or parsed.
+    """
+    entries = []
+    with os.scandir(config_dir) as scan:
+        for entry in scan:
+            if not is_space_id(entry.name):
+                continue
+            try:
+                info = os.stat(Path(entry.path) / "user.yaml")
+                entries.append((entry.name, (info.st_mtime_ns, info.st_size, info.st_ino)))
+            except OSError:
+                entries.append((entry.name, None))
+    return tuple(sorted(entries, key=lambda item: item[0]))
+
+
 def all_spaces(config_dir: Path) -> list[UserConfig]:
-    """Every readable space (derived level not applied), sorted by id."""
+    """Every readable space (derived level not applied), sorted by id.
+
+    The result is reused while the space folders and their `user.yaml` files are unchanged (a changed file, a new or
+    removed space folder invalidates it), so resolving an owner on every request does not parse the files again.
+    """
+    if not config_dir.is_dir():
+        return []
+    signature = _space_signature(config_dir)
+    key = str(config_dir)
+    with _SPACES_LOCK:
+        cached = _SPACES_CACHE.get(key)
+    if cached is not None and cached[0] == signature:
+        return [space.model_copy(deep=True) for space in cached[1]]
     found = []
-    if config_dir.is_dir():
-        for folder in sorted(config_dir.iterdir()):
-            if is_space_id(folder.name) and (folder / "user.yaml").is_file():
-                space = _read(config_dir, folder.name)
-                if space is not None and space.kind == "space":
-                    found.append(space)
-    return found
+    for name, state in signature:
+        if state is None:
+            continue
+        space = _read(config_dir, name)
+        if space is not None and space.kind == "space":
+            found.append(space)
+    with _SPACES_LOCK:
+        _SPACES_CACHE[key] = (signature, found)
+    return [space.model_copy(deep=True) for space in found]
+
+
+def clear_spaces_cache() -> None:
+    with _SPACES_LOCK:
+        _SPACES_CACHE.clear()
 
 
 def spaces_of(user_id: str, config_dir: Path) -> list[str]:
