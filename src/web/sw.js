@@ -79,6 +79,20 @@ self.addEventListener("message", (event) => {
   if (event.data && event.data.type === "SKIP_WAITING") self.skipWaiting();
 });
 
+// A notification the page showed: focus the app and tell the page which chat (or the automations) to open.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const data = event.notification.data || {};
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      const page = list.find((client) => "focus" in client);
+      if (!page) return self.clients.openWindow("/");
+      page.postMessage({ type: "OPEN_FROM_NOTIFICATION", ...data });
+      return page.focus();
+    }),
+  );
+});
+
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys()

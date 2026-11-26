@@ -35,7 +35,7 @@ When an automation is due, the service starts an **unattended task** for its age
 entry point as `python -m src.admin task run`). That means:
 
 - The agent runs with **its own SOUL**, its web group and its terminal (memory stays read-only), in a hidden chat that is removed
-  with the task. The result stays in the task record and shows in the task panel, marked as scheduled.
+  with the task. The result stays in the task record and stays there (open it from the chat that started it, if any).
 - **Nobody can approve**: manual and dangerous terminal actions are denied, normal commands in `smart` mode run, protected paths are refused.
 - The task limits, token budget and the provider's rate-limit cooldown apply.
 - **An automation's task may also message you.** Besides the groups above it keeps `notify` (`notify_telegram`) and `files_send`
@@ -68,7 +68,7 @@ calls `automation_create`; it writes the instruction for its future self, becaus
 
 ## The web tab
 
-The Tasks dialog (the clock button in the side panel) has a second tab, **Automations**. It lists every automation of your agents, newest first:
+The **Automations** dialog (the list button in the side panel) lists every automation of your agents, newest first:
 a badge (*active*, *paused*, *done*, *failed*), the agent, when it fires, the next and last run, how many runs, and a collapsible **History** with the
 last 20 outcomes (started, skipped and why, could not start). Each row has **Pause** or **Resume**, **Edit** and **Delete**. **New automation** opens a form:
 the agent, an optional title, the instruction, and *when* (every N minutes, a cron schedule, once at a date and time, or when a background process ends).

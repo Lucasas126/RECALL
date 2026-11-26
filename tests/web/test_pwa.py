@@ -84,7 +84,7 @@ class ServiceWorkerUpdateTests(PwaFixture):
         self.assertIn('event.data.type === "SKIP_WAITING"', body)
         self.assertIn("self.skipWaiting()", body)
 
-    def test_the_page_offers_the_update_in_the_page_without_notifications(self) -> None:
+    def test_the_page_offers_the_update_in_the_page_without_push(self) -> None:
         static = Path(__file__).resolve().parents[2] / "src" / "web" / "static"
         script = (static / "app.js").read_text(encoding="utf-8")
         html = (static / "index.html").read_text(encoding="utf-8")
@@ -92,8 +92,8 @@ class ServiceWorkerUpdateTests(PwaFixture):
             self.assertIn(needle, html)
         self.assertIn('postMessage({ type: "SKIP_WAITING" })', script)
         self.assertIn("controllerchange", script)
-        self.assertNotIn("Notification.requestPermission", script)
-        self.assertNotIn("showNotification", script)
+        for forbidden in ("pushManager", "PushManager", "applicationServerKey", 'addEventListener("push"'):
+            self.assertNotIn(forbidden, script)  # notifications are shown by the page itself, never by a push service
 
 
 class SessionCookieTests(PwaFixture):

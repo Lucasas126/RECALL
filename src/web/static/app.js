@@ -9,6 +9,8 @@ const ICONS = {
   pencil: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M12 20h9\"/><path d=\"M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z\"/></svg>",
   trash: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M3 6h18\"/><path d=\"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6\"/><path d=\"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2\"/></svg>",
   star: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><polygon points=\"12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2\"/></svg>",
+  bell: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0\"/></svg>",
+  bellOff: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M8.7 3A6 6 0 0 1 18 8c0 2.7.4 4.6.9 6M17 17H3s3-2 3-9c0-.7.1-1.3.3-1.9M10.3 21a1.94 1.94 0 0 0 3.4 0M2 2l20 20\"/></svg>",
   sun: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><circle cx=\"12\" cy=\"12\" r=\"4\"/><path d=\"M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41\"/></svg>",
   eye: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg>",
   eyeOff: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24\"/><path d=\"M1 1l22 22\"/></svg>",
@@ -806,6 +808,7 @@ function translateInterface() {
     $(id).title = tr(text);
     $(id).setAttribute("aria-label", tr(text));
   }
+  renderNotifyBell();
   const kindLabels = { every: "Every N minutes", cron: "On a cron schedule", at: "Once, at a date and time", process_end: "When a background process ends" };
   for (const option of $("automation-kind").options) option.textContent = tr(kindLabels[option.value]);
   $("automation-title").placeholder = tr("Short name (optional)");
@@ -911,6 +914,59 @@ function errorInfo(code) {
 }
 
 const chatsUrl = (suffix = "") => `/api/agents/${state.agentId}/chats${suffix}`;
+
+
+// ---- notifications: pure helpers (the page shows them itself through the browser; no Web Push)
+const NOTIFY_KINDS = ["reply", "approval", "automation"];
+const NOTIFY_HEADS = { reply: "Reply ready", approval: "Approval needed", automation: "Automation finished" };
+
+// Whether this browser has the Notification API at all (on some phones it does not).
+function notifySupported(win) {
+  return Boolean(win) && "Notification" in win;
+}
+
+// The bell is on only when the device chose it AND the browser still allows it (the permission can be revoked later).
+function notifyBellOn(stored, permission, supported) {
+  return Boolean(supported) && stored === "on" && permission === "granted";
+}
+
+// What a click on the bell does: ask for the permission (needs the click), explain a block, or switch on or off.
+function notifyBellClick(permission, on) {
+  if (permission === "default") return "request";
+  if (permission === "denied") return "denied";
+  return on ? "off" : "on";
+}
+
+// The one rule: show only for a known trigger, with the bell on and permission granted, while the page is out of sight or not focused.
+function notifyShouldShow({ kind, bell, supported, permission, hidden, focused }) {
+  if (!NOTIFY_KINDS.includes(kind) || !supported || !bell || permission !== "granted") return false;
+  return Boolean(hidden) || !focused;
+}
+
+// Generic text plus the chat or automation title; never message content. One tag per chat (an approval replaces a reply).
+function notifyContent(kind, title, trFn, agentId, id) {
+  const tag = kind === "automation" ? `automation:${id}` : `chat:${agentId}:${id}`;
+  return { title: trFn(NOTIFY_HEADS[kind]), body: String(title || ""), tag, data: { kind, agent_id: agentId || "", id: id || "" } };
+}
+
+// Compares the chat list with the last one seen: a reply that ended (unread appeared) or more approvals waiting.
+// `seen` is null on the first look (nothing is announced then); returns the events and the map to keep.
+function notifyChatChanges(seen, chats) {
+  const next = {};
+  const events = [];
+  for (const chat of Array.isArray(chats) ? chats : []) {
+    const key = `${chat.agent_id}/${chat.id}`;
+    const now = { unread: Boolean(chat.unread), approvals: Number(chat.pending_approvals) || 0 };
+    next[key] = now;
+    const before = seen?.[key];
+    if (!before) continue;  // first look, or a chat that just entered the (windowed) list: not news
+    const title = chat.title || "";
+    if (now.approvals > before.approvals) events.push({ kind: "approval", agent_id: chat.agent_id, id: chat.id, title });
+    else if (now.unread && !before.unread) events.push({ kind: "reply", agent_id: chat.agent_id, id: chat.id, title });
+  }
+  return { events, next };
+}
+// ---- end notifications: pure helpers
 
 // ------------------------------------------------------------------ login
 
@@ -3687,6 +3743,7 @@ async function refreshChats() {
   const session = state.session;
   const chats = await api(`/api/chats${chatListQuery(state.chatId, state.showHiddenChats)}`);
   if (session !== state.session) return;
+  notifyScan(chats);
   renderChatHeader(chats.find((chat) => chat.id === state.chatId && chat.agent_id === state.agentId) ?? state.chatInfo);
   const list = $("chat-list");
   let section = null;
@@ -9585,3 +9642,117 @@ setInterval(() => {
   if (document.hidden || !state.user || document.querySelector("#chat-list .rename-input") || !$("chat-title-input").hidden) return;
   refreshChats().catch(() => {});
 }, 4000);
+
+// ---- notifications: the bell, the scans and the display (DOM)
+const NOTIFY_STORE = "notifyBell";
+const NOTIFY_POLL_MS = 20000;
+const notify = { seen: null, since: null, away: false, lastPoll: 0, hintTimer: null };
+
+function notifyPermission() {
+  return notifySupported(window) ? Notification.permission : "denied";
+}
+function notifyStored() {
+  try { return localStorage.getItem(NOTIFY_STORE); } catch { return null; }
+}
+function notifyActive() {
+  return notifyBellOn(notifyStored(), notifyPermission(), notifySupported(window));
+}
+function notifyPageAway() {
+  return document.hidden || !document.hasFocus();
+}
+function renderNotifyBell() {
+  const button = $("notify-toggle");
+  button.hidden = !notifySupported(window);
+  const on = notifyActive();
+  button.innerHTML = on ? ICONS.bell : ICONS.bellOff;
+  button.setAttribute("aria-pressed", String(on));
+  const label = tr(on ? "Notifications on (only while this page is in the background)" : "Notifications off");
+  button.title = label;
+  button.setAttribute("aria-label", label);
+}
+function notifyHint(text) {
+  const box = $("notify-hint");
+  box.textContent = tr(text);
+  box.hidden = false;
+  clearTimeout(notify.hintTimer);
+  notify.hintTimer = setTimeout(() => { box.hidden = true; }, 7000);
+}
+function notifyStore(on) {
+  try { localStorage.setItem(NOTIFY_STORE, on ? "on" : "off"); } catch { /* storage may be blocked */ }
+}
+async function notifyBellPressed() {
+  const action = notifyBellClick(notifyPermission(), notifyActive());
+  if (action === "denied") notifyHint("The browser blocked notifications for this site. Allow them in the browser settings.");
+  else if (action === "request") {
+    let result = "default";
+    try { result = await Notification.requestPermission(); } catch { /* an old browser: the callback form is not supported */ }
+    if (result === "granted") notifyStore(true);
+    else if (result === "denied") notifyHint("The browser blocked notifications for this site. Allow them in the browser settings.");
+  } else notifyStore(action === "on");
+  notify.seen = null;
+  renderNotifyBell();
+}
+
+async function notifyShow(event) {
+  if (!notifyShouldShow({
+    kind: event.kind, bell: notifyActive(), supported: notifySupported(window), permission: notifyPermission(),
+    hidden: document.hidden, focused: document.hasFocus(),
+  })) return;
+  const content = notifyContent(event.kind, event.title || (event.kind === "automation" ? "" : tr("New chat")), tr, event.agent_id, event.id);
+  const options = { body: content.body, tag: content.tag, data: content.data, icon: "/static/icons/icon-192.png" };
+  try {
+    const registration = "serviceWorker" in navigator ? await navigator.serviceWorker.getRegistration() : null;
+    if (registration?.showNotification) await registration.showNotification(content.title, options);
+    else {
+      const shown = new Notification(content.title, options);
+      shown.onclick = () => { shown.close(); notifyOpen(content.data); };
+    }
+  } catch (err) {
+    console.warn("notification not shown", err);
+  }
+}
+// A click on a notification: focus the app and open that chat, or the automations dialog.
+function notifyOpen(data) {
+  window.focus();
+  if (!state.user || !data) return;
+  if (data.kind === "automation") $("tasks-open").click();
+  else if (data.agent_id && data.id) openChatFromList({ agent_id: data.agent_id, id: data.id });
+}
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data?.type === "OPEN_FROM_NOTIFICATION") notifyOpen(event.data);
+  });
+}
+
+// Called with every chat list the page loads (the visible poll and the background poll).
+function notifyScan(chats) {
+  const { events, next } = notifyChatChanges(notify.seen, chats);
+  notify.seen = next;
+  for (const event of events) notifyShow(event);
+}
+
+// Automations run without any page: a page that is away asks the server what ended since its marker.
+async function notifyPoll() {
+  if (!state.user || !notifyActive() || !notifyPageAway()) return;
+  notify.lastPoll = Date.now();
+  try {
+    if (document.hidden) notifyScan(await api(`/api/chats${chatListQuery(state.chatId, state.showHiddenChats)}`));
+    const data = await api(`/api/automations/events${notify.since ? `?since=${encodeURIComponent(notify.since)}` : ""}`);
+    notify.since = data.now;
+    for (const item of data.events) notifyShow({ kind: "automation", id: item.automation_id, title: item.title });
+  } catch { /* offline or logged out: the next poll tries again */ }
+}
+// When the page goes away the marker restarts from the server's clock, so what finished while it was watched is not announced.
+function notifyAwayCheck() {
+  const away = notifyPageAway();
+  if (away && !notify.away) notify.since = null;
+  notify.away = away;
+  if (away && (notify.since === null || Date.now() - notify.lastPoll >= NOTIFY_POLL_MS)) notifyPoll();
+}
+$("notify-toggle").addEventListener("click", notifyBellPressed);
+document.addEventListener("visibilitychange", notifyAwayCheck);
+window.addEventListener("blur", notifyAwayCheck);
+window.addEventListener("focus", notifyAwayCheck);
+setInterval(notifyAwayCheck, 5000);
+renderNotifyBell();
+// ---- end notifications (DOM)

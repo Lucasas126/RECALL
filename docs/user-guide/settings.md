@@ -85,6 +85,15 @@ When a new RECALL version is installed while the app is open, a small banner in 
 
 The session cookie is `SameSite=Lax` (so opening RECALL from a link in another app keeps you signed in) and lasts 30 days from your last activity: it is renewed at most once a day while you use the app.
 
+### notifications (the bell)
+
+The bell button in the side panel footer shows browser notifications. It is stored **per device** (this browser only, never in your server preferences) and is off by default. The first press asks the browser for permission; if the browser has blocked it, a short hint says so. The button is hidden when the browser has no Notification API.
+
+- A notification appears only while the page is **in the background** (tab hidden, another window focused). Nothing is shown while you are looking at the app.
+- Triggers: a reply finished (also in chats you have not opened), a tool waiting for your approval, and an automation run that finished. The text is generic ("Reply ready", "Approval needed", "Automation finished") plus the chat or automation title, never message content. Clicking it focuses the app and opens that chat, or the Automations dialog.
+- There is **no push**: no push service is involved. A closed or suspended app (a phone that put the page to sleep) gets nothing. On iPhone it is not verified that it works at all.
+- Automations keep notifying through Telegram exactly as before; the browser notification is an extra. A page that is in the background asks the server about finished automation runs every ~20 s (`GET /api/automations/events`).
+
 ## users (administrators only)
 
 The **Users** section of the settings dialog lists every user of the installation: name and id, maximum level (`max_level`, as a badge),
