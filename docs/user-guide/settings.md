@@ -70,6 +70,18 @@ The **Providers** tab holds what each provider needs from you:
   alone (`OPENROUTER_API_KEY_<USER>`) in `secrets.env` and never shown again; only your `user.yaml` is pointed at it. *Remove
   key* deletes it. Changes apply at once.
 
+## install the web UI as an app
+
+The web UI is an installable web app: it opens in its own window, without the browser bars. It needs HTTPS (or `localhost`); behind a reverse proxy that is usually already the case.
+
+- **Windows (Edge or Chrome)**: open the address, then the install icon at the right of the address bar, or menu > Apps > Install this site as an app.
+- **Android (Chrome)**: menu > Install app (or Add to Home screen).
+- **iPhone (Safari)**: Share > Add to Home Screen. It must be Safari; other iOS browsers cannot install it the same way.
+
+A service worker (`/sw.js`) keeps only the page shell (the page, scripts, styles, fonts and icons) so the app opens when the server is unreachable; it fetches from the network first, shows an "offline, reconnecting" page when there is no copy, and renews the copy on each new RECALL version. It never handles or stores: the API (`/api/`), live replies (event streams), login and logout, uploads, downloads, media, transcripts, any answer that sets a cookie, or any request that is not a plain GET. Chats are never available offline. Logging out also clears the worker's caches.
+
+The session cookie is `SameSite=Lax` (so opening RECALL from a link in another app keeps you signed in) and lasts 30 days from your last activity: it is renewed at most once a day while you use the app.
+
 ## users (administrators only)
 
 The **Users** section of the settings dialog lists every user of the installation: name and id, maximum level (`max_level`, as a badge),

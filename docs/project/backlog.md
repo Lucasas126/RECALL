@@ -33,6 +33,7 @@ One list of ideas and planned work. Implemented behaviour is documented in the
 
 ### tools
 
+- Delegating to an existing agent should default to that agent's own configured terminal backends.
 - **RECALL knowledge, phase 2** (the admin pages `admin-cli`, `recipes` and `security-for-admins` are done): reference pages for Telegram, models and providers, MCP, more recipes (step-by-step fixes) and the user documentation, added to `src/knowledge/recall/` ([RECALL knowledge](../user-guide/recall-knowledge.md) is phase 1).
 - **Read access to docs and source for agents**: let an agent read `docs/` and the code to answer deeper questions. `docs/` is not in the Docker image today; remove it from `.dockerignore` first.
 - **File tools v2** for every source: paginated reads with line numbers and text extraction for PDF/Office files; regex content search and glob file search; `patch` (unique find-and-replace with tolerant matching, returning a diff); a stale-write guard.
@@ -62,6 +63,7 @@ One list of ideas and planned work. Implemented behaviour is documented in the
 
 ### interface
 
+- Installable web app: optional Web Push notifications (own VAPID keys, opt-in, generic payload).
 - Search across chat history from the web UI (the agent can already search its conversations; the user cannot).
 - Optional voice replies (TTS) in Telegram, per agent.
 - Remove unnecessary messages from the settings and configuration selectors to keep the interface clean.

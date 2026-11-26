@@ -1215,9 +1215,27 @@ $("login-form").addEventListener("submit", async (e) => {
 
 $("logout").addEventListener("click", async () => {
   await api("/api/logout", { method: "POST" });
+  await clearShellCaches();
   if (state.user) clearLastChat(localStorage, state.user.id);
   showLogin();
 });
+
+// ---- installable app: the service worker (served at /sw.js) keeps only the page shell, never data
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch((err) => console.warn("service worker not registered", err));
+}
+// Logging out also empties the worker's caches, so nothing stays on a shared device.
+async function clearShellCaches() {
+  if (typeof caches === "undefined") return;
+  try {
+    await Promise.all((await caches.keys()).map((name) => caches.delete(name)));
+  } catch (err) {
+    console.warn("could not clear the app cache", err);
+  }
+}
+registerServiceWorker();
+// ---- end installable app
 
 // ------------------------------------------------------------------ navigation drawer (narrow screens)
 
@@ -7811,10 +7829,24 @@ function attachmentModality(file) {
   return null;
 }
 
-// The speech-to-text endpoint names MP4 audio (what Safari records) "m4a".
+// ---- audio formats: the name the speech-to-text endpoint expects for a recorded or attached file's MIME type
+const AUDIO_FORMATS = {
+  "audio/mp4": "m4a", "audio/x-m4a": "m4a", "audio/m4a": "m4a", "audio/aac": "aac", "audio/mpeg": "mp3",
+  "audio/mp3": "mp3", "audio/x-wav": "wav", "audio/wave": "wav", "audio/wav": "wav",
+};
 function audioFormat(mimeType) {
-  return mimeType.split(";")[0] === "audio/mp4" ? "m4a" : null;
+  return AUDIO_FORMATS[mimeType.split(";")[0].trim().toLowerCase()] ?? null;
 }
+// The recorder's own MIME type (Safari: audio/mp4, Chrome and Firefox: webm or ogg) decides the file extension.
+const RECORDING_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
+function recordingType(isSupported) {
+  return RECORDING_TYPES.find((type) => isSupported(type)) ?? "";
+}
+function recordingExtension(type) {
+  const base = type.split(";")[0].trim().toLowerCase();
+  return audioFormat(base) ?? (base.includes("ogg") ? "ogg" : "webm");
+}
+// ---- end audio formats
 
 function readAttachment(file) {
   const pdf = isPdf(file);
@@ -7942,17 +7974,18 @@ async function voiceStart() {
   voice.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   voice.chunks = [];
   voice.discard = false;
-  voice.recorder = new MediaRecorder(voice.stream);
+  const wanted = recordingType((type) => MediaRecorder.isTypeSupported(type));
+  voice.recorder = wanted ? new MediaRecorder(voice.stream, { mimeType: wanted }) : new MediaRecorder(voice.stream);
   voice.recorder.addEventListener("dataavailable", (event) => { if (event.data.size) voice.chunks.push(event.data); });
   voice.recorder.addEventListener("stop", async () => {
-    const type = voice.recorder?.mimeType || "audio/webm";
+    // the recorder's own type, else the type of what it produced: never assume webm (Safari records mp4)
     const chunks = voice.chunks;
+    const type = voice.recorder?.mimeType || chunks[0]?.type || "audio/webm";
     const discard = voice.discard;
     voiceStopTracks();
     if (discard || !chunks.length) return;
     try {
-      const extension = type.includes("mp4") ? "m4a" : type.includes("ogg") ? "ogg" : "webm";
-      const file = new File(chunks, `voice.${extension}`, { type });
+      const file = new File(chunks, `voice.${recordingExtension(type)}`, { type });
       if (file.size > MAX_FILE_BYTES) throw new Error(tr("{name}: maximum size is 10 MB", { name: file.name }));
       const total = state.attachments.reduce((sum, item) => sum + item.size, 0) + file.size;
       if (total > MAX_TOTAL_FILE_BYTES) throw new Error(tr("Attachments exceed the 25 MB total limit"));

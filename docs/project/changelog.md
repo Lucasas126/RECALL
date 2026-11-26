@@ -5,6 +5,7 @@ sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases b
 
 ## Unreleased
 
+- Web UI: installable as an app (Windows, Android, iPhone). A service worker served at `/sw.js` keeps only the page shell for offline start-up (network first; never the API, event streams, uploads, downloads, media or cookie-setting answers) and logout clears its caches. The session cookie is now `SameSite=Lax` and lasts 30 days from the last activity (renewed at most once a day; it was strict and 14 days fixed). Voice recordings pick a supported type (Safari records `audio/mp4`) and name the file `.m4a`, `.ogg` or `.webm` after the real type. See [install the web UI as an app](../user-guide/settings.md#install-the-web-ui-as-an-app).
 - Web UI voice messages: editing a message that has a recording now shows what was heard inside the one text box (correct it like any text), and the recording appears as a chip with its name and a cross to discard it, like a file waiting to be sent; the player stays after saving. The heard text is shown at the normal message size. While recording, the red button shows a small live level meter (8 bars) next to the elapsed time, and after 2.5 s without sound it dims, shows "!" and its tooltip asks to check the microphone. The edit request accepts `recordings` and `transcripts_in_text`.
 
 ## 0.5.5
