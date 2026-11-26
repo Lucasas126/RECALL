@@ -19,6 +19,7 @@ class TelegramRerouteTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.preferences = {"show_thinking": True, "language": "en", "agent_id": "agent-a"}
         self.service = Mock()
+        self.service.agent_owner.side_effect = lambda person, agent: person
         self.service.get_preferences.side_effect = lambda user: self.preferences.copy()
         self.service.list_agents.return_value = [
             {"id": "agent-a", "name": "First"}, {"id": "agent-b", "name": "Second"},
