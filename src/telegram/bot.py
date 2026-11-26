@@ -71,6 +71,17 @@ _REROUTE_PICKER_SECONDS = 60
 _CREATE_VIEWS = frozenset({"new_chat", "reroute_agent"})
 
 
+def _owner(service: ChatService, session: "TelegramSession", agent_id: str) -> str:
+    """The owner of `agent_id` for this person: themself, or the space that shares it (data is keyed by owner)."""
+    return service.agent_owner(session.user_id, agent_id)
+
+
+def _remember_agent(service: ChatService, session: "TelegramSession", agent_id: str) -> None:
+    """Save `agent_id` as the person's preferred agent; a shared agent is not one of their own, so it is not saved."""
+    if _owner(service, session, agent_id) == session.user_id:
+        service.update_preferences(session.user_id, UserPreferences(agent_id=agent_id))
+
+
 @dataclass
 class TelegramSession:
     user_id: str
@@ -340,7 +351,7 @@ def _paged_rows(
 
 
 def _effort_items(service: ChatService, session: TelegramSession, agent_id: str, chat_id: str) -> list[dict[str, Any]]:
-    default = service.get_chat_models(session.user_id, agent_id, chat_id)["reasoning_effort"]["default"]
+    default = service.get_chat_models(_owner(service, session, agent_id), agent_id, chat_id)["reasoning_effort"]["default"]
     default_label = _msg(session, "Default") + (f" ({default})" if default else "")
     return [{"id": None, "name": default_label}, *({"id": level, "name": level} for level in _EFFORT_LEVELS)]
 
@@ -348,7 +359,7 @@ def _effort_items(service: ChatService, session: TelegramSession, agent_id: str,
 def _effort_view(
     service: ChatService, session: TelegramSession, panel: _Panel,
 ) -> tuple[str, InlineKeyboardMarkup]:
-    effort = service.get_chat_models(session.user_id, panel.agent_id, panel.target_chat)["reasoning_effort"]
+    effort = service.get_chat_models(_owner(service, session, panel.agent_id), panel.agent_id, panel.target_chat)["reasoning_effort"]
     back = [_panel_button(panel, _msg(session, "Back"), "main")]
     if not effort["reasoning"]:
         return _msg(session, "Reasoning is off for this agent."), InlineKeyboardMarkup([back])
@@ -385,7 +396,7 @@ def _model_source(chat: dict[str, Any]) -> str:
 def _agent_default_model(service: ChatService, session: TelegramSession, agent_id: str | None = None) -> str | None:
     """The agent's default chat model, or None when it follows the user default (or cannot be read)."""
     try:
-        model = service.get_agent(session.user_id, agent_id or session.agent_id)["chat_config"].get("model")
+        model = service.get_agent(_owner(service, session, agent_id), agent_id or session.agent_id)["chat_config"].get("model")
     except (ServiceError, ValueError, KeyError, TypeError, AttributeError):
         return None
     return model if isinstance(model, str) and model else None
@@ -421,7 +432,7 @@ def _panel_view(
         }.get(panel.view, "Choose the agent for the new chat:")
         return _msg(session, title), InlineKeyboardMarkup([*rows, tail])
     if panel.view in _CHAT_VIEWS:
-        chat = service.get_chat_models(session.user_id, panel.agent_id, panel.target_chat)
+        chat = service.get_chat_models(_owner(service, session, panel.agent_id), panel.agent_id, panel.target_chat)
         header = _msg(session, _SOURCE_LABELS[_model_source(chat)])
         current = chat["model"]["id"]
     else:
@@ -495,13 +506,13 @@ def _apply_panel_action(
     elif kind == "page" and argument.isdigit() and panel.view in ("llm", "stt", *_CHAT_VIEWS):
         panel.page = int(argument)
     elif kind == "inherit" and panel.view == "chat_llm":
-        service.set_chat_model(session.user_id, panel.agent_id, panel.target_chat, None)
+        service.set_chat_model(_owner(service, session, panel.agent_id), panel.agent_id, panel.target_chat, None)
         if _agent_default_model(service, session, panel.agent_id):
             return _msg(session, "This chat now uses the agent's default LLM model.")
         return _msg(session, "This chat now uses the user's default LLM model.")
     elif kind == "pick" and panel.view == "chat_effort" and argument.isdigit() and int(argument) < len(panel.items):
         item = panel.items[int(argument)]
-        service.set_chat_reasoning_effort(session.user_id, panel.agent_id, panel.target_chat, item["id"])
+        service.set_chat_reasoning_effort(_owner(service, session, panel.agent_id), panel.agent_id, panel.target_chat, item["id"])
         return _msg(session, "Reasoning effort for this chat: {effort}\n\nThis selection applies only to the current chat.",
                     effort=item["name"])
     elif kind == "pick" and argument.isdigit() and int(argument) < len(panel.items):
@@ -513,7 +524,7 @@ def _apply_panel_action(
         elif panel.view == "stt":
             service.update_preferences(session.user_id, UserPreferences(default_stt_model=selected))
         elif panel.view == "chat_llm":
-            chosen = service.set_chat_model(session.user_id, panel.agent_id, panel.target_chat, selected)
+            chosen = service.set_chat_model(_owner(service, session, panel.agent_id), panel.agent_id, panel.target_chat, selected)
             return _lines(
                 _msg(session, "✅ Model selected\n\n{model_id}\n\nThis selection applies to the current chat.",
                      model_id=_with_provider(panel.items[int(argument)].get("provider") or chosen.get("provider"), selected)),
@@ -691,8 +702,8 @@ def _create_session_chat(session: TelegramSession, service: ChatService, agent_i
         if agent_id is None:
             raise InputError("No agents are configured for this user.")
     else:
-        service.update_preferences(session.user_id, UserPreferences(agent_id=agent_id))
-    chat = service.create_chat(session.user_id, agent_id, origin="telegram")
+        _remember_agent(service, session, agent_id)
+    chat = service.create_chat(_owner(service, session, agent_id), agent_id, origin="telegram")
     session.agent_id, session.chat_id = agent_id, chat["id"]
     session.last_message_at = datetime.now(timezone.utc)
     return chat
@@ -710,7 +721,7 @@ def _new_chat_text(
     """The Markdown confirmation of a new chat: its agent (bold) and the LLM it will use (italic)."""
     text = _msg(session, "New chat created with **{agent}**.", agent=_md_escape(agent_name))
     try:
-        chat = service.get_chat(session.user_id, agent_id, chat_id)
+        chat = service.get_chat(_owner(service, session, agent_id), agent_id, chat_id)
         model = chat["model"]
         text += "\n" + _msg(
             session, "Model: _{model_id}_", model_id=_md_escape(_with_provider(model.get("provider"), model["id"])),
@@ -833,7 +844,7 @@ def _last_chat(session: TelegramSession, service: ChatService) -> tuple[dict, st
     """
     try:
         if session.chat_id is not None and session.last_message_at is not None:
-            chat, agent_id = service.chat_summary(session.user_id, session.agent_id, session.chat_id), session.agent_id
+            chat, agent_id = service.chat_summary(_owner(service, session, session.agent_id), session.agent_id, session.chat_id), session.agent_id
         else:
             chat = service.latest_chat(session.user_id, origin="telegram")
             agent_id = chat.get("agent_id") if isinstance(chat, dict) else None
@@ -850,7 +861,7 @@ def _last_activity(session: TelegramSession, service: ChatService, chat: dict | 
     moments = [session.last_message_at] if session.chat_id is not None and session.last_message_at else []
     if chat is not None:
         try:
-            if service.chat_active(session.user_id, agent_id, chat["id"]) is True:
+            if service.chat_active(_owner(service, session, agent_id), agent_id, chat["id"]) is True:
                 return datetime.now(timezone.utc)
         except (ServiceError, OSError, ValueError, TypeError) as exc:
             logger.warning("Could not check whether the Telegram chat is replying: %s", exc)
@@ -877,7 +888,7 @@ def _prepare_message_session(session: TelegramSession, service: ChatService) -> 
     if not starts_new_chat and (session.chat_id is None or session.last_message_at is None):
         # fresh session after a restart: resume the latest chat silently, with its agent
         if agent_id != session.agent_id:
-            service.update_preferences(session.user_id, UserPreferences(agent_id=agent_id))
+            _remember_agent(service, session, agent_id)
         session.agent_id, session.chat_id = agent_id, chat["id"]
     if starts_new_chat:
         previous = (chat["id"], agent_id, str(chat.get("title") or chat["id"])) if chat and chat.get("turns", 1) else ("", "", "")
@@ -919,7 +930,7 @@ async def _launch_generation(
 async def _switch_auto_chat(session: TelegramSession, service: ChatService, record: _Reroute, agent_id: str) -> bool:
     """Replace the empty auto-created chat by a new chat of `agent_id` (the saved preference is not changed)."""
     try:
-        created = await asyncio.to_thread(service.create_chat, session.user_id, agent_id, origin="telegram")
+        created = await asyncio.to_thread(service.create_chat, _owner(service, session, agent_id), agent_id, origin="telegram")
     except (ServiceError, OSError, ValueError) as exc:
         logger.warning("Could not create the orchestrator's chat: %s", exc)
         return False
@@ -999,21 +1010,21 @@ async def _reroute_pending(
         raise InputError("This option expired.")
     title = None
     if chat_id is not None:
-        title = service.chat_summary(session.user_id, agent_id, chat_id).get("title") or chat_id
+        title = service.chat_summary(_owner(service, session, agent_id), agent_id, chat_id).get("title") or chat_id
     session.pending_reroute = None  # single use, set before any await so a double tap cannot repeat it
     if record.timer is not None and record.timer is not asyncio.current_task():
         record.timer.cancel()
     if record.task is not None and not record.task.done():
         record.task.cancel()
     try:
-        await asyncio.to_thread(service.discard_chat, session.user_id, record.auto_agent_id, record.auto_chat_id)
+        await asyncio.to_thread(service.discard_chat, _owner(service, session, record.auto_agent_id), record.auto_agent_id, record.auto_chat_id)
     except (ServiceError, OSError, ValueError) as exc:
         logger.warning("Could not delete the auto-created Telegram chat: %s", exc)
     created = chat_id is None
     try:
         if created:
-            chat_id = service.create_chat(session.user_id, agent_id, origin="telegram")["id"]
-        service.update_preferences(session.user_id, UserPreferences(agent_id=agent_id))
+            chat_id = service.create_chat(_owner(service, session, agent_id), agent_id, origin="telegram")["id"]
+        _remember_agent(service, session, agent_id)
     except (PreferencesError, ServiceError, ValueError, OSError):
         record.attachments = []
         raise
@@ -1197,7 +1208,7 @@ async def show_model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.effective_message.reply_text(_msg(session, "No active chat. Use /newchat."))
         return
     try:
-        chat = state.service.get_chat(session.user_id, session.agent_id, session.chat_id)
+        chat = state.service.get_chat(_owner(state.service, session, session.agent_id), session.agent_id, session.chat_id)
     except (ServiceError, ValueError) as exc:
         logger.warning("Could not read Telegram chat model: %s", exc)
         await update.effective_message.reply_text(_msg(session, "I could not read the current chat model."))
@@ -1250,7 +1261,7 @@ async def _run_dream_command(update: Update, context: ContextTypes.DEFAULT_TYPE,
         return
     try:
         reply = await asyncio.to_thread(
-            state.service.dream_command, session.user_id, session.agent_id, text, channel="telegram",
+            state.service.dream_command, _owner(state.service, session, session.agent_id), session.agent_id, text, channel="telegram",
         )
     except (ServiceError, ValueError, OSError, RuntimeError) as exc:
         logger.warning("Telegram %s failed: %s", text.split()[0], exc)
@@ -1273,7 +1284,7 @@ async def compact_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     text = " ".join(["/compact", *(context.args or [])])
     compaction = asyncio.create_task(asyncio.to_thread(
-        state.service.compact_command, session.user_id, session.agent_id, session.chat_id, text,
+        state.service.compact_command, _owner(state.service, session, session.agent_id), session.agent_id, session.chat_id, text,
     ))
     try:
         # a compaction takes a while and streams nothing: keep Telegram's "typing…" on until it ends
@@ -1952,7 +1963,8 @@ async def _send_generation(
     if session is None or session.chat_id is None:
         await update.effective_message.reply_text(_msg(session, "Create a chat first with /newchat."))
         return
-    user_id, agent_id, chat_id = session.user_id, session.agent_id, session.chat_id
+    agent_id, chat_id = session.agent_id, session.chat_id
+    user_id = _owner(state.service, session, agent_id)  # a shared agent's data lives under its space
     chat = update.effective_chat
     stream = _ReplyStream(context.bot, chat.id, use_draft=chat.type == ChatType.PRIVATE)
     await stream.start()
@@ -1962,7 +1974,7 @@ async def _send_generation(
     busy_key = (user_id, agent_id, chat_id)
     state.busy[busy_key] = state.busy.get(busy_key, 0) + 1  # a task wake waits instead of echoing this reply
     try:
-        preferences = state.service.get_preferences(user_id)
+        preferences = state.service.get_preferences(session.user_id)
         show_thinking = stream.show_thinking = preferences["show_thinking"]
         language = preferences["language"]
         agent_name = _agent_name(state.service, user_id, agent_id)

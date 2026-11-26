@@ -23,6 +23,7 @@ class TelegramUsageCommandTests(unittest.TestCase):
     def test_replies_with_the_service_answer(self) -> None:
         update, message = _update()
         service = Mock()
+        service.agent_owner.side_effect = lambda person, agent: person
         service.usage_command.return_value = "Claude plan usage\nSession (5 h): 6%"
         session = TelegramSession(user_id="user-one", agent_id="agent-one")
         with patch.object(bot, "_session", return_value=session):
@@ -33,6 +34,7 @@ class TelegramUsageCommandTests(unittest.TestCase):
     def test_unknown_telegram_user_is_refused(self) -> None:
         update, message = _update()
         service = Mock()
+        service.agent_owner.side_effect = lambda person, agent: person
         with patch.object(bot, "_session", return_value=None), patch.object(bot, "_unauthorized", AsyncMock()) as refused:
             asyncio.run(usage_command(update, _context(service)))
         refused.assert_awaited_once()
