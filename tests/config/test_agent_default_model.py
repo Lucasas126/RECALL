@@ -221,6 +221,7 @@ def _agent_named(agent_id: str, model: str | None) -> AgentConfig:
 class TelegramAgentDefaultTests(unittest.TestCase):
     def setUp(self) -> None:
         self.service = Mock()
+        self.service.agent_owner.side_effect = lambda person, agent: person
         self.service.require_zdr.return_value = False
         self.service.get_chat_models.return_value = {
             "model": {"id": "vendor/alpha"}, "model_override": None,

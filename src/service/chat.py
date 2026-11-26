@@ -2240,7 +2240,6 @@ class ChatService:
         `status` is `running` or `finished` (anything else: all); `limit` keeps the newest N. A list across chats is
         labelled with the parent agent and chat names.
         """
-        self._user(user_id)
         if agent_id is not None:
             owners = [self.agent_owner(user_id, agent_id)]
             self._owned_agent(owners[0], agent_id)
