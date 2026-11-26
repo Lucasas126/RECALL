@@ -154,6 +154,26 @@ class AgentMoveTests(unittest.TestCase):
         self.assertIn("terminal", text.lower() + "")
         self.assertEqual(all_spaces(self.config), [])
 
+    def test_incomplete_copy_leaves_the_source_untouched(self) -> None:
+        import shutil as real_shutil
+
+        original = real_shutil.copytree
+
+        def lossy_copytree(src, dst, *args, **kwargs):
+            original(src, dst, *args, **kwargs)
+            if (Path(dst) / "notes.txt").exists():
+                (Path(dst) / "notes.txt").unlink()
+
+        with patch("shutil.copytree", lossy_copytree):
+            with self.assertRaises(MoveError) as caught:
+                self.mover.share_agent("user-a", "nova", ["user-c"])
+        self.assertIn("notes.txt", str(caught.exception.kwargs if hasattr(caught.exception, 'kwargs') else caught.exception.__dict__))
+        self.assertTrue((self.data / "user-a" / "nova" / "notes.txt").exists())
+        self.assertTrue((self.config / "user-a" / "agents" / "nova.yaml").exists())
+        self.assertTrue((self.data / "user-a" / ".automations" / "abc1234567.json").exists())
+        self.assertEqual(all_spaces(self.config), [])
+        self.assertEqual(list((self.data).glob("space-*/nova")), [])
+
 
 if __name__ == "__main__":
     unittest.main()

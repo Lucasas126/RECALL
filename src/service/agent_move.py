@@ -165,6 +165,7 @@ class AgentMover:
                 self.avatars.save(target, new_id, self.avatars.read(avatar) or b"", avatar.media_type)
                 made_avatar = True
             automation_paths = self._copy_automations(source, target, config.id, new_id, paused=paused)
+            self._verify(source, target, config.id, new_id)
         except BaseException:
             shutil.rmtree(tmp, ignore_errors=True)
             if made_config:
@@ -177,6 +178,41 @@ class AgentMover:
             raise
         if not copy:
             self._remove_source(source, config.id)
+
+    def _tree(self, root: Path) -> dict[str, int]:
+        """Relative path -> size of every file under `root`, without the index and USER.md (rewritten on a move)."""
+        if not root.is_dir():
+            return {}
+        found = {}
+        for path in root.rglob("*"):
+            relative = path.relative_to(root)
+            if path.is_file() and relative.parts[0] not in _SKIP and relative.as_posix() != _USER_MD:
+                found[relative.as_posix()] = path.stat().st_size
+        return found
+
+    def _verify(self, source: str, target: str, old_id: str, new_id: str) -> None:
+        """The target must be complete before the source may go: config loads for the new owner, same files and sizes,
+        the picture and the automations are there. Raises MoveError listing what differs (the caller undoes the target)."""
+        from src.config.loader import load_agent_config
+
+        problems = []
+        try:
+            if load_agent_config(target, new_id).id != new_id:
+                problems.append("the configuration has another id")
+        except Exception as exc:
+            problems.append(f"the configuration does not load: {exc}")
+        before, after = self._tree(self.data_dir / source / old_id), self._tree(self.data_dir / target / new_id)
+        problems += [f"missing file {name}" for name in sorted(before.keys() - after.keys())]
+        problems += [f"different size {name}" for name in sorted(before.keys() & after.keys()) if before[name] != after[name]]
+        if not (self.data_dir / target / new_id / _USER_MD).is_file():
+            problems.append(f"missing file {_USER_MD}")
+        if self.avatars.get(source, old_id) is not None and self.avatars.get(target, new_id) is None:
+            problems.append("missing profile picture")
+        if len(self._automation_files(target, new_id)) < len(self._automation_files(source, old_id)):
+            problems.append("missing automations")
+        if problems:
+            raise MoveError("the copy of agent '{agent_id}' is incomplete, nothing was removed: {details}",
+                            agent_id=old_id, details="; ".join(problems))
 
     def _remove_source(self, owner: str, agent_id: str) -> None:
         """Remove the agent of `owner`: config and list entry, data folder, picture, automations."""
