@@ -178,6 +178,8 @@ _SPANISH = {
     "Disposable chat, deleted on {date}": "Chat desechable, se eliminará el {date}",
     "Make it a normal chat": "Convertirlo en chat normal",
     "Make it disposable": "Hacerlo desechable",
+    "A new version of RECALL is available.": "Hay una nueva versión de RECALL disponible.",
+    "Reload": "Recargar",
     "Days to keep disposable chats": "Días que se conservan los chats desechables",
     "Disposable chats are deleted after this many days without activity (1–365). Leave empty to use the default of 30.": "Los chats desechables se eliminan tras estos días sin actividad (1–365). Déjalo vacío para usar el valor por defecto de 30.",
     "cannot delete a chat while it has an active or queued reply": "No se puede eliminar un chat mientras tenga una respuesta activa o pendiente.",

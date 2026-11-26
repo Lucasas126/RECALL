@@ -1253,9 +1253,48 @@ $("logout").addEventListener("click", async () => {
 });
 
 // ---- installable app: the service worker (served at /sw.js) keeps only the page shell, never data
+const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+// whether the page may ask the browser for a newer worker again (at most once per interval)
+function updateCheckDue(now, last, interval = UPDATE_CHECK_INTERVAL_MS) {
+  return last == null || now - last >= interval;
+}
+// The in-page "new version" banner: a new worker that finished installing while an older one controls the page is
+// waiting for the user. Reload asks it to take over (SKIP_WAITING) and reloads once it does; no system notification.
+function showUpdateBanner(worker) {
+  const banner = $("update-banner");
+  if (!banner || !banner.hidden) return;
+  $("update-banner-text").textContent = tr("A new version of RECALL is available.");
+  $("update-reload").textContent = tr("Reload");
+  $("update-dismiss").setAttribute("aria-label", tr("Dismiss"));
+  $("update-dismiss").title = tr("Dismiss");
+  banner.hidden = false;
+  $("update-reload").onclick = () => {
+    $("update-reload").disabled = true;
+    navigator.serviceWorker.addEventListener("controllerchange", () => location.reload(), { once: true });
+    worker.postMessage({ type: "SKIP_WAITING" });
+  };
+  $("update-dismiss").onclick = () => { banner.hidden = true; };
+}
+function watchForUpdates(registration) {
+  const offer = (worker) => { if (worker && navigator.serviceWorker.controller) showUpdateBanner(worker); };
+  offer(registration.waiting);
+  registration.addEventListener("updatefound", () => {
+    const worker = registration.installing;
+    worker?.addEventListener("statechange", () => { if (worker.state === "installed") offer(worker); });
+  });
+  let last = Date.now();
+  const check = () => {
+    if (document.visibilityState === "hidden" || !updateCheckDue(Date.now(), last)) return;
+    last = Date.now();
+    registration.update().catch(() => {});   // offline or server down: try again at the next focus
+  };
+  document.addEventListener("visibilitychange", check);
+  window.addEventListener("focus", check);
+}
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch((err) => console.warn("service worker not registered", err));
+  navigator.serviceWorker.register("/sw.js", { scope: "/" }).then(watchForUpdates)
+    .catch((err) => console.warn("service worker not registered", err));
 }
 // Logging out also empties the worker's caches, so nothing stays on a shared device.
 async function clearShellCaches() {

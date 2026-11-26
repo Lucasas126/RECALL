@@ -81,6 +81,8 @@ The web UI is an installable web app: it opens in its own window, without the br
 
 A service worker (`/sw.js`) keeps only the page shell (the page, scripts, styles, fonts and icons) so the app opens when the server is unreachable; it fetches from the network first, shows an "offline, reconnecting" page when there is no copy, and renews the copy on each new RECALL version. It never handles or stores: the API (`/api/`), live replies (event streams), login and logout, uploads, downloads, media, transcripts, any answer that sets a cookie, or any request that is not a plain GET. Chats are never available offline. Logging out also clears the worker's caches.
 
+When a new RECALL version is installed while the app is open, a small banner in the page says so, with **Reload** (switches to the new version and reloads) and a dismiss button. The browser looks for a new version when the app opens and when you come back to it (at most every 5 minutes). It is only this banner: RECALL sends no system notifications and no push messages.
+
 The session cookie is `SameSite=Lax` (so opening RECALL from a link in another app keeps you signed in) and lasts 30 days from your last activity: it is renewed at most once a day while you use the app.
 
 ## users (administrators only)

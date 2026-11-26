@@ -76,6 +76,26 @@ class ServiceWorkerRouteTests(PwaFixture):
         self.assertEqual(self.client.get("/sw.js").status_code, 200)
 
 
+class ServiceWorkerUpdateTests(PwaFixture):
+    def test_a_new_worker_waits_for_the_page_to_ask(self) -> None:
+        body = self.client.get("/sw.js").text
+        install = body.split('addEventListener("install"', 1)[1].split('addEventListener("activate"', 1)[0]
+        self.assertNotIn("skipWaiting", install)
+        self.assertIn('event.data.type === "SKIP_WAITING"', body)
+        self.assertIn("self.skipWaiting()", body)
+
+    def test_the_page_offers_the_update_in_the_page_without_notifications(self) -> None:
+        static = Path(__file__).resolve().parents[2] / "src" / "web" / "static"
+        script = (static / "app.js").read_text(encoding="utf-8")
+        html = (static / "index.html").read_text(encoding="utf-8")
+        for needle in ('id="update-banner"', 'id="update-reload"', 'id="update-dismiss"'):
+            self.assertIn(needle, html)
+        self.assertIn('postMessage({ type: "SKIP_WAITING" })', script)
+        self.assertIn("controllerchange", script)
+        self.assertNotIn("Notification.requestPermission", script)
+        self.assertNotIn("showNotification", script)
+
+
 class SessionCookieTests(PwaFixture):
     @staticmethod
     def _cookie_header(response) -> str:

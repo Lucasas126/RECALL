@@ -69,9 +69,14 @@ function cacheable(response) {
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(SHELL.map((path) => new Request(path, { cache: "reload" }))))
-      .then(() => self.skipWaiting()),
+      .then((cache) => cache.addAll(SHELL.map((path) => new Request(path, { cache: "reload" })))),
   );
+  // A new version does not take over here: it waits until the page shows its "new version" banner and the user presses Reload,
+  // which posts SKIP_WAITING. The very first install has no older worker, so it activates by itself.
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {

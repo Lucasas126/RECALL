@@ -696,6 +696,10 @@ details.thinking { border-left: 2px solid var(--line); padding-left: 10px; displ
 #new-chat-row[hidden] { display: none; }
 #chat-list .chat-badge { display: inline-grid; place-items: center; flex-shrink: 0; color: var(--warn); }
 #chat-list .chat-badge svg { width: 14px; height: 14px; }
+#update-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px var(--gutter) 0; padding: 8px 12px; border: 1px solid var(--accent); border-radius: 10px; background: var(--accent-soft); color: var(--text); font-size: .9em; }
+#update-banner[hidden] { display: none; }
+#update-banner-text { flex: 1 1 200px; min-width: 0; }
+#update-banner button { min-height: 44px; min-width: 44px; padding: 4px 12px; border-radius: 999px; font-size: .9em; }
 #disposable-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px var(--gutter) 0; padding: 8px 12px; border: 1px solid var(--warn-line); border-left: 4px solid var(--warn); border-radius: 10px; background: var(--warn-bg); color: var(--text); font-size: .9em; }
 #disposable-banner[hidden] { display: none; }
 #disposable-banner > svg { flex-shrink: 0; width: 18px; height: 18px; color: var(--warn); }
