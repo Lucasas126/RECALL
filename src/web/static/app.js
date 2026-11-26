@@ -490,6 +490,25 @@ function settingsChanges(current, original, defaults) {
   }
   return changes;
 }
+// Shared-agent invitations: the texts and the nav dot (pure). The dot has several sources (invitations, chat
+// notifications): it shows while any of them wants it.
+function invitationText(invitation, translate) {
+  return translate("{inviter} wants to share {agent} with you")
+    .replace("{inviter}", invitation.inviter_name || invitation.inviter)
+    .replace("{agent}", invitation.agent_name || invitation.agent_id);
+}
+function invitationNote(invitation, translate) {
+  return translate("It uses the keys and Claude subscription of {user}. Every member sees all its chats.")
+    .replace("{user}", invitation.billing_user || invitation.inviter);
+}
+function outgoingFor(invitations, agentId) {
+  return (invitations?.outgoing ?? []).filter((item) => item.agent_id === agentId && (item.status ?? "pending") === "pending");
+}
+function setNavDotSource(sources, source, on) {
+  if (on) sources.add(source);
+  else sources.delete(source);
+  return sources.size > 0;
+}
 // ---- end settings helpers
 
 // ---- number fields and setting rows (DOM)
@@ -827,6 +846,8 @@ function translateInterface() {
     ["model-zdr-warning", "ZDR is not required for your next selection. Providers may retain your prompts and replies. Your OpenRouter account may still enforce ZDR."],
     ["tab-chats", "Chats"], ["tab-agents", "Agents"],
     ["agent-hidden-label", "Hidden"],
+    ["agent-share-legend", "Share"], ["agent-share-invite", "Invite"], ["agent-leave", "Leave"], ["agent-unshare", "Unshare"],
+    ["agent-share-hint", "Invite another user by their user id. They get access to this agent and all its chats, using your keys and Claude subscription."],
     ["agent-hidden-hint", "A hidden agent is left out of the agent selectors and listed under Hidden agents. You can still talk to it with @ and open a chat with it from here."],
     ["agent-open-chat", "Open chat with this agent"],
     ["agent-new-label", "New agent"], ["agents-empty", "Select an agent to edit it, or create a new one."],
@@ -1724,7 +1745,7 @@ function showTab(tab) {
   $("new-chat-row").hidden = agents;
   $("agent-list").hidden = !agents;
   $("agent-new").hidden = !agents;
-  if (agents) return loadAgentConfigs();
+  if (agents) { refreshInvitations(); return loadAgentConfigs(); }
   stopDreamPoll();
   setDreamHash(state.agentId && state.chatId ? chatHash(state.agentId, state.chatId) : null);
   return Promise.resolve();
@@ -1888,6 +1909,7 @@ function fillAgentForm(agent) {
   const sharedNote = sharedAgentNote(agent, tr);
   $("agent-shared-note").textContent = sharedNote;
   $("agent-shared-note").hidden = !sharedNote;
+  renderShareList();
   syncAgentHiddenIcon();
   $("agent-open-chat").hidden = !state.agentForm.originalId;  // a new agent has no chat until it is saved
   $("agent-avatar-error").textContent = "";
@@ -2963,6 +2985,139 @@ $("agent-delete").addEventListener("click", async () => {
   } finally {
     if (session === state.session) setAgentBusy(false);
   }
+});
+
+// ------------------------------------------------------------------ shared agent invitations
+
+const navDotSources = new Set();
+function setNavDot(source, on) {
+  const visible = setNavDotSource(navDotSources, source, on);
+  for (const button of document.querySelectorAll(".nav-toggle")) button.toggleAttribute("data-nav-dot", visible);
+  $("tab-agents").toggleAttribute("data-nav-dot", navDotSources.has("invitations"));
+}
+
+function renderInvitations() {
+  const data = state.invitations ?? { incoming: [], outgoing: [], pending_count: 0 };
+  setNavDot("invitations", data.pending_count > 0);
+  const box = $("invitations-block");
+  box.hidden = !data.incoming.length;
+  box.replaceChildren(...(data.incoming.length ? [Object.assign(document.createElement("h3"), { textContent: tr("Invitations") })] : []),
+    ...data.incoming.map((invitation) => {
+      const item = document.createElement("div");
+      item.className = "invitation";
+      const text = document.createElement("p");
+      text.textContent = invitationText(invitation, tr);
+      const note = document.createElement("p");
+      note.className = "model-note";
+      note.textContent = invitationNote(invitation, tr);
+      const actions = document.createElement("div");
+      actions.className = "invitation-actions";
+      const accept = document.createElement("button");
+      accept.type = "button";
+      accept.className = "primary";
+      accept.textContent = tr("Accept");
+      accept.addEventListener("click", () => answerInvitation(invitation.id, "accept"));
+      const decline = document.createElement("button");
+      decline.type = "button";
+      decline.textContent = tr("Decline");
+      decline.addEventListener("click", () => answerInvitation(invitation.id, "decline"));
+      actions.append(accept, decline);
+      item.append(text, note, actions);
+      return item;
+    }));
+  renderShareList();
+}
+
+async function refreshInvitations() {
+  if (!state.user) return;
+  const session = state.session;
+  try {
+    const data = await api("/api/invitations");
+    if (session !== state.session) return;
+    state.invitations = data;
+    renderInvitations();
+  } catch {
+    // the next poll retries; a failed poll must not break the page
+  }
+}
+
+async function answerInvitation(id, action) {
+  const session = state.session;
+  $("agent-error").textContent = "";
+  try {
+    await api(`/api/invitations/${encodeURIComponent(id)}/${action}`, { method: "POST" });
+    if (session !== state.session) return;
+    await refreshInvitations();
+    if (action === "accept") await refreshAgentsAfterTool();
+  } catch (err) {
+    if (session === state.session) $("agent-error").textContent = err.message;
+  }
+}
+
+function renderShareList() {
+  const agentId = state.agentForm.originalId;
+  const agent = state.agentConfigs.find((item) => item.id === agentId);
+  $("agent-share-section").hidden = !agentId;
+  $("agent-leave").hidden = !agent?.shared;
+  $("agent-unshare").hidden = !agent?.shared;
+  const pending = agentId ? outgoingFor(state.invitations, agentId) : [];
+  $("agent-share-list").replaceChildren(...pending.map((invitation) => {
+    const li = document.createElement("li");
+    const name = document.createElement("span");
+    name.textContent = `${invitation.invitee} · ${tr("pending")}`;
+    const revoke = document.createElement("button");
+    revoke.type = "button";
+    revoke.textContent = tr("Revoke");
+    revoke.addEventListener("click", () => shareAction(`/api/invitations/${encodeURIComponent(invitation.id)}/revoke`, {}, false));
+    li.append(name, revoke);
+    return li;
+  }));
+}
+
+// One call of the Share block; `moved` = the agent list changes (leave, unshare), so the agents and chats are reloaded.
+async function shareAction(url, body, moved) {
+  const session = state.session;
+  const agentId = state.agentForm.originalId;
+  $("agent-share-error").textContent = "";
+  try {
+    await api(url, { method: "POST", body: JSON.stringify(body) });
+    if (session !== state.session) return;
+    if (moved) {
+      state.agentForm.originalId = null;
+      resetDream();
+      setAgentFormOpen(false);
+      setDreamHash("agents");
+      await refreshAgents(agentId, null);
+      await refreshChats();
+    }
+    await refreshInvitations();
+  } catch (err) {
+    if (session === state.session) $("agent-share-error").textContent = err.message;
+  }
+}
+
+$("agent-share-invite").addEventListener("click", async () => {
+  const agentId = state.agentForm.originalId;
+  const userId = $("agent-share-user").value.trim();
+  if (!agentId || !userId) return;
+  await shareAction(`/api/agents/${encodeURIComponent(agentId)}/invitations`, { user_id: userId }, false);
+  if (!$("agent-share-error").textContent) $("agent-share-user").value = "";
+});
+$("agent-leave").addEventListener("click", async () => {
+  const agentId = state.agentForm.originalId;
+  if (!agentId || !(await confirmDialog({
+    title: tr("Leave agent"), message: tr("You will lose access to this agent and its chats. Nothing is deleted."),
+    confirmLabel: tr("Leave"),
+  }))) return;
+  await shareAction(`/api/agents/${encodeURIComponent(agentId)}/leave`, {}, true);
+});
+$("agent-unshare").addEventListener("click", async () => {
+  const agentId = state.agentForm.originalId;
+  if (!agentId || !(await confirmDialog({
+    title: tr("Unshare agent"), message: tr("Every member gets a private copy of this agent and its chats; the shared agent is removed."),
+    confirmLabel: tr("Unshare"), danger: true,
+  }))) return;
+  await shareAction(`/api/agents/${encodeURIComponent(agentId)}/unshare`, {}, true);
 });
 
 // ------------------------------------------------------------------ shared settings
@@ -9946,6 +10101,7 @@ usageTimer = setInterval(() => { if (!document.hidden) refreshClaudeUsage(); }, 
 setInterval(() => {
   if (document.hidden || !state.user || document.querySelector("#chat-list .rename-input") || !$("chat-title-input").hidden) return;
   refreshChats().catch(() => {});
+  refreshInvitations();
 }, 4000);
 
 // ---- notifications: the bell, the scans and the display (DOM)
