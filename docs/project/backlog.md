@@ -15,7 +15,7 @@ One list of ideas and planned work. Implemented behaviour is documented in the
 
 - **Agents shared between users** (idea): one agent that several users can open, with a memory (mind palace) shared by all of them, for example a household agent for two people. Users could also talk to each other through it, with the agent relaying or summarising. Open: who owns the agent and its files, per-user chats versus one shared chat, what each user may read of the other's messages, permission level and approvals (whose limit applies), and where the shared memory lives so private data of one user never leaks to the other.
 
-- **Automations** are being built in steps: the service (triggers `at`, `every`, `cron`, `process_end`; guards; catch-up) is done, see [automations](../user-guide/automations.md); the agent tools (group `automations`, level `assistant`) and the web tab (a second tab of the Tasks dialog) are done too. Left for later: sending a result to a chat. Calendar and conversation events are out of scope.
+- **Automations** are being built in steps: the service (triggers `at`, `every`, `cron`, `process_end`; guards; catch-up) is done, see [automations](../user-guide/automations.md); the agent tools (group `automations`, level `assistant`) and the web dialog (the Automations button in the side panel) are done too. Left for later: sending a result to a chat. Calendar and conversation events are out of scope.
 - **Reminders and proactive messages**: a one-off message the agent sends while it works exists (`notify_telegram`) and an agent can schedule work for later with the `automations` tools (see above). Still open: a scheduled message delivered straight to Telegram and shown in the web without running the agent ("sending a result to a chat" in the automations item).
 - **Recall mode**: the agent enters its mind palace with a context trimmed to the last messages, searches and reads what it needs, and returns only the relevant information, dropping the retrieval process from its context. Complements [dream mode](../user-guide/dream.md): dreams write the palace, recall reads it cheaply.
 - **Warnings section** for configuration mismatches: a reasoning effort or token budget the selected model does not support, a tool that is unavailable, a model that is not offered. (Today the reasoning selector is disabled with an explanation when unsupported; there is no general warnings area.)
@@ -33,6 +33,7 @@ One list of ideas and planned work. Implemented behaviour is documented in the
 
 ### tools
 
+- Delegating to an existing agent should default to that agent's own configured terminal backends.
 - **RECALL knowledge, phase 2** (the admin pages `admin-cli`, `recipes` and `security-for-admins` are done): reference pages for Telegram, models and providers, MCP, more recipes (step-by-step fixes) and the user documentation, added to `src/knowledge/recall/` ([RECALL knowledge](../user-guide/recall-knowledge.md) is phase 1).
 - **Read access to docs and source for agents**: let an agent read `docs/` and the code to answer deeper questions. `docs/` is not in the Docker image today; remove it from `.dockerignore` first.
 - **File tools v2** for every source: paginated reads with line numbers and text extraction for PDF/Office files; regex content search and glob file search; `patch` (unique find-and-replace with tolerant matching, returning a diff); a stale-write guard.
@@ -62,6 +63,7 @@ One list of ideas and planned work. Implemented behaviour is documented in the
 
 ### interface
 
+- Installable web app: optional Web Push notifications (own VAPID keys, opt-in, generic payload).
 - Search across chat history from the web UI (the agent can already search its conversations; the user cannot).
 - Optional voice replies (TTS) in Telegram, per agent.
 - Remove unnecessary messages from the settings and configuration selectors to keep the interface clean.

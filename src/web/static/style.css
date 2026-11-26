@@ -429,8 +429,6 @@ details.msg.task-wake { align-self: flex-start; padding: 6px 12px; border-style:
 #tasks-dialog { color: var(--text); background: var(--bg); border: 1px solid var(--line-strong); border-radius: 14px; width: min(780px, calc(100vw - 32px)); height: min(640px, 85vh); padding: 16px; }
 #tasks-dialog[open] { display: flex; flex-direction: column; gap: 10px; }
 #tasks-dialog::backdrop { background: var(--backdrop); }
-.tasks-filter { display: flex; gap: 6px; flex-wrap: wrap; }
-.tasks-filter button { padding: 3px 12px; border-radius: 999px; font: inherit; font-size: .9em; }
 #automations-pane { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; overflow-y: auto; }
 #automations-pane[hidden] { display: none; }
 .automations-bar { display: flex; align-items: center; gap: 12px; justify-content: space-between; }
@@ -446,7 +444,6 @@ details.msg.task-wake { align-self: flex-start; padding: 6px 12px; border-style:
 .automation-row .task-badge.paused, .automation-row .task-badge.done { color: var(--muted); }
 .automation-row .task-badge.failed { border-color: var(--danger); color: var(--danger); }
 .automation-history { margin: 6px 0 0; padding-left: 18px; color: var(--muted); font-size: .85em; }
-.tasks-filter button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
 #tasks-list { flex: 1; min-height: 0; overflow-y: auto; margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
 .tasks-row { padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .tasks-row-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -696,6 +693,10 @@ details.thinking { border-left: 2px solid var(--line); padding-left: 10px; displ
 #new-chat-row[hidden] { display: none; }
 #chat-list .chat-badge { display: inline-grid; place-items: center; flex-shrink: 0; color: var(--warn); }
 #chat-list .chat-badge svg { width: 14px; height: 14px; }
+#update-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px var(--gutter) 0; padding: 8px 12px; border: 1px solid var(--accent); border-radius: 10px; background: var(--accent-soft); color: var(--text); font-size: .9em; }
+#update-banner[hidden] { display: none; }
+#update-banner-text { flex: 1 1 200px; min-width: 0; }
+#update-banner button { min-height: 44px; min-width: 44px; padding: 4px 12px; border-radius: 999px; font-size: .9em; }
 #disposable-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px var(--gutter) 0; padding: 8px 12px; border: 1px solid var(--warn-line); border-left: 4px solid var(--warn); border-radius: 10px; background: var(--warn-bg); color: var(--text); font-size: .9em; }
 #disposable-banner[hidden] { display: none; }
 #disposable-banner > svg { flex-shrink: 0; width: 18px; height: 18px; color: var(--warn); }
@@ -1040,6 +1041,11 @@ select.warning { border-color: var(--warn); color: var(--warn); }
 /* Top bar: the "make disposable" action sits at the right end of the bar */
 #chat-make-disposable { margin-left: auto; position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 3px 10px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--muted); font-size: var(--s-1); font-weight: 500; white-space: nowrap; }
 #chat-make-disposable:hover:not(:disabled) { background: var(--raised); color: var(--text); }
+/* narrow screens: the icon alone (the text stays for assistive technology through aria-label and title) in a 44px target */
+@media (max-width: 600px) {
+  #chat-make-disposable { padding: 0; min-width: 44px; justify-content: center; gap: 0; }
+  #chat-make-disposable-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
 
 /* Sidebar: date groups */
 #chat-list .chat-section { display: flex; align-items: center; gap: 10px; margin: 16px 0 4px; padding: 0 0 0 8px; border: 0; font: 600 .6875rem/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); cursor: default; }

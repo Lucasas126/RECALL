@@ -9,6 +9,8 @@ const ICONS = {
   pencil: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M12 20h9\"/><path d=\"M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z\"/></svg>",
   trash: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M3 6h18\"/><path d=\"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6\"/><path d=\"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2\"/></svg>",
   star: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><polygon points=\"12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2\"/></svg>",
+  bell: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0\"/></svg>",
+  bellOff: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M8.7 3A6 6 0 0 1 18 8c0 2.7.4 4.6.9 6M17 17H3s3-2 3-9c0-.7.1-1.3.3-1.9M10.3 21a1.94 1.94 0 0 0 3.4 0M2 2l20 20\"/></svg>",
   sun: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><circle cx=\"12\" cy=\"12\" r=\"4\"/><path d=\"M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41\"/></svg>",
   eye: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></svg>",
   eyeOff: "<svg class=\"icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24\"/><path d=\"M1 1l22 22\"/></svg>",
@@ -48,8 +50,9 @@ const tokenPriceFormat = new Intl.NumberFormat("en-US", {
   style: "currency", currency: "USD", maximumSignificantDigits: 6,
 });
 
-// Theme is a per-browser preference: "system" removes the override so prefers-color-scheme applies.
-function applyTheme(theme) {
+// Theme and accent are user preferences on the server; localStorage is the local copy that paints the first frame.
+// "system" removes the override so prefers-color-scheme applies (the server stores no theme then).
+function applyTheme(theme, sync = true) {
   if (theme === "light" || theme === "dark") {
     localStorage.setItem("theme", theme);
     document.documentElement.dataset.theme = theme;
@@ -58,6 +61,37 @@ function applyTheme(theme) {
     delete document.documentElement.dataset.theme;
   }
   renderThemeToggle();
+  if (sync) pushAppearance({ theme: theme === "light" || theme === "dark" ? theme : null });
+}
+
+// Best effort: a failed save is silent, the local copy still applies and the next start uploads or reconciles it.
+function pushAppearance(changes) {
+  if (state.preferences) Object.assign(state.preferences, changes);
+  api("/api/preferences", { method: "PATCH", body: JSON.stringify(changes) }).catch(() => {});
+}
+globalThis.recallAppearance?.onChange(({ accent, accent_color }) => pushAppearance({ accent, accent_color }));
+
+// On start: server values win over the local copy; values the server lacks are uploaded once per browser (afterwards a
+// missing server value means "no choice", e.g. theme back to system, and clears the local one).
+function syncAppearance(preferences) {
+  const appearance = globalThis.recallAppearance;
+  if (!appearance) return;
+  const local = { theme: localStorage.getItem("theme"), ...appearance.snapshot() };
+  const upload = {};
+  const seeded = localStorage.getItem("recall.appearanceSynced") === "1";
+  for (const key of ["theme", "accent", "accent_color"]) {
+    if (preferences[key] == null && local[key] != null && !seeded) upload[key] = local[key];
+  }
+  if (preferences.theme !== (local.theme ?? null) && (preferences.theme != null || seeded)) {
+    applyTheme(preferences.theme ?? "system", false);
+    $("settings-theme").value = preferences.theme ?? "system";
+  }
+  if ((preferences.accent != null && preferences.accent !== local.accent)
+    || (preferences.accent_color != null && preferences.accent_color !== local.accent_color)) {
+    appearance.apply({ accent: preferences.accent, accent_color: preferences.accent_color });
+  }
+  try { localStorage.setItem("recall.appearanceSynced", "1"); } catch { /* private mode */ }
+  if (Object.keys(upload).length) pushAppearance(upload);
 }
 
 function effectiveTheme() {
@@ -576,8 +610,7 @@ function translateInterface() {
   renderVersion();
   for (const [id, text] of [
     ["settings-title", "User settings"], ["settings-save", "Save settings"],
-    ["tasks-title", "Tasks"], ["tasks-empty", "No tasks to show."],
-    ["tasks-tab-tasks", "Tasks"], ["tasks-tab-automations", "Automations"],
+    ["tasks-title", "Automations"],
     ["automations-hint", "Things an agent does later. Ask an agent that has the Automations tool group, or create one here."],
     ["automation-new", "New automation"], ["automations-empty", "No automations yet."],
     ["automation-agent-label", "Agent"], ["automation-title-label", "Title"], ["automation-instruction-label", "Instruction"],
@@ -603,7 +636,7 @@ function translateInterface() {
     ["settings-disposable-days-hint", "Disposable chats are deleted after this many days without activity."],
     ["settings-language-label", "Alerts and errors"], ["settings-theme-label", "Theme"],
     ["settings-language-hint", "Language of alerts and error messages, here and in Telegram."],
-    ["settings-theme-hint", "Applied at once and remembered in this browser only."],
+    ["settings-theme-hint", "Applied at once and synced across your devices."],
     ["agent-avatar-legend", "Profile picture"], ["agent-avatar-upload", "Upload image"], ["agent-avatar-remove", "Remove"],
     ["agent-avatar-free-label", "No circle or border"],
     ["agent-avatar-free-hint", "For transparent PNGs: the image is shown as it is, without cropping."],
@@ -769,17 +802,13 @@ function translateInterface() {
   $("agent-model").placeholder = tr("Your default model");
   $("agent-delegation-model").placeholder = tr("The model of the chat");
   for (const [id, text] of [
-    ["settings-open", "Settings"], ["settings-close", "Close"], ["tasks-open", "Tasks"], ["tasks-close", "Close"], ["assoc-close", "Close"],
+    ["settings-open", "Settings"], ["settings-close", "Close"], ["tasks-open", "Automations"], ["tasks-close", "Close"], ["assoc-close", "Close"],
     ["logout", "Log out"], ["jump-latest", "Jump to latest"], ["claude-usage-toggle", "Claude plan usage"], ["claude-usage-body", "Claude plan usage"], ["theme-toggle", "Switch theme"], ["header-resizer", "Resize the header"],
   ]) {
     $(id).title = tr(text);
     $(id).setAttribute("aria-label", tr(text));
   }
-  for (const [filter, text] of [["all", "All"], ["running", "Running"], ["finished", "Finished"]]) {
-    document.querySelector(`#tasks-filter [data-filter="${filter}"]`).textContent = tr(text);
-  }
-  $("tasks-filter").setAttribute("aria-label", tr("Filter tasks"));
-  $("tasks-tabs").setAttribute("aria-label", tr("Tasks and automations"));
+  renderNotifyBell();
   const kindLabels = { every: "Every N minutes", cron: "On a cron schedule", at: "Once, at a date and time", process_end: "When a background process ends" };
   for (const option of $("automation-kind").options) option.textContent = tr(kindLabels[option.value]);
   $("automation-title").placeholder = tr("Short name (optional)");
@@ -885,6 +914,59 @@ function errorInfo(code) {
 }
 
 const chatsUrl = (suffix = "") => `/api/agents/${state.agentId}/chats${suffix}`;
+
+
+// ---- notifications: pure helpers (the page shows them itself through the browser; no Web Push)
+const NOTIFY_KINDS = ["reply", "approval", "automation"];
+const NOTIFY_HEADS = { reply: "Reply ready", approval: "Approval needed", automation: "Automation finished" };
+
+// Whether this browser has the Notification API at all (on some phones it does not).
+function notifySupported(win) {
+  return Boolean(win) && "Notification" in win;
+}
+
+// The bell is on only when the device chose it AND the browser still allows it (the permission can be revoked later).
+function notifyBellOn(stored, permission, supported) {
+  return Boolean(supported) && stored === "on" && permission === "granted";
+}
+
+// What a click on the bell does: ask for the permission (needs the click), explain a block, or switch on or off.
+function notifyBellClick(permission, on) {
+  if (permission === "default") return "request";
+  if (permission === "denied") return "denied";
+  return on ? "off" : "on";
+}
+
+// The one rule: show only for a known trigger, with the bell on and permission granted, while the page is out of sight or not focused.
+function notifyShouldShow({ kind, bell, supported, permission, hidden, focused }) {
+  if (!NOTIFY_KINDS.includes(kind) || !supported || !bell || permission !== "granted") return false;
+  return Boolean(hidden) || !focused;
+}
+
+// Generic text plus the chat or automation title; never message content. One tag per chat (an approval replaces a reply).
+function notifyContent(kind, title, trFn, agentId, id) {
+  const tag = kind === "automation" ? `automation:${id}` : `chat:${agentId}:${id}`;
+  return { title: trFn(NOTIFY_HEADS[kind]), body: String(title || ""), tag, data: { kind, agent_id: agentId || "", id: id || "" } };
+}
+
+// Compares the chat list with the last one seen: a reply that ended (unread appeared) or more approvals waiting.
+// `seen` is null on the first look (nothing is announced then); returns the events and the map to keep.
+function notifyChatChanges(seen, chats) {
+  const next = {};
+  const events = [];
+  for (const chat of Array.isArray(chats) ? chats : []) {
+    const key = `${chat.agent_id}/${chat.id}`;
+    const now = { unread: Boolean(chat.unread), approvals: Number(chat.pending_approvals) || 0 };
+    next[key] = now;
+    const before = seen?.[key];
+    if (!before) continue;  // first look, or a chat that just entered the (windowed) list: not news
+    const title = chat.title || "";
+    if (now.approvals > before.approvals) events.push({ kind: "approval", agent_id: chat.agent_id, id: chat.id, title });
+    else if (now.unread && !before.unread) events.push({ kind: "reply", agent_id: chat.agent_id, id: chat.id, title });
+  }
+  return { events, next };
+}
+// ---- end notifications: pure helpers
 
 // ------------------------------------------------------------------ login
 
@@ -1215,9 +1297,66 @@ $("login-form").addEventListener("submit", async (e) => {
 
 $("logout").addEventListener("click", async () => {
   await api("/api/logout", { method: "POST" });
+  await clearShellCaches();
   if (state.user) clearLastChat(localStorage, state.user.id);
   showLogin();
 });
+
+// ---- installable app: the service worker (served at /sw.js) keeps only the page shell, never data
+const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+// whether the page may ask the browser for a newer worker again (at most once per interval)
+function updateCheckDue(now, last, interval = UPDATE_CHECK_INTERVAL_MS) {
+  return last == null || now - last >= interval;
+}
+// The in-page "new version" banner: a new worker that finished installing while an older one controls the page is
+// waiting for the user. Reload asks it to take over (SKIP_WAITING) and reloads once it does; no system notification.
+function showUpdateBanner(worker) {
+  const banner = $("update-banner");
+  if (!banner || !banner.hidden) return;
+  $("update-banner-text").textContent = tr("A new version of RECALL is available.");
+  $("update-reload").textContent = tr("Reload");
+  $("update-dismiss").setAttribute("aria-label", tr("Dismiss"));
+  $("update-dismiss").title = tr("Dismiss");
+  banner.hidden = false;
+  $("update-reload").onclick = () => {
+    $("update-reload").disabled = true;
+    navigator.serviceWorker.addEventListener("controllerchange", () => location.reload(), { once: true });
+    worker.postMessage({ type: "SKIP_WAITING" });
+  };
+  $("update-dismiss").onclick = () => { banner.hidden = true; };
+}
+function watchForUpdates(registration) {
+  const offer = (worker) => { if (worker && navigator.serviceWorker.controller) showUpdateBanner(worker); };
+  offer(registration.waiting);
+  registration.addEventListener("updatefound", () => {
+    const worker = registration.installing;
+    worker?.addEventListener("statechange", () => { if (worker.state === "installed") offer(worker); });
+  });
+  let last = Date.now();
+  const check = () => {
+    if (document.visibilityState === "hidden" || !updateCheckDue(Date.now(), last)) return;
+    last = Date.now();
+    registration.update().catch(() => {});   // offline or server down: try again at the next focus
+  };
+  document.addEventListener("visibilitychange", check);
+  window.addEventListener("focus", check);
+}
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.register("/sw.js", { scope: "/" }).then(watchForUpdates)
+    .catch((err) => console.warn("service worker not registered", err));
+}
+// Logging out also empties the worker's caches, so nothing stays on a shared device.
+async function clearShellCaches() {
+  if (typeof caches === "undefined") return;
+  try {
+    await Promise.all((await caches.keys()).map((name) => caches.delete(name)));
+  } catch (err) {
+    console.warn("could not clear the app cache", err);
+  }
+}
+registerServiceWorker();
+// ---- end installable app
 
 // ------------------------------------------------------------------ navigation drawer (narrow screens)
 
@@ -2609,6 +2748,7 @@ $("agent-delete").addEventListener("click", async () => {
 
 function applyPreferences(preferences) {
   state.preferences = preferences;
+  syncAppearance(preferences);
   // application-wide size limits (settings.yaml) arrive with the preferences
   if (preferences.limits) $("agent-prompt").maxLength = preferences.limits.soul_chars;
   $("messages").classList.toggle("hide-thinking", !preferences.show_thinking);
@@ -3603,6 +3743,7 @@ async function refreshChats() {
   const session = state.session;
   const chats = await api(`/api/chats${chatListQuery(state.chatId, state.showHiddenChats)}`);
   if (session !== state.session) return;
+  notifyScan(chats);
   renderChatHeader(chats.find((chat) => chat.id === state.chatId && chat.agent_id === state.agentId) ?? state.chatInfo);
   const list = $("chat-list");
   let section = null;
@@ -3936,6 +4077,7 @@ function renderDisposable() {
   $("chat-make-disposable").hidden = !view.canMakeDisposable;
   $("chat-make-disposable-text").textContent = tr("Make it disposable");
   $("chat-make-disposable").title = tr("Make it disposable");
+  $("chat-make-disposable").setAttribute("aria-label", tr("Make it disposable"));
   const locked = state.busy || state.modelBusy;
   $("disposable-convert").disabled = locked;
   $("chat-make-disposable").disabled = locked;
@@ -5658,66 +5800,6 @@ function wakeBubbleState(message) {
   return { ids: Array.isArray(message?.task_ids) ? message.task_ids : titles.map((t) => t.id), titles: titles.map((t) => t.title), body: parts.join("\n\n").trim() };
 }
 
-// ---- task panel helpers: the list of all the user's tasks (cross-chat), its filter and rows
-// 950 -> "950", 12400 -> "12.4k", 1500000 -> "1.5M"
-function formatTokenCount(count) {
-  const value = Number(count);
-  if (!Number.isFinite(value) || value < 0) return "0";
-  if (value < 1000) return String(Math.round(value));
-  if (value < 1_000_000) return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0).replace(/\.0$/, "")}k`;
-  return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
-}
-
-// "running" keeps the tasks that have not ended, "finished" the ended ones, anything else all of them.
-function taskPanelFilter(tasks, filter) {
-  const list = Array.isArray(tasks) ? tasks : [];
-  if (filter === "running") return list.filter((task) => !taskIsFinal(task.status));
-  if (filter === "finished") return list.filter((task) => taskIsFinal(task.status));
-  return list.slice();
-}
-
-// Newest first by creation time (the server lists oldest first); stable for equal or missing times.
-function taskPanelSort(tasks) {
-  const stamp = (task) => Date.parse(task.created_at ?? task.started_at ?? "") || 0;
-  return (Array.isArray(tasks) ? tasks : []).map((task, index) => ({ task, index }))
-    .sort((a, b) => stamp(b.task) - stamp(a.task) || b.index - a.index).map((item) => item.task);
-}
-
-// What one row of the panel shows (the record is a `GET /api/tasks` entry, labelled with the parent's names).
-function taskPanelRow(record, nowMs) {
-  const kind = record?.target?.kind ?? "ephemeral";
-  const worker = kind === "agent" ? record?.target?.name || record?.target?.agent_id || "" : "";
-  const status = record?.status ?? "";
-  const running = status === "running";
-  const parentChat = record?.parent?.chat_id ?? "";
-  return {
-    id: record?.id ?? "",
-    title: record?.title || record?.id || "task",
-    status,
-    statusLabel: taskStatusLabel(taskDisplayStatus(record) || status),
-    awaitingApproval: taskDisplayStatus(record).startsWith("awaiting_approval"),
-    ephemeral: !worker,
-    target: worker,
-    parentAgent: record?.parent?.agent_name || record?.parent?.agent_id || "",
-    parentTitle: parentChat ? record?.parent?.title || "" : "",
-    parentAgentId: record?.parent?.agent_id ?? "",
-    parentChatId: parentChat,
-    canOpenParent: Boolean(parentChat),
-    scheduled: Boolean(record?.unattended),
-    elapsed: formatElapsed(taskElapsed(record, nowMs)),
-    tokens: (record?.usage?.in ?? 0) + (record?.usage?.out ?? 0),
-    running,
-    canStop: running,
-    canSteer: running,
-    canOpenChat: Boolean(record?.child?.chat_id),
-  };
-}
-
-// The panel keeps refreshing while any listed task runs.
-function taskPanelNeedsPolling(response) {
-  return (response?.tasks ?? []).some((task) => !taskIsFinal(task.status));
-}
-// ---- end task panel helpers
 
 // Pure: one row per running task of the chat for the tray above the message box (oldest first).
 function taskTrayRows(records, agentId, chatId, nowMs) {
@@ -6426,165 +6508,15 @@ new MutationObserver(() => {
 
 $("task-dialog-close").addEventListener("click", () => $("task-dialog").close());
 $("task-dialog").addEventListener("close", stopTaskDialog);
-// ---- task panel (DOM): every task of the user across chats and agents, newest first
-const taskPanel = { filter: "all", tasks: [], rows: new Map(), timer: null, running: false, again: false, loaded: false };
-
-function taskPanelRowNode(id) {
-  const badge = element("span", { className: "task-badge" });
-  badge.setAttribute("role", "status");
-  const title = element("strong", { className: "tasks-row-title" });
-  const meta = element("div", { className: "tasks-row-meta" });
-  const error = element("div", { className: "task-error", hidden: true });
-  error.setAttribute("role", "alert");
-  const button = (text, handler) => {
-    const node = element("button", { type: "button", className: "secondary", textContent: text });
-    node.addEventListener("click", handler);
-    return node;
-  };
-  const field = element("input", { type: "text", className: "task-steer-input", maxLength: 2000, placeholder: tr("Tell the worker what to change") });
-  field.setAttribute("aria-label", tr("Steer"));
-  const form = element("div", { className: "task-steer-form", hidden: true });
-  const send = element("button", { type: "button", className: "primary", textContent: tr("Send") });
-  form.append(field, send);
-  const stop = button(tr("Stop"), async () => {
-    error.hidden = true;
-    try { await api(taskUrl(id, "/stop"), { method: "POST" }); } catch (err) { showTaskError(error, err); }
-    taskPanelRefresh();
-  });
-  const steer = button(tr("Steer"), () => {
-    form.hidden = !form.hidden;
-    if (!form.hidden) field.focus();
-  });
-  const open = button(tr("Open chat"), () => openTaskChat(id));
-  send.addEventListener("click", async () => {
-    const text = field.value.trim();
-    if (!text) return;
-    error.hidden = true;
-    try {
-      await api(taskUrl(id, "/steer"), { method: "POST", body: JSON.stringify({ text }) });
-      field.value = "";
-      form.hidden = true;
-    } catch (err) { showTaskError(error, err); }
-    taskPanelRefresh();
-  });
-  field.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && !event.isComposing) {
-      event.preventDefault();
-      send.click();
-    }
-  });
-  const actions = element("div", { className: "task-actions" }, stop, steer, open);
-  const head = element("div", { className: "tasks-row-head" }, badge, title);
-  const node = element("li", { className: "tasks-row" }, head, meta, actions, form, error);
-  node.dataset.id = id;
-  node._parts = { badge, title, meta, stop, steer, open, form };
-  return node;
-}
-
-function updateTaskPanelRow(node, record) {
-  const view = taskPanelRow(record, Date.now());
-  const parts = node._parts;
-  node.dataset.status = view.status;
-  parts.badge.className = `task-badge ${view.awaitingApproval ? "awaiting_approval" : view.status}`;
-  parts.badge.textContent = tr(view.statusLabel);
-  parts.title.textContent = view.title;
-  parts.meta.replaceChildren();
-  const bits = [view.ephemeral ? tr("ephemeral") : view.target];
-  if (view.scheduled) bits.push(tr("scheduled"));
-  if (view.elapsed) bits.push(view.elapsed);
-  if (view.tokens) bits.push(tr("{count} tokens", { count: formatTokenCount(view.tokens) }));
-  parts.meta.append(element("span", { textContent: bits.join(" · ") }));
-  if (view.canOpenParent) {
-    const link = element("button", {
-      type: "button", className: "link-button tasks-parent",
-      textContent: tr("from {agent} · {chat}", { agent: view.parentAgent, chat: view.parentTitle || tr("(untitled chat)") }),
-    });
-    link.addEventListener("click", async () => {
-      $("tasks-dialog").close();
-      await openChatFromList({ id: view.parentChatId, agent_id: view.parentAgentId });
-    });
-    parts.meta.append(link);
-  } else {
-    parts.meta.append(element("span", { textContent: tr("no parent chat") }));
-  }
-  parts.stop.hidden = !view.canStop;
-  parts.steer.hidden = !view.canSteer;
-  parts.open.hidden = !view.canOpenChat;
-  if (!view.canSteer) parts.form.hidden = true;
-}
-
-function renderTaskPanel() {
-  const list = $("tasks-list");
-  const shown = taskPanelSort(taskPanelFilter(taskPanel.tasks, taskPanel.filter));
-  const wanted = new Set(shown.map((task) => task.id));
-  for (const [id, node] of [...taskPanel.rows]) {
-    if (!wanted.has(id)) {
-      node.remove();
-      taskPanel.rows.delete(id);
-    }
-  }
-  shown.forEach((task, index) => {
-    let node = taskPanel.rows.get(task.id);
-    if (!node) {
-      node = taskPanelRowNode(task.id);
-      taskPanel.rows.set(task.id, node);
-    }
-    updateTaskPanelRow(node, task);
-    if (list.children[index] !== node) list.insertBefore(node, list.children[index] ?? null);
-  });
-  $("tasks-empty").hidden = shown.length > 0 || !taskPanel.loaded;
-  for (const button of document.querySelectorAll("#tasks-filter button")) {
-    const on = button.dataset.filter === taskPanel.filter;
-    button.classList.toggle("active", on);
-    button.setAttribute("aria-pressed", String(on));
-  }
-}
-
-async function taskPanelRefresh() {
-  if (!$("tasks-dialog").open || !state.user) return;
-  if (taskPanel.running) {
-    taskPanel.again = true;
-    return;
-  }
-  clearTimeout(taskPanel.timer);
-  taskPanel.running = true;
-  taskPanel.again = false;
-  let keep = false;
-  try {
-    const data = await api("/api/tasks?limit=100");
-    taskPanel.tasks = data.tasks;
-    taskPanel.loaded = true;
-    for (const task of data.tasks) taskRecords.set(task.id, task);
-    renderTaskPanel();
-    $("tasks-error").hidden = true;
-    keep = taskPanelNeedsPolling(data);
-  } catch (err) {
-    showTaskError($("tasks-error"), err);
-  }
-  taskPanel.running = false;
-  if ($("tasks-dialog").open && (keep || taskPanel.again)) taskPanel.timer = setTimeout(taskPanelRefresh, taskPanel.again ? 0 : 3000);
-}
-
 $("tasks-open").addEventListener("click", () => {
   const dialog = $("tasks-dialog");
   if (!dialog.open) dialog.showModal();
-  taskPanel.loaded = false;
-  taskPanel.rows.clear();  // rebuilt: labels follow the interface language
-  $("tasks-list").replaceChildren();
-  taskPanelRefresh();
+  automationPanelRefresh();
 });
 $("tasks-close").addEventListener("click", () => $("tasks-dialog").close());
 $("assoc-close").addEventListener("click", () => $("assoc-dialog").close());
-$("tasks-dialog").addEventListener("close", () => clearTimeout(taskPanel.timer));
-$("tasks-filter").addEventListener("click", (event) => {
-  const button = event.target.closest("button[data-filter]");
-  if (!button) return;
-  taskPanel.filter = button.dataset.filter;
-  renderTaskPanel();
-});
-// ---- end task panel (DOM)
 
-// ---- automations panel: a second tab of the tasks dialog
+// ---- automations panel (the dialog behind the #tasks-open button)
 const automationPanel = { items: [], loaded: false, editing: null, timer: null };
 
 // Pure: the trigger sentence shown in a row, from a stored trigger.
@@ -6669,7 +6601,7 @@ function renderAutomationPanel() {
 }
 
 async function automationPanelRefresh() {
-  if (!$("tasks-dialog").open || !state.user || $("automations-pane").hidden) return;
+  if (!$("tasks-dialog").open || !state.user) return;
   clearTimeout(automationPanel.timer);
   try {
     const data = await api("/api/automations");
@@ -6680,7 +6612,7 @@ async function automationPanelRefresh() {
   } catch (err) {
     showTaskError($("tasks-error"), err);
   }
-  if ($("tasks-dialog").open && !$("automations-pane").hidden) automationPanel.timer = setTimeout(automationPanelRefresh, 10000);
+  if ($("tasks-dialog").open) automationPanel.timer = setTimeout(automationPanelRefresh, 10000);
 }
 
 function automationKindChanged() {
@@ -6710,30 +6642,6 @@ function automationFormOpen(record = null) {
   $("automation-instruction").focus();
 }
 
-function automationTabShow(tab) {
-  const automations = tab === "automations";
-  $("automations-pane").hidden = !automations;
-  $("tasks-filter").hidden = automations;
-  $("tasks-empty").hidden = automations || ($("tasks-empty").hidden && true);
-  $("tasks-list").hidden = automations;
-  for (const button of document.querySelectorAll("#tasks-tabs button")) {
-    const on = button.dataset.tab === tab;
-    button.classList.toggle("active", on);
-    button.setAttribute("aria-pressed", String(on));
-  }
-  if (automations) {
-    clearTimeout(taskPanel.timer);
-    automationPanelRefresh();
-  } else {
-    clearTimeout(automationPanel.timer);
-    taskPanelRefresh();
-  }
-}
-
-$("tasks-tabs").addEventListener("click", (event) => {
-  const button = event.target.closest("button[data-tab]");
-  if (button) automationTabShow(button.dataset.tab);
-});
 $("automation-kind").addEventListener("change", automationKindChanged);
 $("automation-new").addEventListener("click", () => automationFormOpen(null));
 $("automation-cancel").addEventListener("click", () => { $("automation-form").hidden = true; });
@@ -6765,8 +6673,7 @@ $("automation-form").addEventListener("submit", async (event) => {
   $("automation-form").hidden = true;
   automationPanelRefresh();
 });
-// the dialog always opens on the tasks tab, and closing it stops the automation refresh
-$("tasks-open").addEventListener("click", () => automationTabShow("tasks"));
+// closing the dialog stops the automation refresh
 $("tasks-dialog").addEventListener("close", () => clearTimeout(automationPanel.timer));
 // ---- end automations panel
 // ---- end task cards: DOM
@@ -7811,10 +7718,24 @@ function attachmentModality(file) {
   return null;
 }
 
-// The speech-to-text endpoint names MP4 audio (what Safari records) "m4a".
+// ---- audio formats: the name the speech-to-text endpoint expects for a recorded or attached file's MIME type
+const AUDIO_FORMATS = {
+  "audio/mp4": "m4a", "audio/x-m4a": "m4a", "audio/m4a": "m4a", "audio/aac": "aac", "audio/mpeg": "mp3",
+  "audio/mp3": "mp3", "audio/x-wav": "wav", "audio/wave": "wav", "audio/wav": "wav",
+};
 function audioFormat(mimeType) {
-  return mimeType.split(";")[0] === "audio/mp4" ? "m4a" : null;
+  return AUDIO_FORMATS[mimeType.split(";")[0].trim().toLowerCase()] ?? null;
 }
+// The recorder's own MIME type (Safari: audio/mp4, Chrome and Firefox: webm or ogg) decides the file extension.
+const RECORDING_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
+function recordingType(isSupported) {
+  return RECORDING_TYPES.find((type) => isSupported(type)) ?? "";
+}
+function recordingExtension(type) {
+  const base = type.split(";")[0].trim().toLowerCase();
+  return audioFormat(base) ?? (base.includes("ogg") ? "ogg" : "webm");
+}
+// ---- end audio formats
 
 function readAttachment(file) {
   const pdf = isPdf(file);
@@ -7942,17 +7863,18 @@ async function voiceStart() {
   voice.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   voice.chunks = [];
   voice.discard = false;
-  voice.recorder = new MediaRecorder(voice.stream);
+  const wanted = recordingType((type) => MediaRecorder.isTypeSupported(type));
+  voice.recorder = wanted ? new MediaRecorder(voice.stream, { mimeType: wanted }) : new MediaRecorder(voice.stream);
   voice.recorder.addEventListener("dataavailable", (event) => { if (event.data.size) voice.chunks.push(event.data); });
   voice.recorder.addEventListener("stop", async () => {
-    const type = voice.recorder?.mimeType || "audio/webm";
+    // the recorder's own type, else the type of what it produced: never assume webm (Safari records mp4)
     const chunks = voice.chunks;
+    const type = voice.recorder?.mimeType || chunks[0]?.type || "audio/webm";
     const discard = voice.discard;
     voiceStopTracks();
     if (discard || !chunks.length) return;
     try {
-      const extension = type.includes("mp4") ? "m4a" : type.includes("ogg") ? "ogg" : "webm";
-      const file = new File(chunks, `voice.${extension}`, { type });
+      const file = new File(chunks, `voice.${recordingExtension(type)}`, { type });
       if (file.size > MAX_FILE_BYTES) throw new Error(tr("{name}: maximum size is 10 MB", { name: file.name }));
       const total = state.attachments.reduce((sum, item) => sum + item.size, 0) + file.size;
       if (total > MAX_TOTAL_FILE_BYTES) throw new Error(tr("Attachments exceed the 25 MB total limit"));
@@ -9720,3 +9642,117 @@ setInterval(() => {
   if (document.hidden || !state.user || document.querySelector("#chat-list .rename-input") || !$("chat-title-input").hidden) return;
   refreshChats().catch(() => {});
 }, 4000);
+
+// ---- notifications: the bell, the scans and the display (DOM)
+const NOTIFY_STORE = "notifyBell";
+const NOTIFY_POLL_MS = 20000;
+const notify = { seen: null, since: null, away: false, lastPoll: 0, hintTimer: null };
+
+function notifyPermission() {
+  return notifySupported(window) ? Notification.permission : "denied";
+}
+function notifyStored() {
+  try { return localStorage.getItem(NOTIFY_STORE); } catch { return null; }
+}
+function notifyActive() {
+  return notifyBellOn(notifyStored(), notifyPermission(), notifySupported(window));
+}
+function notifyPageAway() {
+  return document.hidden || !document.hasFocus();
+}
+function renderNotifyBell() {
+  const button = $("notify-toggle");
+  button.hidden = !notifySupported(window);
+  const on = notifyActive();
+  button.innerHTML = on ? ICONS.bell : ICONS.bellOff;
+  button.setAttribute("aria-pressed", String(on));
+  const label = tr(on ? "Notifications on (only while this page is in the background)" : "Notifications off");
+  button.title = label;
+  button.setAttribute("aria-label", label);
+}
+function notifyHint(text) {
+  const box = $("notify-hint");
+  box.textContent = tr(text);
+  box.hidden = false;
+  clearTimeout(notify.hintTimer);
+  notify.hintTimer = setTimeout(() => { box.hidden = true; }, 7000);
+}
+function notifyStore(on) {
+  try { localStorage.setItem(NOTIFY_STORE, on ? "on" : "off"); } catch { /* storage may be blocked */ }
+}
+async function notifyBellPressed() {
+  const action = notifyBellClick(notifyPermission(), notifyActive());
+  if (action === "denied") notifyHint("The browser blocked notifications for this site. Allow them in the browser settings.");
+  else if (action === "request") {
+    let result = "default";
+    try { result = await Notification.requestPermission(); } catch { /* an old browser: the callback form is not supported */ }
+    if (result === "granted") notifyStore(true);
+    else if (result === "denied") notifyHint("The browser blocked notifications for this site. Allow them in the browser settings.");
+  } else notifyStore(action === "on");
+  notify.seen = null;
+  renderNotifyBell();
+}
+
+async function notifyShow(event) {
+  if (!notifyShouldShow({
+    kind: event.kind, bell: notifyActive(), supported: notifySupported(window), permission: notifyPermission(),
+    hidden: document.hidden, focused: document.hasFocus(),
+  })) return;
+  const content = notifyContent(event.kind, event.title || (event.kind === "automation" ? "" : tr("New chat")), tr, event.agent_id, event.id);
+  const options = { body: content.body, tag: content.tag, data: content.data, icon: "/static/icons/icon-192.png" };
+  try {
+    const registration = "serviceWorker" in navigator ? await navigator.serviceWorker.getRegistration() : null;
+    if (registration?.showNotification) await registration.showNotification(content.title, options);
+    else {
+      const shown = new Notification(content.title, options);
+      shown.onclick = () => { shown.close(); notifyOpen(content.data); };
+    }
+  } catch (err) {
+    console.warn("notification not shown", err);
+  }
+}
+// A click on a notification: focus the app and open that chat, or the automations dialog.
+function notifyOpen(data) {
+  window.focus();
+  if (!state.user || !data) return;
+  if (data.kind === "automation") $("tasks-open").click();
+  else if (data.agent_id && data.id) openChatFromList({ agent_id: data.agent_id, id: data.id });
+}
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data?.type === "OPEN_FROM_NOTIFICATION") notifyOpen(event.data);
+  });
+}
+
+// Called with every chat list the page loads (the visible poll and the background poll).
+function notifyScan(chats) {
+  const { events, next } = notifyChatChanges(notify.seen, chats);
+  notify.seen = next;
+  for (const event of events) notifyShow(event);
+}
+
+// Automations run without any page: a page that is away asks the server what ended since its marker.
+async function notifyPoll() {
+  if (!state.user || !notifyActive() || !notifyPageAway()) return;
+  notify.lastPoll = Date.now();
+  try {
+    if (document.hidden) notifyScan(await api(`/api/chats${chatListQuery(state.chatId, state.showHiddenChats)}`));
+    const data = await api(`/api/automations/events${notify.since ? `?since=${encodeURIComponent(notify.since)}` : ""}`);
+    notify.since = data.now;
+    for (const item of data.events) notifyShow({ kind: "automation", id: item.automation_id, title: item.title });
+  } catch { /* offline or logged out: the next poll tries again */ }
+}
+// When the page goes away the marker restarts from the server's clock, so what finished while it was watched is not announced.
+function notifyAwayCheck() {
+  const away = notifyPageAway();
+  if (away && !notify.away) notify.since = null;
+  notify.away = away;
+  if (away && (notify.since === null || Date.now() - notify.lastPoll >= NOTIFY_POLL_MS)) notifyPoll();
+}
+$("notify-toggle").addEventListener("click", notifyBellPressed);
+document.addEventListener("visibilitychange", notifyAwayCheck);
+window.addEventListener("blur", notifyAwayCheck);
+window.addEventListener("focus", notifyAwayCheck);
+setInterval(notifyAwayCheck, 5000);
+renderNotifyBell();
+// ---- end notifications (DOM)

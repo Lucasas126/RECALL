@@ -28,3 +28,15 @@ class MobileComposerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MakeDisposableNarrowTests(unittest.TestCase):
+    def test_phones_show_only_the_icon_and_keep_the_name_for_assistive_technology(self) -> None:
+        css = (STATIC / "style.css").read_text(encoding="utf-8")
+        block = re.search(r"@media \(max-width: 600px\) \{\s*#chat-make-disposable \{[^}]*\}[^@]*?\n\}", css, re.S)
+        self.assertIsNotNone(block, "the narrow-screen rule of the make-disposable button is missing")
+        self.assertIn("min-width: 44px", block.group(0))
+        self.assertIn("#chat-make-disposable-text", block.group(0))
+        self.assertNotIn("display: none", block.group(0))  # hidden visually only, still in the accessibility tree
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        self.assertIn('$("chat-make-disposable").setAttribute("aria-label"', js)

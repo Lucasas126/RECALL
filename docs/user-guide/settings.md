@@ -6,7 +6,7 @@ across the top on narrow screens); only one section shows at a time.
 
 | Section | Settings |
 | --- | --- |
-| General | show model thinking; show the agent's picture in replies (on by default); your **Profile picture**; theme and accent colour (**Appearance**, this browser only, applied at once); language of alerts and errors; **Default agent** (the agent new chats open with when you do not pick one, and the Telegram router's fallback when it is unsure and no core agent is set; empty means the first agent in your list) |
+| General | show model thinking; show the agent's picture in replies (on by default); your **Profile picture**; theme and accent colour (**Appearance**, applied at once and synced across your devices); language of alerts and errors; **Default agent** (the agent new chats open with when you do not pick one, and the Telegram router's fallback when it is unsure and no core agent is set; empty means the first agent in your list) |
 | Models | default LLM model and default speech-to-text model (the model picker) |
 | Chats & memory | maximum associative memory matches (1-20); days to keep disposable chats (1-365) |
 | Telegram | choose the agent automatically (the orchestrator) and the core agent used when it is unsure (empty: *Same as default agent*) |
@@ -33,7 +33,7 @@ by `GET /api/preferences` in a `defaults` object; see the [preferences API](../r
 A setting you never changed is stored as nothing, and a reset stores nothing again: it saves `null` for the associative matches, the
 disposable days, the orchestrator switch, the default agent, the core agent and the default models, so they keep following the application (or your
 `user.yaml` models) if the default changes later. Theme, language, show model thinking and show the agent's picture always hold a value, so a reset puts the
-default value back. The theme and the accent colour are kept in the browser and apply immediately; the other settings are applied by **Save settings**.
+default value back. The theme and the accent colour apply immediately and are saved to your account at once; the other settings are applied by **Save settings**.
 
 ## numbers, saving and leaving
 
@@ -46,8 +46,9 @@ button or Escape) with unsaved changes asks for confirmation first.
 
 ## appearance and art slots
 
-**Settings > General > Appearance** holds three browser-only choices, applied at once and kept in `localStorage` (not in `preferences.json`, so
-they are not shared with Telegram and do not count as unsaved changes):
+**Settings > General > Appearance** holds choices applied at once, which do not count as unsaved changes. They are saved in `preferences.json` (`theme`, `accent`, `accent_color`),
+so every device you sign in on shows the same look, and each browser keeps a copy in `localStorage` so the page is painted before it loads.
+On start the account's values win; a browser's own values are uploaded once if the account has none. Saving is best effort (no error if offline):
 
 - **Theme**: system, light or dark (the Theme row above it).
 - **Accent colour**: pink (default), blue, gold, green, violet or cyan. It colours the primary buttons, the active-chat bookmark, links and
@@ -69,6 +70,29 @@ The **Providers** tab holds what each provider needs from you:
 - **OpenRouter**: set your own API key. It is checked with OpenRouter before saving, stored under a variable of yours
   alone (`OPENROUTER_API_KEY_<USER>`) in `secrets.env` and never shown again; only your `user.yaml` is pointed at it. *Remove
   key* deletes it. Changes apply at once.
+
+## install the web UI as an app
+
+The web UI is an installable web app: it opens in its own window, without the browser bars. It needs HTTPS (or `localhost`); behind a reverse proxy that is usually already the case.
+
+- **Windows (Edge or Chrome)**: open the address, then the install icon at the right of the address bar, or menu > Apps > Install this site as an app.
+- **Android (Chrome)**: menu > Install app (or Add to Home screen).
+- **iPhone (Safari)**: Share > Add to Home Screen. It must be Safari; other iOS browsers cannot install it the same way.
+
+A service worker (`/sw.js`) keeps only the page shell (the page, scripts, styles, fonts and icons) so the app opens when the server is unreachable; it fetches from the network first, shows an "offline, reconnecting" page when there is no copy, and renews the copy on each new RECALL version. It never handles or stores: the API (`/api/`), live replies (event streams), login and logout, uploads, downloads, media, transcripts, any answer that sets a cookie, or any request that is not a plain GET. Chats are never available offline. Logging out also clears the worker's caches.
+
+When a new RECALL version is installed while the app is open, a small banner in the page says so, with **Reload** (switches to the new version and reloads) and a dismiss button. The browser looks for a new version when the app opens and when you come back to it (at most every 5 minutes). It is only this banner: RECALL sends no system notifications and no push messages.
+
+The session cookie is `SameSite=Lax` (so opening RECALL from a link in another app keeps you signed in) and lasts 30 days from your last activity: it is renewed at most once a day while you use the app.
+
+### notifications (the bell)
+
+The bell button in the side panel footer shows browser notifications. It is stored **per device** (this browser only, never in your server preferences) and is off by default. The first press asks the browser for permission; if the browser has blocked it, a short hint says so. The button is hidden when the browser has no Notification API.
+
+- A notification appears only while the page is **in the background** (tab hidden, another window focused). Nothing is shown while you are looking at the app.
+- Triggers: a reply finished (also in chats you have not opened), a tool waiting for your approval, and an automation run that finished. The text is generic ("Reply ready", "Approval needed", "Automation finished") plus the chat or automation title, never message content. Clicking it focuses the app and opens that chat, or the Automations dialog.
+- There is **no push**: no push service is involved. A closed or suspended app (a phone that put the page to sleep) gets nothing. On iPhone it is not verified that it works at all.
+- Automations keep notifying through Telegram exactly as before; the browser notification is an extra. A page that is in the background asks the server about finished automation runs every ~20 s (`GET /api/automations/events`).
 
 ## users (administrators only)
 

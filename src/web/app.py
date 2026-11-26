@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator, Iterator, Literal, Optional
@@ -45,13 +46,16 @@ from src.utils.avatars import (
 from src.utils.logger import get_logger
 from src.terminal.approvals import ApprovalForbidden, ApprovalNotFound
 from src.utils.i18n import error_code, error_message, message, messages
-from src.utils.version import version_info
+from src.utils.version import app_build, app_version, version_info
 from src.config.settings import WEB_SESSION_SECRET_ENV
 
 logger = get_logger("web")
 
 _STATIC = Path(__file__).parent / "static"
 _SESSION_KEY = "user_id"
+_SESSION_RENEWED_KEY = "renewed_at"
+SESSION_MAX_AGE = 60 * 60 * 24 * 30  # a session lasts 30 days from the last renewal
+SESSION_RENEW_AFTER = 60 * 60 * 24  # an active session is re-signed at most once a day
 
 
 class LoginIn(BaseModel):
@@ -284,9 +288,9 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
         SessionMiddleware,
         secret_key=session_secret,
         session_cookie="recall_session",
-        same_site="strict",
+        same_site="lax",  # "strict" would drop the cookie when arriving from an outside link
         https_only=False,
-        max_age=60 * 60 * 24 * 14,
+        max_age=SESSION_MAX_AGE,
     )
 
     def current_user(request: Request) -> str:
@@ -298,6 +302,10 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
         except UnknownUser:
             request.session.clear()
             raise HTTPException(401, message(request.headers.get("Accept-Language", "en"), "not logged in")) from None
+        # SessionMiddleware only re-signs a modified session, so touch it once a day: the cookie expiry slides while in use.
+        now = int(time.time())
+        if now - int(request.session.get(_SESSION_RENEWED_KEY, 0)) >= SESSION_RENEW_AFTER:
+            request.session[_SESSION_RENEWED_KEY] = now
         return user_id
 
     def notification_language(request: Request) -> str:
@@ -412,6 +420,7 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
             return localized_error(request, 401, e)
         request.session.clear()
         request.session[_SESSION_KEY] = profile["id"]
+        request.session[_SESSION_RENEWED_KEY] = int(time.time())
         return profile
 
     @app.post("/api/logout")
@@ -880,6 +889,10 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     def list_automations(user_id: str = Depends(current_user)):
         return service.list_automations(user_id)
 
+    @app.get("/api/automations/events")
+    def automation_events(since: str = "", user_id: str = Depends(current_user)):
+        return service.automation_events(user_id, since)
+
     @app.post("/api/automations", status_code=201)
     def create_automation(body: AutomationIn, user_id: str = Depends(current_user)):
         return service.create_automation(user_id, body.agent_id, body.instruction, body.trigger.stored(), body.title)
@@ -946,6 +959,13 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     @app.get("/")
     def index():
         return FileResponse(_STATIC / "index.html")
+
+    @app.get("/sw.js", include_in_schema=False)
+    def service_worker():
+        """The service worker, from the root so its scope is the whole app; the cache name carries the version."""
+        stamp = re.sub(r"[^A-Za-z0-9._-]", "-", "-".join(filter(None, (app_version(), app_build()))))
+        source = (_STATIC.parent / "sw.js").read_text(encoding="utf-8").replace("__RECALL_VERSION__", stamp)
+        return Response(source, media_type="application/javascript", headers={"Cache-Control": "no-cache"})
 
     # Browsers ask for these two at the site root even when the page does not link them.
     @app.get("/favicon.ico", include_in_schema=False)

@@ -22,6 +22,32 @@ def _update_in_process(root: Path, field: str, value: str | bool) -> None:
         store.update("user-one", UserPreferences.model_validate({field: value}))
 
 
+class AppearancePreferencesTests(unittest.TestCase):
+    def test_valid_values_round_trip_through_the_store(self) -> None:
+        with TemporaryDirectory() as folder:
+            (Path(folder) / "user-one").mkdir()
+            store = UserPreferencesStore(Path(folder))
+            changes = UserPreferences.model_validate({"theme": "dark", "accent": "custom", "accent_color": "#12aB56"})
+            store.update("user-one", changes)
+            saved = store.get("user-one")
+            self.assertEqual((saved.theme, saved.accent, saved.accent_color), ("dark", "custom", "#12aB56"))
+            store.update("user-one", UserPreferences.model_validate({"theme": None}))
+            self.assertIsNone(store.get("user-one").theme)
+            self.assertEqual(store.get("user-one").accent, "custom")
+
+    def test_invalid_values_are_refused(self) -> None:
+        for field, value in [
+            ("theme", "system"), ("theme", 1), ("accent", "red"), ("accent", True),
+            ("accent_color", "#fff"), ("accent_color", "ff6b9d"), ("accent_color", "#gggggg"), ("accent_color", 0xFF6B9D),
+        ]:
+            with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                UserPreferences.model_validate({field: value})
+
+    def test_defaults_are_unset(self) -> None:
+        preferences = UserPreferences()
+        self.assertEqual((preferences.theme, preferences.accent, preferences.accent_color), (None, None, None))
+
+
 class UserPreferencesStorageTests(unittest.TestCase):
     def setUp(self) -> None:
         directory = TemporaryDirectory()
@@ -37,7 +63,7 @@ class UserPreferencesStorageTests(unittest.TestCase):
         self.assertEqual(prefs.model_dump(), {
             "show_thinking": True, "show_agent_avatar": True, "language": "en", "agent_id": None,
             "default_llm_model": None, "default_stt_model": None, "stt_language": None, "associative_max_matches": None, "associative_palace_slots": None, "disposable_retention_days": None,
-            "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle",
+            "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "theme": None, "accent": None, "accent_color": None,
         })
         self.assertEqual(prefs.model_fields_set, set())
         self.assertEqual(list(self.path.parent.iterdir()), [])
@@ -130,7 +156,7 @@ class UserPreferencesStorageTests(unittest.TestCase):
         self.assertEqual(self.store.get("user-one").model_dump(), {
             "show_thinking": False, "show_agent_avatar": True, "language": "es", "agent_id": "agent-b",
             "default_llm_model": None, "default_stt_model": None, "stt_language": None, "associative_max_matches": None, "associative_palace_slots": None, "disposable_retention_days": None,
-            "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle",
+            "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "theme": None, "accent": None, "accent_color": None,
         })
 
     def test_concurrent_process_updates_preserve_other_fields(self) -> None:
@@ -144,7 +170,7 @@ class UserPreferencesStorageTests(unittest.TestCase):
         self.assertEqual(self.store.get("user-one").model_dump(), {
             "show_thinking": False, "show_agent_avatar": True, "language": "es", "agent_id": "agent-b",
             "default_llm_model": None, "default_stt_model": None, "stt_language": None, "associative_max_matches": None, "associative_palace_slots": None, "disposable_retention_days": None,
-            "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle",
+            "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "theme": None, "accent": None, "accent_color": None,
         })
 
     def test_user_yaml_and_favorites_are_not_rewritten(self) -> None:
@@ -229,7 +255,7 @@ class UserPreferencesWebTests(unittest.TestCase):
             "show_thinking": True, "show_agent_avatar": True, "language": "es", "agent_id": "agent-a",
             "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo", "stt_language": None,
             "associative_max_matches": None, "associative_palace_slots": None, "disposable_retention_days": None,
-            "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "orchestrator_default": False,
+            "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "theme": None, "accent": None, "accent_color": None, "orchestrator_default": False,
         })
         self.assertFalse(self.path.exists())
         self.factory.assert_not_called()
@@ -245,7 +271,7 @@ class UserPreferencesWebTests(unittest.TestCase):
             "show_thinking": False, "show_agent_avatar": True, "language": "en", "agent_id": "agent-b",
             "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo", "stt_language": None,
             "associative_max_matches": None, "associative_palace_slots": None, "disposable_retention_days": None,
-            "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "orchestrator_default": False,
+            "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "theme": None, "accent": None, "accent_color": None, "orchestrator_default": False,
         })
         self.assertEqual(ChatService().get_preferences("user-one"), self.client.get(self.url).json())
 
@@ -257,7 +283,7 @@ class UserPreferencesWebTests(unittest.TestCase):
             "show_thinking": False, "show_agent_avatar": True, "language": "en", "agent_id": "agent-b",
             "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo", "stt_language": None,
             "associative_max_matches": None, "associative_palace_slots": None, "disposable_retention_days": None,
-            "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "orchestrator_default": False,
+            "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "theme": None, "accent": None, "accent_color": None, "orchestrator_default": False,
         })
         self.client.patch(self.url, json={"agent_id": "agent-a"})
         response = self.client.patch(self.url, json={"agent_id": None})
@@ -288,7 +314,7 @@ class UserPreferencesWebTests(unittest.TestCase):
             "show_thinking": True, "show_agent_avatar": True, "language": "en", "agent_id": "agent-c",
             "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo", "stt_language": None,
             "associative_max_matches": None, "associative_palace_slots": None, "disposable_retention_days": None,
-            "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "orchestrator_default": False,
+            "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "theme": None, "accent": None, "accent_color": None, "orchestrator_default": False,
         })
         self.client.patch(self.url, json={"language": "es"})
         login(self.client, "user-one")
@@ -296,7 +322,7 @@ class UserPreferencesWebTests(unittest.TestCase):
             "show_thinking": False, "show_agent_avatar": True, "language": "en", "agent_id": "agent-b",
             "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo", "stt_language": None,
             "associative_max_matches": None, "associative_palace_slots": None, "disposable_retention_days": None,
-            "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "orchestrator_default": False,
+            "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "theme": None, "accent": None, "accent_color": None, "orchestrator_default": False,
         })
 
     def test_foreign_or_missing_agent_is_rejected_before_preferences_are_changed(self) -> None:
@@ -309,7 +335,7 @@ class UserPreferencesWebTests(unittest.TestCase):
                     "show_thinking": True, "show_agent_avatar": True, "language": "en", "agent_id": "agent-a",
                     "default_llm_model": "openai/gpt-4o-mini", "default_stt_model": "openai/whisper-large-v3-turbo", "stt_language": None,
             "associative_max_matches": None, "associative_palace_slots": None, "disposable_retention_days": None,
-            "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "orchestrator_default": False,
+            "orchestrator": None, "default_agent_id": None, "core_agent_id": None, "avatar_style": "circle", "theme": None, "accent": None, "accent_color": None, "orchestrator_default": False,
                 })
         self.users["user-one"].agents = ["agent-a"]
         def load_agent(user: str, agent: str) -> AgentConfig:
