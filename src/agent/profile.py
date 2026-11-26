@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from src.config.models import MemoryLimits
 from src.config.settings import memory_limits
+from src.config.spaces import scaled_user_chars
 from src.core.sources.agent_files import SkillInfo, join_memory
 from src.core.sources.registry import SourceRegistry
 
@@ -26,6 +27,9 @@ class AgentProfile:
     skills: list[SkillInfo] = field(default_factory=list)
     for_user: list[str] = field(default_factory=list)
     limits: MemoryLimits = field(default_factory=memory_limits)
+    user_text: str = ""  # space agents: USER.md as written (sections per member); `user` is then empty
+    user_names: dict[str, str] = field(default_factory=dict)  # space agents: member id -> display name
+    user_chars: int | None = None  # space agents: the scaled USER.md limit; None = `limits.user_chars`
     loaded_at: str = ""  # ISO time of the read; empty for a hand-built profile (no loaded line in the prompt)
 
 
@@ -41,15 +45,24 @@ def open_items(text: str, limit: int = MAX_PROMPT_FOR_USER) -> list[str]:
     return found
 
 
-def load_profile(sources: SourceRegistry, *, recall_knowledge: bool = True) -> AgentProfile:
+def load_profile(
+    sources: SourceRegistry, *, recall_knowledge: bool = True, space_members: dict[str, str] | None = None,
+) -> AgentProfile:
     """Read SOUL, memories, skill index and the open `for_user.md` items; a missing SOUL.md is an empty personality."""
     files = sources.agent_files()
     palace = sources.mind_palace()
     for_user = palace.read(FOR_USER_FILE) if palace.exists(FOR_USER_FILE) else ""
+    shared = {}
+    if space_members:  # a space-owned agent: USER.md has one section per member and a bigger limit
+        shared = {
+            "user_text": files.memory_text("user"), "user_names": dict(space_members),
+            "user_chars": scaled_user_chars(memory_limits().user_chars, len(space_members)),
+        }
     return AgentProfile(
         soul=files.soul_text(),
         memory=files.memory_entries("memory"),
-        user=files.memory_entries("user"),
+        user=[] if shared else files.memory_entries("user"),
+        **shared,
         skills=files.skills(include_builtin=recall_knowledge),
         for_user=open_items(for_user),
         limits=memory_limits(),
@@ -66,7 +79,17 @@ def profile_blocks(profile: AgentProfile) -> list[str]:
             f"## Your memory ({len(text)}/{profile.limits.memory_chars} chars)\n\n"
             f"Your own durable notes, kept with the `memory` tool (target `memory`).\n\n{text}"
         )
-    if profile.user:
+    if profile.user_names:
+        from src.agent.user_sections import prompt_text
+
+        text = prompt_text(profile.user_text, profile.user_names)
+        if text:
+            blocks.append(
+                f"## About the users ({len(profile.user_text)}/{profile.user_chars} chars)\n\n"
+                "What you know about each member of this shared space, kept with the `memory` tool (target `user`). "
+                "The tool changes only the section of the person speaking.\n\n" + text
+            )
+    elif profile.user:
         text = join_memory(profile.user)
         blocks.append(
             f"## About the user ({len(text)}/{profile.limits.user_chars} chars)\n\n"

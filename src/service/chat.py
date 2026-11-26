@@ -416,6 +416,7 @@ class _MessageRun:
     meta: Optional[dict] = None  # persisted on the user turn (source, task_ids)
     blocks: Optional[list[str]] = None  # a wake turn's task blocks: later results merge into a queued wake
     frame: Optional[Callable[[list[str]], str]] = None  # composes `text` from `blocks`
+    speaker: Optional[str] = None  # space agents: the member who wrote it (their USER.md section); None = the space's billing user
     compact: Optional[str] = None  # a `/compact` run: its instructions ("" for none); not a reply
     compact_percent: Optional[int] = None  # a `/compact N` run: the share of the conversation to keep (None = 20)
     block_runs: Optional[list[list[str]]] = None  # the task runs each block of `blocks` reports (to drop a block already read)
@@ -3091,6 +3092,7 @@ class ChatService:
                 run.text, stream=run.stream, cancellation=run.cancellation,
                 continuation=run.continuation, attachments=run.attachments, meta=run.meta, channel=run.channel,
                 author=run.author,
+                speaker=run.speaker or run.author,
             )
             if memory := agent.memory_event():  # a search that already finished (replies that are not streamed)
                 yield ChatEvent("memory", data=memory, generation_id=run.generation_id)

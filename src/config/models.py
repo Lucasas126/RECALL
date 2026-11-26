@@ -948,6 +948,9 @@ class ResolvedAgent(BaseModel):
     """Runtime dependencies resolved from the user's models/providers and agent behavior."""
 
     user_id: str
+    # space-owned agent only: member id -> display name, and the member who is the speaker when none is known
+    space_members: dict[str, str] = Field(default_factory=dict)
+    space_billing_user: Optional[str] = None
     claude_user_id: Optional[str] = None  # whose config folder holds the Claude login; None = `user_id` (spaces: billing user)
     language: str = "en"
     require_zdr: bool = False

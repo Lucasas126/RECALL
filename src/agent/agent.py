@@ -234,6 +234,7 @@ class Agent:
         self._disposable, self._task = self._chat_kind(chat_id)
         # called with (input tokens, output tokens) after each model call; the task manager's token watchdog
         self.usage_hook: Callable[[int, int], None] | None = None
+        self.speaker: str | None = None  # space agents: the member whose message this turn answers (USER.md section)
         if self._task is not None:
             self._become_worker(self._task)
         self._base_tool_specs, self._base_tool_handlers = self._build_base_tools()
@@ -427,7 +428,7 @@ class Agent:
         config = load_agent(user_id, agent_id)
         provider = main_provider(config)
         sources = SourceRegistry.for_agent(config.user_id, config.id, **chat_folder_options(config))
-        profile = load_profile(sources, recall_knowledge=config.recall_knowledge)
+        profile = load_profile(sources, recall_knowledge=config.recall_knowledge, space_members=config.space_members)
         logger.debug(
             "loaded agent user=%s agent=%s provider=%s model=%s",
             config.user_id, config.id, config.provider_name, config.models.chat,
@@ -561,7 +562,7 @@ class Agent:
         self, user_input: str, stream: Optional[bool] = None,
         cancellation: CancellationToken | None = None,
         *, continuation: bool = False, attachments: Optional[list[dict]] = None,
-        meta: Optional[dict] = None, channel: Optional[str] = None, author: Optional[str] = None,
+        meta: Optional[dict] = None, channel: Optional[str] = None, author: Optional[str] = None, speaker: Optional[str] = None,
     ) -> Union[str, Iterator[tuple[str, str | dict]]]:
         """Send a user message and return the reply, updating conversation memory.
 
@@ -573,6 +574,7 @@ class Agent:
         """
         if stream is None:
             stream = self.config.stream
+        self.speaker = speaker  # per turn: a turn without one (automation, task) falls back to the billing member
         attachments = attachments or []
         if not continuation:
             self._drop_tool_images()

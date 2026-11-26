@@ -11,7 +11,7 @@ from src.config.levels import check_agent_level, effective_agent_level
 from src.config.models import AgentConfig, ModelsConfig, ResolvedAgent, UserConfig
 from src.config.preferences import UserPreferencesStore
 from src.config.secrets import get_secret
-from src.config.spaces import resolve_space
+from src.config.spaces import member_names, resolve_space
 from src.config.settings import ASSOC, CHAT_NAMING, CONFIG_DIR, DATA_DIR, TERMINAL, current_mcp_settings
 from src.agent.tool_groups import DEFAULT_TOOL_GROUPS
 from src.terminal.resolve import resolve_backends
@@ -109,6 +109,8 @@ def load_agent(user_id: str, agent_id: Optional[str] = None) -> ResolvedAgent:
     return ResolvedAgent(
         user_id=user.id,
         claude_user_id=user.claude_owner,
+        space_members=member_names(user, CONFIG_DIR) if user.kind == "space" else {},
+        space_billing_user=user.billing_user if user.kind == "space" else None,
         language=user.language,
         require_zdr=user.require_zdr,
         id=agent.id,
