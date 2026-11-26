@@ -1040,6 +1040,11 @@ select.warning { border-color: var(--warn); color: var(--warn); }
 /* Top bar: the "make disposable" action sits at the right end of the bar */
 #chat-make-disposable { margin-left: auto; position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 3px 10px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--muted); font-size: var(--s-1); font-weight: 500; white-space: nowrap; }
 #chat-make-disposable:hover:not(:disabled) { background: var(--raised); color: var(--text); }
+/* narrow screens: the icon alone (the text stays for assistive technology through aria-label and title) in a 44px target */
+@media (max-width: 600px) {
+  #chat-make-disposable { padding: 0; min-width: 44px; justify-content: center; gap: 0; }
+  #chat-make-disposable-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
 
 /* Sidebar: date groups */
 #chat-list .chat-section { display: flex; align-items: center; gap: 10px; margin: 16px 0 4px; padding: 0 0 0 8px; border: 0; font: 600 .6875rem/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); cursor: default; }

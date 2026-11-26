@@ -3987,6 +3987,7 @@ function renderDisposable() {
   $("chat-make-disposable").hidden = !view.canMakeDisposable;
   $("chat-make-disposable-text").textContent = tr("Make it disposable");
   $("chat-make-disposable").title = tr("Make it disposable");
+  $("chat-make-disposable").setAttribute("aria-label", tr("Make it disposable"));
   const locked = state.busy || state.modelBusy;
   $("disposable-convert").disabled = locked;
   $("chat-make-disposable").disabled = locked;
