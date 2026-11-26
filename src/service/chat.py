@@ -9,6 +9,7 @@ import threading
 from collections import deque
 from contextlib import closing
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from queue import SimpleQueue
 from time import monotonic, sleep
@@ -693,6 +694,37 @@ class ChatService:
             for record in self._automations.list(user_id)
         ]
         return {"automations": sorted(records, key=lambda r: r["created_at"], reverse=True)}
+
+    def automation_events(self, user_id: str, since: str = "") -> dict:
+        """Runs of the user's automations that ended after `since` (an ISO time from an earlier answer's `now`).
+
+        Automations run without any page, so a connected page asks for this now and then to show a browser notification.
+        Only ids, titles and the final status are returned, never the result. Without `since` it returns no events, just `now`.
+        """
+        self._user(user_id)
+        now = datetime.now().astimezone()
+        out: dict = {"now": now.isoformat(timespec="seconds"), "events": []}
+        try:
+            after = datetime.fromisoformat(since) if since else None
+        except ValueError:
+            after = None
+        if after is None:
+            return out
+        for record in self._automations.list(user_id):
+            task_id = next((e["task"] for e in reversed(record.get("history") or []) if e.get("task")), None)
+            if not task_id:
+                continue
+            try:
+                task = self._tasks.store.get(user_id, task_id)
+                ended = datetime.fromisoformat(task.get("ended_at") or "") if task else None
+            except (TaskError, ValueError):
+                continue
+            if ended is not None and ended > after:
+                out["events"].append({
+                    "automation_id": record["id"], "title": record["title"], "task_id": task_id,
+                    "status": task["status"], "ended_at": task["ended_at"],
+                })
+        return out
 
     def _own_automation(self, user_id: str, automation_id: str) -> dict:
         self._user(user_id)

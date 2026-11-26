@@ -889,6 +889,10 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     def list_automations(user_id: str = Depends(current_user)):
         return service.list_automations(user_id)
 
+    @app.get("/api/automations/events")
+    def automation_events(since: str = "", user_id: str = Depends(current_user)):
+        return service.automation_events(user_id, since)
+
     @app.post("/api/automations", status_code=201)
     def create_automation(body: AutomationIn, user_id: str = Depends(current_user)):
         return service.create_automation(user_id, body.agent_id, body.instruction, body.trigger.stored(), body.title)

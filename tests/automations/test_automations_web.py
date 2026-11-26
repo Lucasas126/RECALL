@@ -42,6 +42,21 @@ class AutomationsApiTests(base.AsyncFixture):
         self.assertEqual((listed[0]["title"], listed[0]["status"], listed[0]["enabled"]), ("News", "active", True))
         self.assertIn("Name of", listed[0]["agent_name"]) if "Name of" in listed[0]["agent_name"] else self.assertTrue(listed[0]["agent_name"])
 
+    def test_events_report_runs_that_ended_after_the_marker_without_the_result(self) -> None:
+        record = self.create()
+        first = self.client.get("/api/automations/events").json()
+        self.assertEqual(first["events"], [])
+        task = {"id": "abc123abc123", "user_id": USER, "status": "done", "ended_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "result": {"text": "secret result"}}
+        self.service._tasks.store.save(task)
+        self.service._automations.store.update(USER, record["id"], lambda r: r["history"].append({"at": "x", "outcome": "started", "task": task["id"]}))
+        later = self.client.get("/api/automations/events", params={"since": "2020-01-01T00:00:00+00:00"}).json()
+        self.assertEqual([(e["automation_id"], e["title"], e["status"]) for e in later["events"]], [(record["id"], "News", "done")])
+        self.assertNotIn("secret", str(later))
+        newer = self.client.get("/api/automations/events", params={"since": later["now"]}).json()
+        self.assertEqual(newer["events"], [])
+        self.assertEqual(self.client.get("/api/automations/events", params={"since": "junk"}).json()["events"], [])
+
     def test_each_way_of_saying_when(self) -> None:
         soon = (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%dT%H:%M")
         for trigger in (
