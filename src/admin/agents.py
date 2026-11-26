@@ -297,6 +297,33 @@ def agent_set(service, user_id: str, agent_id: str, assignments: list[str]) -> i
     return 0
 
 
+def _move_command(args) -> int:
+    from src.admin.spaces import space_create
+    from src.service.agent_move import AgentMover
+
+    print("warning: this works on the files; no server may be running a reply, task or process for this agent "
+          "(the live busy check is only done by the web service). Its index is rebuilt on the agent's next start.",
+          file=sys.stderr)
+    mover = AgentMover(CONFIG_DIR, DATA_DIR, create_space=space_create)  # a separate process cannot see running replies
+    if args.agent_command == "share":
+        space_id = mover.share_agent(check_user_id(args.user), args.agent, args.members)
+        print(f"Shared agent '{args.agent}' of '{args.user}' into {space_id}. Stop its replies first; the index is rebuilt "
+              "on the next start (or reindex).")
+        return 0
+    if not args.yes:
+        raise AdminError("refusing to unshare without --yes (the agent leaves the space; copies go to each member).")
+    from src.config.spaces import SpaceError
+    from src.config.loader import load_user
+
+    try:
+        actor = args.actor or load_user(args.space).members[0]
+    except (FileNotFoundError, SpaceError) as exc:
+        raise AdminError(f"cannot read space '{args.space}': {exc}") from exc
+    plan = mover.unshare_agent(args.space, args.agent, actor)
+    print("Unshared '%s' from %s: %s" % (args.agent, args.space, ", ".join(f"{m} -> {a}" for m, a in plan.items())))
+    return 0
+
+
 def agent_rename(service, user_id: str, agent_id: str, new_id: str, name: str | None) -> int:
     _require_user(user_id)
     if not _ID_RE.match(new_id):
@@ -561,6 +588,14 @@ def add_parsers(sub) -> None:
             parser.add_argument("--agent", required=True, help="agent id")
         return parser
 
+    share = with_user(asub.add_parser("share", help="move an agent into a shared space with other users"), True)
+    share.add_argument("--with", action="append", required=True, dest="members", metavar="USER",
+                       help="another member (repeatable); a space with exactly these members is reused or created")
+    unshare = asub.add_parser("unshare", help="give a shared agent back: moved to the only member, else copied to each")
+    unshare.add_argument("--space", required=True, help="space id")
+    unshare.add_argument("--agent", required=True, help="agent id")
+    unshare.add_argument("--actor", help="member doing it (default: the first member)")
+    unshare.add_argument("--yes", action="store_true", help="confirm")
     with_user(asub.add_parser("list", help="the user's agents"))
     with_user(asub.add_parser("show", help="print an agent's yaml as the loader sees it"), True)
     create = with_user(asub.add_parser("create", help="create an agent (validated, same rules as the web UI)"))
@@ -606,6 +641,8 @@ def run(args, service=None) -> int:
         command = args.agent_command
         if command == "check":
             return agent_check(args.user)
+        if command in ("share", "unshare"):
+            return _move_command(args)
         service = service or _make_service()
         if command in ("create", "set") and getattr(args, "level", None):
             args.sets = [*args.sets, f"level={args.level}"]  # same validation as `--set level=...`

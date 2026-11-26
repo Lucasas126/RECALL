@@ -159,6 +159,28 @@ class AgentStore:
                 raise
             return config
 
+    def adopt(self, user_id: str, config: AgentConfig) -> AgentConfig:
+        """Add an agent moved or copied from another owner: like `create` without the id clash check across owners.
+
+        The caller (the agent move, `src/service/agent_move.py`) has already checked that the id is free for every
+        person concerned; the level rule and the existing-file rule still apply.
+        """
+        with self._locked(user_id):
+            user = self._read_user(user_id)
+            self._check_level(user, config)
+            if config.id in user.agents or self._is_defined(user_id, config.id):
+                raise AgentConflict("An agent with the id '{agent_id}' already exists.", agent_id=config.id)
+            path = self._agents_dir(user_id) / f"{config.id}.yaml"
+            if path.exists():
+                raise AgentConflict("The agent file '{file}' already exists.", file=path.name)
+            self._write_agent(path, config)
+            try:
+                self._write_user_agents(user_id, [*user.agents, config.id])
+            except BaseException:
+                path.unlink(missing_ok=True)
+                raise
+            return config
+
     def update(self, user_id: str, agent_id: str, config: AgentConfig) -> AgentConfig:
         with self._locked(user_id):
             user = self._read_user(user_id)
