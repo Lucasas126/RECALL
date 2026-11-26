@@ -59,6 +59,10 @@ script, so no inline script is needed). Fonts (Fraunces, Inter, Geist Mono) are 
 to any other site; their licence (SIL Open Font License 1.1) is in `static/fonts/LICENSES.md`. The login art (arch and capital) lives in
 `static/art/`; `static/art/README.md` lists each slot, its size and how to swap it.
 
+## code blocks in replies
+
+Every fenced code block in a reply has a header with its language (`text` when the fence names none) and a **Copy** button that copies only the code. The button briefly reads "Copied", or "Failed to copy" if the browser refuses. It also works on plain `http://` pages, where the browser has no clipboard API. Blocks with a known language (Python, JavaScript, TypeScript, JSON, shell, YAML, HTML/XML, CSS, SQL, Markdown, diff, Dockerfile, INI/TOML) are coloured with the bundled highlight.js (`static/vendor/`, BSD-3-Clause); the language is never guessed, and a block still being written is coloured once its fence closes. Long lines scroll sideways.
+
 ## providers
 
 The **Providers** tab holds what each provider needs from you:
