@@ -323,7 +323,7 @@ Errors: `401` no session, `404` unknown task (`code: "unknown_task"`) or a task 
 | `POST /api/agents/<agent_id>/chats/<chat_id>/processes/<process_id>/stop` | stops one of the chat's processes (`202`, `{stopped}`); it does not wake the agent |
 | `POST /api/agents/<agent_id>/chats/<chat_id>/read` | clears the chat's unread mark |
 
-The chat list also returns, per chat, `unread` (a reply finished and the chat was not opened since; stored as `<chat_id>.unread.json` next to the chat), `pending_approvals` (count) and `processes` (count). The web UI shows a blinking dot while the agent works or a background process runs, and a steady dot for an unread reply or a pending approval. Server restarts keep this state, and so do other devices.
+The chat list also returns, per chat, `unread` (a reply finished and the chat was not opened since; stored as `<chat_id>.unread.json` next to the chat), `pending_approvals` (count), `processes` (count), `tasks` (subagent tasks launched from the chat that are still running) and `task_results` (finished tasks whose result is still on its way to the chat). The web UI shows a blinking dot while the agent works, a background process runs or a subagent task is running or about to report back, and a steady dot for an unread reply or a pending approval. Server restarts keep this state, and so do other devices.
 
 <a id="automations"></a>
 ## Automations

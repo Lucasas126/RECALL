@@ -22,6 +22,61 @@ class ChatListApprovalTests(models_tests.ModelFixture):
         self.assertEqual(listed[self.chat]["pending_approvals"], 0)
 
 
+class ChatListTaskActivityTests(models_tests.ModelFixture):
+    def _task(self, task_id: str, status: str, chat: str | None = None, wake: str | None = None, agent: str = "agent-one") -> None:
+        record = {
+            "id": task_id, "user_id": "user-one", "parent": {"agent_id": agent, "chat_id": chat or self.chat},
+            "child": {"agent_id": agent, "chat_id": None}, "status": status,
+            "created_at": f"2026-11-05T10:00:0{len(task_id)}+01:00", "usage": {"in": 0, "out": 0},
+        }
+        if wake:
+            record["wake"] = {"state": wake}
+        self.service._tasks.store.save(record)
+        if status == "running":  # a live executor holds the run lock; without it the task counts as dead
+            lock = self.service._tasks.store.run_lock("user-one", task_id)
+            self.assertTrue(lock.acquire())
+            self.addCleanup(lock.release)
+
+    def _listed(self) -> dict:
+        return {c["id"]: c for c in self.service.list_chats("user-one", "agent-one", self.chat)}
+
+    def test_a_chat_without_tasks_reports_none(self) -> None:
+        row = self._listed()[self.chat]
+        self.assertEqual((row["tasks"], row["task_results"]), (0, 0))
+
+    def test_running_tasks_are_counted_on_their_parent_chat(self) -> None:
+        self._task("aaaaaaaaaaaa", "running")
+        self._task("bbbbbbbbbbbb", "running")
+        self._task("cccccccccccc", "done", wake="delivered")
+        row = self._listed()[self.chat]
+        self.assertEqual((row["tasks"], row["task_results"]), (2, 0))
+        self.assertFalse(row["active"])  # the reply itself ended: the task is what keeps the chat working
+
+    def test_a_finished_task_whose_result_is_on_its_way_still_counts(self) -> None:
+        self._task("aaaaaaaaaaaa", "done", wake="pending")
+        self._task("bbbbbbbbbbbb", "failed", wake="claimed")
+        self._task("cccccccccccc", "done", wake="held")  # waits for the person, not on its way
+        row = self._listed()[self.chat]
+        self.assertEqual((row["tasks"], row["task_results"]), (0, 2))
+
+    def test_tasks_of_other_chats_and_agents_are_not_counted(self) -> None:
+        self._task("aaaaaaaaaaaa", "running", chat="20200101-000000-aaaaaa")
+        self._task("bbbbbbbbbbbb", "running", agent="agent-two")
+        row = self._listed()[self.chat]
+        self.assertEqual((row["tasks"], row["task_results"]), (0, 0))
+
+    def test_the_task_store_is_read_per_listing_not_per_chat(self) -> None:
+        store = self.service._tasks.store
+        with patch.object(store, "list", wraps=store.list) as listing:
+            self.service.list_chats("user-one", "agent-one", self.chat)
+        first = listing.call_count
+        self.service.create_chat("user-one", "agent-one")
+        self.service.create_chat("user-one", "agent-one")
+        with patch.object(store, "list", wraps=store.list) as listing:
+            self.service.list_chats("user-one", "agent-one", self.chat)
+        self.assertEqual(listing.call_count, first)
+
+
 class UnreadStateTests(models_tests.ModelFixture):
     def _listed(self) -> dict:
         return {c["id"]: c for c in self.service.list_chats("user-one", "agent-one", self.chat)}
@@ -56,7 +111,7 @@ class ChatListDotStaticTests(unittest.TestCase):
     def test_page_marks_working_blinking_and_ready_or_approval_fixed(self) -> None:
         script = (_STATIC / "app.js").read_text(encoding="utf-8")
         css = (_STATIC / "style.css").read_text(encoding="utf-8")
-        for needle in ('"approval"', '"ready"', '"working"', "pending_approvals", "chat.unread", "/read"):
+        for needle in ('"approval"', '"ready"', '"working"', "pending_approvals", "chat.unread", "/read", "chat.tasks", "chat.task_results"):
             self.assertIn(needle, script)
         self.assertNotIn("localStorage.getItem(READY", script)  # the unread state is the server's, not the browser's
         self.assertIn('#chat-list li[data-dot]::after', css)

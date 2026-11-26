@@ -1912,6 +1912,30 @@ class TaskManager:
         """One of the user's tasks, in full; raises TaskError when it does not exist."""
         return self.view(self._record(user_id, task_id, None), full=True)
 
+    def parent_activity(self, user_id: str, agent_id: str) -> dict[str, dict[str, int]]:
+        """Per parent chat of the agent, in one read of the store: `running` tasks and `arriving` results.
+
+        A result is arriving while its wake is pending or claimed; a `held` one waits for the person and is not counted."""
+        if not self.store.folder(user_id, create=False).is_dir():
+            return {}
+        with self.store.lock(user_id):
+            self._fail_dead(user_id)
+            records = self.store.list(user_id)
+        out: dict[str, dict[str, int]] = {}
+        for record in records:
+            parent = record["parent"]
+            if parent["agent_id"] != agent_id:
+                continue
+            if record["status"] not in FINAL_STATES:
+                key = "running"
+            elif (record.get("wake") or {}).get("state") in ("pending", "claimed"):
+                key = "arriving"
+            else:
+                continue
+            counts = out.setdefault(parent["chat_id"], {"running": 0, "arriving": 0})
+            counts[key] += 1
+        return out
+
     def pending_wake(self, user_id: str, agent_id: str, chat_id: str) -> bool:
         """Whether a finished task of this parent chat still has its result on the way to the parent."""
         with self.store.lock(user_id):
