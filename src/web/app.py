@@ -728,6 +728,7 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
         attachments = [attachment.model_dump() for attachment in body.attachments]
+        author = {"author": user_id} if owner != user_id else {}  # a shared agent: who is speaking
         replaced = None
         try:
             events = service.send(
@@ -735,6 +736,7 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
                 attachments=attachments, rewind_to=body.edit_index, channel="web",
                 recordings=body.recordings if body.edit_index is not None else None,
                 transcripts_in_text=body.transcripts_in_text and body.edit_index is not None,
+                **author,
             )
         except UnknownChat:
             if body.edit_index is not None or not _GENERATED_CHAT_ID.match(chat_id):
@@ -745,7 +747,7 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
             replaced = service.create_chat(owner, agent_id)
             chat_id = replaced["id"]
             events = service.send(
-                owner, agent_id, chat_id, body.content, stream=True, attachments=attachments, channel="web",
+                owner, agent_id, chat_id, body.content, stream=True, attachments=attachments, channel="web", **author,
             )
 
         stream = _event_stream(events, language, owner, agent_id, chat_id)

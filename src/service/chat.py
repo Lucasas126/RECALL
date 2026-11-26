@@ -411,6 +411,7 @@ class _MessageRun:
     stream: Optional[bool]
     continuation: bool = False
     channel: Optional[str] = None  # where the user wrote it: "web" or "telegram" (None for system turns)
+    author: Optional[str] = None  # who wrote it in a shared (space) agent: a user id
     source: Optional[str] = None  # "task" for a wake turn written by the system, not the user
     meta: Optional[dict] = None  # persisted on the user turn (source, task_ids)
     blocks: Optional[list[str]] = None  # a wake turn's task blocks: later results merge into a queued wake
@@ -1681,6 +1682,7 @@ class ChatService:
                         "role", "content", "ts", "reasoning", "actions", "timeline", "interrupted", "interrupted_by", "checkpoint", "media",
                         "associative_matches", "associative_skipped", "usage", "usage_report",
                         "associative_fragments", "associative_query",
+                        "author",  # who wrote it in a shared agent
                         "source", "task_ids",  # a wake turn: a subagent result, not written by the user
                         "task_brief", "task_message",  # a worker chat's first message / follow-up, structured for the UI
                         "tokens_before", "tokens_after", "manual", "kept_percent",
@@ -1890,6 +1892,7 @@ class ChatService:
         rewind_to: Optional[int] = None, internal_task: bool = False, meta: Optional[dict] = None,
         channel: Optional[str] = None, mention_meta: Optional[dict] = None,
         recordings: Optional[list[Optional[str]]] = None, transcripts_in_text: bool = False,
+        author: Optional[str] = None,
     ) -> Iterator[ChatEvent]:
         """Send a user message to a chat and yield the reply as events.
 
@@ -1913,6 +1916,10 @@ class ChatService:
         transcript of their own, and nothing is appended to the message.
 
         `channel` (`web` or `telegram`) is where the person wrote; it is stored on the turn and shown to the model.
+
+        `author` (a user id) is who wrote it in a shared (space) agent: stored on the turn and shown to the model as
+        a `[NAME]` prefix. Callers set it only when the owner is not the person; an edit without it keeps the
+        original turn's author.
 
         A person's message starting with `@<agent_id>` of another agent of the same user is answered by that agent
         instead (see `_send_mention`). `mention_meta` is only set by that path and stored on the mentioned agent's turn.
@@ -1939,6 +1946,7 @@ class ChatService:
         kept_recordings: list[dict] = []
         if rewind_to is not None:
             original = self._edit_target(conversations, chat_id, rewind_to)
+            author = author or original.get("author") or None
             if not attachments:
                 attachments = self._stored_attachments(original.get("content"))
                 # a PDF only lives on the turn as `media` (the model gets its text): an edit keeps it
@@ -1982,7 +1990,7 @@ class ChatService:
         if media:
             run_meta["media"] = media
         run = _MessageRun(chat_id, text, attachments, stream, meta=run_meta or None,
-                           channel=channel if channel in ("web", "telegram") else None)
+                           channel=channel if channel in ("web", "telegram") else None, author=author)
         # keep what the speech-to-text heard next to each recording, so the person can check it any time
         unheard = [item for item in media if item["modality"] == "audio" and "transcript" not in item]
         if rewind_to is not None and transcripts_in_text and not attachments_given:
@@ -3073,6 +3081,7 @@ class ChatService:
             result = agent.invoke(
                 run.text, stream=run.stream, cancellation=run.cancellation,
                 continuation=run.continuation, attachments=run.attachments, meta=run.meta, channel=run.channel,
+                author=run.author,
             )
             if memory := agent.memory_event():  # a search that already finished (replies that are not streamed)
                 yield ChatEvent("memory", data=memory, generation_id=run.generation_id)
