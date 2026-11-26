@@ -200,10 +200,22 @@ function selectableAgents(agents, keepId = null) {
   return (agents ?? []).filter((agent) => !agent.hidden || agent.id === keepId);
 }
 
-// The Settings > Agents list: the agents that are shown and, below, the hidden ones (a broken file has no flag: shown).
+// The Settings > Agents list: own agents, the shared ones (from a space) and the hidden ones; a hidden agent, shared or
+// not, goes only under Hidden (a broken file has no flag: shown).
 function splitHiddenAgents(agents) {
   const list = agents ?? [];
-  return { shown: list.filter((agent) => !agent.hidden), hidden: list.filter((agent) => agent.hidden) };
+  return {
+    shown: list.filter((agent) => !agent.hidden && !agent.shared),
+    shared: list.filter((agent) => !agent.hidden && agent.shared),
+    hidden: list.filter((agent) => agent.hidden),
+  };
+}
+
+// The line on a shared agent's settings page ("" for an own agent).
+function sharedAgentNote(agent, translate) {
+  if (!agent?.shared) return "";
+  const text = translate("Shared agent · uses the keys and Claude subscription of {user}");
+  return text.replace("{user}", agent.billing_user || translate("the space owner"));
 }
 
 // Query string of the chat list request: the open chat is kept (an empty one is not pruned) and hidden chats are asked for.
@@ -1598,6 +1610,7 @@ function agentListItem(agent) {
   name.className = "title";
   name.textContent = agent.name;
   if (agent.hidden) name.prepend(hiddenIcon(), " ");
+  if (agent.shared) name.append(" ", sharedTag());
   if (agent.level) name.append(" ", levelBadge(agent.level));
   button.append(name);
   if (agent.description) {
@@ -1621,6 +1634,14 @@ function agentListItem(agent) {
   return item;
 }
 
+function sharedTag() {
+  const tag = document.createElement("span");
+  tag.className = "shared-tag";
+  tag.textContent = tr("shared");
+  tag.title = tr("Shared agent");
+  return tag;
+}
+
 function hiddenIcon() {
   const icon = document.createElement("span");
   icon.className = "hidden-icon";
@@ -1631,7 +1652,7 @@ function hiddenIcon() {
 
 // Two sections, both always shown: the agents, then the hidden agents (with a hint while there are none).
 function renderAgentList() {
-  const { shown, hidden } = splitHiddenAgents(state.agentConfigs);
+  const { shown, shared, hidden } = splitHiddenAgents(state.agentConfigs);
   const heading = (text) => {
     const li = document.createElement("li");
     li.className = "agent-section";
@@ -1644,6 +1665,7 @@ function renderAgentList() {
   empty.textContent = tr("No hidden agents. Hide an agent in its editor to list it here.");
   $("agent-list").replaceChildren(
     heading("Agents"), ...shown.map(agentListItem),
+    ...(shared.length ? [heading("Shared agents"), ...shared.map(agentListItem)] : []),
     ...(state.showHiddenAgents ? [heading("Hidden agents"), ...(hidden.length ? hidden.map(agentListItem) : [empty])] : []),
   );
 }
@@ -1712,6 +1734,9 @@ function fillAgentForm(agent) {
   $("agent-description").value = agent.description ?? "";
   $("agent-avatar-free").checked = agent.avatar_style === "free";
   $("agent-hidden").checked = Boolean(agent.hidden);
+  const sharedNote = sharedAgentNote(agent, tr);
+  $("agent-shared-note").textContent = sharedNote;
+  $("agent-shared-note").hidden = !sharedNote;
   syncAgentHiddenIcon();
   $("agent-open-chat").hidden = !state.agentForm.originalId;  // a new agent has no chat until it is saved
   $("agent-avatar-error").textContent = "";
@@ -3810,6 +3835,7 @@ async function refreshChats() {
       const agent = document.createElement("span");
       agent.className = "chat-agent";
       agent.textContent = chat.agent_name;
+      if (chat.shared) agent.append(" ", sharedTag());
       meta.append(title, agent);
       const del = document.createElement("button");
       del.className = "del";
