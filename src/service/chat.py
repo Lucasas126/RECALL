@@ -79,7 +79,7 @@ from src.service.dream import (
 from src.agent.toolsets.delegate import TaskError
 from src.service.agent_admin import AgentAdmin
 from src.service.agent_permissions import AgentPermissions
-from src.service.tasks import TaskManager
+from src.service.tasks import FINAL_STATES, TaskManager
 from src.service.mentions import MENTION_CONTEXT_CHARS, chat_excerpt, mention_chat_title, mention_prompt, parse_mention
 from src.agent.toolsets.processes import process_registry, process_wake_block, process_wake_frame
 from src.terminal.approvals import ApprovalBroker, ApprovalNotFound
@@ -1016,6 +1016,64 @@ class ChatService:
         elif previously_indexed - {f.name for f in updated.folders if f.indexed}:
             self._purge_folder_chunks(user_id, agent_id)
         return self._agent_view(user_id, updated)
+
+    # ------------------------------------------------------------------ sharing (docs/project/design-shared-agents.md)
+
+    def _agent_mover(self):
+        from src.admin.spaces import space_create
+        from src.service.agent_move import AgentMover
+
+        return AgentMover(
+            CONFIG_DIR, DATA_DIR, create_space=space_create, is_busy=self._agent_in_use,
+            on_removed=self._agent_moved_away, on_created=self._agent_arrived,
+        )
+
+    def _agent_in_use(self, owner: str, agent_id: str) -> bool:
+        """A reply running or queued, a task of the agent running, or a background process of one of its chats."""
+        slot = self._slot(owner, agent_id)
+        if slot.active or slot.pending:
+            return True
+        for record in self._tasks.store.list(owner):
+            if record["status"] not in FINAL_STATES and agent_id in (
+                record["parent"]["agent_id"], record["child"]["agent_id"],
+            ):
+                return True
+        registry = process_registry(DATA_DIR)
+        registry.recover(owner)
+        return any(r["state"] == "running" and r.get("agent") == agent_id for r in registry.list(owner))
+
+    def _agent_moved_away(self, owner: str, agent_id: str) -> None:
+        """The agent left `owner`: drop its slot and whatever the owner's preferences point at."""
+        self._forget_slot(owner, agent_id)
+        self._good_agents.pop((owner, agent_id), None)
+        if not is_space_id(owner):  # a space has no preferences
+            self._replace_preferred_agent(owner, agent_id, None)
+
+    def _agent_arrived(self, owner: str, agent_id: str) -> None:
+        """A new owner got the agent: rebuild its index (queued; the data folder came without `.index`)."""
+        self.reindex(owner, agent_id, full=True)
+
+    def share_agent(self, person: str, agent_id: str, members: list[str]) -> str:
+        """Move `person`'s agent into the shared space of `person` + `members`; returns the space id. Needs it idle."""
+        self._owned_agent(person, agent_id)
+        slot = self._slot(person, agent_id)
+        with slot.state:
+            if slot.active or slot.pending:
+                raise AgentBusy("wait for this agent's active and queued replies before sharing it")
+            with slot.lock:
+                return self._agent_mover().share_agent(person, agent_id, members)
+
+    def unshare_agent(self, person: str, space_id: str, agent_id: str) -> dict[str, str]:
+        """Give a shared agent back to its members (moved when alone, else copied); `person` must be a member."""
+        if person not in self._user(space_id).members:
+            raise UnknownAgent("agent '{agent_id}' is not owned by user '{user_id}'", agent_id=agent_id, user_id=person)
+        self._owned_agent(space_id, agent_id)
+        slot = self._slot(space_id, agent_id)
+        with slot.state:
+            if slot.active or slot.pending:
+                raise AgentBusy("wait for this agent's active and queued replies before unsharing it")
+            with slot.lock:
+                return self._agent_mover().unshare_agent(space_id, agent_id, person)
 
     def _purge_folder_chunks(self, user_id: str, agent_id: str) -> None:
         """After folders were removed or un-indexed: queue a reconcile that drops their chunks (best effort)."""

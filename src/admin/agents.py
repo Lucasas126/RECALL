@@ -301,6 +301,9 @@ def _move_command(args) -> int:
     from src.admin.spaces import space_create
     from src.service.agent_move import AgentMover
 
+    print("warning: this works on the files; no server may be running a reply, task or process for this agent "
+          "(the live busy check is only done by the web service). Its index is rebuilt on the agent's next start.",
+          file=sys.stderr)
     mover = AgentMover(CONFIG_DIR, DATA_DIR, create_space=space_create)  # a separate process cannot see running replies
     if args.agent_command == "share":
         space_id = mover.share_agent(check_user_id(args.user), args.agent, args.members)

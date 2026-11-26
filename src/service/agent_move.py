@@ -11,6 +11,7 @@ after every target is complete. A failure removes what was made for the targets 
 from __future__ import annotations
 
 import json
+import logging
 import re
 import secrets
 import shutil
@@ -19,7 +20,7 @@ from typing import Callable
 
 from src.agent.user_sections import parse_sections, render_sections
 from src.config.agents import AgentConfigError, AgentStore
-from src.config.levels import Level, required_level
+from src.config.levels import Level, required_level, required_level_reason
 from src.config.models import AgentConfig, UserConfig
 from src.config.spaces import SpaceError, agent_id_conflict, all_spaces, resolve_space
 from src.config.yaml_files import load_yaml_file
@@ -29,6 +30,7 @@ from src.utils.avatars import AvatarStore
 from src.utils.files import atomic_write_text
 from src.utils.i18n import InputError
 
+logger = logging.getLogger(__name__)
 AUDIT_FILE = "admin_audit.jsonl"
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _USER_MD = MEMORY_FILES["user"]
@@ -43,9 +45,14 @@ class AgentMover:
     """Share and unshare agents for one configuration and data directory."""
 
     def __init__(self, config_dir: Path, data_dir: Path, *, create_space: Callable[[str, list[str], str | None], str],
-                 is_busy: Callable[[str, str], bool] = lambda owner, agent: False) -> None:
+                 is_busy: Callable[[str, str], bool] = lambda owner, agent: False,
+                 on_removed: Callable[[str, str], None] = lambda owner, agent: None,
+                 on_created: Callable[[str, str], None] = lambda owner, agent: None) -> None:
+        """`is_busy(owner, agent)` is the live busy check; `on_removed` and `on_created` let the service drop its slot and
+        preferences for the old owner and rebuild the index of each new one (best effort, after the move succeeded)."""
         self.config_dir, self.data_dir = Path(config_dir), Path(data_dir)
         self._create_space, self._is_busy = create_space, is_busy
+        self._on_removed, self._on_created = on_removed, on_created
         self.store = AgentStore(self.config_dir, self.data_dir)
         self.avatars = AvatarStore(self.data_dir)
 
@@ -68,6 +75,8 @@ class AgentMover:
             clash = agent_id_conflict(member, agent_id, self.config_dir, ignore=owner_user if member == owner_user else None)
             if clash is not None:
                 raise MoveError("agent '{agent_id}' clashes with an agent of '{owner}'", agent_id=agent_id, owner=clash)
+        backends = (self.store.user(space.id) if space else user).terminal_backends
+        self._check_fits(config, {m: self._owner(m, "user").max_level for m in everyone}, backends, "the space")
         created = space is None
         space_id = space.id if space else self._create_space(owner_user, everyone[1:], None)
         try:
@@ -76,7 +85,11 @@ class AgentMover:
             if created:
                 shutil.rmtree(self.config_dir / space_id, ignore_errors=True)
             raise
-        self._audit(owner_user, "share_agent", agent=agent_id, space=space_id, members=everyone)
+        dropped = self._drop_targets(owner_user, drop=agent_id)
+        dropped += self._drop_targets(space_id, only=agent_id)
+        self._audit(owner_user, "share_agent", agent=agent_id, space=space_id, members=everyone, dropped_targets=dropped)
+        self._safely(self._on_removed, owner_user, agent_id)
+        self._safely(self._on_created, space_id, agent_id)
         self._audit(space_id, "share_agent", agent=agent_id, from_user=owner_user, members=everyone)
         return space_id
 
@@ -96,6 +109,8 @@ class AgentMover:
             self._owner(member, "user")
             new_id = agent_id if single else self._free_id(member, agent_id, space_id)
             plan[member] = new_id
+        for member in space.members:
+            self._check_fits(config, {member: self.store.user(member).max_level}, space.terminal_backends, f"the account of '{member}'")
         done: list[tuple[str, str]] = []
         try:
             for member, new_id in plan.items():
@@ -108,11 +123,15 @@ class AgentMover:
             raise
         self._remove_source(space_id, agent_id)
         remaining = self.store.user(space_id).agents
+        dropped = self._drop_targets(space_id, drop=agent_id) if remaining else []
         if not remaining:
             shutil.rmtree(self.config_dir / space_id, ignore_errors=True)  # its data folder stays
         for member, new_id in plan.items():
+            self._drop_targets(member, only=new_id)
             self._audit(member, "unshare_agent", agent=agent_id, new_id=new_id, space=space_id, actor=actor)
-        self._audit(space_id, "unshare_agent", agent=agent_id, actor=actor, members=list(space.members))
+            self._safely(self._on_created, member, new_id)
+        self._safely(self._on_removed, space_id, agent_id)
+        self._audit(space_id, "unshare_agent", agent=agent_id, actor=actor, members=list(space.members), dropped_targets=dropped)
         return plan
 
     # ------------------------------------------------------------------ steps
@@ -258,6 +277,51 @@ class AgentMover:
         """USER.md of an agent moved back to its only member: that member's section as flat entries."""
         entries = [entry for items in sections.values() for entry in items]
         return join_memory(entries)
+
+    @staticmethod
+    def _safely(hook, owner: str, agent_id: str) -> None:
+        """Tell the service about the move; a failure here never undoes it (the next start reconciles the index)."""
+        try:
+            hook(owner, agent_id)
+        except Exception:
+            logger.warning("agent move follow-up failed for %s/%s", owner, agent_id, exc_info=True)
+
+    def _drop_targets(self, owner: str, *, only: str | None = None, drop: str | None = None) -> list[str]:
+        """Remove delegation targets that are not agents of `owner` (or are `drop`); returns "<agent>:<target>" per removal.
+
+        `only` limits the cleaning to one agent (the moved one: its targets stayed behind); without it every agent of
+        `owner` is cleaned (the others, whose target just left). A dangling target does not fail the load, but saving
+        the agent in the web refuses it, so it is removed and audited.
+        """
+        try:
+            agents = self.store.user(owner).agents
+            configs = [self.store.load(owner, agent_id) for agent_id in agents if only is None or agent_id == only]
+        except (FileNotFoundError, AgentConfigError, SpaceError):
+            return []
+        removed = []
+        for config in configs:
+            if config.delegation is None:
+                continue
+            kept = [t for t in config.delegation.targets if t.agent in agents and t.agent != drop]
+            if len(kept) == len(config.delegation.targets):
+                continue
+            removed += [f"{config.id}:{t.agent}" for t in config.delegation.targets if t not in kept]
+            self.store.update(owner, config.id, config.model_copy(update={
+                "delegation": config.delegation.model_copy(update={"targets": kept})}))
+        if removed:
+            self._audit(owner, "drop_delegation_targets", removed=removed)
+        return removed
+
+    def _check_fits(self, config: AgentConfig, levels: dict[str, Level], backends, where: str) -> None:
+        """Refuse a configuration that needs more than the lowest `max_level` among `levels`, naming who limits it and why."""
+        needed, service = required_level_reason(config, backends)
+        member, lowest = min(levels.items(), key=lambda item: item[1])
+        if needed > lowest:
+            raise MoveError(
+                "agent '{agent_id}' uses {service}, which needs the level '{needed}'; the maximum level of '{member}' "
+                "is '{lowest}', which limits {where}. Remove {service} from the agent or ask an administrator to raise "
+                "that maximum.", agent_id=config.id, service=service, needed=needed.label, member=member,
+                lowest=lowest.label, where=where)
 
     def _audit(self, owner: str, action: str, **fields) -> None:
         write_audit(self.data_dir / owner / AUDIT_FILE, event="admin_action", action=action, **fields)

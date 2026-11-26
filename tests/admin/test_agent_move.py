@@ -126,6 +126,34 @@ class AgentMoveTests(unittest.TestCase):
             self.assertEqual(users.main(["agent", "unshare", "--space", space_id, "--agent", "nova"]), 1)
             self.assertEqual(users.main(["agent", "unshare", "--space", space_id, "--agent", "nova", "--yes"]), 0, err.getvalue())
 
+    def test_hooks_and_delegation_targets(self) -> None:
+        calls = []
+        mover = AgentMover(self.config, self.data, create_space=space_create,
+                           on_removed=lambda o, a: calls.append(("gone", o, a)), on_created=lambda o, a: calls.append(("new", o, a)))
+        self.add_user("user-a", "operator", ["nova", "sage"])
+        (self.config / "user-a" / "agents" / "sage.yaml").write_text(
+            "id: sage\nname: Sage\ndelegation:\n  targets:\n    - agent: nova\n", encoding="utf-8")
+        space_id = mover.share_agent("user-a", "nova", ["user-c"])
+        self.assertEqual(calls, [("gone", "user-a", "nova"), ("new", space_id, "nova")])
+        self.assertEqual(load_agent_config("user-a", "sage").delegation.targets, [])
+        self.assertIn("drop_delegation_targets", (self.data / "user-a" / "admin_audit.jsonl").read_text())
+        calls.clear()
+        mover.unshare_agent(space_id, "nova", "user-a")
+        self.assertEqual([c[0] for c in calls], ["new", "new", "gone"])
+
+    def test_level_error_names_member_and_capability(self) -> None:
+        self.add_user("user-c", "assistant")
+        (self.config / "user-a" / "agents" / "nova.yaml").write_text(
+            "id: nova\nname: Nova\nchat_config:\n  tool_groups: [terminal]\nterminal:\n  backends: {box: {}}\n", encoding="utf-8")
+        with open(self.config / "user-a" / "user.yaml", "a", encoding="utf-8") as handle:
+            handle.write("terminal_backends:\n  box: {type: ssh, host: example.invalid, user: u, key_file: k, known_hosts_file: h}\n")
+        with self.assertRaises(MoveError) as caught:
+            self.mover.share_agent("user-a", "nova", ["user-c"])
+        text = str(caught.exception.args) + str(getattr(caught.exception, "values", ""))
+        self.assertIn("user-c", text)
+        self.assertIn("terminal", text.lower() + "")
+        self.assertEqual(all_spaces(self.config), [])
+
 
 if __name__ == "__main__":
     unittest.main()
