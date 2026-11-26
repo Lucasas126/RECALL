@@ -1258,3 +1258,5 @@ html.resizing-sidebar #app { transition: none; }
 #user-wizard input, #user-wizard select { width: 100%; box-sizing: border-box; }
 #user-wizard button { margin-top: 8px; }
 #user-wizard code { overflow-wrap: anywhere; }
+
+.shared-tag { display: inline-block; padding: 0 6px; border-radius: 999px; border: 1px solid var(--muted); color: var(--muted); font-size: 0.7em; font-weight: 500; vertical-align: middle; }

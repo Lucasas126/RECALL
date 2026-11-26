@@ -8,7 +8,7 @@ const vm = require("node:vm");
 const source = readFileSync(path.join(__dirname, "..", "..", "..", "src", "web", "static", "app.js"), "utf8");
 const code = source.match(/\/\/ ---- settings helpers[\s\S]*?\/\/ ---- end settings helpers/)[0];
 const context = vm.createContext({});
-vm.runInContext(`${code}\nthis.api = { selectableAgents, splitHiddenAgents, chatListQuery, readShowHidden, writeShowHidden };`, context);
+vm.runInContext(`${code}\nthis.api = { selectableAgents, splitHiddenAgents, sharedAgentNote, chatListQuery, readShowHidden, writeShowHidden };`, context);
 const api = context.api;
 const plain = (value) => JSON.parse(JSON.stringify(value));
 const agents = [{ id: "nova" }, { id: "ghost", hidden: true }, { id: "sage", hidden: false }];
@@ -23,7 +23,22 @@ test("the agent list splits into shown and hidden sections", () => {
   const split = api.splitHiddenAgents(agents);
   assert.deepEqual(split.shown.map((a) => a.id), ["nova", "sage"]);
   assert.deepEqual(split.hidden.map((a) => a.id), ["ghost"]);
-  assert.deepEqual(plain(api.splitHiddenAgents([])), { shown: [], hidden: [] });
+  assert.deepEqual(plain(api.splitHiddenAgents([])), { shown: [], shared: [], hidden: [] });
+});
+
+test("shared agents get their own section; a hidden shared one stays under Hidden", () => {
+  const list = [...agents, { id: "team", shared: true }, { id: "team-ghost", shared: true, hidden: true }];
+  const split = api.splitHiddenAgents(list);
+  assert.deepEqual(split.shown.map((a) => a.id), ["nova", "sage"]);
+  assert.deepEqual(split.shared.map((a) => a.id), ["team"]);
+  assert.deepEqual(split.hidden.map((a) => a.id), ["ghost", "team-ghost"]);
+});
+
+test("the shared note names the billing user and is empty for own agents", () => {
+  const tr = (text) => text;
+  assert.equal(api.sharedAgentNote({ id: "nova" }, tr), "");
+  assert.equal(api.sharedAgentNote({ shared: true, billing_user: "user-a" }, tr), "Shared agent · uses the keys and Claude subscription of user-a");
+  assert.match(api.sharedAgentNote({ shared: true }, tr), /the space owner/);
 });
 
 test("the chat list query keeps the open chat and asks for hidden chats only when shown", () => {

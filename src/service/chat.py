@@ -628,7 +628,7 @@ class ChatService:
             else:
                 agents.append({"id": cfg.id, "name": cfg.name, "avatar": self._agent_avatar_view(owner, cfg), "hidden": cfg.hidden})
             if space_id is not None:
-                agents[-1].update(shared=True, space_id=space_id)
+                agents[-1].update(shared=True, space_id=space_id, billing_user=user.billing_user)
         return agents
 
     def list_agents(self, user_id: str) -> list[dict]:
@@ -648,7 +648,7 @@ class ChatService:
                     logger.error("agent list: %s/%s: %s", owner, agent_id, reason)
                     view = {"id": agent_id, "name": agent_id, "broken": True, "error": reason}
                 if space_id is not None:
-                    view.update(shared=True, space_id=space_id)
+                    view.update(shared=True, space_id=space_id, billing_user=self._user(owner).billing_user)
                 views.append(view)
         return views
 
