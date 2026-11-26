@@ -1053,15 +1053,39 @@ select.warning { border-color: var(--warn); color: var(--warn); }
 #chat-list .chat-section::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 #chat-list .chat-section:hover { background: none; }
 
-/* Narrow main column: the options drop to a second row under the input; send and mic stay on the input row, and .multiline (app.js) pulls them down */
-@container main (max-width: 680px) {
-  #composer { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "pend pend pend pend" "attach input mic send" "controls controls controls controls"; }
-  #chat-controls { margin: 0 0 0 36px; }
-}
+/* Prompt overlay: the textarea has no placeholder (it would wrap and grow the box); this line shows "Message <agent>..." with an ellipsis, or a slow marquee when it is wider than the box (app.js measures) */
+#input-hint { grid-area: input; align-self: start; box-sizing: border-box; min-width: 0; min-height: 36px; padding: 7px 6px; overflow: hidden; white-space: nowrap; font-size: .9375rem; line-height: 1.5; color: var(--muted); pointer-events: none; user-select: none; }
+#input-hint-text { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+#input:not(:placeholder-shown) ~ #input-hint, #input:focus:not(:placeholder-shown) ~ #input-hint { visibility: hidden; }
+#input-hint.scrolling #input-hint-text { display: inline-block; max-width: none; overflow: visible; text-overflow: clip; animation: input-hint-marquee var(--hint-duration, 12s) ease-in-out infinite; }
+@keyframes input-hint-marquee { 0%, 20% { transform: translateX(0); } 55%, 75% { transform: translateX(calc(-1 * var(--hint-shift, 0px))); } 100% { transform: translateX(0); } }
+@media (prefers-reduced-motion: reduce) { #input-hint.scrolling #input-hint-text { animation: none; display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; } }
+
+/* The options button exists only in the narrow main column */
+#composer-options { display: none; grid-area: opts; width: 36px; height: 36px; border-radius: 4px; }
+#composer-options[aria-expanded="true"] { color: var(--accent); }
+@media (pointer: coarse) { #composer-options { width: 44px; height: 44px; } }
 
 /* A multi-line message gets the whole width of the box; the options move under it (the class is set by app.js) */
 #composer.multiline { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "pend pend pend pend" "attach input mic send" ". controls mic send"; }
 #composer.multiline #chat-controls { margin: 0; }
+
+/* Narrow main column: no second row. One options button sits next to the attach button and opens #chat-controls (model, effort and their policy texts) as a panel above the composer; app.js toggles .options-open */
+@container main (max-width: 680px) {
+  #composer { position: relative; grid-template-columns: auto auto minmax(0, 1fr) auto auto; grid-template-areas: "pend pend pend pend pend" "attach opts input mic send"; }
+  #composer-options { display: inline-grid; }
+  #composer #chat-controls { display: none; grid-area: auto; position: absolute; z-index: 20; left: 0; right: 0; bottom: calc(100% + 4px); flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0; padding: 10px; overflow: visible; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--bg); box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+  #composer.options-open #chat-controls { display: flex; }
+  #composer #chat-controls > * { flex-shrink: 1; min-width: 0; }
+  /* inside the panel the controls show their text again (the phone icon-only rules do not apply) */
+  #composer #chat-controls #model-picker, #composer #chat-controls #chat-effort { width: auto; min-width: 0; max-width: 100%; min-height: 44px; padding: 3px 24px 3px 8px; font-size: var(--s-1); color: var(--text); background: no-repeat right 6px center / 12px url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%23a8a8a8' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5'/%3E%3C/svg%3E") !important; }
+  #composer #chat-controls #model-picker::before, #composer #chat-controls #chat-effort-label::after { content: none; }
+  #composer #chat-controls #chat-effort-label { flex: 0 0 auto; }
+  #composer #chat-controls #effort-policy, #composer #chat-controls #model-policy, #composer #chat-controls #model-policy:not(.privacy-warning) { display: block; flex: 1 1 100%; max-width: none; padding: 0; white-space: normal; }
+  #composer #chat-controls #effort-policy:empty, #composer #chat-controls #model-policy:empty { display: none; }
+  #composer.multiline { grid-template-columns: auto auto minmax(0, 1fr) auto auto; grid-template-areas: "pend pend pend pend pend" "attach opts input mic send"; }
+  #composer.multiline #chat-controls { margin: 0; }
+}
 
 /* Associative memory status: on the line of the author name, not inside the reply */
 .msg.assistant { position: relative; }

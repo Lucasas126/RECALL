@@ -434,6 +434,7 @@ _SPANISH = {
     "First agent in the list": "Primer agente de la lista",
     "Used for new chats when you do not pick an agent, and by the Telegram router when it is unsure (unless a core agent is set).": "Se usa en los chats nuevos cuando no eliges agente, y en el selector de Telegram cuando duda (salvo que haya un agente principal).",
     "Jump to latest": "Ir al final",
+    "Chat options": "Opciones del chat",
     "Dream mode: status, start or cancel": "Modo sueño: estado, iniciar o cancelar",
     "Summarize the older part of this chat": "Resume la parte más antigua de este chat",
     "Show the Claude plan usage": "Muestra el uso del plan de Claude",

@@ -21,9 +21,44 @@ class MobileComposerTests(unittest.TestCase):
 
     def test_the_steer_placeholder_fits_one_line(self) -> None:
         js = (STATIC / "app.js").read_text(encoding="utf-8")
-        found = re.search(r'\$\("input"\)\.placeholder = state\.busy\s*\?\s*"([^"]+)"', js)
+        found = re.search(r'const prompt = state\.busy\s*\?\s*"([^"]+)"', js)
         self.assertIsNotNone(found)
         self.assertLessEqual(len(found.group(1)), 24)
+
+    def test_narrow_composer_has_one_options_button_and_no_second_row(self) -> None:
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        css = (STATIC / "style.css").read_text(encoding="utf-8")
+        button = re.search(r'<button id="composer-options"[^>]*>', html)
+        self.assertIsNotNone(button)
+        for part in ('aria-haspopup="true"', 'aria-expanded="false"', 'aria-controls="chat-controls"', "title=", "aria-label="):
+            self.assertIn(part, button.group(0))
+        for element_id in ("composer-options", "chat-controls", "model-picker", "chat-effort", "effort-policy", "model-policy"):
+            self.assertEqual(html.count(f'id="{element_id}"'), 1, element_id)  # reused, never duplicated
+        block = re.search(r"@container main \(max-width: 680px\) \{.*?\n\}", css, re.S)
+        self.assertIsNotNone(block)
+        text = block.group(0)
+        self.assertIn('"attach opts input mic send"', text)
+        self.assertNotIn('"controls controls', text)  # the second row is gone
+        self.assertIn("#composer.options-open #chat-controls { display: flex; }", text)
+        self.assertRegex(text, r"#model-policy:not\(\.privacy-warning\)\s*\{ display: block")
+        self.assertIn("#composer.multiline { grid-template-columns: auto auto", text)  # multiline keeps one row
+        self.assertIn("#composer-options { display: none;", css)  # wide layout unchanged
+        self.assertIn('"Chat options"', (STATIC.parent.parent / "utils" / "i18n.py").read_text(encoding="utf-8"))
+        self.assertIn('["composer-options", "Chat options"]', (STATIC / "app.js").read_text(encoding="utf-8"))
+
+    def test_input_prompt_is_an_ellipsised_overlay(self) -> None:
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        css = (STATIC / "style.css").read_text(encoding="utf-8")
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        self.assertIn('<span id="input-hint" aria-hidden="true">', html)
+        self.assertRegex(html, r'<textarea id="input"[^>]*placeholder=" "[^>]*aria-label=')
+        self.assertIn("pointer-events: none", re.search(r"#input-hint \{[^}]*\}", css).group(0))
+        self.assertIn("white-space: nowrap", re.search(r"#input-hint \{[^}]*\}", css).group(0))
+        self.assertIn("text-overflow: ellipsis", css)
+        self.assertIn("@keyframes input-hint-marquee", css)
+        self.assertRegex(css, r"prefers-reduced-motion: reduce\) \{ #input-hint\.scrolling #input-hint-text \{ animation: none")
+        self.assertIn('$("input-hint-text").textContent = prompt;', js)
+        self.assertNotIn('$("input").placeholder = state.busy', js)
 
 
 if __name__ == "__main__":

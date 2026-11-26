@@ -803,7 +803,7 @@ function translateInterface() {
   $("agent-delegation-model").placeholder = tr("The model of the chat");
   for (const [id, text] of [
     ["settings-open", "Settings"], ["settings-close", "Close"], ["tasks-open", "Automations"], ["tasks-close", "Close"], ["assoc-close", "Close"],
-    ["logout", "Log out"], ["jump-latest", "Jump to latest"], ["claude-usage-toggle", "Claude plan usage"], ["claude-usage-body", "Claude plan usage"], ["theme-toggle", "Switch theme"], ["header-resizer", "Resize the header"],
+    ["logout", "Log out"], ["jump-latest", "Jump to latest"], ["composer-options", "Chat options"], ["claude-usage-toggle", "Claude plan usage"], ["claude-usage-body", "Claude plan usage"], ["theme-toggle", "Switch theme"], ["header-resizer", "Resize the header"],
   ]) {
     $(id).title = tr(text);
     $(id).setAttribute("aria-label", tr(text));
@@ -1206,10 +1206,41 @@ function renderAgentBanner() {
   const name = currentAgentName();
   $("agent-title").textContent = name || "—";
   renderAvatar($("agent-avatar"), state.user?.agents.find((a) => a.id === state.agentId)?.avatar, name);
-  $("input").placeholder = state.busy
+  const prompt = state.busy
     ? "Steer the response..."
     : name ? `Message ${name}...` : "Write a message...";
+  $("input").setAttribute("aria-label", prompt);   // the visible prompt is the overlay #input-hint (a placeholder cannot be ellipsised)
+  $("input-hint-text").textContent = prompt;
+  measureInputHint();
 }
+
+// ---- input prompt overlay: one line, an ellipsis, and a slow back-and-forth marquee when the text is wider than the box
+// Pure: how many pixels the text overflows the box by (0 when it fits, or when motion is not wanted).
+function hintShift(textWidth, boxWidth, reducedMotion) {
+  if (reducedMotion || !(textWidth > 0) || !(boxWidth > 0)) return 0;
+  const over = Math.ceil(textWidth - boxWidth);
+  return over > 1 ? over : 0;
+}
+// Pure: seconds for one full loop (a pause at each end plus the travel at about 25 px/s).
+function hintDuration(shift) {
+  return Math.max(8, Math.round(6 + shift / 25));
+}
+function measureInputHint() {
+  const hint = document.getElementById("input-hint"), text = document.getElementById("input-hint-text");
+  if (!hint || !text) return;
+  hint.classList.remove("scrolling");
+  const reduced = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const shift = hintShift(text.scrollWidth, hint.clientWidth - 12, reduced);   // 12 = the horizontal padding of the hint
+  if (!shift) return;
+  hint.style.setProperty("--hint-shift", `${shift}px`);
+  hint.style.setProperty("--hint-duration", `${hintDuration(shift)}s`);
+  hint.classList.add("scrolling");
+}
+if (typeof ResizeObserver !== "undefined" && typeof document !== "undefined" && document.getElementById("input-hint")) {
+  new ResizeObserver(measureInputHint).observe(document.getElementById("input-hint"));
+  document.fonts?.ready.then(measureInputHint);
+}
+// ---- end input prompt overlay
 
 // ---- last open chat: #chat/<agent id>/<chat id> in the address bar, plus a per-user fallback in localStorage
 const LAST_CHAT_PREFIX = "lastChat:";
@@ -9552,6 +9583,29 @@ function writeHeaderHeight(storage, px) {
     apply(height() + (event.key === "ArrowDown" ? 16 : -16));
     writeHeaderHeight(localStorage, height());
   });
+})();
+
+// ---- composer options popover (narrow main column only: CSS hides the button and shows #chat-controls inline elsewhere)
+(() => {
+  const button = document.getElementById("composer-options"), panel = document.getElementById("chat-controls"), composer = document.getElementById("composer");
+  if (!button || !panel || !composer) return;
+  const setOpen = (open, refocus) => {
+    composer.classList.toggle("options-open", open);
+    button.setAttribute("aria-expanded", String(open));
+    if (open) panel.querySelector("select:not(:disabled), button:not(:disabled)")?.focus();
+    else if (refocus) button.focus();
+  };
+  const isOpen = () => composer.classList.contains("options-open");
+  button.addEventListener("click", () => setOpen(!isOpen(), false));
+  document.addEventListener("pointerdown", (event) => {
+    if (isOpen() && !panel.contains(event.target) && !button.contains(event.target)) setOpen(false, false);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && isOpen()) { event.preventDefault(); setOpen(false, true); }
+  });
+  // a choice closes the panel (the model picker opens its own dialog; the effort select fires "change")
+  panel.addEventListener("click", (event) => { if (event.target.closest?.("#model-picker")) setOpen(false, false); });
+  panel.addEventListener("change", (event) => { if (event.target.id === "chat-effort") setOpen(false, true); });
 })();
 
 // ---- composer: once the message needs more than one line it spans the box and the chat options move under it
