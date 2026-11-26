@@ -4878,10 +4878,11 @@ function showTranscript(item, transcript) {
 }
 
 // The model reads a recording as "[AUDIO] Audio transcription:\n<text>" appended to the message; the person sees the text
-// under the player instead, so those blocks are left out of the message text when the turn's recordings carry it.
+// under the player instead, so those blocks are left out of the message text when the turn's recordings carry it. The
+// "[FILE] Original of ..." lines tell the agent where an upload is saved; they are for the agent only and never shown.
 function visibleUserText(text, media) {
   if (typeof text !== "string") return text;
-  let shown = text;
+  let shown = text.replace(/^\[FILE\] Original of '.*' saved at .* \(read-only source address: [^)\n]*\)[ \t]*$/gm, "");
   for (const item of media || []) {
     if (item.modality === "audio" && item.transcript) shown = shown.split(`[AUDIO] Audio transcription:\n${item.transcript}`).join("");
   }
