@@ -139,6 +139,38 @@ function memoryDetails(fragments, query) {
   return body;
 }
 
+// An in-app confirmation (the native <dialog>, like the other dialogs): resolves true when confirmed, false on Cancel,
+// Escape or a click on the backdrop. Destructive ones (`danger`) start with Cancel focused. Texts are set with textContent.
+const confirmQueue = serialRunner();
+function confirmDialog(options) {
+  return confirmQueue(() => new Promise((resolve) => {
+    const spec = confirmSpec(options, tr);
+    const dialog = $("confirm-dialog");
+    const opener = document.activeElement;
+    $("confirm-title").textContent = spec.title;
+    $("confirm-title").hidden = !spec.title;
+    dialog.setAttribute("aria-labelledby", spec.title ? "confirm-title" : "confirm-message");
+    $("confirm-message").textContent = spec.message;
+    $("confirm-ok").textContent = spec.confirmLabel;
+    $("confirm-cancel").textContent = spec.cancelLabel;
+    $("confirm-ok").classList.toggle("danger", spec.danger);
+    $("confirm-ok").classList.toggle("primary", !spec.danger);
+    dialog.dataset.danger = String(spec.danger);
+    const finish = () => {
+      dialog.removeEventListener("close", finish);
+      resolve(dialog.returnValue === "ok");
+      if (opener?.isConnected && typeof opener.focus === "function") opener.focus();
+    };
+    dialog.returnValue = "";
+    dialog.addEventListener("close", finish);
+    dialog.showModal();
+    (spec.danger ? $("confirm-cancel") : $("confirm-ok")).focus();
+  }));
+}
+$("confirm-ok").addEventListener("click", () => $("confirm-dialog").close("ok"));
+$("confirm-cancel").addEventListener("click", () => $("confirm-dialog").close("cancel"));
+$("confirm-dialog").addEventListener("click", (event) => { if (event.target === event.currentTarget) event.currentTarget.close("cancel"); });
+
 function openMemoryDialog(summary, fragments, query) {
   const body = memoryDetails(fragments, query);
   if (!body) return;
@@ -147,6 +179,30 @@ function openMemoryDialog(summary, fragments, query) {
   const dialog = $("assoc-dialog");
   if (!dialog.open) dialog.showModal();
 }
+
+// ---- confirm dialog: pure helpers (no DOM; tested without a browser)
+// Fills in the defaults of a confirmation: the confirm button is "Confirm" and the cancel button "Cancel" unless named.
+function confirmSpec(options, translate) {
+  const spec = typeof options === "string" ? { message: options } : options ?? {};
+  return {
+    title: spec.title ? String(spec.title) : "",
+    message: String(spec.message ?? ""),
+    confirmLabel: spec.confirmLabel || translate("Confirm"),
+    cancelLabel: spec.cancelLabel || translate("Cancel"),
+    danger: Boolean(spec.danger),
+  };
+}
+
+// Runs the given async tasks one after the other, so two confirmations are never open together.
+function serialRunner() {
+  let tail = Promise.resolve();
+  return (task) => {
+    const result = tail.then(task);
+    tail = result.catch(() => {});
+    return result;
+  };
+}
+// ---- end confirm dialog
 
 function tr(template, values = {}) {
   const text = state.preferences?.language === "es" ? state.translations[template] : template;
@@ -2186,8 +2242,13 @@ async function resetLearnedApprovals() {
   }
 }
 
-$("agent-approval-rules-reset").addEventListener("click", () => {
-  if (confirm(tr("Remove every learned approval of this agent?"))) resetLearnedApprovals();
+$("agent-approval-rules-reset").addEventListener("click", async () => {
+  const agentId = state.agentForm.originalId;
+  const ok = await confirmDialog({
+    title: tr("Reset learned approvals"), message: tr("Remove every learned approval of this agent?"),
+    confirmLabel: tr("Remove approvals"), danger: true,
+  });
+  if (ok && agentId === state.agentForm.originalId) resetLearnedApprovals();
 });
 
 function renderTerminalBlock(agent) {
@@ -2642,7 +2703,11 @@ function showIndexStatus(status) {
 async function reindexAgent(full) {
   const agentId = state.agentForm.originalId;
   if (!agentId) return;
-  if (full && !confirm(tr("Rebuild the whole index? Every note and chat is embedded again, which costs embedding requests."))) return;
+  if (full && !(await confirmDialog({
+    title: tr("Rebuild index"), message: tr("Rebuild the whole index? Every note and chat is embedded again, which costs embedding requests."),
+    confirmLabel: tr("Rebuild index"),
+  }))) return;
+  if (agentId !== state.agentForm.originalId) return;
   const request = ++indexRequest;
   const session = state.session;
   $("index-status-error").textContent = "";
@@ -2851,7 +2916,11 @@ $("agent-form").addEventListener("submit", async (event) => {
 $("agent-delete").addEventListener("click", async () => {
   const agentId = state.agentForm.originalId;
   if (!agentId || state.agentForm.busy) return;
-  if (!window.confirm(tr("Delete this agent? Its conversations and memory data are kept on disk."))) return;
+  if (!(await confirmDialog({
+    title: tr("Delete agent"), message: tr("Delete this agent? Its conversations and memory data are kept on disk."),
+    confirmLabel: tr("Delete agent"), danger: true,
+  }))) return;
+  if (agentId !== state.agentForm.originalId || state.agentForm.busy) return;
   const session = state.session;
   setAgentBusy(true);
   $("agent-error").textContent = "";
@@ -3136,9 +3205,12 @@ $("theme-toggle").addEventListener("click", () => {
   refreshRows($("settings-form"));
 });
 // closing with unsaved changes asks first (the Close button, Escape)
-function requestSettingsClose() {
-  if (Object.keys(pendingSettings()).length && !window.confirm(tr("You have unsaved changes. Close and discard them?"))) return;
-  $("settings-dialog").close();
+async function requestSettingsClose() {
+  if (Object.keys(pendingSettings()).length && !(await confirmDialog({
+    title: tr("Unsaved changes"), message: tr("You have unsaved changes. Close and discard them?"),
+    confirmLabel: tr("Discard changes"), cancelLabel: tr("Keep editing"), danger: true,
+  }))) return;
+  if ($("settings-dialog").open) $("settings-dialog").close();
 }
 $("settings-close").addEventListener("click", requestSettingsClose);
 $("settings-dialog").addEventListener("cancel", (event) => { event.preventDefault(); requestSettingsClose(); });
@@ -3743,11 +3815,7 @@ function connectionItem(server) {
     actions.append(connect);
     if (server.connected || server.pending) {
       const disconnect = Object.assign(document.createElement("button"), { type: "button", textContent: tr("Disconnect") });
-      disconnect.addEventListener("click", () => {
-        if (window.confirm(tr("Disconnect {server}? Your stored credentials for it are deleted.", { server: server.name }))) {
-          changeConnection(server, "disconnect");
-        }
-      });
+      disconnect.addEventListener("click", () => confirmDisconnect(server));
       actions.append(disconnect);
     }
     item.append(actions);
@@ -3783,17 +3851,22 @@ function tokenConnection(server) {
   box.append(form);
   if (server.connected) {
     const disconnect = Object.assign(document.createElement("button"), { type: "button", textContent: tr("Disconnect") });
-    disconnect.addEventListener("click", () => {
-      if (window.confirm(tr("Disconnect {server}? Your stored credentials for it are deleted.", { server: server.name }))) {
-        changeConnection(server, "disconnect");
-      }
-    });
+    disconnect.addEventListener("click", () => confirmDisconnect(server));
     const actions = document.createElement("div");
     actions.className = "agent-actions";
     actions.append(disconnect);
     box.append(actions);
   }
   return box;
+}
+
+async function confirmDisconnect(server) {
+  const session = state.session;
+  const ok = await confirmDialog({
+    title: tr("Disconnect"), message: tr("Disconnect {server}? Your stored credentials for it are deleted.", { server: server.name }),
+    confirmLabel: tr("Disconnect"), danger: true,
+  });
+  if (ok && session === state.session) changeConnection(server, "disconnect");
 }
 
 async function changeConnection(server, action, token) {
@@ -4296,7 +4369,18 @@ async function openChatNow(chatId) {
 }
 
 async function deleteChat(chat) {
-  if (isGenerating(chat.agent_id, chat.id) || state.modelBusy || !confirm(tr("Delete \"{title}\"?", { title: chat.title || tr("New chat") }))) return;
+  const stillIdle = () => {
+    const row = [...$("chat-list").querySelectorAll(".del")].find((b) => b.dataset.agent === chat.agent_id && b.dataset.chat === chat.id);
+    return !isGenerating(chat.agent_id, chat.id) && !state.modelBusy && !row?.disabled;
+  };
+  if (!stillIdle()) return;
+  const session = state.session;
+  const ok = await confirmDialog({
+    title: tr("Delete chat"), message: tr("Delete \"{title}\"? Its messages cannot be recovered.", { title: chat.title || tr("New chat") }),
+    confirmLabel: tr("Delete chat"), danger: true,
+  });
+  // the chat may have started replying (or the session changed) while the dialog was open
+  if (!ok || session !== state.session || !stillIdle()) return;
   await api(`/api/agents/${chat.agent_id}/chats/${chat.id}`, { method: "DELETE" });
   const remembered = readLastChat(localStorage, state.user.id);
   if (remembered && remembered.chatId === chat.id) clearLastChat(localStorage, state.user.id);
@@ -6710,7 +6794,12 @@ function automationRow(record) {
   }
   actions.append(
     button(tr("Edit"), () => automationFormOpen(record)),
-    button(tr("Delete"), () => { if (window.confirm(tr("Delete this automation?"))) act("", { method: "DELETE" })(); }),
+    button(tr("Delete"), async () => {
+      const ok = await confirmDialog({
+        title: tr("Delete automation"), message: tr("Delete this automation?"), confirmLabel: tr("Delete automation"), danger: true,
+      });
+      if (ok) act("", { method: "DELETE" })();
+    }),
   );
   const row = element("li", { className: "tasks-row automation-row" }, element("div", { className: "tasks-row-head" }, badge, title), meta, actions, error);
   row.dataset.enabled = String(record.enabled);
@@ -8785,7 +8874,10 @@ async function viewSoulVersion(version) {
 }
 
 async function restoreSoulVersion(version) {
-  if (!window.confirm(tr("Restore the SOUL.md version saved {date}? The current text is saved to the history first.", { date: formatDate(version.saved_at) }))) return;
+  if (!(await confirmDialog({
+    title: tr("Restore version"), message: tr("Restore the SOUL.md version saved {date}? The current text is saved to the history first.", { date: formatDate(version.saved_at) }),
+    confirmLabel: tr("Restore"),
+  }))) return;
   const session = state.session;
   const token = state.dream.token;
   $("soul-error").textContent = "";
@@ -9083,7 +9175,10 @@ async function startDream() {
 }
 
 async function cancelDream() {
-  if (!window.confirm(tr("Cancel the running dream session? A tool call in progress finishes first; chats it has not marked reviewed stay pending."))) return;
+  if (!(await confirmDialog({
+    title: tr("Cancel dream session"), message: tr("Cancel the running dream session? A tool call in progress finishes first; chats it has not marked reviewed stay pending."),
+    confirmLabel: tr("Cancel session"), cancelLabel: tr("Keep running"), danger: true,
+  }))) return;
   const session = state.session;
   const token = state.dream.token;
   $("dream-status-error").textContent = "";
@@ -9463,12 +9558,16 @@ $("dream-every-hours").closest("label").addEventListener("click", () => {
 $("dream-daily-at").closest("label").addEventListener("click", () => {
   if (!$("dream-mode-daily").checked) { $("dream-mode-daily").checked = true; syncDreamScheduleInputs(); }
 });
-$("dream-prompt-copy").addEventListener("click", () => {
-  if ($("dream-prompt").value.trim() && !window.confirm(tr("Replace the current prompt with the default one?"))) return;
+$("dream-prompt-copy").addEventListener("click", async () => {
+  if ($("dream-prompt").value.trim() && !(await confirmDialog({
+    title: tr("Replace prompt"), message: tr("Replace the current prompt with the default one?"), confirmLabel: tr("Replace prompt"), danger: true,
+  }))) return;
   $("dream-prompt").value = state.dream.settings?.default_prompt ?? "";
 });
-$("dream-prompt-reset").addEventListener("click", () => {
-  if ($("dream-prompt").value.trim() && !window.confirm(tr("Clear the custom prompt and use the default one? Save to apply."))) return;
+$("dream-prompt-reset").addEventListener("click", async () => {
+  if ($("dream-prompt").value.trim() && !(await confirmDialog({
+    title: tr("Clear prompt"), message: tr("Clear the custom prompt and use the default one? Save to apply."), confirmLabel: tr("Clear prompt"), danger: true,
+  }))) return;
   $("dream-prompt").value = "";
 });
 $("dream-model-browse").addEventListener("click", () => openModelPicker("dream-llm"));

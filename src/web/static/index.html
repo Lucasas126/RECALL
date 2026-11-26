@@ -1122,6 +1122,16 @@
     <p id="task-dialog-banner-text" class="task-internal-banner" role="status">Internal worker chat: read-only, not part of your chat list. Use Steer on the task card to correct it.</p>
     <div id="task-dialog-messages" role="log"></div>
   </dialog>
+  <dialog id="confirm-dialog" role="alertdialog" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+    <div class="confirm-body">
+      <h2 id="confirm-title"></h2>
+      <p id="confirm-message"></p>
+      <div class="confirm-actions">
+        <button id="confirm-cancel" type="button"></button>
+        <button id="confirm-ok" type="button" class="primary"></button>
+      </div>
+    </div>
+  </dialog>
   <dialog id="model-dialog" aria-labelledby="model-title">
     <div class="model-heading">
       <h2 id="model-title">Models</h2>
