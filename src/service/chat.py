@@ -821,6 +821,11 @@ class ChatService:
             self.send_system(
                 record["user"], record["agent"], record["chat_id"], block, source="process", frame=process_wake_frame,
             )
+            # The agent may have read the final state between the check above and the queueing (the registry flips
+            # `done` before this hook runs, so a `process_wait` returns first): `mark_seen` then found nothing queued.
+            # Look again now that the block is queued; a wake that already started is left alone.
+            if registry.get(record["user"], record["id"]).get("seen"):
+                self._drop_seen_process_wake(record)
         except (UnknownChat, ProcessError, ValueError):
             pass  # the chat or the record is gone: nobody to tell
         except Exception:

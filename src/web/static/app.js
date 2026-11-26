@@ -3963,6 +3963,17 @@ function markChatRead(agentId, chatId) {
   api(`/api/agents/${encodeURIComponent(agentId)}/chats/${encodeURIComponent(chatId)}/read`, { method: "POST" }).catch(() => {});
 }
 
+// The side panel is collapsed on a phone, so the row dots are out of sight: the menu buttons repeat the strongest one
+// (a command waits for approval, or an answer is unread) from the chats other than the open one.
+function paintNavAttention(chats) {
+  const others = chats.filter((chat) => !(chat.id === state.chatId && chat.agent_id === state.agentId));
+  const level = others.some((chat) => chat.pending_approvals > 0) ? "approval" : others.some((chat) => chat.unread) ? "ready" : "";
+  for (const button of document.querySelectorAll(".nav-toggle")) {
+    if (level) button.dataset.attention = level;
+    else delete button.dataset.attention;
+  }
+}
+
 async function refreshChats() {
   if (!state.user) return;
   const session = state.session;
@@ -3970,6 +3981,7 @@ async function refreshChats() {
   if (session !== state.session) return;
   notifyScan(chats);
   renderChatHeader(chats.find((chat) => chat.id === state.chatId && chat.agent_id === state.agentId) ?? state.chatInfo);
+  paintNavAttention(chats);
   const list = $("chat-list");
   let section = null;
   list.replaceChildren(
