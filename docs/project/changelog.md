@@ -3,6 +3,10 @@
 The notes of each release are on the GitHub Releases page. This file groups what changed by topic, starting with 0.4.0, which
 sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases between 5 and 15 November.
 
+## 0.6.2 (26 November 2026)
+
+- Web UI: the one-line message prompt now lines up with the text caret in the narrow composer.
+
 ## 0.6.1 (26 November 2026)
 
 - Web UI: browser notifications now show the agent name in the first line ("<agent> · Reply ready"); the chat title stays below.
