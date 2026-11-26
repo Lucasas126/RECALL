@@ -308,6 +308,14 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
             request.session[_SESSION_RENEWED_KEY] = now
         return user_id
 
+    def agent_owner(agent_id: str, user_id: str = Depends(current_user)) -> str:
+        """The owner holding the path's agent for the logged-in person: themself or a space they belong to.
+
+        Routes pass this to the service as the data-plane user. Not a member (or no such agent): the person's own id,
+        so the service answers with the same 404 as for another user's agent.
+        """
+        return service.agent_owner(user_id, agent_id)
+
     def notification_language(request: Request) -> str:
         language = request.headers.get("Accept-Language", "en").split(",", 1)[0]
         user_id = request.session.get(_SESSION_KEY)
@@ -539,32 +547,32 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
         return service.create_agent(user_id, body)
 
     @app.get("/api/agents/{agent_id}")
-    def get_agent(agent_id: str, user_id: str = Depends(current_user)):
-        return service.get_agent(user_id, agent_id)
+    def get_agent(agent_id: str, owner: str = Depends(agent_owner)):
+        return service.get_agent(owner, agent_id)
 
     @app.put("/api/agents/{agent_id}")
-    def update_agent(agent_id: str, body: AgentConfig, user_id: str = Depends(current_user)):
-        return service.update_agent(user_id, agent_id, body)
+    def update_agent(agent_id: str, body: AgentConfig, owner: str = Depends(agent_owner)):
+        return service.update_agent(owner, agent_id, body)
 
     @app.delete("/api/agents/{agent_id}", status_code=204)
-    def delete_agent(agent_id: str, user_id: str = Depends(current_user)):
-        service.delete_agent(user_id, agent_id)
+    def delete_agent(agent_id: str, owner: str = Depends(agent_owner)):
+        service.delete_agent(owner, agent_id)
 
     @app.put("/api/agents/{agent_id}/avatar")
-    async def put_agent_avatar(agent_id: str, request: Request, user_id: str = Depends(current_user)):
-        service.check_agent_owned(user_id, agent_id)  # another user's agent is a 404 before anything is read
+    async def put_agent_avatar(agent_id: str, request: Request, user_id: str = Depends(current_user), owner: str = Depends(agent_owner)):
+        service.check_agent_owned(owner, agent_id)  # another user's agent is a 404 before anything is read
         check_content_type(request.headers.get("content-type"))
         data = await _read_upload(request)
-        return await run_in_threadpool(service.set_agent_avatar, user_id, agent_id, data)
+        return await run_in_threadpool(service.set_agent_avatar, owner, agent_id, data)
 
     @app.get("/api/agents/{agent_id}/avatar")
-    def get_agent_avatar(agent_id: str, request: Request, user_id: str = Depends(current_user)):
-        avatar, content = service.get_agent_avatar(user_id, agent_id)
+    def get_agent_avatar(agent_id: str, request: Request, owner: str = Depends(agent_owner)):
+        avatar, content = service.get_agent_avatar(owner, agent_id)
         return _avatar_response(request, avatar, content)
 
     @app.delete("/api/agents/{agent_id}/avatar", status_code=204)
-    def delete_agent_avatar(agent_id: str, user_id: str = Depends(current_user)):
-        service.delete_agent_avatar(user_id, agent_id)
+    def delete_agent_avatar(agent_id: str, owner: str = Depends(agent_owner)):
+        service.delete_agent_avatar(owner, agent_id)
 
     @app.get("/api/chats")
     def list_all_chats(keep: Optional[str] = None, include_hidden: bool = False, user_id: str = Depends(current_user)):
@@ -572,137 +580,137 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
 
     @app.get("/api/agents/{agent_id}/chats")
     def list_chats(
-        agent_id: str, keep: Optional[str] = None, include_hidden: bool = False, user_id: str = Depends(current_user),
+        agent_id: str, keep: Optional[str] = None, include_hidden: bool = False, owner: str = Depends(agent_owner),
     ):
-        return service.list_chats(user_id, agent_id, keep, include_hidden)
+        return service.list_chats(owner, agent_id, keep, include_hidden)
 
     @app.post("/api/agents/{agent_id}/chats", status_code=201)
     def create_chat(
         agent_id: str, body: Optional[ChatCreateIn] = None, disposable: Optional[bool] = None,
-        user_id: str = Depends(current_user),
+        owner: str = Depends(agent_owner),
     ):
         # optional JSON body or query flag; no body keeps creating a normal chat
         wanted = disposable if disposable is not None else (body.disposable if body is not None else False)
-        return service.create_chat(user_id, agent_id, disposable=wanted)
+        return service.create_chat(owner, agent_id, disposable=wanted)
 
     @app.post("/api/agents/{agent_id}/chats/{chat_id}/disposable")
     def set_chat_disposable(
-        agent_id: str, chat_id: str, body: ChatDisposableIn, user_id: str = Depends(current_user),
+        agent_id: str, chat_id: str, body: ChatDisposableIn, owner: str = Depends(agent_owner),
     ):
-        return service.set_chat_disposable(user_id, agent_id, chat_id, body.disposable)
+        return service.set_chat_disposable(owner, agent_id, chat_id, body.disposable)
 
     @app.get("/api/agents/{agent_id}/chats/{chat_id}")
     def get_chat(
         agent_id: str, chat_id: str, limit: Optional[int] = Query(None, ge=1, le=5000), before: Optional[int] = Query(None, ge=0),
-        user_id: str = Depends(current_user),
+        owner: str = Depends(agent_owner),
     ):
-        return service.get_chat(user_id, agent_id, chat_id, limit=limit, before=before)
+        return service.get_chat(owner, agent_id, chat_id, limit=limit, before=before)
 
     @app.get("/api/agents/{agent_id}/chats/{chat_id}/models")
-    def get_chat_models(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):
-        return service.get_chat_models(user_id, agent_id, chat_id)
+    def get_chat_models(agent_id: str, chat_id: str, owner: str = Depends(agent_owner)):
+        return service.get_chat_models(owner, agent_id, chat_id)
 
     @app.put("/api/agents/{agent_id}/chats/{chat_id}/model")
     def set_chat_model(
-        agent_id: str, chat_id: str, body: ChatModelIn, user_id: str = Depends(current_user),
+        agent_id: str, chat_id: str, body: ChatModelIn, owner: str = Depends(agent_owner),
     ):
-        return service.set_chat_model(user_id, agent_id, chat_id, body.model_id, zdr=body.zdr)
+        return service.set_chat_model(owner, agent_id, chat_id, body.model_id, zdr=body.zdr)
 
     @app.put("/api/agents/{agent_id}/chats/{chat_id}/reasoning-effort")
     def set_chat_reasoning_effort(
-        agent_id: str, chat_id: str, body: ChatReasoningEffortIn, user_id: str = Depends(current_user),
+        agent_id: str, chat_id: str, body: ChatReasoningEffortIn, owner: str = Depends(agent_owner),
     ):
-        return service.set_chat_reasoning_effort(user_id, agent_id, chat_id, body.effort)
+        return service.set_chat_reasoning_effort(owner, agent_id, chat_id, body.effort)
 
     @app.put("/api/agents/{agent_id}/chats/{chat_id}/title")
     def rename_chat(
-        agent_id: str, chat_id: str, body: ChatTitleIn, user_id: str = Depends(current_user),
+        agent_id: str, chat_id: str, body: ChatTitleIn, owner: str = Depends(agent_owner),
     ):
-        return service.rename_chat(user_id, agent_id, chat_id, body.title)
+        return service.rename_chat(owner, agent_id, chat_id, body.title)
 
     @app.delete("/api/agents/{agent_id}/chats/{chat_id}", status_code=204)
-    def delete_chat(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):
-        service.delete_chat(user_id, agent_id, chat_id)
+    def delete_chat(agent_id: str, chat_id: str, owner: str = Depends(agent_owner)):
+        service.delete_chat(owner, agent_id, chat_id)
 
     # ------------------------------------------------------------------ dream mode and own files
 
     @app.get("/api/agents/{agent_id}/dream/settings")
-    def get_dream_settings(agent_id: str, user_id: str = Depends(current_user)):
-        return service.get_dream_settings(user_id, agent_id)
+    def get_dream_settings(agent_id: str, owner: str = Depends(agent_owner)):
+        return service.get_dream_settings(owner, agent_id)
 
     @app.put("/api/agents/{agent_id}/dream/settings")
-    def update_dream_settings(agent_id: str, body: DreamSettingsIn, user_id: str = Depends(current_user)):
-        return service.update_dream_settings(user_id, agent_id, body.dream)
+    def update_dream_settings(agent_id: str, body: DreamSettingsIn, owner: str = Depends(agent_owner)):
+        return service.update_dream_settings(owner, agent_id, body.dream)
 
     # ------------------------------------------------------------------ vector index
 
     @app.get("/api/agents/{agent_id}/index")
-    def index_status(agent_id: str, user_id: str = Depends(current_user)):
-        return service.index_status(user_id, agent_id)
+    def index_status(agent_id: str, owner: str = Depends(agent_owner)):
+        return service.index_status(owner, agent_id)
 
     @app.post("/api/agents/{agent_id}/index/reindex", status_code=202)
-    def reindex(agent_id: str, body: Optional[ReindexIn] = None, user_id: str = Depends(current_user)):
-        return service.reindex(user_id, agent_id, full=bool(body and body.full))
+    def reindex(agent_id: str, body: Optional[ReindexIn] = None, owner: str = Depends(agent_owner)):
+        return service.reindex(owner, agent_id, full=bool(body and body.full))
 
     @app.get("/api/agents/{agent_id}/dream/status")
-    def dream_status(agent_id: str, user_id: str = Depends(current_user)):
-        return service.dream_status(user_id, agent_id)
+    def dream_status(agent_id: str, owner: str = Depends(agent_owner)):
+        return service.dream_status(owner, agent_id)
 
     @app.post("/api/agents/{agent_id}/dream/start", status_code=202)
-    def start_dream(agent_id: str, user_id: str = Depends(current_user)):
-        return service.start_dream(user_id, agent_id)
+    def start_dream(agent_id: str, owner: str = Depends(agent_owner)):
+        return service.start_dream(owner, agent_id)
 
     @app.post("/api/agents/{agent_id}/dream/cancel", status_code=202)
-    def cancel_dream(agent_id: str, user_id: str = Depends(current_user)):
-        return service.cancel_dream(user_id, agent_id)
+    def cancel_dream(agent_id: str, owner: str = Depends(agent_owner)):
+        return service.cancel_dream(owner, agent_id)
 
     @app.get("/api/agents/{agent_id}/dream/sessions")
-    def list_dream_sessions(agent_id: str, user_id: str = Depends(current_user)):
-        return service.list_dream_sessions(user_id, agent_id)
+    def list_dream_sessions(agent_id: str, owner: str = Depends(agent_owner)):
+        return service.list_dream_sessions(owner, agent_id)
 
     @app.get("/api/agents/{agent_id}/dream/sessions/{session_id}")
-    def get_dream_session(agent_id: str, session_id: str, user_id: str = Depends(current_user)):
-        return service.get_dream_session(user_id, agent_id, session_id)
+    def get_dream_session(agent_id: str, session_id: str, owner: str = Depends(agent_owner)):
+        return service.get_dream_session(owner, agent_id, session_id)
 
     @app.get("/api/agents/{agent_id}/soul")
-    def get_soul(agent_id: str, user_id: str = Depends(current_user)):
-        return service.get_soul(user_id, agent_id)
+    def get_soul(agent_id: str, owner: str = Depends(agent_owner)):
+        return service.get_soul(owner, agent_id)
 
     @app.put("/api/agents/{agent_id}/soul")
-    def update_soul(agent_id: str, body: TextIn, user_id: str = Depends(current_user)):
-        return service.update_soul(user_id, agent_id, body.content)
+    def update_soul(agent_id: str, body: TextIn, owner: str = Depends(agent_owner)):
+        return service.update_soul(owner, agent_id, body.content)
 
     @app.get("/api/agents/{agent_id}/soul/history")
-    def soul_history(agent_id: str, user_id: str = Depends(current_user)):
-        return service.soul_history(user_id, agent_id)
+    def soul_history(agent_id: str, owner: str = Depends(agent_owner)):
+        return service.soul_history(owner, agent_id)
 
     @app.get("/api/agents/{agent_id}/soul/history/{version}")
-    def get_soul_version(agent_id: str, version: str, user_id: str = Depends(current_user)):
-        return service.get_soul_version(user_id, agent_id, version)
+    def get_soul_version(agent_id: str, version: str, owner: str = Depends(agent_owner)):
+        return service.get_soul_version(owner, agent_id, version)
 
     @app.post("/api/agents/{agent_id}/soul/history/{version}/restore")
-    def restore_soul(agent_id: str, version: str, user_id: str = Depends(current_user)):
-        return service.restore_soul(user_id, agent_id, version)
+    def restore_soul(agent_id: str, version: str, owner: str = Depends(agent_owner)):
+        return service.restore_soul(owner, agent_id, version)
 
     @app.get("/api/agents/{agent_id}/memories/{target}")
-    def get_memory(agent_id: str, target: MemoryTarget, user_id: str = Depends(current_user)):
-        return service.get_memory(user_id, agent_id, target)
+    def get_memory(agent_id: str, target: MemoryTarget, owner: str = Depends(agent_owner)):
+        return service.get_memory(owner, agent_id, target)
 
     @app.put("/api/agents/{agent_id}/memories/{target}")
-    def update_memory(agent_id: str, target: MemoryTarget, body: TextIn, user_id: str = Depends(current_user)):
-        return service.update_memory(user_id, agent_id, target, body.content)
+    def update_memory(agent_id: str, target: MemoryTarget, body: TextIn, owner: str = Depends(agent_owner)):
+        return service.update_memory(owner, agent_id, target, body.content)
 
     @app.post("/api/agents/{agent_id}/chats/{chat_id}/messages")
     def send_message(
-        agent_id: str, chat_id: str, body: MessageIn, user_id: str = Depends(current_user),
+        agent_id: str, chat_id: str, body: MessageIn, user_id: str = Depends(current_user), owner: str = Depends(agent_owner),
     ):
         language = service.language(user_id)
         command_reply = (
             None if body.attachments or body.edit_index is not None
-            else service.dream_command(user_id, agent_id, body.content)
+            else service.dream_command(owner, agent_id, body.content)
         )
         if command_reply is None and not body.attachments and body.edit_index is None:
-            compaction = service.compact_start(user_id, agent_id, chat_id, body.content)
+            compaction = service.compact_start(owner, agent_id, chat_id, body.content)
             if compaction is not None:
                 return StreamingResponse(
                     _compaction_stream(compaction, language),
@@ -723,7 +731,7 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
         replaced = None
         try:
             events = service.send(
-                user_id, agent_id, chat_id, body.content, stream=True,
+                owner, agent_id, chat_id, body.content, stream=True,
                 attachments=attachments, rewind_to=body.edit_index, channel="web",
                 recordings=body.recordings if body.edit_index is not None else None,
                 transcripts_in_text=body.transcripts_in_text and body.edit_index is not None,
@@ -733,14 +741,14 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
                 raise  # an edit needs its chat; an id RECALL never generates is a plain 404, not a chat to replace
             # an empty chat can be pruned before its first message (another tab, the phone, a listing):
             # answer in a fresh one and tell the page which chat it is now
-            logger.warning("web chat %s/%s/%s no longer exists; answering in a new chat", user_id, agent_id, chat_id)
-            replaced = service.create_chat(user_id, agent_id)
+            logger.warning("web chat %s/%s/%s no longer exists; answering in a new chat", owner, agent_id, chat_id)
+            replaced = service.create_chat(owner, agent_id)
             chat_id = replaced["id"]
             events = service.send(
-                user_id, agent_id, chat_id, body.content, stream=True, attachments=attachments, channel="web",
+                owner, agent_id, chat_id, body.content, stream=True, attachments=attachments, channel="web",
             )
 
-        stream = _event_stream(events, language, user_id, agent_id, chat_id)
+        stream = _event_stream(events, language, owner, agent_id, chat_id)
         if replaced is not None:
             stream = _chat_replaced_stream(replaced, stream)
         return StreamingResponse(
@@ -749,12 +757,12 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
         )
 
     @app.post("/api/agents/{agent_id}/chats/{chat_id}/stop", status_code=202)
-    def stop_chat(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):
-        return service.stop_chat(user_id, agent_id, chat_id)
+    def stop_chat(agent_id: str, chat_id: str, owner: str = Depends(agent_owner)):
+        return service.stop_chat(owner, agent_id, chat_id)
 
     @app.post("/api/agents/{agent_id}/chats/{chat_id}/read")
-    def mark_chat_read(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):
-        return service.mark_chat_read(user_id, agent_id, chat_id)
+    def mark_chat_read(agent_id: str, chat_id: str, owner: str = Depends(agent_owner)):
+        return service.mark_chat_read(owner, agent_id, chat_id)
 
     @app.get("/api/openrouter/key")
     def openrouter_key_status(user_id: str = Depends(current_user)):
@@ -789,54 +797,55 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
         return service.claude_usage(user_id)
 
     @app.get("/api/agents/{agent_id}/chats/{chat_id}/stream")
-    def follow_reply(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):
+    def follow_reply(agent_id: str, chat_id: str, user_id: str = Depends(current_user), owner: str = Depends(agent_owner)):
         language = service.language(user_id)
-        events = service.follow(user_id, agent_id, chat_id)
+        events = service.follow(owner, agent_id, chat_id)
         if events is None:
             return Response(status_code=204)  # no reply is running: the saved chat is complete
         return StreamingResponse(
-            _event_stream(events, language, user_id, agent_id, chat_id), media_type="text/event-stream",
+            _event_stream(events, language, owner, agent_id, chat_id), media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
     @app.get("/api/agents/{agent_id}/chats/{chat_id}/processes")
-    def list_processes(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):
-        return {"processes": service.list_processes(user_id, agent_id, chat_id)}
+    def list_processes(agent_id: str, chat_id: str, owner: str = Depends(agent_owner)):
+        return {"processes": service.list_processes(owner, agent_id, chat_id)}
 
     @app.post("/api/agents/{agent_id}/chats/{chat_id}/processes/{process_id}/stop", status_code=202)
-    def stop_process(agent_id: str, chat_id: str, process_id: str, user_id: str = Depends(current_user)):
-        service.stop_process(user_id, agent_id, chat_id, process_id)
+    def stop_process(agent_id: str, chat_id: str, process_id: str, owner: str = Depends(agent_owner)):
+        service.stop_process(owner, agent_id, chat_id, process_id)
         return {"stopped": process_id}
 
     @app.get("/api/agents/{agent_id}/chats/{chat_id}/approvals")
-    def list_approvals(agent_id: str, chat_id: str, user_id: str = Depends(current_user)):
-        return service.list_approvals(user_id, agent_id, chat_id)
+    def list_approvals(agent_id: str, chat_id: str, owner: str = Depends(agent_owner)):
+        return service.list_approvals(owner, agent_id, chat_id)
 
     @app.post("/api/agents/{agent_id}/chats/{chat_id}/approvals/{approval_id}")
     def resolve_approval(
-        agent_id: str, chat_id: str, approval_id: str, body: ApprovalIn, user_id: str = Depends(current_user),
+        agent_id: str, chat_id: str, approval_id: str, body: ApprovalIn,
+        user_id: str = Depends(current_user), owner: str = Depends(agent_owner),
     ):
-        return service.resolve_approval(user_id, agent_id, chat_id, approval_id, body.decision, body.scope)
+        return service.resolve_approval(owner, agent_id, chat_id, approval_id, body.decision, body.scope, person_id=user_id)
 
     @app.get("/api/agents/{agent_id}/approval-rules")
-    def list_approval_rules(agent_id: str, user_id: str = Depends(current_user)):
-        return service.list_approval_rules(user_id, agent_id)
+    def list_approval_rules(agent_id: str, owner: str = Depends(agent_owner)):
+        return service.list_approval_rules(owner, agent_id)
 
     @app.get("/api/agents/{agent_id}/approval-rules/effective")
-    def effective_approval_rules(agent_id: str, user_id: str = Depends(current_user)):
-        return service.effective_approval_rules(user_id, agent_id)
+    def effective_approval_rules(agent_id: str, owner: str = Depends(agent_owner)):
+        return service.effective_approval_rules(owner, agent_id)
 
     @app.delete("/api/agents/{agent_id}/approval-rules")
-    def clear_approval_rules(agent_id: str, user_id: str = Depends(current_user)):
-        return service.clear_approval_rules(user_id, agent_id)
+    def clear_approval_rules(agent_id: str, owner: str = Depends(agent_owner)):
+        return service.clear_approval_rules(owner, agent_id)
 
     @app.post("/api/agents/{agent_id}/approval-rules/reset")
-    def reset_approval_rules(agent_id: str, user_id: str = Depends(current_user)):
-        return service.clear_approval_rules(user_id, agent_id)
+    def reset_approval_rules(agent_id: str, owner: str = Depends(agent_owner)):
+        return service.clear_approval_rules(owner, agent_id)
 
     @app.delete("/api/agents/{agent_id}/approval-rules/{index}")
-    def remove_approval_rule(agent_id: str, index: int, user_id: str = Depends(current_user)):
-        return service.remove_approval_rule(user_id, agent_id, index)
+    def remove_approval_rule(agent_id: str, index: int, owner: str = Depends(agent_owner)):
+        return service.remove_approval_rule(owner, agent_id, index)
 
     # ------------------------------------------------------------------ administration (max_level admin only)
 
@@ -949,9 +958,10 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
         if events is None:
             frames = [_sse("unavailable", "live view only in the process running the task")] if reason else []
             return StreamingResponse(iter([*frames, _sse("done", "", "")]), media_type="text/event-stream", headers=headers)
-        agent_id, chat_id = service.tasks.child_of(user_id, task_id)
+        owner = service.task_owner(user_id, task_id)
+        agent_id, chat_id = service.tasks.child_of(owner, task_id)
         return StreamingResponse(
-            _event_stream(events, language, user_id, agent_id, chat_id), media_type="text/event-stream", headers=headers,
+            _event_stream(events, language, owner, agent_id, chat_id), media_type="text/event-stream", headers=headers,
         )
 
     # ------------------------------------------------------------------ frontend

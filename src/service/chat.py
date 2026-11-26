@@ -41,6 +41,7 @@ from src.config.preferences import (
 from src.config.field_defaults import agent_defaults
 from src.config.secrets import fingerprint as secrets_fingerprint, get_secret
 from src.config.zdr import chat_zdr, zdr_required
+from src.config.spaces import SpaceError, is_space_id, resolve_owner, spaces_of
 from src.config.settings import (
     AGENT_MAX_TOOL_HOPS, APPROVAL_EXPLAIN, ASSOC, CHAT_NAMING, CONFIG_DIR, DATA_DIR, ORCHESTRATOR, PDF, SPEECH_TO_TEXT, TAVILY, TELEGRAM_ALLOWED_USERS_ENV, current_mcp_settings,
     SUBAGENTS, TERMINAL, UPLOADS, VIDEO_DECOMPOSITION, WEB_PUBLIC_URL, memory_limits,
@@ -581,30 +582,74 @@ class ChatService:
             raise UnknownUser("Invalid user ID or password")
         return self.login(user_id)
 
-    def list_agents(self, user_id: str) -> list[dict]:
-        user = self._user(user_id)
+    def agent_owner(self, person_id: str, agent_id: str) -> str:
+        """The owner holding `agent_id` for a logged-in person: themself, or a space they belong to.
+
+        The data plane keeps its `(owner, agent)` keys: routes call the service with the owner returned here and keep
+        `person_id` for what is per person (preferences, language, usage, audit). An agent the person cannot reach gives
+        the person's own id, so the next check fails exactly as for another user's agent (404).
+        """
+        self._check_id("user", person_id, UnknownUser)
+        self._check_id("agent", agent_id, UnknownAgent)
+        owner = resolve_owner(person_id, agent_id, CONFIG_DIR)
+        if owner is None or owner == person_id:
+            return person_id
+        try:
+            self._user(owner)  # a space with a missing member is unusable (fail closed)
+        except (SpaceError, UnknownUser):
+            return person_id
+        return owner
+
+    def _spaces_of(self, person_id: str) -> list[str]:
+        """Ids of the usable spaces the person belongs to (a space whose member is gone is skipped and logged)."""
+        usable = []
+        for space_id in spaces_of(person_id, CONFIG_DIR):
+            try:
+                self._user(space_id)
+            except (SpaceError, UnknownUser, ValueError) as exc:
+                logger.error("space %s is unusable: %s", space_id, describe_config_error(exc))
+                continue
+            usable.append(space_id)
+        return usable
+
+    def _owners_of(self, person_id: str) -> list[tuple[str, str | None]]:
+        """`(owner, space_id)` for the person's own agents (space_id None) and then each of their spaces."""
+        return [(person_id, None), *((space_id, space_id) for space_id in self._spaces_of(person_id))]
+
+    def _own_agents(self, owner: str, space_id: str | None) -> list[dict]:
+        user = self._user(owner)
         agents = []
         for agent_id in user.agents:
             try:
-                cfg = self._agent_config(user_id, agent_id)
+                cfg = self._agent_config(owner, agent_id)
             except Exception as exc:  # one unreadable agent file must not hide the list
-                logger.error("agent list: %s/%s: %s", user_id, agent_id, describe_config_error(exc))
+                logger.error("agent list: %s/%s: %s", owner, agent_id, describe_config_error(exc))
                 agents.append({"id": agent_id, "name": agent_id, "avatar": None, "hidden": False})
-                continue
-            agents.append({"id": cfg.id, "name": cfg.name, "avatar": self._agent_avatar_view(user_id, cfg), "hidden": cfg.hidden})
+            else:
+                agents.append({"id": cfg.id, "name": cfg.name, "avatar": self._agent_avatar_view(owner, cfg), "hidden": cfg.hidden})
+            if space_id is not None:
+                agents[-1].update(shared=True, space_id=space_id)
         return agents
 
+    def list_agents(self, user_id: str) -> list[dict]:
+        """The person's own agents, then those of their spaces (each marked `shared` with its `space_id`)."""
+        self._user(user_id)
+        return [agent for owner, space_id in self._owners_of(user_id) for agent in self._own_agents(owner, space_id)]
+
     def list_agent_configs(self, user_id: str) -> list[dict]:
-        """Full editable configuration of every agent the user owns."""
-        user = self._user(user_id)
+        """Full editable configuration of every agent the person owns or shares through a space."""
         views = []
-        for agent_id in user.agents:
-            try:
-                views.append(self._agent_view(user_id, self._agent_config(user_id, agent_id)))
-            except Exception as exc:  # one invalid agent file must not hide the others
-                reason = describe_config_error(exc)
-                logger.error("agent list: %s/%s: %s", user_id, agent_id, reason)
-                views.append({"id": agent_id, "name": agent_id, "broken": True, "error": reason})
+        for owner, space_id in self._owners_of(user_id):
+            for agent_id in self._user(owner).agents:
+                try:
+                    view = self._agent_view(owner, self._agent_config(owner, agent_id))
+                except Exception as exc:  # one invalid agent file must not hide the others
+                    reason = describe_config_error(exc)
+                    logger.error("agent list: %s/%s: %s", owner, agent_id, reason)
+                    view = {"id": agent_id, "name": agent_id, "broken": True, "error": reason}
+                if space_id is not None:
+                    view.update(shared=True, space_id=space_id)
+                views.append(view)
         return views
 
     def agent_defaults(self, user_id: str) -> dict:
@@ -690,13 +735,16 @@ class ChatService:
             logger.exception("process automations failed")
 
     def list_automations(self, user_id: str) -> dict:
-        """The user's automations with their agent's name, newest first, for the web tab."""
+        """The person's automations and those of their spaces' agents, with the agent's name, newest first, for the web tab."""
         self._user(user_id)
-        names = {agent["id"]: agent["name"] for agent in self.list_agents(user_id)}
-        records = [
-            {**record, "agent_name": names.get(record["agent_id"], record["agent_id"])}
-            for record in self._automations.list(user_id)
-        ]
+        records = []
+        for owner, space_id in self._owners_of(user_id):
+            names = {agent["id"]: agent["name"] for agent in self._own_agents(owner, space_id)}
+            for record in self._automations.list(owner):
+                item = {**record, "agent_name": names.get(record["agent_id"], record["agent_id"])}
+                if space_id is not None:
+                    item.update(shared=True, space_id=space_id)
+                records.append(item)
         return {"automations": sorted(records, key=lambda r: r["created_at"], reverse=True)}
 
     def automation_events(self, user_id: str, since: str = "") -> dict:
@@ -714,44 +762,44 @@ class ChatService:
             after = None
         if after is None:
             return out
-        for record in self._automations.list(user_id):
-            task_id = next((e["task"] for e in reversed(record.get("history") or []) if e.get("task")), None)
-            if not task_id:
-                continue
-            try:
-                task = self._tasks.store.get(user_id, task_id)
-                ended = datetime.fromisoformat(task.get("ended_at") or "") if task else None
-            except (TaskError, ValueError):
-                continue
-            if ended is not None and ended > after:
-                out["events"].append({
-                    "automation_id": record["id"], "title": record["title"], "task_id": task_id,
-                    "status": task["status"], "ended_at": task["ended_at"],
-                })
+        for owner, _ in self._owners_of(user_id):
+            for record in self._automations.list(owner):
+                task_id = next((e["task"] for e in reversed(record.get("history") or []) if e.get("task")), None)
+                if not task_id:
+                    continue
+                try:
+                    task = self._tasks.store.get(owner, task_id)
+                    ended = datetime.fromisoformat(task.get("ended_at") or "") if task else None
+                except (TaskError, ValueError):
+                    continue
+                if ended is not None and ended > after:
+                    out["events"].append({
+                        "automation_id": record["id"], "title": record["title"], "task_id": task_id,
+                        "status": task["status"], "ended_at": task["ended_at"],
+                    })
         return out
 
-    def _own_automation(self, user_id: str, automation_id: str) -> dict:
-        self._user(user_id)
-        record = self._automations.store.get(user_id, automation_id)
-        if record is None:
-            raise UnknownAutomation("unknown automation: {automation_id}", automation_id=automation_id)
-        return record
+    def _automation_owner(self, person_id: str, automation_id: str) -> str:
+        """The owner (the person or one of their spaces) that holds the automation; UnknownAutomation otherwise."""
+        self._user(person_id)
+        for owner, _ in self._owners_of(person_id):
+            if self._automations.store.get(owner, automation_id) is not None:
+                return owner
+        raise UnknownAutomation("unknown automation: {automation_id}", automation_id=automation_id)
 
     def create_automation(self, user_id: str, agent_id: str, instruction: str, trigger: dict, title: str = "") -> dict:
-        self._owned_agent(user_id, agent_id)
-        return self._automations.create(user_id, agent_id, instruction, trigger, title=title, created_by="web")
+        owner = self.agent_owner(user_id, agent_id)
+        self._owned_agent(owner, agent_id)
+        return self._automations.create(owner, agent_id, instruction, trigger, title=title, created_by="web")
 
     def edit_automation(self, user_id: str, automation_id: str, **changes) -> dict:
-        self._own_automation(user_id, automation_id)
-        return self._automations.edit(user_id, automation_id, **changes)
+        return self._automations.edit(self._automation_owner(user_id, automation_id), automation_id, **changes)
 
     def set_automation_enabled(self, user_id: str, automation_id: str, enabled: bool) -> dict:
-        self._own_automation(user_id, automation_id)
-        return self._automations.set_enabled(user_id, automation_id, enabled)
+        return self._automations.set_enabled(self._automation_owner(user_id, automation_id), automation_id, enabled)
 
     def delete_automation(self, user_id: str, automation_id: str) -> None:
-        self._own_automation(user_id, automation_id)
-        self._automations.delete(user_id, automation_id)
+        self._automations.delete(self._automation_owner(user_id, automation_id), automation_id)
 
     @property
     def automations(self) -> AutomationService:
@@ -842,6 +890,9 @@ class ChatService:
         view = config.model_dump(mode="json")
         view["level"] = effective_agent_level(config, self._user(user_id)).label  # declared, else what its config needs
         view["avatar"] = self._agent_avatar_view(user_id, config)  # read-only: changed through the avatar routes
+        owner = self._user(user_id)
+        if owner.kind == "space":
+            view.update(shared=True, space_id=user_id, billing_user=owner.billing_user)
         return view
 
     # ------------------------------------------------------------------ profile pictures (the owner's own only)
@@ -1289,11 +1340,19 @@ class ChatService:
         return sorted(summaries, key=lambda s: s["updated"], reverse=True)
 
     def list_all_chats(self, user_id: str, keep: Optional[str] = None, include_hidden: bool = False) -> list[dict]:
-        """Chat summaries across all of the user's agents, each labelled with its agent."""
+        """Chat summaries across the person's agents and their spaces' agents, each labelled with its agent.
+
+        Chats of a shared agent also say `shared: true` and their `space_id`.
+        """
         chats = []
-        for agent in self.list_agents(user_id):
-            for chat in self.list_chats(user_id, agent["id"], keep, include_hidden):
-                chats.append({**chat, "agent_id": agent["id"], "agent_name": agent["name"]})
+        self._user(user_id)
+        for owner, space_id in self._owners_of(user_id):
+            for agent in self._own_agents(owner, space_id):
+                for chat in self.list_chats(owner, agent["id"], keep, include_hidden):
+                    labelled = {**chat, "agent_id": agent["id"], "agent_name": agent["name"]}
+                    if space_id is not None:
+                        labelled.update(shared=True, space_id=space_id)
+                    chats.append(labelled)
         return sorted(chats, key=lambda chat: chat["updated"], reverse=True)
 
     # ------------------------------------------------------------------ telegram orchestrator
@@ -2128,9 +2187,20 @@ class ChatService:
 
     # ------------------------------------------------------------------ subagent tasks (web API; always the session user's own)
 
+    def task_owner(self, person_id: str, task_id: str) -> str:
+        """The owner (the person or one of their spaces) whose task store holds `task_id`; UnknownTask otherwise."""
+        self._user(person_id)
+        for owner, _ in self._owners_of(person_id):
+            try:
+                self._tasks._record(owner, task_id, None)
+            except TaskError:
+                continue
+            return owner
+        raise UnknownTask("unknown task: {task_id}", task_id=task_id)
+
     def _task_record(self, user_id: str, task_id: str) -> dict:
         try:
-            return self._tasks._record(user_id, task_id, None)
+            return self._tasks._record(self.task_owner(user_id, task_id), task_id, None)
         except TaskError as exc:
             raise UnknownTask("unknown task: {task_id}", task_id=task_id) from exc
 
@@ -2164,53 +2234,66 @@ class ChatService:
     def list_tasks(
         self, user_id: str, agent_id: str | None = None, chat_id: str | None = None, status: str = "", limit: int = 0,
     ) -> dict:
-        """The user's tasks, optionally those launched from one parent chat, plus whether that chat is about to get a wake.
+        """The person's tasks and those of their spaces' agents, optionally those launched from one parent chat, plus
+        whether that chat is about to get a wake.
 
         `status` is `running` or `finished` (anything else: all); `limit` keeps the newest N. A list across chats is
         labelled with the parent agent and chat names.
         """
+        self._user(user_id)
         if agent_id is not None:
-            self._owned_agent(user_id, agent_id)
-        tasks = self._tasks.list_view(user_id, agent_id, chat_id, status if status in ("running", "finished") else "", limit)
+            owners = [self.agent_owner(user_id, agent_id)]
+            self._owned_agent(owners[0], agent_id)
+        else:
+            owners = [owner for owner, _ in self._owners_of(user_id)]
+        tasks: list[dict] = []
+        for owner in owners:
+            batch = self._tasks.list_view(owner, agent_id, chat_id, status if status in ("running", "finished") else "", limit)
+            if agent_id is None or chat_id is None:
+                self._label_tasks(owner, batch)
+            tasks.extend(batch)
+        if len(owners) > 1:
+            tasks.sort(key=lambda task: task.get("created_at") or "")
+            if limit and limit > 0:
+                tasks = tasks[-limit:]
         out: dict = {"tasks": tasks}
-        if agent_id is None or chat_id is None:
-            self._label_tasks(user_id, tasks)
         if agent_id is not None and chat_id is not None:
-            out["active"] = self.chat_active(user_id, agent_id, chat_id)
-            out["pending_wake"] = self._tasks.pending_wake(user_id, agent_id, chat_id)
+            out["active"] = self.chat_active(owners[0], agent_id, chat_id)
+            out["pending_wake"] = self._tasks.pending_wake(owners[0], agent_id, chat_id)
         return out
 
     def get_task(self, user_id: str, task_id: str) -> dict:
-        self._task_record(user_id, task_id)
-        return self._tasks.detail(user_id, task_id)
+        return self._tasks.detail(self.task_owner(user_id, task_id), task_id)
 
     def steer_task(self, user_id: str, task_id: str, text: str) -> dict:
         """The user corrects a running task (same mechanism as the `task_steer` tool)."""
+        owner = self.task_owner(user_id, task_id)
         record = self._task_record(user_id, task_id)
         if record["status"] != "running":
             raise AgentBusy("task {task_id} is not running (status: {status})", task_id=task_id, status=record["status"])
         try:
-            return self._tasks.steer(user_id, task_id, text)
+            return self._tasks.steer(owner, task_id, text)
         except TaskError as exc:
             if "not running" in str(exc):
                 raise AgentBusy("task {task_id} is not running (status: {status})", task_id=task_id, status=record["status"]) from exc
             raise InputError(str(exc)) from exc
 
     def stop_task(self, user_id: str, task_id: str) -> dict:
+        owner = self.task_owner(user_id, task_id)
         record = self._task_record(user_id, task_id)
         try:
-            return self._tasks.stop_task(user_id, task_id)
+            return self._tasks.stop_task(owner, task_id)
         except TaskError as exc:
             raise AgentBusy("task {task_id} cannot be stopped from here (status: {status})", task_id=task_id, status=record["status"]) from exc
 
     def get_task_chat(self, user_id: str, task_id: str) -> dict:
         """The task's hidden worker chat, read-only, in the shape of `get_chat`."""
-        self._task_record(user_id, task_id)
+        owner = self.task_owner(user_id, task_id)
         try:
-            agent_id, chat_id = self._tasks.child_of(user_id, task_id)
+            agent_id, chat_id = self._tasks.child_of(owner, task_id)
         except TaskError as exc:
             raise UnknownChat("unknown chat: {chat_id}", chat_id=task_id) from exc
-        out = self.get_chat(user_id, agent_id, chat_id)
+        out = self.get_chat(owner, agent_id, chat_id)
         out["task"] = {"id": task_id, "agent_id": agent_id, "chat_id": chat_id, "internal": True}
         return out
 
@@ -2220,22 +2303,27 @@ class ChatService:
         Returns `(events, "")` to stream, `(None, "")` when nothing is running (the saved chat is complete) and
         `(None, "elsewhere")` when another process (web or Telegram) executes the task: its replies cannot be streamed from here.
         """
+        owner = self.task_owner(user_id, task_id)
         record = self._task_record(user_id, task_id)
         try:
-            agent_id, chat_id = self._tasks.child_of(user_id, task_id)
+            agent_id, chat_id = self._tasks.child_of(owner, task_id)
         except TaskError as exc:
             raise UnknownChat("unknown chat: {chat_id}", chat_id=task_id) from exc
-        if self._tasks.runs_elsewhere(user_id, record):
+        if self._tasks.runs_elsewhere(owner, record):
             return None, "elsewhere"
         try:
-            return self.follow(user_id, agent_id, chat_id), ""
+            return self.follow(owner, agent_id, chat_id), ""
         except UnknownChat:
             return None, ""
 
     def resolve_approval(
         self, user_id: str, agent_id: str, chat_id: str, approval_id: str, decision: str, scope: str = "once",
+        *, person_id: str | None = None,
     ) -> dict:
         """Approve or deny a pending approval of the chat; raises ApprovalNotFound / ApprovalForbidden.
+
+        `user_id` is the owner of the chat's agent (a space for a shared agent); `person_id` the member who answers,
+        whose language the error uses.
 
         `scope` (approve only): `once`, `session` (this exact action, until the chat ends) or `agent` (a narrow allow
         rule in the agent's configuration). When the agent rule cannot be saved the action is still approved once and
@@ -2248,7 +2336,7 @@ class ChatService:
         answer = self._approvals.answer(approval_id, user_id, decision, scope)
         result = {"status": answer.status, "scope": answer.scope}
         if answer.error is not None:
-            result["error"] = error_message(self.language(user_id), answer.error)
+            result["error"] = error_message(self.language(person_id or user_id), answer.error)
         return result
 
     # ------------------------------------------------------------------ the agent's approval rules (learned by 'always for this agent')
@@ -2308,6 +2396,8 @@ class ChatService:
         """Every user with their maximum level and the level of each agent (what the admin screen and the CLI list)."""
         rows = []
         for user_id in sorted(path.parent.name for path in CONFIG_DIR.glob("*/user.yaml") if _ID_RE.match(path.parent.name)):
+            if is_space_id(user_id):  # a space is not a person: the admin CLI lists spaces with `space list`
+                continue
             try:
                 user = load_user(user_id)
                 agents = self._agents.agent_levels(user_id, user)
