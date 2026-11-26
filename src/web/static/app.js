@@ -493,13 +493,14 @@ function settingsChanges(current, original, defaults) {
 // Shared-agent invitations: the texts and the nav dot (pure). The dot has several sources (invitations, chat
 // notifications): it shows while any of them wants it.
 function invitationText(invitation, translate) {
-  return translate("{inviter} wants to share {agent} with you")
-    .replace("{inviter}", invitation.inviter_name || invitation.inviter)
-    .replace("{agent}", invitation.agent_name || invitation.agent_id);
+  return translate("{inviter} wants to share {agent} with you", {
+    inviter: invitation.inviter_name || invitation.inviter, agent: invitation.agent_name || invitation.agent_id,
+  });
 }
 function invitationNote(invitation, translate) {
-  return translate("It uses the keys and Claude subscription of {user}. Every member sees all its chats.")
-    .replace("{user}", invitation.billing_user || invitation.inviter);
+  return translate("It uses the keys and Claude subscription of {user}. Every member sees all its chats.", {
+    user: invitation.billing_user || invitation.inviter,
+  });
 }
 function outgoingFor(invitations, agentId) {
   return (invitations?.outgoing ?? []).filter((item) => item.agent_id === agentId && (item.status ?? "pending") === "pending");

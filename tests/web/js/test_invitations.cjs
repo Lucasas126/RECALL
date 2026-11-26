@@ -9,7 +9,7 @@ const code = source.match(/\/\/ ---- settings helpers[\s\S]*?\/\/ ---- end setti
 const context = vm.createContext({});
 vm.runInContext(`${code}\nthis.api = { invitationText, invitationNote, outgoingFor, navAttentionLevel };`, context);
 const api = context.api;
-const tr = (text) => text;
+const tr = (text, values = {}) => text.replace(/\{(\w+)\}/g, (_, key) => values[key]);  // like the page's tr()
 
 test("the invitation text names the inviter and the agent, the note the billing user", () => {
   const invitation = { agent_id: "nova", agent_name: "Nova", inviter: "user-a", inviter_name: "User A", billing_user: "user-a" };
