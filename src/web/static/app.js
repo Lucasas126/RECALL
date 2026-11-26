@@ -3793,8 +3793,8 @@ async function refreshChats() {
       }
       const li = document.createElement("li");
       li.classList.toggle("active", chat.id === state.chatId && chat.agent_id === state.agentId);
-      const generating = isGenerating(chat.agent_id, chat.id) || Boolean(chat.active) || chat.processes > 0;
-      li.dataset.active = String(Boolean(chat.active));
+      const generating = isGenerating(chat.agent_id, chat.id) || chatWorking(chat);
+      li.dataset.active = String(chatWorking(chat));  // read back by updateBusy between polls
       li.classList.toggle("generating", generating);
       // dot before the title: blinking while the agent works, fixed when it waits for you (approval) or its answer is unread
       const here = chat.id === state.chatId && chat.agent_id === state.agentId;
@@ -4704,7 +4704,7 @@ function updateBusy() {
   $("new-disposable-chat").disabled = state.modelBusy || state.settingsBusy;
   $("settings-open").disabled = state.settingsBusy;
   for (const button of $("chat-list").querySelectorAll(".del")) {
-    button.disabled = isGenerating(button.dataset.agent, button.dataset.chat) || state.modelBusy;
+    button.disabled = isGenerating(button.dataset.agent, button.dataset.chat) || button.closest("li")?.dataset.active === "true" || state.modelBusy;
   }
   for (const li of $("chat-list").querySelectorAll("li")) {
     const del = li.querySelector(".del");
@@ -5926,6 +5926,11 @@ function taskBriefState(message) {
     instructionsPresent: false,
   };
 }
+// a chat row works while it replies, runs background processes or waits for subagent tasks (running, or finished with the result on its way)
+function chatWorking(chat) {
+  return Boolean(chat.active) || chat.processes > 0 || chat.tasks > 0 || chat.task_results > 0;
+}
+
 // ---- end task cards
 
 // A tool step: closed it is one line (icon, name, backend, summary); open it shows the arguments and the result.
