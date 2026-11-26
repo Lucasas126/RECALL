@@ -9,7 +9,7 @@ const source = readFileSync(path.join(__dirname, "..", "..", "..", "src", "web",
 const code = source.slice(source.indexOf("// ---- task cards: pure helpers"), source.indexOf("// ---- end task cards"));
 const context = vm.createContext({});
 vm.runInContext(
-  `${code}\nObject.assign(this, { taskStatusLabel, formatElapsed, taskElapsed, taskActionId, isTaskStartAction, taskCardState, isWakeMessage, wakeBubbleState, tasksNeedPolling, nextTaskPollDelay, finishedProcessIds, shouldAttachWake });`,
+  `${code}\nObject.assign(this, { taskStatusLabel, formatElapsed, taskElapsed, taskActionId, isTaskStartAction, taskCardState, isWakeMessage, wakeBubbleState, tasksNeedPolling, nextTaskPollDelay, finishedProcessIds, shouldAttachWake, chatWorking });`,
   context,
 );
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -136,4 +136,13 @@ test("an idle chat keeps a slow task poll so a revived task is found", () => {
   assert.equal(context.nextTaskPollDelay({ again: false, pollAgain: false, open: true }), 12000);
   assert.equal(context.nextTaskPollDelay({ again: false, pollAgain: false, open: false }), null);
   assert.equal(context.nextTaskPollDelay({ again: true, pollAgain: false, open: false }), 3000);
+});
+
+test("a chat row keeps working while its subagent tasks run or their results are on the way", () => {
+  assert.equal(context.chatWorking({}), false);
+  assert.equal(context.chatWorking({ active: true }), true);
+  assert.equal(context.chatWorking({ processes: 1 }), true);
+  assert.equal(context.chatWorking({ active: false, processes: 0, tasks: 2, task_results: 0 }), true);
+  assert.equal(context.chatWorking({ active: false, processes: 0, tasks: 0, task_results: 1 }), true);
+  assert.equal(context.chatWorking({ active: false, processes: 0, tasks: 0, task_results: 0 }), false);
 });
