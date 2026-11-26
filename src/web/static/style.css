@@ -29,14 +29,14 @@
   color-scheme: dark;
   --bg: #111111; --panel: #171717; --raised: #1f1f1f; --line: #2e2e2e; --line-strong: #6a6a6a; --side: #141414; --code-bg: #0d0d0d;
   --text: #ededed; --muted: #a8a8a8; --accent: #ff6b9d; --accent-strong: #ff8cb3; --on-accent: #0f0f14;
-  --accent-soft: #37232a; --danger: #f07167; --warn: #e6c36e; --warn-bg: #2b2616; --warn-line: #7d6a30;
+  --accent-soft: #37232a; --danger: #f07167; --on-danger: #0f0f14; --warn: #e6c36e; --warn-bg: #2b2616; --warn-line: #7d6a30;
   --ok: #7fc79a; --shade: #ededed26; --backdrop: #000a; --shadow: 0 6px 24px #0007, 0 1px 2px #0008;
 }
 :root[data-theme="light"] {
   color-scheme: light; --orn-a: .1; --art-capital-filter: brightness(1.25);
   --bg: #fafaf8; --panel: #ffffff; --raised: #ebebe6; --line: #dcdcd6; --line-strong: #8a8a84; --side: #f4f4f1; --code-bg: #f3f3ef;
   --text: #161616; --muted: #4a4a45; --accent: #b0205e; --accent-strong: #8d1a4b; --on-accent: #ffffff;
-  --accent-soft: #f7e9ef; --danger: #b42318; --warn: #7a5a00; --warn-bg: #fbf1d3; --warn-line: #d3b24f;
+  --accent-soft: #f7e9ef; --danger: #b42318; --on-danger: #ffffff; --warn: #7a5a00; --warn-bg: #fbf1d3; --warn-line: #d3b24f;
   --ok: #2b7a45; --shade: #16161626; --backdrop: #0007; --shadow: 0 6px 24px #0000001c, 0 1px 2px #00000014;
 }
 @media (prefers-color-scheme: light) {
@@ -44,7 +44,7 @@
     color-scheme: light; --orn-a: .1; --art-capital-filter: brightness(1.25);
     --bg: #fafaf8; --panel: #ffffff; --raised: #ebebe6; --line: #dcdcd6; --line-strong: #8a8a84; --side: #f4f4f1; --code-bg: #f3f3ef;
     --text: #161616; --muted: #4a4a45; --accent: #b0205e; --accent-strong: #8d1a4b; --on-accent: #ffffff;
-    --accent-soft: #f7e9ef; --danger: #b42318; --warn: #7a5a00; --warn-bg: #fbf1d3; --warn-line: #d3b24f;
+    --accent-soft: #f7e9ef; --danger: #b42318; --on-danger: #ffffff; --warn: #7a5a00; --warn-bg: #fbf1d3; --warn-line: #d3b24f;
     --ok: #2b7a45; --shade: #16161626; --backdrop: #0007; --shadow: 0 6px 24px #0000001c, 0 1px 2px #00000014;
   }
 }
@@ -1258,3 +1258,20 @@ html.resizing-sidebar #app { transition: none; }
 #user-wizard input, #user-wizard select { width: 100%; box-sizing: border-box; }
 #user-wizard button { margin-top: 8px; }
 #user-wizard code { overflow-wrap: anywhere; }
+
+/* the in-app confirmation: a small modal over everything, destructive ones with a red confirm button */
+#confirm-dialog { color: var(--text); background: var(--panel); border: 1px solid var(--line-strong); border-radius: 14px; box-shadow: var(--shadow); width: min(420px, calc(100vw - 32px)); max-width: calc(100vw - 32px); padding: 0; }
+#confirm-dialog::backdrop { background: var(--backdrop); }
+.confirm-body { display: flex; flex-direction: column; gap: 10px; padding: 20px; }
+#confirm-title { margin: 0; font-size: 1.15em; }
+#confirm-message { margin: 0; color: var(--muted); line-height: 1.45; overflow-wrap: anywhere; white-space: pre-line; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+#confirm-ok.danger { background: var(--danger); border-color: var(--danger); color: var(--on-danger); font-weight: 600; }
+#confirm-ok.danger:hover:not(:disabled) { background: var(--danger); border-color: var(--danger); filter: brightness(1.1); }
+#confirm-ok.danger:focus-visible { outline-color: var(--danger); }
+@media (max-width: 640px) {
+  #confirm-dialog { width: calc(100vw - 24px); max-width: calc(100vw - 24px); margin-bottom: max(12px, env(safe-area-inset-bottom)); }
+  .confirm-body { padding: 18px 16px; }
+  .confirm-actions { flex-direction: column-reverse; }
+  .confirm-actions button { width: 100%; min-height: 44px; }
+}

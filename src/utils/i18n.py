@@ -3,6 +3,22 @@ from __future__ import annotations
 from typing import Literal
 
 _SPANISH = {
+    "Confirm": "Confirmar",
+    "Delete chat": "Eliminar chat",
+    "Delete \"{title}\"? Its messages cannot be recovered.": "¿Eliminar \"{title}\"? Sus mensajes no se pueden recuperar.",
+    "Reset learned approvals": "Restablecer aprobaciones aprendidas",
+    "Remove approvals": "Quitar aprobaciones",
+    "Rebuild index": "Reconstruir índice",
+    "Unsaved changes": "Cambios sin guardar",
+    "Discard changes": "Descartar cambios",
+    "Keep editing": "Seguir editando",
+    "Delete automation": "Eliminar automatización",
+    "Restore version": "Restaurar versión",
+    "Cancel dream session": "Cancelar la sesión de sueño",
+    "Cancel session": "Cancelar sesión",
+    "Keep running": "Dejar que siga",
+    "Replace prompt": "Reemplazar prompt",
+    "Clear prompt": "Borrar prompt",
     "This menu has expired. Run the command again.": "Este menú ha caducado. Vuelve a usar el comando.",
     "Unknown menu option. Run the command again.": "Opción de menú desconocida. Vuelve a usar el comando.",
     "Default LLM model": "Modelo LLM por defecto",
