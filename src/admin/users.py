@@ -7,6 +7,7 @@
     python -m src.admin terminal-test --user <user_id> --backend <name>
     python -m src.admin agent list|show|create|set|rename|delete|check|rules ...   (src/admin/agents.py)
     python -m src.admin user show|set --user <user_id> ...                   (src/admin/agents.py)
+    python -m src.admin space list|show|create|add-member|remove-member|delete   (src/admin/spaces.py)
     python -m src.admin set-secret NAME [--stdin]  /  secret list            (src/admin/credentials.py)
     python -m src.admin task run --user U --agent A --goal "..." [--wait]    (src/admin/tasks.py)
 
@@ -231,6 +232,9 @@ def _build_parser() -> argparse.ArgumentParser:
     from src.admin import tasks as task_commands  # lazy too: it imports this module
 
     task_commands.add_parsers(sub)
+    from src.admin import spaces as space_commands
+
+    space_commands.add_parsers(sub)
     secret_set = sub.add_parser(
         "set-secret", help="store a credential in .config/secrets.env (hidden prompt or --stdin; never an argument)",
     )
@@ -332,6 +336,10 @@ def main(argv: list[str] | None = None) -> int:
         from src.admin import agents as agent_commands
 
         return agent_commands.run(args)
+    if args.command == "space":
+        from src.admin import spaces as space_commands
+
+        return space_commands.run(args)
     if args.command == "task":
         from src.admin import tasks as task_commands
 
