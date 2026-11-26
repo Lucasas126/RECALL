@@ -49,6 +49,20 @@ class AuthorStorageTests(steering.SteeringFixture):
             sent = self._users_in_context()
             self.assertTrue(sent[0].startswith("[ANA] ") and sent[1].startswith("[BEN] ") and sent[2].startswith("[ANA] "))
 
+    def test_get_chat_returns_the_author_name(self) -> None:
+        with patch("src.agent.agent.load_user", _users), patch.object(self.service, "_user", side_effect=_users) as lookup:
+            list(self.service.send("user-one", "agent-one", self.chat, "First", author="user-a"))
+            list(self.service.send("user-one", "agent-one", self.chat, "Second", author="user-a"))
+            lookup.reset_mock()
+            users = [m for m in self.service.get_chat("user-one", "agent-one", self.chat)["messages"] if m["role"] == "user"]
+        self.assertEqual([m["author_name"] for m in users], ["Ana", "Ana"])
+        self.assertEqual(lookup.call_count, 1)  # resolved once per call
+
+    def test_private_chat_has_no_author_name(self) -> None:
+        list(self._send("Hello"))
+        messages = self.service.get_chat("user-one", "agent-one", self.chat)["messages"]
+        self.assertTrue(all("author_name" not in m for m in messages))
+
     def test_rewind_keeps_the_author(self) -> None:
         with patch("src.agent.agent.load_user", _users):
             list(self.service.send("user-one", "agent-one", self.chat, "First", author="user-b"))

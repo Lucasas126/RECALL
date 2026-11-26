@@ -1693,6 +1693,15 @@ class ChatService:
             }
             for position, t in turns
         ]
+        names: dict[str, str] = {}  # each author's display name, resolved once per call
+        for message in messages:
+            if message.get("author"):
+                if message["author"] not in names:
+                    try:
+                        names[message["author"]] = self._user(message["author"]).name or message["author"]
+                    except Exception:  # a member who left: the id stands in
+                        names[message["author"]] = message["author"]
+                message["author_name"] = names[message["author"]]
         return {
             "chat": {
                 **conversations.summary(chat_id, self._retention_days(user_id)),
