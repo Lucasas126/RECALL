@@ -24,4 +24,10 @@ assert.strictEqual(
 assert.strictEqual(visibleUserText("hi", audio), "hi");
 const parts = [{ type: "text", text: "x" }];
 assert.strictEqual(visibleUserText(parts, audio), parts);
+// the "[FILE] Original of ..." lines for the agent are never shown, with or without a transcript
+const note = "[FILE] Original of 'voice.webm' saved at /data/u/.uploads/c1/20261126-voice.webm (read-only source address: uploads:c1/20261126-voice.webm)";
+assert.strictEqual(visibleUserText(`[AUDIO] Audio transcription:\nHello there\n\n${note}`, audio), "");
+assert.strictEqual(visibleUserText(`look\n\n${note}\n${note.replace("voice.webm", "b.pdf")}`, []), "look");
+assert.strictEqual(visibleUserText(note, [{ modality: "image" }]), "");
+assert.strictEqual(visibleUserText("I wrote [FILE] Original of x", []), "I wrote [FILE] Original of x");
 console.log("ok");
