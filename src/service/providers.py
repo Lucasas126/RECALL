@@ -61,9 +61,9 @@ def _ollama(user: UserConfig) -> dict:
 
 def _claude(user: UserConfig) -> dict:
     main = user.provider.name
-    if not login_allowed(user.id, user.claude_subscription):  # before any CLI process is started
+    if not login_allowed(user.claude_owner, user.claude_subscription):  # before any CLI process is started
         return _row(CLAUDE_SUBSCRIPTION, main, available=False, reason="no_own_login")
-    status = cli_status(resolved_settings(user.id, user.claude_subscription))
+    status = cli_status(resolved_settings(user.claude_owner, user.claude_subscription))
     if not status["cli_found"]:
         return _row(CLAUDE_SUBSCRIPTION, main, available=False, reason="cli_missing", detail=status["hint"])
     if status["logged_in"] is None:

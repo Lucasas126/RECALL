@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from src.config.levels import Level, check_agent_level, effective_agent_level, parse_level, required_level
 from src.config.models import AgentConfig, UserConfig
+from src.config.spaces import SpaceError, agent_id_conflict, resolve_space
 from src.config.yaml_files import load_yaml_file
 from src.terminal.rules import ApprovalRule, ApprovalRuleList, rule_key
 from src.utils.avatars import AvatarStore
@@ -397,6 +398,15 @@ class AgentStore:
     def _ensure_free(self, user_id: str, agent_id: str, user: UserConfig) -> None:
         if agent_id in user.agents or self._is_defined(user_id, agent_id):
             raise AgentConflict("An agent with the id '{agent_id}' already exists.", agent_id=agent_id)
+        if user.kind == "space":  # also free for every member: their own agents and their other spaces
+            for member in user.members:
+                if agent_id_conflict(member, agent_id, self.config_dir, ignore=user_id) is not None:
+                    raise AgentConflict(
+                        "An agent with the id '{agent_id}' already exists for a member of this space.", agent_id=agent_id,
+                    )
+        else:  # and not in a space of the user's
+            if agent_id_conflict(user_id, agent_id, self.config_dir) is not None:
+                raise AgentConflict("An agent with the id '{agent_id}' already exists in one of your spaces.", agent_id=agent_id)
 
     def _is_defined(self, user_id: str, agent_id: str) -> bool:
         try:
@@ -442,7 +452,11 @@ class AgentStore:
                 "Invalid user configuration '{file}': {details}",
                 file=path.name, details="; ".join(error["msg"] for error in exc.errors()),
             ) from exc
-        return check_user_folder(user, user_id)
+        user = check_user_folder(user, user_id)
+        try:
+            return resolve_space(user, self.config_dir)
+        except SpaceError as exc:
+            raise AgentConfigError("Invalid user configuration '{file}': {details}", file=path.name, details=str(exc)) from exc
 
     def _read(self, path: Path) -> AgentConfig:
         try:

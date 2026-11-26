@@ -158,7 +158,8 @@ def provider_settings(config: ResolvedAgent) -> dict:
     """The user's provider settings, as `provider_for` takes them."""
     return {
         "main": config.provider_name, "main_api_key": config.api_key, "openrouter": config.openrouter,
-        "ollama": config.ollama, "claude": config.claude_subscription, "user_id": config.user_id,
+        "ollama": config.ollama, "claude": config.claude_subscription,
+        "user_id": config.claude_user_id or config.user_id,  # whose folder holds the Claude login
     }
 
 

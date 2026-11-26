@@ -1,6 +1,6 @@
 # Design: agents shared between users
 
-Status: planned. Steps are built one branch at a time off `feat/shared-agents`; each step lists what is done.
+Status: step 1 done on branch `feat/shared-agents-space` (model, derived level, login refusal, `resolve_owner`, admin CLI, tests); the rest is planned. Steps are built one branch at a time off `feat/shared-agents`; each step lists what is done.
 
 ## Goal
 
@@ -98,7 +98,7 @@ One operation, used by share (user to space) and unshare (space to user, once pe
 ## Steps
 
 1. Space model and storage: `kind: space`, `members`, `billing_user`, derived `max_level`, login refused,
-   `resolve_owner`, admin CLI. Tests.
+   `resolve_owner`, admin CLI. Tests. **Done** (`src/config/spaces.py`, `src/admin/spaces.py`; a declared `max_level` on a space is refused).
 2. Web access by membership, "Shared" section, "shared" tag, isolation of mentions and delegation.
 3. Speaker: `author` in the JSONL, `[NAME]` prefix, `USER.md` sections and limit.
 4. Move: share an existing agent into a space and unshare (copies), with prechecks and index rebuild.

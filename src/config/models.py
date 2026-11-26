@@ -434,6 +434,8 @@ class ModelsConfig(BaseModel):
 
 
 _BACKEND_NAME = r"^[a-z][a-z0-9_-]{0,31}$"
+SPACE_ID_PATTERN = r"^space-[0-9a-f]{8}$"
+_USER_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 TerminalApprovals = Literal["manual", "smart", "off"]
 
 
@@ -658,14 +660,27 @@ class UserConfig(BaseModel):
     terminal_backends: dict[Annotated[str, StringConstraints(pattern=_BACKEND_NAME)], TerminalBackendConfig] = Field(
         default_factory=dict,
     )
-    # highest level the user's agents may have; required, set only by an administrator (see config/levels.py)
+    # highest level the user's agents may have; required, set only by an administrator (see config/levels.py).
+    # A space declares none: it is derived from its members when the space is loaded (see config/spaces.py); until
+    # then a space carries the lowest level, so an unresolved space never grants more than it should.
     max_level: LevelField
+    # "user" is a person who logs in; "space" is a pseudo-user owning agents shared by `members`
+    # (docs/project/design-shared-agents.md). A space has no password and never logs in.
+    kind: Literal["user", "space"] = "user"
+    members: list[str] = Field(default_factory=list)  # space only: the user ids sharing it (at least one)
+    billing_user: Optional[str] = None  # space only: a member whose keys and Claude login the space uses
     # approval rules for all of the user's agents (the `user` layer; see docs/architecture/permissions.md)
     approval_rules: Optional[ApprovalRuleList] = None
 
     @model_validator(mode="before")
     @classmethod
     def _max_level_is_declared(cls, data: object) -> object:
+        if isinstance(data, dict) and data.get("kind") == "space":
+            if data.get("max_level") is not None:
+                raise ValueError(
+                    f"space '{data.get('id', '?')}' must not declare max_level: it is the lowest max_level of its members"
+                )
+            return {**data, "max_level": "minimal"}  # placeholder, replaced by the loader (config/spaces.py)
         if isinstance(data, dict) and data.get("max_level") is None:
             raise ValueError(
                 f"user '{data.get('id', '?')}' has no max_level (the highest permission level of its agents). "
@@ -673,6 +688,31 @@ class UserConfig(BaseModel):
                 "(minimal, reader, assistant, collaborator, operator or admin)"
             )
         return data
+
+    @model_validator(mode="after")
+    def _kind_fields(self) -> "UserConfig":
+        if self.kind == "user":
+            if self.members or self.billing_user is not None:
+                raise ValueError(f"user '{self.id}': members and billing_user belong to spaces (kind: space)")
+            return self
+        if not re.match(SPACE_ID_PATTERN, self.id):
+            raise ValueError(f"space id '{self.id}' must look like space-<8 hex digits>")
+        if self.password_hash:
+            raise ValueError(f"space '{self.id}' must not have a password_hash: a space never logs in")
+        if not self.members:
+            raise ValueError(f"space '{self.id}' needs at least one member")
+        if len(set(self.members)) != len(self.members):
+            raise ValueError(f"space '{self.id}' lists a member twice")
+        if any(not _USER_ID.match(member) or member == self.id for member in self.members):
+            raise ValueError(f"space '{self.id}': members must be user ids")
+        if self.billing_user is None or self.billing_user not in self.members:
+            raise ValueError(f"space '{self.id}': billing_user is required and must be one of its members")
+        return self
+
+    @property
+    def claude_owner(self) -> str:
+        """Whose config folder holds the Claude login: the user, or a space's `billing_user` (never another path)."""
+        return self.billing_user if self.kind == "space" and self.billing_user else self.id
 
     def openrouter_settings(self) -> OpenRouterConfig:
         """OpenRouter settings with the key env var actually used (`provider.api_key` when it is main)."""
@@ -908,6 +948,7 @@ class ResolvedAgent(BaseModel):
     """Runtime dependencies resolved from the user's models/providers and agent behavior."""
 
     user_id: str
+    claude_user_id: Optional[str] = None  # whose config folder holds the Claude login; None = `user_id` (spaces: billing user)
     language: str = "en"
     require_zdr: bool = False
     id: str
