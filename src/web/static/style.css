@@ -624,6 +624,7 @@ html.resizing-header, html.resizing-header * { cursor: row-resize !important; us
 @media (max-width: 800px) { #chat-title-wrap { display: none; } }
 .msg.assistant[data-author]::before { content: attr(data-author); display: block; margin-bottom: 8px; color: var(--accent); font: 600 .6875rem/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; white-space: nowrap; }
 .msg.assistant[data-author=""]::before { display: none; }
+.msg.user[data-author]::before { content: attr(data-author); display: block; margin-bottom: 4px; color: var(--muted); font-size: .75em; font-weight: 650; }
 
 /* Polish */
 input:focus, textarea:focus, select:focus { border-color: var(--accent); }
