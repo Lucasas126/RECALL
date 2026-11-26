@@ -344,19 +344,19 @@ main { position: relative; isolation: isolate; container: main / inline-size; di
 @media (pointer: coarse) { .code-copy { min-height: 36px; padding: 4px 14px; } }
 /* syntax colours: one palette per theme (the stock themes assume one background); each pair keeps AA contrast on --code-bg */
 :root { --tok-keyword: #ff8cb3; --tok-string: #8fcda7; --tok-number: #e6c36e; --tok-title: #8fb4f0; --tok-comment: #8f8f8f; --tok-attr: #d7a0f0; --tok-add: #7fc79a; --tok-del: #f07167; }
-:root[data-theme="light"] { --tok-keyword: #a21b57; --tok-string: #1f6f3d; --tok-number: #8a5a00; --tok-title: #1f4fa3; --tok-comment: #5c5c56; --tok-attr: #7a2e9a; --tok-add: #1f6f3d; --tok-del: #b42318; }
+html[data-theme="light"] { --tok-keyword: #a21b57; --tok-string: #1f6f3d; --tok-number: #8a5a00; --tok-title: #1f4fa3; --tok-comment: #5c5c56; --tok-attr: #7a2e9a; --tok-add: #1f6f3d; --tok-del: #b42318; }
 @media (prefers-color-scheme: light) {
-  :root:not([data-theme]) { --tok-keyword: #a21b57; --tok-string: #1f6f3d; --tok-number: #8a5a00; --tok-title: #1f4fa3; --tok-comment: #5c5c56; --tok-attr: #7a2e9a; --tok-add: #1f6f3d; --tok-del: #b42318; }
+  html:not([data-theme]) { --tok-keyword: #a21b57; --tok-string: #1f6f3d; --tok-number: #8a5a00; --tok-title: #1f4fa3; --tok-comment: #5c5c56; --tok-attr: #7a2e9a; --tok-add: #1f6f3d; --tok-del: #b42318; }
 }
 .hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-built_in, .hljs-doctag { color: var(--tok-keyword); }
 .hljs-string, .hljs-regexp, .hljs-addition, .hljs-meta .hljs-string { color: var(--tok-string); }
 .hljs-number, .hljs-symbol, .hljs-bullet, .hljs-variable, .hljs-template-variable { color: var(--tok-number); }
 .hljs-title, .hljs-section, .hljs-type, .hljs-class .hljs-title, .hljs-selector-id, .hljs-selector-class { color: var(--tok-title); }
 .hljs-attr, .hljs-attribute, .hljs-name, .hljs-property, .hljs-params, .hljs-meta { color: var(--tok-attr); }
-.hljs-comment, .hljs-quote { color: var(--tok-comment); font-style: italic; }
+.hljs-comment, .hljs-quote { color: var(--tok-comment); }
 .hljs-addition { color: var(--tok-add); }
 .hljs-deletion { color: var(--tok-del); }
-.hljs-emphasis { font-style: italic; } .hljs-strong { font-weight: 700; }
+.hljs-strong { font-weight: 700; }
 .body blockquote { border-left: 3px solid var(--line); margin-left: 0; padding-left: 12px; color: var(--muted); }
 .body table { border-collapse: collapse; display: block; overflow-x: auto; }
 .body th, .body td { border: 1px solid var(--line); padding: 4px 10px; }
