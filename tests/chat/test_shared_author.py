@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import unittest
+from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from src.agent.agent import Agent
+from src.agent.toolsets.self_files import build_self_tools
+from src.agent.user_sections import parse_sections
+from src.config.models import MemoryLimits, ProviderConfig, UserConfig
+from src.service.chat import InputError
 from src.core.sources.conversations import ConversationsSource
 from tests.tasks import test_service_steering as steering
 
@@ -78,6 +83,55 @@ class AuthorStorageTests(steering.SteeringFixture):
         stored = self.sources[("user-one", "agent-one")].load(self.chat)
         self.assertNotIn("author", stored[0])
         self.assertTrue(self._users_in_context()[0].startswith("[20"))
+
+
+class SharedMemoryTests(steering.SteeringFixture):
+    MEMBERS = {"user-a": "Ana", "user-b": "Ben"}
+
+    def _space(self) -> UserConfig:
+        return UserConfig(
+            id="space-0a1b2c3d", name="Team", kind="space", members=list(self.MEMBERS), billing_user="user-a",
+            agents=["agent-one"], provider=ProviderConfig(name="ollama"),
+        )
+
+    def _files(self) -> SimpleNamespace:
+        files = SimpleNamespace(text="")
+        files.memory_lock = nullcontext
+        files.memory_text = lambda target: files.text
+        files.memory_entries = lambda target: [e for e in files.text.split("\n") if e]
+        files.write_memory_text = lambda target, text: setattr(files, "text", text)
+        return files
+
+    def test_memory_tool_after_a_turn_writes_the_authors_section(self) -> None:
+        with patch("src.agent.agent.load_user", _users):
+            list(self.service.send("user-one", "agent-one", self.chat, "Hi", author="user-b"))
+        agent = self.agents[("user-one", "agent-one")]
+        agent.config.space_members = dict(self.MEMBERS)
+        agent.config.space_billing_user = "user-a"
+        files = self._files()
+        agent.sources = SimpleNamespace(agent_files=lambda: files)
+        memory = {t.tool_spec["function"]["name"]: t for t in build_self_tools(agent)}["memory"]
+        self.assertIn("saved user", memory(target="user", action="add", content="likes jazz"))
+        self.assertEqual(parse_sections(files.text), {"user-b": ["likes jazz"]})  # not the billing member's section
+
+    def test_memory_limit_of_a_space_agent_scales_with_the_members(self) -> None:
+        files = self._files()
+        space = self._space()
+        with patch("src.config.settings.MEMORY_LIMITS", MemoryLimits(user_chars=100, memory_chars=100)), \
+                patch.object(self.service, "_owned_agent", return_value=space), \
+                patch.object(self.service, "_agent_files", return_value=files):
+            self.assertEqual(self.service.get_memory("space-0a1b2c3d", "agent-one", "user")["limit"], 200)
+            self.assertEqual(self.service.get_memory("space-0a1b2c3d", "agent-one", "memory")["limit"], 100)
+            self.service.update_memory("space-0a1b2c3d", "agent-one", "user", "## user-a\n" + "x" * 150)  # over 100, under 200
+            with self.assertRaises(InputError):
+                self.service.update_memory("space-0a1b2c3d", "agent-one", "user", "x" * 201)
+            with self.assertRaises(InputError):
+                self.service.update_memory("space-0a1b2c3d", "agent-one", "memory", "x" * 101)
+
+    def test_private_agent_keeps_the_plain_limit(self) -> None:
+        with patch("src.config.settings.MEMORY_LIMITS", MemoryLimits(user_chars=100)), \
+                patch.object(self.service, "_agent_files", return_value=self._files()):
+            self.assertEqual(self.service.get_memory("user-one", "agent-one", "user")["limit"], 100)
 
 
 if __name__ == "__main__":

@@ -100,7 +100,7 @@ One operation, used by share (user to space) and unshare (space to user, once pe
 1. Space model and storage: `kind: space`, `members`, `billing_user`, derived `max_level`, login refused,
    `resolve_owner`, admin CLI. Tests. **Done** (`src/config/spaces.py`, `src/admin/spaces.py`; a declared `max_level` on a space is refused).
 2. Web access by membership, "Shared" section, "shared" tag, isolation of mentions and delegation.
-3. Speaker: `author` in the JSONL, `[NAME]` prefix, `USER.md` sections and limit.
+3. Speaker: `author` in the JSONL, `[NAME]` prefix, `USER.md` sections and limit. **Done** (author, prefix and name in the UI; `src/agent/user_sections.py`; limit scaled in the memory tool, the prompt counter, `ChatService.get_memory`/`update_memory` and so the web route; a hand edit of USER.md only has to fit the scaled limit, its sections are free text).
 4. Move: share an existing agent into a space and unshare (copies), with prechecks and index rebuild.
 5. Invitations: request, accept, decline, revoke, leave; UI.
 6. Notifications to every member; Telegram per speaker.

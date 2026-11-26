@@ -41,7 +41,7 @@ from src.config.preferences import (
 from src.config.field_defaults import agent_defaults
 from src.config.secrets import fingerprint as secrets_fingerprint, get_secret
 from src.config.zdr import chat_zdr, zdr_required
-from src.config.spaces import SpaceError, is_space_id, resolve_owner, spaces_of
+from src.config.spaces import SpaceError, is_space_id, resolve_owner, scaled_user_chars, spaces_of
 from src.config.settings import (
     AGENT_MAX_TOOL_HOPS, APPROVAL_EXPLAIN, ASSOC, CHAT_NAMING, CONFIG_DIR, DATA_DIR, ORCHESTRATOR, PDF, SPEECH_TO_TEXT, TAVILY, TELEGRAM_ALLOWED_USERS_ENV, current_mcp_settings,
     SUBAGENTS, TERMINAL, UPLOADS, VIDEO_DECOMPOSITION, WEB_PUBLIC_URL, memory_limits,
@@ -3543,22 +3543,27 @@ class ChatService:
             raise UnknownDreamSession("unknown SOUL version: {version}", version=version) from exc
         return self.get_soul(user_id, agent_id)
 
-    def get_memory(self, user_id: str, agent_id: str, target: MemoryTarget) -> dict:
-        self._owned_agent(user_id, agent_id)
+    @staticmethod
+    def _memory_limit(owner: UserConfig, target: MemoryTarget) -> int:
+        """Char limit of a memory file; USER.md of a space agent scales with the members (as the memory tool does)."""
         limits = memory_limits()
+        if target == "memory":
+            return limits.memory_chars
+        return scaled_user_chars(limits.user_chars, len(owner.members)) if owner.kind == "space" else limits.user_chars
+
+    def get_memory(self, user_id: str, agent_id: str, target: MemoryTarget) -> dict:
+        owner = self._owned_agent(user_id, agent_id)
         files = self._agent_files(user_id, agent_id)
         content = files.memory_text(target)
         return {
             "target": target, "content": content, "chars": len(content),
-            "limit": limits.memory_chars if target == "memory" else limits.user_chars,
+            "limit": self._memory_limit(owner, target),
             "entries": files.memory_entries(target),
         }
 
     def update_memory(self, user_id: str, agent_id: str, target: MemoryTarget, content: str) -> dict:
         """Replace MEMORY.md or USER.md; entries are separated by a line holding only `§`."""
-        self._owned_agent(user_id, agent_id)
-        limits = memory_limits()
-        limit = limits.memory_chars if target == "memory" else limits.user_chars
+        limit = self._memory_limit(self._owned_agent(user_id, agent_id), target)
         if len(content) > limit:
             raise InputError(
                 "the {target} memory cannot exceed {limit} characters; shorten it; the limit is set in settings.yaml (memory_limits)",

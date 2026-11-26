@@ -99,9 +99,9 @@ class SharedAgentMemberTests(SharedAgentFixture):
         self.assertEqual(client.get(f"/api/agents/{SHARED}/chats").status_code, 200)
         sent = client.post(f"/api/agents/{SHARED}/chats/{chat}/messages", json={"content": "hello"})
         self.assertEqual(sent.status_code, 200, sent.text)
-        self.assertIn("Answer: hello", sent.text)
+        self.assertRegex(sent.text, r"Answer: .*hello")  # the stamped user text may carry a prefix
         contents = [m["content"] for m in client.get(f"/api/agents/{SHARED}/chats/{chat}").json()["messages"]]
-        self.assertIn("Answer: hello", contents)
+        self.assertTrue(any(c.startswith("Answer: ") and c.endswith("hello") for c in contents), contents)
         self.assertEqual(client.get(f"/api/agents/{SHARED}/chats/{chat}/approvals").json(), [])
 
     def test_a_member_sees_the_pending_approvals_of_the_shared_chat(self) -> None:
