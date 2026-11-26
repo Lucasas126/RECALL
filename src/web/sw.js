@@ -15,6 +15,7 @@ const SHELL = [
   "/static/appearance.js",
   "/static/vendor/marked.umd.js",
   "/static/vendor/purify.min.js",
+  "/static/vendor/highlight.min.js",
   "/static/vendor/panzoom.min.js",
   "/static/fonts/inter.woff2",
   "/static/fonts/fraunces.woff2",
