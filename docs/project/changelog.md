@@ -3,6 +3,12 @@
 The notes of each release are on the GitHub Releases page. This file groups what changed by topic, starting with 0.4.0, which
 sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases between 5 and 15 November.
 
+## 0.6.1 (26 November 2026)
+
+- Web UI: browser notifications now show the agent name in the first line ("<agent> · Reply ready"); the chat title stays below.
+- Web UI: on narrow screens the model and reasoning controls move out of their own row into a panel opened by one options button next to the attach button; wide layouts are unchanged.
+- Web UI: a long agent name in the message prompt stays on one line; if it does not fit it scrolls slowly in a loop (only an ellipsis with reduced motion).
+
 ## 0.6.0 (26 November 2026)
 
 - Web UI: optional in-browser notifications (a bell in the side panel footer, per device, off by default; no Web Push). The page itself shows "Reply ready", "Approval needed" and "Automation finished" with the chat or automation title, only while it is in the background; clicking opens the chat or the Automations dialog. New `GET /api/automations/events` lists runs that ended since a marker (ids, title and status only). Telegram notifications of automations are unchanged. Removed the Tasks tab of the former Tasks dialog (a list of background tasks nobody used); the dialog is now **Automations** only.
