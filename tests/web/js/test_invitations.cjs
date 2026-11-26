@@ -1,0 +1,36 @@
+const assert = require("node:assert/strict");
+const { readFileSync } = require("node:fs");
+const path = require("node:path");
+const { test } = require("node:test");
+const vm = require("node:vm");
+
+const source = readFileSync(path.join(__dirname, "..", "..", "..", "src", "web", "static", "app.js"), "utf8");
+const code = source.match(/\/\/ ---- settings helpers[\s\S]*?\/\/ ---- end settings helpers/)[0];
+const context = vm.createContext({});
+vm.runInContext(`${code}\nthis.api = { invitationText, invitationNote, outgoingFor, navAttentionLevel };`, context);
+const api = context.api;
+const tr = (text) => text;
+
+test("the invitation text names the inviter and the agent, the note the billing user", () => {
+  const invitation = { agent_id: "nova", agent_name: "Nova", inviter: "user-a", inviter_name: "User A", billing_user: "user-a" };
+  assert.equal(api.invitationText(invitation, tr), "User A wants to share Nova with you");
+  assert.equal(api.invitationNote(invitation, tr), "It uses the keys and Claude subscription of user-a. Every member sees all its chats.");
+  assert.equal(api.invitationText({ agent_id: "nova", inviter: "user-a" }, tr), "user-a wants to share nova with you");
+});
+
+test("only the pending invitations of the open agent are listed", () => {
+  const data = { outgoing: [
+    { id: "1", agent_id: "nova", invitee: "user-b", status: "pending" },
+    { id: "2", agent_id: "nova", invitee: "user-c", status: "declined" },
+    { id: "3", agent_id: "sage", invitee: "user-b", status: "pending" },
+  ] };
+  assert.deepEqual(api.outgoingFor(data, "nova").map((i) => i.id), ["1"]);
+  assert.equal(api.outgoingFor(null, "nova").length, 0);
+});
+
+test("the menu dot takes the strongest of chats and invitations", () => {
+  assert.equal(api.navAttentionLevel("", 0), "");
+  assert.equal(api.navAttentionLevel("", 2), "ready");
+  assert.equal(api.navAttentionLevel("ready", 0), "ready");
+  assert.equal(api.navAttentionLevel("approval", 1), "approval");
+});

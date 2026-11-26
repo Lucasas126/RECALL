@@ -93,6 +93,55 @@ class AgentMover:
         self._audit(space_id, "share_agent", agent=agent_id, from_user=owner_user, members=everyone)
         return space_id
 
+    def regroup_agent(self, space_id: str, agent_id: str, members: list[str], actor: str) -> str:
+        """Move a shared agent to the space of exactly `members` (found or created); returns that space id.
+
+        Used when someone joins (invitation accepted) or leaves. The source space is deleted when it has no agents left.
+        """
+        everyone = list(dict.fromkeys(members))
+        if not everyone:
+            raise MoveError("share needs at least one other member")
+        source = self._owner(space_id, "space")
+        if agent_id not in source.agents:
+            raise MoveError("agent '{agent_id}' is not owned by '{user_id}'", agent_id=agent_id, user_id=space_id)
+        if actor not in source.members:
+            raise MoveError("'{actor}' is not a member of {space}", actor=actor, space=space_id)
+        levels = {m: self._owner(m, "user").max_level for m in everyone}
+        config = self.store.load(space_id, agent_id)
+        self._check_idle(space_id, agent_id)
+        target = next((s for s in all_spaces(self.config_dir) if set(s.members) == set(everyone)), None)
+        if target is not None and target.id == space_id:
+            return space_id
+        for member in everyone:
+            clash = agent_id_conflict(member, agent_id, self.config_dir, ignore=space_id)
+            if clash is not None:
+                raise MoveError("agent '{agent_id}' clashes with an agent of '{owner}'", agent_id=agent_id, owner=clash)
+        self._check_fits(config, levels, (target or source).terminal_backends, "the space")
+        created = target is None
+        if created:
+            billing = source.billing_user if source.billing_user in everyone else everyone[0]
+            ordered = [billing, *[m for m in everyone if m != billing]]
+            target_id = self._create_space(ordered[0], ordered[1:], None)
+        else:
+            target_id = target.id
+        user_md = self._read_user_md(space_id, agent_id)
+        try:
+            self._transfer(space_id, target_id, config, copy=False, paused=False, user_md=user_md)
+        except BaseException:
+            if created:
+                shutil.rmtree(self.config_dir / target_id, ignore_errors=True)
+            raise
+        remaining = self.store.user(space_id).agents
+        dropped = self._drop_targets(space_id, drop=agent_id) if remaining else []
+        dropped += self._drop_targets(target_id, only=agent_id)
+        if not remaining:
+            shutil.rmtree(self.config_dir / space_id, ignore_errors=True)  # its data folder stays
+        self._audit(space_id, "regroup_agent", agent=agent_id, actor=actor, to_space=target_id, members=everyone, dropped_targets=dropped)
+        self._safely(self._on_removed, space_id, agent_id)
+        self._safely(self._on_created, target_id, agent_id)
+        self._audit(target_id, "regroup_agent", agent=agent_id, actor=actor, from_space=space_id, members=everyone)
+        return target_id
+
     def unshare_agent(self, space_id: str, agent_id: str, actor: str) -> dict[str, str]:
         """Give the agent back: moved to the only member, else copied to each member (paused automations); returns member -> new id."""
         space = self._owner(space_id, "space")

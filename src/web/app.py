@@ -31,6 +31,7 @@ from src.service.chat import (
     ChatService,
     ServiceError,
     UnknownAgent,
+    UnknownInvitation,
     UnknownChat,
     UnknownTask,
     UnknownAutomation,
@@ -56,6 +57,10 @@ _SESSION_KEY = "user_id"
 _SESSION_RENEWED_KEY = "renewed_at"
 SESSION_MAX_AGE = 60 * 60 * 24 * 30  # a session lasts 30 days from the last renewal
 SESSION_RENEW_AFTER = 60 * 60 * 24  # an active session is re-signed at most once a day
+
+
+class InviteIn(BaseModel):
+    user_id: str
 
 
 class LoginIn(BaseModel):
@@ -338,6 +343,7 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
         return localized_error(request, 401, exc)
 
     @app.exception_handler(UnknownAgent)
+    @app.exception_handler(UnknownInvitation)
     @app.exception_handler(UnknownChat)
     @app.exception_handler(UnknownTask)
     @app.exception_handler(UnknownAutomation)
@@ -545,6 +551,36 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     @app.post("/api/agents", status_code=201)
     def create_agent(body: AgentConfig, user_id: str = Depends(current_user)):
         return service.create_agent(user_id, body)
+
+    @app.post("/api/agents/{agent_id}/invitations", status_code=201)
+    def invite_to_agent(agent_id: str, body: InviteIn, user_id: str = Depends(current_user)):
+        record = service.invite(user_id, agent_id, body.user_id)
+        return {"id": record["id"], "agent_id": agent_id, "invitee": record["invitee"], "status": record["status"],
+                "created": record["created"]}
+
+    @app.get("/api/invitations")
+    def list_invitations(user_id: str = Depends(current_user)):
+        return service.list_invitations(user_id)
+
+    @app.post("/api/invitations/{invitation_id}/accept")
+    def accept_invitation(invitation_id: str, user_id: str = Depends(current_user)):
+        return service.accept(user_id, invitation_id)
+
+    @app.post("/api/invitations/{invitation_id}/decline", status_code=204)
+    def decline_invitation(invitation_id: str, user_id: str = Depends(current_user)):
+        service.decline(user_id, invitation_id)
+
+    @app.post("/api/invitations/{invitation_id}/revoke", status_code=204)
+    def revoke_invitation(invitation_id: str, user_id: str = Depends(current_user)):
+        service.revoke(user_id, invitation_id)
+
+    @app.post("/api/agents/{agent_id}/leave")
+    def leave_agent(agent_id: str, user_id: str = Depends(current_user)):
+        return {"space_id": service.leave_shared(user_id, agent_id)}
+
+    @app.post("/api/agents/{agent_id}/unshare")
+    def unshare_agent(agent_id: str, user_id: str = Depends(current_user), owner: str = Depends(agent_owner)):
+        return {"agents": service.unshare_agent(user_id, owner, agent_id)}
 
     @app.get("/api/agents/{agent_id}")
     def get_agent(agent_id: str, owner: str = Depends(agent_owner)):
