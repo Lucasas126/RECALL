@@ -77,6 +77,32 @@ class ProcessWakeTests(AsyncFixture):
         self.assertIn(second, content)  # never lose an unread one
         self.assertNotIn(first, content)
 
+    def test_reading_the_end_while_the_wake_is_being_queued_still_drops_it(self) -> None:
+        """`process_wait` returns as soon as the process is done, before the wake hook queues its block: that read
+        finds nothing queued, so the hook has to look again once its block is queued."""
+        self.parent_gate = threading.Event()
+        events = self._send("question")
+        self.addCleanup(lambda: list(events))
+        self.assertTrue(self.parent_started.wait(3))
+        registry = process_registry(self.data)
+        real = self.service.send_system
+        seen_in_window: list[str] = []
+
+        def send_then_read(user, agent, chat, block, **kwargs):
+            pid = block.split(" [", 1)[0].split()[-1]
+            registry.mark_seen(USER, pid)  # the agent's read lands after the hook's check, before its block is queued
+            seen_in_window.append(pid)
+            return real(user, agent, chat, block, **kwargs)
+
+        self.service.send_system = send_then_read
+        self.addCleanup(lambda: setattr(self.service, "send_system", real))
+        pid = self.run_process("echo raced")
+        registry.wait(USER, pid, 10)
+        self.assertTrue(until(lambda: seen_in_window))
+        self.parent_gate.set()
+        self.assertTrue(until(self.idle))
+        self.assertFalse(until(lambda: self.process_wakes(), timeout=1.0))
+
     def test_an_unread_process_still_wakes_and_a_running_one_is_not_marked(self) -> None:
         registry = process_registry(self.data)
         pid = self.run_process("sleep 0.4; echo late")
