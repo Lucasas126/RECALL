@@ -79,7 +79,7 @@ class ServiceWorkerRouteTests(PwaFixture):
 class ServiceWorkerUpdateTests(PwaFixture):
     def test_a_new_worker_waits_for_the_page_to_ask(self) -> None:
         body = self.client.get("/sw.js").text
-        install = body.split('addEventListener("install"', 1)[1].split('addEventListener("activate"', 1)[0]
+        install = body.split('addEventListener("install"', 1)[1].split('addEventListener("message"', 1)[0]
         self.assertNotIn("skipWaiting", install)
         self.assertIn('event.data.type === "SKIP_WAITING"', body)
         self.assertIn("self.skipWaiting()", body)
