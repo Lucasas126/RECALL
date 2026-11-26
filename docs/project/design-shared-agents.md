@@ -1,6 +1,6 @@
 # Design: agents shared between users
 
-Status: step 1 done on branch `feat/shared-agents-space` (model, derived level, login refusal, `resolve_owner`, admin CLI, tests); step 2 done on branch `feat/shared-web-tests` (web: `agent_owner` dependency on every `/api/agents/{id}/...` route, space agents in the listings with `shared`/`space_id`, spaces left out of the user overview, cached `all_spaces`, tests in `tests/web/test_shared_agents_web.py`; a space with an unreadable member now fails closed even after it was valid once); the rest is planned. Steps are built one branch at a time off `feat/shared-agents`; each step lists what is done.
+Status: steps 1-5 implemented; 6 in progress; 7 done (docs). Step 1: model, derived level, login refusal, `resolve_owner`, admin CLI. Step 2: web access by membership (`agent_owner` dependency on every `/api/agents/{id}/...` route, space agents in the listings with `shared`/`space_id`; a space with an unreadable member fails closed even after it was valid once). Step 3: speaker. Step 4: move. Step 5: invitations, accept/decline/revoke, leave, unshare, web UI. Steps are built one branch at a time off `feat/shared-agents`.
 
 ## Goal
 
@@ -101,9 +101,9 @@ One operation, used by share (user to space) and unshare (space to user, once pe
    `resolve_owner`, admin CLI. Tests. **Done** (`src/config/spaces.py`, `src/admin/spaces.py`; a declared `max_level` on a space is refused).
 2. Web access by membership, "Shared" section, "shared" tag, isolation of mentions and delegation.
 3. Speaker: `author` in the JSONL, `[NAME]` prefix, `USER.md` sections and limit. **Done** (author, prefix and name in the UI; `src/agent/user_sections.py`; limit scaled in the memory tool, the prompt counter, `ChatService.get_memory`/`update_memory` and so the web route; a hand edit of USER.md only has to fit the scaled limit, its sections are free text).
-4. Move: share an existing agent into a space and unshare (copies), with prechecks and index rebuild. **Service and admin CLI done** (`src/service/agent_move.py`, `agent share|unshare`; `.index` is not copied, the index is rebuilt on the agent's next start or `reindex`; the CLI cannot see running replies of a server process, so stop them first; web UI pending).
-5. Invitations: request, accept, decline, revoke, leave; UI.
-6. Notifications to every member; Telegram per speaker.
-7. Docs (`docs/architecture/agents-and-users.md`, permissions, user guide, built-in `recall` skill).
+4. Move: share an existing agent into a space and unshare (copies), with prechecks and index rebuild. **Done** (`src/service/agent_move.py`, `agent share|unshare`; `.index` is not copied, the index is rebuilt after the move; the CLI cannot see running replies of a server process, so stop them first).
+5. Invitations: request, accept, decline, revoke, leave, unshare; UI. **Done** (`src/service/invitations.py`, `ChatService` methods, `/api/invitations` routes, Share block and Agents tab in the web UI).
+6. Notifications to every member; Telegram per speaker. **In progress.**
+7. Docs (`docs/architecture/agents-and-users.md`, permissions, user guide, built-in `recall` skill). **Done.**
 
 Before deploy: back up config and data, then test the release on a throwaway instance with two test users.

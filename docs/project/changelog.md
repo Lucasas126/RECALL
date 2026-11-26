@@ -3,6 +3,10 @@
 The notes of each release are on the GitHub Releases page. This file groups what changed by topic, starting with 0.4.0, which
 sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases between 5 and 15 November.
 
+## Unreleased
+
+- Shared agents: several users can use one agent (same SOUL, memory, chats, tools; level = lowest member's; the creator's keys and Claude subscription pay). Share from the agent settings by user id; the invited person accepts or declines in the Agents tab. Messages carry the speaker's name and `USER.md` has one section per member. Leave, or unshare (copies for everyone, automations paused). New `space` and `agent share|unshare` admin commands and `/api/invitations` routes. Notifications to every member and Telegram per speaker are still in progress. See [shared agents](../user-guide/shared-agents.md).
+
 ## 0.6.2 (26 November 2026)
 
 - Web UI: the one-line message prompt now lines up with the text caret in the narrow composer.
