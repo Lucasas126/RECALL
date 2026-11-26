@@ -67,7 +67,27 @@ Implemented:
 - The admin user list (`/api/admin/users`, `user_overview`) does not list spaces; the admin CLI has `space` commands.
 - The list of spaces is cached and reused while the `space-*` folders and their `user.yaml` files are unchanged.
 
-Planned: the editing UI for shared agents, per-person attribution of messages and billing in the web, and Telegram.
+- **Owner resolution** is by id: agent ids must be unique across a person's private agents and their spaces; a clash is refused
+  at share and accept time. `resolve_owner(user, agent)` in `src/config/spaces.py` is the single lookup.
+- **Isolation.** Private agents cannot @mention, delegate to or list a space's agents, and the other way round; inside one
+  space they work as between agents of one user.
+- **Billing.** The space has a `billing_user` (the creator). Its provider settings, secret variable names and Claude login are
+  copied at creation; Claude login and usage resolve against that user's folder only.
+- **Speaker.** A message to a space agent is stored with `author` and sent with a `[NAME]` prefix. `USER.md` has one
+  `## <member id>` section per member (`src/agent/user_sections.py`), limit scaled by member count (max 5x).
+- **Moving** (`src/service/agent_move.py`, `AgentMover`): share moves the agent from a user to a space, unshare moves it back to
+  the only member or copies it to each member, and leaving regroups it into the space of the remaining members. Each move needs
+  the agent idle (no active or queued reply, checked under the slot lock), moves config, data, avatar and automations (copies
+  start paused), does not copy `.index` (reindexed in the new owner), and writes an audit entry in each affected owner.
+  Unshare copies drop keys and MCP tokens and cap the level by the user's `max_level`.
+- **Invitations** (`src/service/invitations.py`): one JSON file per invitation in `<data>/.invitations/` (`pending`, `accepted`,
+  `declined`, `revoked`), written atomically and serialised by a lock. `ChatService.invite|accept|decline|revoke|leave_shared`
+  with routes `POST /api/agents/{id}/invitations`, `GET /api/invitations`, `POST /api/invitations/{id}/accept|decline|revoke`,
+  `POST /api/agents/{id}/leave|unshare`. Nothing moves until accept; any member may invite or revoke.
+- **Web.** The agent settings have a Share block, the Agents tab a "Shared" section, the pending invitations and a dot; chats of
+  shared agents carry a "shared" tag.
+
+Planned: notifications to every member and Telegram per speaker (step 6). User view: [shared agents](../user-guide/shared-agents.md).
 
 ## isolation
 

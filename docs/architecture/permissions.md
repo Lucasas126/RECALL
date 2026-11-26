@@ -52,6 +52,11 @@ Notes:
 - Every user can edit their own agents in the web UI; `permissions` lets an *agent* do it for them, so a user below admin can
   have a bot that tunes the permissions of their other bots.
 - An agent can only restrict another agent to its own level or lower, never above the user's `max_level`.
+- **Shared agents.** A space (the owner of a shared agent, see [agents and users](agents-and-users.md#shared-agents-spaces)) has no declared
+  `max_level`: it is derived on every load as the lowest `max_level` of its members, and the ordinary ceiling caps every agent of
+  the space (what is above is disabled, not deleted). It fails closed: if any member is missing, unreadable or not a real user,
+  the space is unusable (its agents answer 404 and vanish from listings) rather than falling back to the others. Adding a member
+  or lowering a member's ceiling recomputes the cap; adding is refused when it would put an agent below what it needs.
 - A permission change made by an agent always needs human approval (it cannot be set to "always allow"), is written to the audit
   log with a diff, and can be reset to the defaults.
 - The `local` backend runs commands as the RECALL OS user on the RECALL host. It is a host shell and belongs to L5 only. The

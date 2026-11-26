@@ -183,3 +183,11 @@ def member_names(space: UserConfig, config_dir: Path) -> dict[str, str]:
         user = _read(config_dir, member)
         names[member] = user.name if user is not None else member
     return names
+
+
+def notification_targets(owner_id: str, config_dir: Path) -> list[str]:
+    """The people who receive what an agent of `owner_id` sends: every member of a space, else the owner itself."""
+    owner = _read(config_dir, owner_id)
+    if owner is not None and owner.kind == "space":
+        return list(owner.members)
+    return [owner_id]

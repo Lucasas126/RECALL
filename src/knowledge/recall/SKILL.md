@@ -34,8 +34,9 @@ Read this page, then load only the reference you need: `skill_view("recall", "re
 | something is broken: logs, errors, what the user must do | `references/troubleshooting.md` |
 | connecting an MCP server (catalog, token or sign-in, enabling it on the agent) | `references/troubleshooting.md`, section "Connecting an MCP server" |
 | which source file implements a behaviour | `references/code-map.md` |
+| shared with other users | `references/shared-agents.md` |
 | administering RECALL: `python -m src.admin` for agents, users, secrets; what applies when | `references/admin-cli.md` |
-| step-by-step tasks: new agent, change model, rename the guide, folder, terminal, secrets, delete (with the `agents` tools or the CLI) | `references/recipes.md` |
+| step-by-step tasks: new agent, model, rename, folder, terminal, secrets, delete | `references/recipes.md` |
 | what an admin agent can reach with a local terminal; cross-user and secret rules | `references/security-for-admins.md` |
 
 ## Rules
