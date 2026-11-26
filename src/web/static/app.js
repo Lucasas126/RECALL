@@ -504,10 +504,9 @@ function invitationNote(invitation, translate) {
 function outgoingFor(invitations, agentId) {
   return (invitations?.outgoing ?? []).filter((item) => item.agent_id === agentId && (item.status ?? "pending") === "pending");
 }
-function setNavDotSource(sources, source, on) {
-  if (on) sources.add(source);
-  else sources.delete(source);
-  return sources.size > 0;
+// The menu-button dot: the strongest level among the chats' and the invitations' ("approval" over "ready").
+function navAttentionLevel(chatLevel, invitations) {
+  return chatLevel === "approval" ? "approval" : chatLevel || (invitations > 0 ? "ready" : "");
 }
 // ---- end settings helpers
 
@@ -2989,16 +2988,11 @@ $("agent-delete").addEventListener("click", async () => {
 
 // ------------------------------------------------------------------ shared agent invitations
 
-const navDotSources = new Set();
-function setNavDot(source, on) {
-  const visible = setNavDotSource(navDotSources, source, on);
-  for (const button of document.querySelectorAll(".nav-toggle")) button.toggleAttribute("data-nav-dot", visible);
-  $("tab-agents").toggleAttribute("data-nav-dot", navDotSources.has("invitations"));
-}
-
 function renderInvitations() {
   const data = state.invitations ?? { incoming: [], outgoing: [], pending_count: 0 };
-  setNavDot("invitations", data.pending_count > 0);
+  paintNavAttention();
+  if (data.pending_count > 0) $("tab-agents").dataset.attention = "ready";
+  else delete $("tab-agents").dataset.attention;
   const box = $("invitations-block");
   box.hidden = !data.incoming.length;
   box.replaceChildren(...(data.incoming.length ? [Object.assign(document.createElement("h3"), { textContent: tr("Invitations") })] : []),
@@ -4118,6 +4112,20 @@ function markChatRead(agentId, chatId) {
   api(`/api/agents/${encodeURIComponent(agentId)}/chats/${encodeURIComponent(chatId)}/read`, { method: "POST" }).catch(() => {});
 }
 
+// The side panel is collapsed on a phone, so the row dots are out of sight: the menu buttons repeat the strongest one
+// (a command waits for approval, or an answer is unread) from the chats other than the open one.
+// Pending shared-agent invitations add a dot too. Called without chats it reuses the last list.
+function paintNavAttention(chats = state.navChats ?? []) {
+  state.navChats = chats;
+  const others = chats.filter((chat) => !(chat.id === state.chatId && chat.agent_id === state.agentId));
+  const chatLevel = others.some((chat) => chat.pending_approvals > 0) ? "approval" : others.some((chat) => chat.unread) ? "ready" : "";
+  const level = navAttentionLevel(chatLevel, state.invitations?.pending_count ?? 0);
+  for (const button of document.querySelectorAll(".nav-toggle")) {
+    if (level) button.dataset.attention = level;
+    else delete button.dataset.attention;
+  }
+}
+
 async function refreshChats() {
   if (!state.user) return;
   const session = state.session;
@@ -4125,6 +4133,7 @@ async function refreshChats() {
   if (session !== state.session) return;
   notifyScan(chats);
   renderChatHeader(chats.find((chat) => chat.id === state.chatId && chat.agent_id === state.agentId) ?? state.chatInfo);
+  paintNavAttention(chats);
   const list = $("chat-list");
   let section = null;
   list.replaceChildren(

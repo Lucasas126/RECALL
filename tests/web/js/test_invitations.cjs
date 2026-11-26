@@ -7,7 +7,7 @@ const vm = require("node:vm");
 const source = readFileSync(path.join(__dirname, "..", "..", "..", "src", "web", "static", "app.js"), "utf8");
 const code = source.match(/\/\/ ---- settings helpers[\s\S]*?\/\/ ---- end settings helpers/)[0];
 const context = vm.createContext({});
-vm.runInContext(`${code}\nthis.api = { invitationText, invitationNote, outgoingFor, setNavDotSource };`, context);
+vm.runInContext(`${code}\nthis.api = { invitationText, invitationNote, outgoingFor, navAttentionLevel };`, context);
 const api = context.api;
 const tr = (text) => text;
 
@@ -28,10 +28,9 @@ test("only the pending invitations of the open agent are listed", () => {
   assert.equal(api.outgoingFor(null, "nova").length, 0);
 });
 
-test("the nav dot shows while any source wants it", () => {
-  const sources = new Set();
-  assert.equal(api.setNavDotSource(sources, "invitations", true), true);
-  assert.equal(api.setNavDotSource(sources, "chats", true), true);
-  assert.equal(api.setNavDotSource(sources, "invitations", false), true);
-  assert.equal(api.setNavDotSource(sources, "chats", false), false);
+test("the menu dot takes the strongest of chats and invitations", () => {
+  assert.equal(api.navAttentionLevel("", 0), "");
+  assert.equal(api.navAttentionLevel("", 2), "ready");
+  assert.equal(api.navAttentionLevel("ready", 0), "ready");
+  assert.equal(api.navAttentionLevel("approval", 1), "approval");
 });
