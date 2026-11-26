@@ -48,8 +48,9 @@ const tokenPriceFormat = new Intl.NumberFormat("en-US", {
   style: "currency", currency: "USD", maximumSignificantDigits: 6,
 });
 
-// Theme is a per-browser preference: "system" removes the override so prefers-color-scheme applies.
-function applyTheme(theme) {
+// Theme and accent are user preferences on the server; localStorage is the local copy that paints the first frame.
+// "system" removes the override so prefers-color-scheme applies (the server stores no theme then).
+function applyTheme(theme, sync = true) {
   if (theme === "light" || theme === "dark") {
     localStorage.setItem("theme", theme);
     document.documentElement.dataset.theme = theme;
@@ -58,6 +59,37 @@ function applyTheme(theme) {
     delete document.documentElement.dataset.theme;
   }
   renderThemeToggle();
+  if (sync) pushAppearance({ theme: theme === "light" || theme === "dark" ? theme : null });
+}
+
+// Best effort: a failed save is silent, the local copy still applies and the next start uploads or reconciles it.
+function pushAppearance(changes) {
+  if (state.preferences) Object.assign(state.preferences, changes);
+  api("/api/preferences", { method: "PATCH", body: JSON.stringify(changes) }).catch(() => {});
+}
+globalThis.recallAppearance?.onChange(({ accent, accent_color }) => pushAppearance({ accent, accent_color }));
+
+// On start: server values win over the local copy; values the server lacks are uploaded once per browser (afterwards a
+// missing server value means "no choice", e.g. theme back to system, and clears the local one).
+function syncAppearance(preferences) {
+  const appearance = globalThis.recallAppearance;
+  if (!appearance) return;
+  const local = { theme: localStorage.getItem("theme"), ...appearance.snapshot() };
+  const upload = {};
+  const seeded = localStorage.getItem("recall.appearanceSynced") === "1";
+  for (const key of ["theme", "accent", "accent_color"]) {
+    if (preferences[key] == null && local[key] != null && !seeded) upload[key] = local[key];
+  }
+  if (preferences.theme !== (local.theme ?? null) && (preferences.theme != null || seeded)) {
+    applyTheme(preferences.theme ?? "system", false);
+    $("settings-theme").value = preferences.theme ?? "system";
+  }
+  if ((preferences.accent != null && preferences.accent !== local.accent)
+    || (preferences.accent_color != null && preferences.accent_color !== local.accent_color)) {
+    appearance.apply({ accent: preferences.accent, accent_color: preferences.accent_color });
+  }
+  try { localStorage.setItem("recall.appearanceSynced", "1"); } catch { /* private mode */ }
+  if (Object.keys(upload).length) pushAppearance(upload);
 }
 
 function effectiveTheme() {
@@ -603,7 +635,7 @@ function translateInterface() {
     ["settings-disposable-days-hint", "Disposable chats are deleted after this many days without activity."],
     ["settings-language-label", "Alerts and errors"], ["settings-theme-label", "Theme"],
     ["settings-language-hint", "Language of alerts and error messages, here and in Telegram."],
-    ["settings-theme-hint", "Applied at once and remembered in this browser only."],
+    ["settings-theme-hint", "Applied at once and synced across your devices."],
     ["agent-avatar-legend", "Profile picture"], ["agent-avatar-upload", "Upload image"], ["agent-avatar-remove", "Remove"],
     ["agent-avatar-free-label", "No circle or border"],
     ["agent-avatar-free-hint", "For transparent PNGs: the image is shown as it is, without cropping."],
@@ -2627,6 +2659,7 @@ $("agent-delete").addEventListener("click", async () => {
 
 function applyPreferences(preferences) {
   state.preferences = preferences;
+  syncAppearance(preferences);
   // application-wide size limits (settings.yaml) arrive with the preferences
   if (preferences.limits) $("agent-prompt").maxLength = preferences.limits.soul_chars;
   $("messages").classList.toggle("hide-thinking", !preferences.show_thinking);

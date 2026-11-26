@@ -23,7 +23,7 @@ function load({ theme, accent, colour } = {}) {
     MutationObserver: class { observe() {} },
   });
   vm.runInContext(source, context);
-  return { root, properties, store, listeners };
+  return { root, properties, store, listeners, context };
 }
 
 const channel = (v) => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
@@ -135,4 +135,21 @@ test("a colour that needed adjusting says so", () => {
   const { els } = loadPanel({ theme: "dark", accent: "custom", colour: "#101040" });
   assert.match(els["accent-note"].textContent, /readable/);
   assert.equal(loadPanel({ theme: "dark", accent: "custom", colour: "#ff6b9d" }).els["accent-note"].textContent, "");
+});
+
+test("recallAppearance applies the server's accent, keeps a local copy and reports user changes", () => {
+  const ctx = load({ accent: "blue" });
+  const { root, store, properties } = ctx;
+  const api = ctx.context.recallAppearance;
+  assert.equal(JSON.stringify(api.snapshot()), JSON.stringify({ accent: "blue", accent_color: null }));
+  api.apply({ accent: "custom", accent_color: "#12AB56" });
+  assert.equal(root.dataset.accent, "custom");
+  assert.equal(store["recall.accent"], "custom");
+  assert.equal(store["recall.accentColor"], "#12ab56");
+  assert.ok(properties["--accent"]);
+  api.apply({ accent: "nonsense", accent_color: "red" });   // invalid values are ignored
+  assert.equal(root.dataset.accent, "custom");
+  api.apply({ accent: "gold" });
+  assert.equal(root.dataset.accent, "gold");
+  assert.equal(properties["--accent"], undefined);
 });

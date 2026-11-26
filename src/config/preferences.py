@@ -48,6 +48,11 @@ class UserPreferences(BaseModel):
     core_agent_id: Annotated[str, Field(strict=True, pattern=r"^[A-Za-z0-9_-]{1,64}$")] | None = None
     # how the user's own profile picture is shown: cropped into a circle, or as it is (for transparent PNGs)
     avatar_style: Literal["circle", "free"] = "circle"
+    # appearance, synced across the user's devices (each browser keeps a local copy to paint before the first load);
+    # None means no choice yet: the theme follows the system and the accent is the default one
+    theme: Literal["light", "dark"] | None = None
+    accent: Literal["pink", "blue", "gold", "green", "violet", "cyan", "custom"] | None = None
+    accent_color: Annotated[str, Field(strict=True, pattern=r"^#[0-9a-fA-F]{6}$")] | None = None
 
     def language_for(self, configured: str) -> Literal["en", "es"]:
         """Resolve an explicit language override or the language configured in YAML."""

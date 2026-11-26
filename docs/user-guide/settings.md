@@ -6,7 +6,7 @@ across the top on narrow screens); only one section shows at a time.
 
 | Section | Settings |
 | --- | --- |
-| General | show model thinking; show the agent's picture in replies (on by default); your **Profile picture**; theme and accent colour (**Appearance**, this browser only, applied at once); language of alerts and errors; **Default agent** (the agent new chats open with when you do not pick one, and the Telegram router's fallback when it is unsure and no core agent is set; empty means the first agent in your list) |
+| General | show model thinking; show the agent's picture in replies (on by default); your **Profile picture**; theme and accent colour (**Appearance**, applied at once and synced across your devices); language of alerts and errors; **Default agent** (the agent new chats open with when you do not pick one, and the Telegram router's fallback when it is unsure and no core agent is set; empty means the first agent in your list) |
 | Models | default LLM model and default speech-to-text model (the model picker) |
 | Chats & memory | maximum associative memory matches (1-20); days to keep disposable chats (1-365) |
 | Telegram | choose the agent automatically (the orchestrator) and the core agent used when it is unsure (empty: *Same as default agent*) |
@@ -33,7 +33,7 @@ by `GET /api/preferences` in a `defaults` object; see the [preferences API](../r
 A setting you never changed is stored as nothing, and a reset stores nothing again: it saves `null` for the associative matches, the
 disposable days, the orchestrator switch, the default agent, the core agent and the default models, so they keep following the application (or your
 `user.yaml` models) if the default changes later. Theme, language, show model thinking and show the agent's picture always hold a value, so a reset puts the
-default value back. The theme and the accent colour are kept in the browser and apply immediately; the other settings are applied by **Save settings**.
+default value back. The theme and the accent colour apply immediately and are saved to your account at once; the other settings are applied by **Save settings**.
 
 ## numbers, saving and leaving
 
@@ -46,8 +46,9 @@ button or Escape) with unsaved changes asks for confirmation first.
 
 ## appearance and art slots
 
-**Settings > General > Appearance** holds three browser-only choices, applied at once and kept in `localStorage` (not in `preferences.json`, so
-they are not shared with Telegram and do not count as unsaved changes):
+**Settings > General > Appearance** holds choices applied at once, which do not count as unsaved changes. They are saved in `preferences.json` (`theme`, `accent`, `accent_color`),
+so every device you sign in on shows the same look, and each browser keeps a copy in `localStorage` so the page is painted before it loads.
+On start the account's values win; a browser's own values are uploaded once if the account has none. Saving is best effort (no error if offline):
 
 - **Theme**: system, light or dark (the Theme row above it).
 - **Accent colour**: pink (default), blue, gold, green, violet or cyan. It colours the primary buttons, the active-chat bookmark, links and

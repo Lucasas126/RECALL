@@ -342,7 +342,7 @@ _SPANISH = {
     "The agent that answers greetings and general talk when no agent is clearly the best fit.": "El agente que responde a saludos y conversación general cuando ningún agente encaja claramente.",
     "Disposable chats are deleted after this many days without activity.": "Los chats desechables se eliminan tras estos días sin actividad.",
     "Language of alerts and error messages, here and in Telegram.": "Idioma de las alertas y los mensajes de error, aquí y en Telegram.",
-    "Applied at once and remembered in this browser only.": "Se aplica al instante y solo se recuerda en este naatlasdor.",
+    "Applied at once and synced across your devices.": "Se aplica al instante y se sincroniza entre tus dispositivos.",
     "Used by chats that have no model of their own and by agents that do not set one.": "Lo usan los chats sin modelo propio y los agentes que no fijan uno.",
     "Transcribes voice messages to text.": "Transcribe los mensajes de voz a texto.",
     "Voice message language": "Idioma de los mensajes de voz",

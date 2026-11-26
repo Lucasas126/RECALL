@@ -1,5 +1,5 @@
-// Appearance: accent colour, a per-browser preference kept in localStorage
-// (like the light/dark theme) and applied as data-accent on <html>.
+// Appearance: accent colour, a user preference kept on the server (synced by app.js) with a local copy in localStorage
+// (like the light/dark theme) so it is applied without network and applied as data-accent on <html>.
 // The accent is one of the named swatches or "custom": any colour picked with the colour input, whose variables are derived
 // here for the current theme (kept at least AA, 4.5:1, against the theme's surfaces, like the swatches).
 // This file is loaded synchronously in <head>, so the saved values are applied before first paint (no flash).
@@ -97,6 +97,27 @@
 
   setAccent(read(ACCENT_KEY));
 
+  // The accent is also a user preference on the server (synced across devices): app.js reads the local copy with `snapshot`,
+  // applies the server's values with `apply`, and is told with `onChange` when the user picks another accent.
+  const listeners = [];
+  let repaint = () => {};
+  const notify = () => { for (const listener of listeners) { try { listener(snapshot()); } catch { /* best effort */ } } };
+  const snapshot = () => {
+    const accent = read(ACCENT_KEY);
+    return { accent: accent === "custom" || ACCENTS.includes(accent) ? accent : null, accent_color: validColour(read(CUSTOM_KEY)) };
+  };
+  globalThis.recallAppearance = {
+    snapshot,
+    onChange: (listener) => { listeners.push(listener); },
+    // apply values from the server (keys left out or null are kept) and refresh the local copy
+    apply({ accent, accent_color: colour } = {}) {
+      const picked = validColour(colour);
+      if (picked) { custom = picked; write(CUSTOM_KEY, picked); }
+      if (accent === "custom" || ACCENTS.includes(accent)) { setAccent(accent); write(ACCENT_KEY, accent); }
+      repaint();
+    },
+  };
+
   // the derived variables depend on the theme: recompute when it changes (the toggle, or the system setting when automatic)
   const retheme = () => { if (root.dataset.accent === "custom") applyCustom(); };
   try { new MutationObserver(retheme).observe(root, { attributes: true, attributeFilter: ["data-theme"] }); } catch { /* no observer: the next load applies it */ }
@@ -129,17 +150,24 @@
       setAccent("custom");
       write(CUSTOM_KEY, custom);
       write(ACCENT_KEY, "custom");
+      notify();
       for (const radio of radios) radio.checked = radio.value === "custom";
       paint(fromHexField);
     };
 
     paint();
+    repaint = () => {
+      hsv = toHsv(custom);
+      paint();
+      for (const radio of radios) radio.checked = radio.value === root.dataset.accent;
+    };
     for (const radio of radios) {
       radio.checked = radio.value === root.dataset.accent;
       radio.addEventListener("change", () => {
         if (!radio.checked) return;
         setAccent(radio.value);
         write(ACCENT_KEY, radio.value);
+        notify();
       });
     }
     if (trigger && panel) {
