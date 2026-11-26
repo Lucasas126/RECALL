@@ -545,8 +545,10 @@ class ChatService:
     # ------------------------------------------------------------------ users & agents
 
     def login(self, user_id: str) -> dict:
-        """Resolve an existing user and return their profile and agents; raises UnknownUser."""
+        """Resolve an existing user and return their profile and agents; raises UnknownUser (always for a space)."""
         user = self._user(user_id)
+        if user.kind != "user":
+            raise UnknownUser("unknown user: {user_id}", user_id=user_id)
         return {
             "id": user_id,
             "name": user.name,
@@ -573,6 +575,8 @@ class ChatService:
             user = self._user(user_id)
         except UnknownUser:
             raise UnknownUser("Invalid user ID or password") from None
+        if user.kind != "user":  # a space is not a person: it never logs in
+            raise UnknownUser("Invalid user ID or password")
         if not verify_password(password, user.password_hash):
             raise UnknownUser("Invalid user ID or password")
         return self.login(user_id)
@@ -1444,19 +1448,19 @@ class ChatService:
     def claude_login_status(self, user_id: str) -> dict:
         """Login state of the user's own Claude login folder (never reads the credential files)."""
         user = self._user(user_id)
-        if not login_allowed(user.id, user.claude_subscription):
+        if not login_allowed(user.claude_owner, user.claude_subscription):
             return {"available": False, "reason": "no_own_login"}
-        status = cli_status(resolved_settings(user.id, user.claude_subscription))
+        status = cli_status(resolved_settings(user.claude_owner, user.claude_subscription))
         return {"available": True, "cli_found": status["cli_found"], "logged_in": status["logged_in"],
                 "subscription": status.get("subscription")}
 
     def claude_login_start(self, user_id: str) -> dict:
         user = self._user(user_id)
-        return claude_signin.start(user.id, resolved_settings(user.id, user.claude_subscription))
+        return claude_signin.start(user.id, resolved_settings(user.claude_owner, user.claude_subscription))
 
     def claude_login_code(self, user_id: str, code: str) -> dict:
         user = self._user(user_id)
-        claude = resolved_settings(user.id, user.claude_subscription)
+        claude = resolved_settings(user.claude_owner, user.claude_subscription)
         status = claude_signin.submit(user.id, code, claude)
         with self._usage_lock:
             self._usage_cache.pop(user_id, None)
@@ -1470,9 +1474,9 @@ class ChatService:
     def claude_usage(self, user_id: str) -> dict:
         """Plan usage (session and week, in percent) of the user's Claude login; cached for a minute."""
         user = self._user(user_id)
-        if not login_allowed(user.id, user.claude_subscription):
+        if not login_allowed(user.claude_owner, user.claude_subscription):
             return {"available": False, "reason": "no_own_login"}
-        folder = resolved_settings(user.id, user.claude_subscription).claude_config_dir
+        folder = resolved_settings(user.claude_owner, user.claude_subscription).claude_config_dir
         with self._usage_lock:
             hit = self._usage_cache.get(user_id)
             if hit is not None and monotonic() - hit[0] < 60:
@@ -2430,11 +2434,11 @@ class ChatService:
     def admin_claude_login_start(self, admin_id: str, user_id: str) -> dict:
         user = self._admin_login_user(admin_id, user_id)
         self._admin_audit(admin_id, user_id, "claude_login_start")
-        return claude_signin.start(user.id, resolved_settings(user.id, user.claude_subscription))
+        return claude_signin.start(user.id, resolved_settings(user.claude_owner, user.claude_subscription))
 
     def admin_claude_login_code(self, admin_id: str, user_id: str, code: str) -> dict:
         user = self._admin_login_user(admin_id, user_id)
-        status = claude_signin.submit(user.id, code, resolved_settings(user.id, user.claude_subscription))
+        status = claude_signin.submit(user.id, code, resolved_settings(user.claude_owner, user.claude_subscription))
         self._availability.forget()
         self._admin_audit(admin_id, user_id, "claude_login_done")
         return {"logged_in": status["logged_in"], "subscription": status.get("subscription")}
@@ -3030,7 +3034,7 @@ class ChatService:
             user = self._user(user_id)
             if is_claude_subscription(CHAT_NAMING.model):  # ZDR is an OpenRouter filter; it never applies here
                 # runs with the requesting user's own Claude login, never another user's
-                provider = claude_subscription_provider(user.claude_subscription, user_id=user.id, purpose="chat_naming.model")
+                provider = claude_subscription_provider(user.claude_subscription, user_id=user.claude_owner, purpose="chat_naming.model")
 
                 def ask(history: list[dict]) -> dict:
                     return provider.invoke(history, CHAT_NAMING.model, stream=False, tools=[_NAMING_TOOL])
@@ -3096,7 +3100,7 @@ class ChatService:
         ]
         user = self._user(user_id)
         if is_claude_subscription(config.model):
-            provider = claude_subscription_provider(user.claude_subscription, user_id=user.id, purpose="approval_explain.model")
+            provider = claude_subscription_provider(user.claude_subscription, user_id=user.claude_owner, purpose="approval_explain.model")
             reply = provider.invoke(messages, config.model, stream=False)
         else:
             api_key = get_secret(config.api_key).strip()

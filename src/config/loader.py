@@ -11,6 +11,7 @@ from src.config.levels import check_agent_level, effective_agent_level
 from src.config.models import AgentConfig, ModelsConfig, ResolvedAgent, UserConfig
 from src.config.preferences import UserPreferencesStore
 from src.config.secrets import get_secret
+from src.config.spaces import resolve_space
 from src.config.settings import ASSOC, CHAT_NAMING, CONFIG_DIR, DATA_DIR, TERMINAL, current_mcp_settings
 from src.agent.tool_groups import DEFAULT_TOOL_GROUPS
 from src.terminal.resolve import resolve_backends
@@ -28,7 +29,8 @@ def _load_yaml(path: Path) -> dict:
 
 def load_user(user_id: str) -> UserConfig:
     """Load a user's config; raises FileNotFoundError if the user does not exist and AgentConfigError if its id differs from the folder."""
-    return check_user_folder(UserConfig(**_load_yaml(CONFIG_DIR / user_id / "user.yaml")), user_id)
+    user = check_user_folder(UserConfig(**_load_yaml(CONFIG_DIR / user_id / "user.yaml")), user_id)
+    return resolve_space(user, CONFIG_DIR)  # a space gets its derived max_level; raises SpaceError if a member is gone
 
 
 def load_agent_config(user_id: str, agent_id: str) -> AgentConfig:
@@ -106,6 +108,7 @@ def load_agent(user_id: str, agent_id: Optional[str] = None) -> ResolvedAgent:
             logger.warning("agent %s/%s: terminal tools disabled: %s", user.id, agent.id, exc)
     return ResolvedAgent(
         user_id=user.id,
+        claude_user_id=user.claude_owner,
         language=user.language,
         require_zdr=user.require_zdr,
         id=agent.id,
