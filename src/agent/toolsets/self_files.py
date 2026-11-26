@@ -83,7 +83,7 @@ def build_self_tools(agent: Agent) -> list[Callable[..., str]]:
 
         return memory_limits().memory_chars if target == "memory" else user_limit(agent.config)
 
-    sections = bool(getattr(agent.config, "space_members", None))  # USER.md of a space agent has one section per member
+    sections = bool(getattr(getattr(agent, "config", None), "space_members", None))  # USER.md of a space agent has one section per member
 
     @tool
     def memory(
