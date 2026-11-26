@@ -13,6 +13,7 @@ class PrunedChatTests(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self) -> None:
         self.service = Mock()
+        self.service.agent_owner.side_effect = lambda person, agent: person
         self.service.get_preferences.return_value = {"show_thinking": False, "language": "en"}
         self.service.list_agents.return_value = [{"id": "agent-a", "name": "First"}]
         self.service.create_chat.return_value = {"id": "fresh-chat"}

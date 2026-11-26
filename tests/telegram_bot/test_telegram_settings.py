@@ -26,6 +26,7 @@ class TelegramSettingsTests(unittest.IsolatedAsyncioTestCase):
             "default_llm_model": "llm/base", "default_stt_model": "stt/base",
         }
         self.service = Mock()
+        self.service.agent_owner.side_effect = lambda person, agent: person
         self.service.get_preferences.side_effect = lambda user: self.preferences.copy()
         self.service.language.side_effect = lambda user: self.preferences["language"]
         self.service.list_agents.return_value = [
