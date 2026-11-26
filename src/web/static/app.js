@@ -9643,21 +9643,35 @@ function usageReset(iso, now = Date.now()) {
   return `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
+// "Claude subscription · user@example.com · Pro": what the numbers belong to; fields the answer lacks are left out
+function usageHeader(report) {
+  const plan = typeof report?.plan === "string" && report.plan ? report.plan[0].toUpperCase() + report.plan.slice(1) : "";
+  return [report?.label ? tr(report.label) : "", report?.account_email || "", plan].filter(Boolean).join(" · ");
+}
+
+// one block per provider, so more subscriptions can be listed later; today the only provider is the Claude subscription
+function usageProviders(report) {
+  return report?.available && report.windows?.length ? [report] : [];
+}
+
 function renderClaudeUsage(report) {
   const box = $("claude-usage");
-  const windows = report?.available ? report.windows : [];
-  box.hidden = !windows.length;
-  if (!windows.length) return setClaudeUsageOpen(false);
+  const providers = usageProviders(report);
+  box.hidden = !providers.length;
+  if (!providers.length) return setClaudeUsageOpen(false);
   const body = $("claude-usage-body");
   body.replaceChildren();
   for (const dot of box.querySelectorAll(".usage-dot")) dot.dataset.level = "";
-  for (const item of windows) {
-    const percent = Math.round(item.percent);
-    const level = usageLevel(item.percent);
-    const dot = box.querySelector(`.usage-dot[data-window="${item.key}"]`);
-    if (dot) {
-      dot.dataset.level = level;
-      dot.title = `${tr(USAGE_LABELS[item.key] ?? item.key)}: ${percent}%`;
+  for (const provider of providers) {
+    const header = usageHeader(provider);
+    if (header) body.append(element("div", { className: "usage-account", textContent: header, title: header }));
+    for (const item of provider.windows) {
+      const percent = Math.round(item.percent);
+      const level = usageLevel(item.percent);
+      const dot = box.querySelector(`.usage-dot[data-window="${item.key}"]`);
+      if (dot) {
+        dot.dataset.level = level;
+        dot.title = `${tr(USAGE_LABELS[item.key] ?? item.key)}: ${percent}%`;
     }
     const fill = element("span", {});
     fill.style.width = `${percent}%`;
@@ -9666,6 +9680,7 @@ function renderClaudeUsage(report) {
     body.append(element("div", { className: "usage-row" },
       element("div", { className: "usage-head" }, element("span", { textContent: tr(USAGE_LABELS[item.key] ?? item.key) }), element("span", { className: "usage-reset", textContent: reset }), element("strong", { textContent: `${percent}%` })),
       element("div", { className: "usage-bar" }, fill)));
+    }
   }
 }
 
