@@ -69,5 +69,49 @@ class ServiceMoveTests(AdminFixture):
         self.assertIsNone(self.service._preferences.get("user-b").agent_id)
         self.assertEqual(self.service._preferences.get("user-a").agent_id, "bot")
 
+    def _orphan_sequence(self) -> None:
+        """share, unshare (both get a private copy), user-a deletes hers: config gone, data folder kept."""
+        space_id = self.service.share_agent("user-a", "bot", ["user-b"])
+        self.service.unshare_agent("user-b", space_id, "bot")
+        self.service.delete_agent("user-a", "bot")
+        (self.data_dir / "user-a" / "bot" / "old.txt").write_text("old", encoding="utf-8")
+
+    def test_configured_copy_still_blocks_sharing(self) -> None:
+        space_id = self.service.share_agent("user-a", "bot", ["user-b"])
+        self.service.unshare_agent("user-b", space_id, "bot")
+        with self.assertRaises(MoveError):
+            self.service.share_agent("user-b", "bot", ["user-a"])  # user-a still has a configured `bot`
+
+    def test_orphan_data_does_not_block_unshare_after_regroup(self) -> None:
+        self._orphan_sequence()
+        space = self.service.share_agent("user-b", "bot", ["user-a"])  # accepted invitation
+        space = self.service._regroup("user-b", space, "bot", ["user-b"])  # user-a leaves
+        space = self.service._regroup("user-b", space, "bot", ["user-a", "user-b"])  # invited again
+        space = self.service._regroup("user-b", space, "bot", ["user-a"])  # user-b leaves
+        plan = self.service.unshare_agent("user-a", space, "bot")
+        self.assertEqual(plan, {"user-a": "bot"})
+        self.assertIn("bot", self.service._user("user-a").agents)
+        trash = list((self.data_dir / "user-a" / ".trash").glob("bot-*"))
+        self.assertEqual(len(trash), 1)  # the old folder was kept, not deleted
+        self.assertEqual((trash[0] / "old.txt").read_text(encoding="utf-8"), "old")
+        self.assertFalse((self.data_dir / "user-a" / "bot" / "old.txt").exists())
+
+    def test_orphan_data_is_trashed_on_share_and_audited(self) -> None:
+        self._orphan_sequence()
+        self.service.share_agent("user-b", "bot", ["user-a"])
+        self.assertEqual(len(list((self.data_dir / "user-a" / ".trash").glob("bot-*"))), 0)  # user-a's folder is not touched
+        lines = (self.data_dir / "user-b" / "admin_audit.jsonl").read_text(encoding="utf-8")
+        self.assertNotIn("orphan_data_moved_to", lines)
+
+    def test_orphan_data_keeps_the_free_id(self) -> None:
+        self._orphan_sequence()
+        space = self.service.share_agent("user-b", "bot", ["user-a"])
+        plan = self.service.unshare_agent("user-a", space, "bot")
+        self.assertEqual(plan, {"user-a": "bot", "user-b": "bot"})  # no "-2" because of the orphan folder
+        self.assertTrue(any((self.data_dir / "user-a" / ".trash").glob("bot-*")))
+        audit = (self.data_dir / "user-a" / "admin_audit.jsonl").read_text(encoding="utf-8")
+        self.assertIn("orphan_data_moved_to", audit)
+
+
 if __name__ == "__main__":
     unittest.main()
