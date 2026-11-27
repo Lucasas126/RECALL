@@ -624,6 +624,10 @@ class ChatService:
             usable.append(space_id)
         return usable
 
+    def _routable_agents(self, person_id: str) -> list[tuple[str, str]]:
+        """`(owner, agent_id)` of every agent the person can talk to: their own, then those of their spaces."""
+        return [(owner, agent_id) for owner, _ in self._owners_of(person_id) for agent_id in self._user(owner).agents]
+
     def _owners_of(self, person_id: str) -> list[tuple[str, str | None]]:
         """`(owner, space_id)` for the person's own agents (space_id None) and then each of their spaces."""
         return [(person_id, None), *((space_id, space_id) for space_id in self._spaces_of(person_id))]
@@ -1591,7 +1595,12 @@ class ChatService:
         except (ServiceError, PreferencesError, OSError, ValueError):
             return False
         enabled = ORCHESTRATOR.enabled if override is None else override
-        return enabled and len(user.agents) >= 2
+        if not enabled:
+            return False
+        try:
+            return len(self._routable_agents(user.id)) >= 2
+        except (ServiceError, OSError, ValueError):
+            return len(user.agents) >= 2
 
     def default_agent(self, user_id: str) -> Optional[str]:
         """The user's default agent: the saved `default_agent_id` while it is still one of theirs, else the first agent.
@@ -1629,8 +1638,8 @@ class ChatService:
         try:
             user = self._user(user_id)
             criteria, names = {}, {}
-            for agent_id in user.agents:
-                config = self._agent_config(user_id, agent_id)
+            for owner, agent_id in self._routable_agents(user_id):  # shared agents too; ids never clash across owners
+                config = self._agent_config(owner, agent_id)
                 names[agent_id] = config.name
                 description = (config.description or "").strip()
                 criteria[agent_id] = f"{config.name}: {description}" if description else config.name
