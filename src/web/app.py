@@ -4,6 +4,7 @@ import json
 import re
 import os
 import time
+from queue import Empty
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator, Iterator, Literal, Optional
@@ -223,6 +224,30 @@ def _avatar_response(request: Request, avatar, content: bytes) -> Response:
 def _sse(event: str, data, generation_id: str = "") -> str:
     event_id = f"id: {generation_id}\n" if generation_id else ""
     return f"{event_id}event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+CHANGES_HEARTBEAT_SECONDS = 20.0  # a comment line this often keeps proxies from closing an idle stream
+_CHANGES_POLL_SECONDS = 2.0  # how often the stream looks again, so a closed connection is noticed and unsubscribed
+
+
+def _changes_stream(queue, unsubscribe, heartbeat: float = CHANGES_HEARTBEAT_SECONDS) -> Iterator[str]:
+    """A chat's change notices as SSE (`event: change`, data `{kind}`) with periodic heartbeats; ends when the client leaves."""
+    idle = 0.0
+    try:
+        yield ": open\n\n"
+        while True:
+            try:
+                kind = queue.get(timeout=min(_CHANGES_POLL_SECONDS, heartbeat))
+            except Empty:
+                idle += min(_CHANGES_POLL_SECONDS, heartbeat)
+                if idle >= heartbeat:
+                    idle = 0.0
+                    yield ": keepalive\n\n"
+                continue
+            idle = 0.0
+            yield _sse("change", {"kind": kind})
+    finally:
+        unsubscribe()
 
 
 def _compaction_stream(events, language: str) -> Iterator[str]:
@@ -842,6 +867,14 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
             return Response(status_code=204)  # no reply is running: the saved chat is complete
         return StreamingResponse(
             _event_stream(events, language, owner, agent_id, chat_id), media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    @app.get("/api/agents/{agent_id}/chats/{chat_id}/events")
+    def chat_changes(agent_id: str, chat_id: str, owner: str = Depends(agent_owner)):
+        queue, unsubscribe = service.watch(owner, agent_id, chat_id)
+        return StreamingResponse(
+            _changes_stream(queue, unsubscribe), media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
