@@ -4706,7 +4706,7 @@ async function openChat(chatId) {
   }
 }
 
-async function openChatNow(chatId) {
+async function openChatNow(chatId, { keepPosition = false } = {}) {
   const session = state.session;
   const agentId = state.agentId;
   const revision = ++state.chatModelRevision;
@@ -4726,7 +4726,7 @@ async function openChatNow(chatId) {
     syncUsage();
   } else {
     forgetApprovals(agentId, chatId);
-    renderMessages(data.messages, data.window);
+    renderMessages(data.messages, data.window, undefined, keepPosition);
     // a reply started elsewhere (another tab, an earlier page load) is still running: replay it and follow it live
     if (data.chat.active) followReply(agentId, chatId);
   }
@@ -4734,7 +4734,7 @@ async function openChatNow(chatId) {
   syncApprovals(agentId, chatId);
   ensureTaskPolling();  // task cards and wake replies of this chat
   startProcessPolling();
-  $("input").focus();
+  focusComposer();
   // the sidebar already lists this chat: mark it as the open one where it is instead of asking the server for the whole
   // list again (the slowest request of a switch); the periodic refresh keeps titles and dots current. A chat the list does
   // not show yet (just created) brings the list in the background, without holding the switch.
@@ -5696,7 +5696,10 @@ async function loadEarlier(container, count) {
 // The end of a long chat is drawn first: `window` (from the server: {total, hidden, first_index}) says how many earlier
 // messages are left out, and a bar above the first one loads them. `limit` is how many messages the view asks for again
 // when the chat is reloaded (after a reply, an edit, a followed run), so a longer history the user opened stays open.
-function renderMessages(messages, window = null, limit = CHAT_PAGE) {
+function renderMessages(messages, window = null, limit = CHAT_PAGE, keepPosition = false) {
+  const box = $("messages");
+  // a reload of the chat being read (after a reply ends) must not pull a reader who scrolled up back to the end
+  const keep = keepPosition && !stuckToBottom ? box.scrollTop : null;
   const container = document.createElement("div");
   container.className = "chat-view";
   container.historyLimit = limit;
@@ -5709,7 +5712,12 @@ function renderMessages(messages, window = null, limit = CHAT_PAGE) {
   // the stored history may carry no report (a reply still running, an older chat): keep this chat's last known one
   if ($("usage").hidden) syncUsage();
   updateHistoryBar(container);
-  scrollDown(true);
+  if (keep === null) scrollDown(true);
+  else {
+    stuckToBottom = false;
+    box.scrollTop = keep;
+    updateJumpLatest();
+  }
 }
 
 // What an empty chat shows: the agent's name, large, over its picture faded behind it. It hides by itself (CSS) as soon
@@ -6917,7 +6925,7 @@ async function attachWake(agentId, chatId) {
     if (!current || !data.chat.active) return;
     state.chatInfo = data.chat;
     forgetApprovals(agentId, chatId);
-    renderMessages(data.messages, data.window, state.view?.historyLimit);
+    renderMessages(data.messages, data.window, state.view?.historyLimit, true);
     followReply(agentId, chatId);
   } finally {
     wakeAttaching = false;
@@ -8653,14 +8661,14 @@ async function dispatchMessage(content, attachments, edit = null) {
       }
       updateBusy();
       if (!isGenerating(request.agentId, request.chatId)) {
-        if (isCurrent(request)) $("input").focus();
+        if (isCurrent(request)) focusComposer();
         try {
           await refreshChats();
           if (isCurrent(request)) {
             if (request.reloadAfter) {
               forgetApprovals(request.agentId, request.chatId);
               const reloaded = await api(chatsUrl(`/${request.chatId}${chatQuery(state.view?.historyLimit)}`));
-              renderMessages(reloaded.messages, reloaded.window, state.view?.historyLimit);
+              renderMessages(reloaded.messages, reloaded.window, state.view?.historyLimit, true);
               syncApprovals(request.agentId, request.chatId);
             }
             else await syncEditIndexes(request);
@@ -8879,6 +8887,11 @@ $("input").addEventListener("keyup", (e) => {
 $("input").addEventListener("blur", closeComposerPopup);
 $("composer-popup").addEventListener("mousedown", (e) => e.preventDefault());   // keep the focus (and the caret) in the box
 
+// Focusing the box by itself opens the on-screen keyboard on a phone and covers what is being read: only desktops get it.
+function focusComposer() {
+  if (!touchKeyboard.matches) $("input").focus();
+}
+
 // Touch screens have no Shift key: there Enter writes a new line and the Send button sends.
 const touchKeyboard = window.matchMedia("(pointer: coarse)");
 function enterSends(event, touch = touchKeyboard.matches) {
@@ -9023,12 +9036,12 @@ async function followReply(agentId, chatId, attempt = 0) {
     });
     if (next === "stop") return;
     forgetApprovals(agentId, chatId);
-    renderMessages(data.messages, data.window, state.view?.historyLimit);
+    renderMessages(data.messages, data.window, state.view?.historyLimit, true);
     if (next === "follow") followReply(agentId, chatId, attempt + 1);
     else {
       updateBusy();
       syncApprovals(agentId, chatId);
-      $("input").focus();
+      focusComposer();
     }
   } catch (err) {
     if (isCurrent(request)) reply.error(err);
@@ -10451,7 +10464,7 @@ async function liveSyncCheck(pushed = false) {
     const previous = liveSync.key === key ? liveSync.seen : null;
     liveSync.key = key;
     liveSync.seen = current;
-    if (liveSyncAction(previous, current, isGenerating(agentId, chatId)) === "reload") await openChatNow(chatId);
+    if (liveSyncAction(previous, current, isGenerating(agentId, chatId)) === "reload") await openChatNow(chatId, { keepPosition: true });
   } catch (err) {
     if (err?.status === 404) { liveSyncClose(); chatGone(agentId, chatId, session); }  // else: the next tick tries again
   } finally { liveSync.busy = false; }
