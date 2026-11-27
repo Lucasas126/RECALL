@@ -42,7 +42,7 @@ from src.config.field_defaults import agent_defaults
 from src.config.secrets import fingerprint as secrets_fingerprint, get_secret
 from src.config.zdr import chat_zdr, zdr_required
 from src.service.invitations import ACCEPTED, DECLINED, PENDING, REVOKED, InvitationStore
-from src.config.spaces import SpaceError, is_space_id, resolve_owner, scaled_user_chars, spaces_of
+from src.config.spaces import SpaceError, agent_id_conflict, is_space_id, resolve_owner, scaled_user_chars, spaces_of
 from src.config.settings import (
     AGENT_MAX_TOOL_HOPS, APPROVAL_EXPLAIN, ASSOC, CHAT_NAMING, CONFIG_DIR, DATA_DIR, ORCHESTRATOR, PDF, SPEECH_TO_TEXT, TAVILY, TELEGRAM_ALLOWED_USERS_ENV, current_mcp_settings,
     SUBAGENTS, TERMINAL, UPLOADS, VIDEO_DECOMPOSITION, WEB_PUBLIC_URL, memory_limits,
@@ -1126,6 +1126,8 @@ class ChatService:
             raise InvitationError("you cannot invite yourself")
         if invitee_id == owner or invitee_id in owner_user.members:
             raise InvitationError("'{user_id}' already has this agent", user_id=invitee_id)
+        if agent_id_conflict(invitee_id, agent_id, CONFIG_DIR, ignore=owner) is not None:
+            raise InvitationError("'{user_id}' already has an agent with the id '{agent_id}'", user_id=invitee_id, agent_id=agent_id)
         store = self._invitation_store()
         with store.lock:
             for record in store.all():

@@ -113,5 +113,22 @@ class ServiceMoveTests(AdminFixture):
         self.assertIn("orphan_data_moved_to", audit)
 
 
+    def test_copy_with_same_id_blocks_invite_and_accept_leaves_it_untouched(self) -> None:
+        from src.service.chat import InvitationError
+
+        space_id = self.service.share_agent("user-a", "bot", ["user-b"])
+        self.service.unshare_agent("user-b", space_id, "bot")  # both keep a private `bot`
+        (self.data_dir / "user-a" / "bot" / "chat.txt").write_text("mine", encoding="utf-8")
+        with self.assertRaises(InvitationError):
+            self.service.invite("user-b", "bot", "user-a")  # refused early
+        self.assertEqual(self.service._invitation_store().all(), [])
+        with self.assertRaises(MoveError):  # and the move itself still refuses
+            self.service.share_agent("user-b", "bot", ["user-a"])
+        self.assertEqual(self.service._user("user-a").agents, ["bot"])
+        self.assertTrue((self.config_dir / "user-a" / "agents" / "bot.yaml").is_file())
+        self.assertEqual((self.data_dir / "user-a" / "bot" / "chat.txt").read_text(encoding="utf-8"), "mine")
+        self.assertEqual(self.service._user("user-b").agents, ["bot"])
+
+
 if __name__ == "__main__":
     unittest.main()

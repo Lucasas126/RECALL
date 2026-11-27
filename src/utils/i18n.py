@@ -412,6 +412,7 @@ _SPANISH = {
     "unknown invitation": "invitación desconocida",
     "you cannot invite yourself": "no puedes invitarte a ti mismo",
     "'{user_id}' already has this agent": "'{user_id}' ya tiene este agente",
+    "'{user_id}' already has an agent with the id '{agent_id}'": "'{user_id}' ya tiene un agente con el id '{agent_id}'",
     "'{user_id}' already has a pending invitation for this agent": "'{user_id}' ya tiene una invitación pendiente para este agente",
     "this agent is no longer available for sharing": "este agente ya no está disponible para compartir",
     "agent '{agent_id}' is not shared": "el agente '{agent_id}' no está compartido",
