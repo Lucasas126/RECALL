@@ -26,5 +26,6 @@ A shared agent is used by several people at once. Its owner is a **space** (`spa
 - Leave: the member goes, the agent stays with the others. Unshare: with several members each gets a private copy (automations paused, keys not copied, `USER.md` reduced to their section); with one member left the agent moves back.
 - All members are equal; any may edit, unshare or delete the agent. You cannot do any of this yourself.
 - Telegram: only the person talking gets the reply. Notifications to every member are planned.
-- A message starting with `@<member id>` in a shared agent is for that person: stored with the author, the agent does not run or reply. An agent with the same id wins. Private agents: normal message.
+- `@id` counts anywhere (start or after a space; not in emails). The FIRST valid mention decides: an agent routes there (later mentions are plain text, one agent per message); a person (below) means later agent mentions do not run. The popup shows a notice instead of candidates after an agent mention.
+- A message with `@<member id>` in a shared agent is for that person: stored with the author, the agent does not run or reply. An agent with the same id wins. Private agents: normal message.
 - Admin commands (spaces, sharing): `references/admin-cli.md`.

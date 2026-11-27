@@ -38,7 +38,7 @@ Private agents cannot @mention, delegate to or list a shared agent, and the shar
 
 ## Writing to a person
 
-In a shared agent's chat, typing `@` also suggests the other members (name, `@<user id>` and "person"). A message that starts with `@<member id>` is for that person: it is stored in the chat with your name and the other member sees it, but the agent does not run (no model call, no reply). The agent reads it later as normal history, with your `[NAME]` prefix. If the id is also an agent of the space, the agent answers as usual. In a private agent `@<member id>` is a normal message.
+In a shared agent's chat, typing `@` also suggests the other members (name, `@<user id>` and "person"). A message with `@<member id>` anywhere is for that person (`@id` after a space or at the start, followed by a space, punctuation or the end; emails like `a@b.com` do not count): it is stored in the chat with your name and the other member sees it, but the agent does not run (no model call, no reply). The agent reads it later as normal history, with your `[NAME]` prefix. If the id is also an agent of the space, the agent answers as usual. In a private agent `@<member id>` is a normal message. The first valid mention decides: after an agent mention every other mention (agents or people) is plain text; after a person mention only more people can follow and an agent mention does not run. At most one agent per message: after an agent mention the `@` popup only shows "Only one agent can be mentioned per message", and after a person it offers only the other people.
 
 ## Automations
 
