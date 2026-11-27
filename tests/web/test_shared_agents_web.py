@@ -218,3 +218,79 @@ class SpacesCacheTests(SharedAgentFixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ChatChangesTests(SharedAgentFixture):
+    """The push channel of an open chat: a notifier per chat, and an SSE route behind the same membership check."""
+
+    def test_the_notifier_delivers_only_to_subscribers_of_that_chat_and_forgets_them(self) -> None:
+        from src.service.live import ChatChanges
+        changes = ChatChanges()
+        changes.publish(SPACE, SHARED, "c1", "turn")  # nobody listens: nothing is kept
+        self.assertEqual(changes.watched(), 0)
+        first, second = changes.subscribe(SPACE, SHARED, "c1"), changes.subscribe(SPACE, SHARED, "c1")
+        other = changes.subscribe(SPACE, SHARED, "c2")
+        changes.publish(SPACE, SHARED, "c1", "turn")
+        self.assertEqual((first.get_nowait(), second.get_nowait()), ("turn", "turn"))
+        self.assertTrue(other.empty())
+        changes.unsubscribe(SPACE, SHARED, "c1", first)
+        changes.unsubscribe(SPACE, SHARED, "c1", first)  # twice is harmless
+        changes.publish(SPACE, SHARED, "c1", "reply_done")
+        self.assertTrue(first.empty())
+        self.assertEqual(second.get_nowait(), "reply_done")
+        changes.unsubscribe(SPACE, SHARED, "c1", second)
+        changes.unsubscribe(SPACE, SHARED, "c2", other)
+        self.assertEqual(changes.watched(), 0)
+
+    def test_the_stream_sends_changes_and_heartbeats_and_unsubscribes_when_closed(self) -> None:
+        from queue import SimpleQueue
+        from src.web.app import _changes_stream
+        queue, left = SimpleQueue(), []
+        stream = _changes_stream(queue, lambda: left.append(True), heartbeat=0.05)
+        self.assertTrue(next(stream).startswith(":"))
+        queue.put("turn")
+        self.assertEqual(next(stream), 'event: change\ndata: {"kind": "turn"}\n\n')
+        self.assertEqual(next(stream), ": keepalive\n\n")
+        stream.close()
+        self.assertEqual(left, [True])
+
+    def test_the_route_is_closed_to_non_members_and_unknown_chats(self) -> None:
+        member = self._client_as("user-one")
+        chat = member.post(f"/api/agents/{SHARED}/chats").json()["id"]
+        self.assertEqual(self._client_as("user-three").get(f"/api/agents/{SHARED}/chats/{chat}/events").status_code, 404)
+        self.assertEqual(member.get(f"/api/agents/{SHARED}/chats/nope/events").status_code, 404)
+        self.assertEqual(self.service.changes.watched(), 0)
+
+    def test_a_member_is_told_when_another_member_sends(self) -> None:
+        import src.web.app as web
+        real = web._changes_stream
+
+        def until_change(queue, unsubscribe, heartbeat=20.0):
+            for chunk in real(queue, unsubscribe, heartbeat):
+                yield chunk
+                if "event: change" in chunk:
+                    return  # the test client buffers a stream: end it after the first change
+
+        first, second = self._client_as("user-one"), self._client_as("user-two")
+        chat = first.post(f"/api/agents/{SHARED}/chats").json()["id"]
+        with patch.object(web, "_changes_stream", until_change):
+            import threading
+            seen: list[str] = []
+
+            def listen() -> None:
+                with second.stream("GET", f"/api/agents/{SHARED}/chats/{chat}/events") as response:
+                    seen.append(str(response.status_code))
+                    seen.extend(line for line in response.iter_lines() if line.startswith("data:"))
+
+            thread = threading.Thread(target=listen)
+            thread.start()
+            for _ in range(200):  # wait until the listener is subscribed
+                if self.service.changes.watched():
+                    break
+                threading.Event().wait(0.02)
+            first.post(f"/api/agents/{SHARED}/chats/{chat}/messages", json={"content": "hello"})
+            thread.join(10)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(seen[0], "200")
+        self.assertIn('"kind"', seen[1])
+        self.assertEqual(self.service.changes.watched(), 0)

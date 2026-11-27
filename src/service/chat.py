@@ -19,6 +19,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.agent import compaction
+from src.service.live import ChatChanges
 from src.agent.agent import Agent, embeddings_provider, main_provider, model_provider
 from src.agent.tools import chat_folder_options
 from src.agent.dream import DEFAULT_DREAM_PROMPT
@@ -477,6 +478,7 @@ class ChatService:
         self._slots_guard = threading.Lock()
         # (user, origin agent, origin chat) -> (mentioned agent, its chat) while a mention reply runs or is being copied
         self._mention_runs: dict[tuple[str, str, str], tuple[str, str]] = {}
+        self.changes = ChatChanges()  # who watches which chat: see `src/service/live.py`
         self._favorites = ModelFavorites(CONFIG_DIR)
         self._preferences = UserPreferencesStore(CONFIG_DIR)
         self._agents = AgentStore(CONFIG_DIR, DATA_DIR)
@@ -2104,6 +2106,7 @@ class ChatService:
             conversations.rename(chat_id, title)
         except FileNotFoundError as exc:
             raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
+        self.changes.publish(user_id, agent_id, chat_id, "renamed")
         return conversations.summary(chat_id, self._retention_days(user_id))
 
     @staticmethod
@@ -2138,6 +2141,7 @@ class ChatService:
             with slot.state:
                 slot.agents.pop(chat_id, None)
         self._approvals.forget_chat(user_id, agent_id, chat_id)
+        self.changes.publish(user_id, agent_id, chat_id, "deleted")
         try:
             self._agent_index(user_id, agent_id).forget_chat(chat_id)
         except Exception:  # the chat is gone; a stale index entry is dropped by the next reconcile anyway
@@ -2282,6 +2286,7 @@ class ChatService:
                             slot.agents.pop(chat_id, None)  # its context still holds the removed turns
                     self._enqueue(user_id, agent_id, slot, chat_id, run)
                     events = self._events(run, run.events.subscribe())
+                    self.changes.publish(user_id, agent_id, chat_id, "turn")
                     break
             if monotonic() > deadline:
                 raise AgentBusy("the chat is still replying; try again in a moment")
@@ -2344,6 +2349,7 @@ class ChatService:
         )
         self._forget_cached_agent(user_id, agent_id, chat_id)  # the agent's next turn reloads the chat with it
         self._mark_unread(user_id, agent_id, chat_id)
+        self.changes.publish(user_id, agent_id, chat_id, "turn")
         return iter([ChatEvent("delivered", data={"to": person})])
 
     def _send_mention(
@@ -2431,6 +2437,7 @@ class ChatService:
                 mention_reply={"agent_id": target_id, "chat_id": target_chat}, **extra,
             )
             self._forget_cached_agent(user_id, origin_id, origin_chat)
+            self.changes.publish(user_id, origin_id, origin_chat, "reply_done")
         except Exception:
             logger.exception("could not copy the mention reply of %s into %s/%s", target_id, origin_id, origin_chat)
         finally:
@@ -3251,6 +3258,13 @@ class ChatService:
         finally:
             run.events.unsubscribe(queue)
 
+    def watch(self, user_id: str, agent_id: str, chat_id: str) -> tuple[SimpleQueue, Callable[[], None]]:
+        """Subscribe to the chat's changes (kinds published by `ChatChanges`); returns the queue and the unsubscribe."""
+        self._owned_agent(user_id, agent_id)
+        self._require_chat(self._conversations(user_id, agent_id), chat_id)
+        queue = self.changes.subscribe(user_id, agent_id, chat_id)
+        return queue, lambda: self.changes.unsubscribe(user_id, agent_id, chat_id, queue)
+
     def follow(self, user_id: str, agent_id: str, chat_id: str) -> Iterator[ChatEvent] | None:
         """Attach to the chat's running reply: replay what it produced so far, then follow it live.
 
@@ -3284,6 +3298,7 @@ class ChatService:
                     return
                 run = pending.popleft()
                 slot.active[chat_id] = run
+            self.changes.publish(user_id, agent_id, chat_id, "reply_started")
             if run.compact is not None:
                 try:
                     text = self._manual_compaction(user_id, agent_id, slot, run)
@@ -3317,6 +3332,7 @@ class ChatService:
                 with slot.state:
                     slot.active.pop(chat_id, None)
             self._mark_unread(user_id, agent_id, chat_id)
+            self.changes.publish(user_id, agent_id, chat_id, "reply_done")
             self._compact_after_reply(slot, chat_id)
 
     def _mark_unread(self, user_id: str, agent_id: str, chat_id: str) -> None:
