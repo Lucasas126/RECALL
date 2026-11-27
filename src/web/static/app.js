@@ -2282,8 +2282,6 @@ function drawApprovalRules(entries) {
   const rules = entries.filter((entry) => entry.learned); // the others are in the rule editor
   state.agentForm.learnedEntries = rules;
   state.agentForm.learned = rules.map((entry) => entry.rule);
-  const open = chats.find((chat) => chat.id === state.chatId && chat.agent_id === state.agentId);
-  if (open?.unread && !document.hidden) markChatRead(open.agent_id, open.id);
   list.replaceChildren(...rules.map((entry) => {
     const item = document.createElement("li");
     const text = Object.assign(document.createElement("span"), { className: "approval-rule-text", textContent: approvalRuleText(entry.rule) });
