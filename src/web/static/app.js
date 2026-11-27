@@ -1789,6 +1789,7 @@ function rememberChat(agentId, chatId, hasTurns) {
 function showTab(tab) {
   const agents = tab === "agents";
   state.tab = tab;
+  paintNavAttention();
   renderShowHiddenButton();
   $("tab-chats").setAttribute("aria-pressed", String(!agents));
   $("tab-agents").setAttribute("aria-pressed", String(agents));
@@ -4302,6 +4303,10 @@ function paintNavAttention(chats = state.navChats ?? []) {
     if (level) button.dataset.attention = level;
     else delete button.dataset.attention;
   }
+  // With the panel open the menu button stays quiet (CSS); on the Agents tab the Chats tab carries the chat dot instead.
+  const chatsTab = $("tab-chats");
+  if (chatLevel && state.tab === "agents") chatsTab.dataset.attention = chatLevel;
+  else delete chatsTab.dataset.attention;
 }
 
 async function refreshChats() {
