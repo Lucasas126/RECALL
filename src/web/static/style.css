@@ -1306,7 +1306,8 @@ html.resizing-sidebar #app { transition: none; }
 .invitations { flex: 0 0 auto; width: 100%; max-width: 640px; margin: 0 auto; display: grid; gap: 8px; align-content: start; }
 .invitations h3 { margin: 0; }
 /* with the editor open the view is a column: the block is a compact unit above it, aligned with it (no stretch) */
-#agents-view:has(#agent-editor:not([hidden])) > .invitations { max-width: none; margin: 0; min-height: 0; }
+/* the same centred card whether the agent list or an editor is open (the editor turns the view into a column) */
+#agents-view:has(#agent-editor:not([hidden])) > .invitations { align-self: center; min-height: 0; margin-bottom: 8px; }
 .invitation { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
 .invitation p { margin: 0 0 2px; }
 .invitation-actions, .share-row { display: flex; gap: 8px; }
@@ -1317,7 +1318,8 @@ html.resizing-sidebar #app { transition: none; }
 .share-list:empty { display: none; }
 .share-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; }
 .share-list li .share-id, .share-list li .share-tag { color: var(--muted); font-size: .85em; }
-.share-list li .share-tag { margin-left: 6px; }
+.share-list li .share-who { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.share-list li .share-who .share-tag { font-size: .8em; }
 #agent-share-error:empty { display: none; }
 .share-leave { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
 .share-leave .model-note { margin: 0; }
