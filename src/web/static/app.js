@@ -363,10 +363,12 @@ function splitHiddenAgents(agents) {
 }
 
 // The line on a shared agent's settings page ("" for an own agent).
-function sharedAgentNote(agent, translate) {
+function sharedAgentNote(agent, translate, me = null) {
   if (!agent?.shared) return "";
-  return translate("Shared agent · uses the keys and Claude subscription of {user}", {
-    user: agent.billing_user || translate("the space owner"),
+  if (agent.billing_user && agent.billing_user === me) return translate("Shared agent · uses your providers and subscriptions");
+  const payer = (agent.members ?? []).find((member) => member.id === agent.billing_user);
+  return translate("Shared agent · uses the providers and subscriptions of {user}", {
+    user: payer?.name || agent.billing_user || translate("the space owner"),
   });
 }
 
@@ -499,17 +501,28 @@ function invitationText(invitation, translate) {
   });
 }
 function invitationNote(invitation, translate) {
-  return translate("It uses the keys and Claude subscription of {user}. Every member sees all its chats.", {
-    user: invitation.billing_user || invitation.inviter,
+  return translate("It uses the providers and subscriptions of {user}. Every member sees all its chats.", {
+    user: invitation.billing_name || invitation.inviter_name || invitation.billing_user || invitation.inviter,
   });
 }
-// The Share block's member rows (pure): who has access, "you", and who pays (the billing user). A private agent: only you.
+// The Share block's member rows (pure): who has access, "(you)" after your name, and whose providers and subscriptions the
+// agent uses (the billing user). A private agent: only you.
 function memberRows(agent, meId, translate) {
-  if (!agent?.shared) return [{ id: meId, name: translate("Only you"), you: true, tags: [] }];
-  return (agent.members ?? []).map((member) => ({
+  if (!agent?.shared) return [{ id: meId, name: translate("Only you"), you: true, suffix: "", note: "" }];
+  const members = agent.members ?? [];
+  const billing = members.find((member) => member.id === agent.billing_user);
+  return members.map((member) => ({
     id: member.id, name: member.name || member.id, you: member.id === meId,
-    tags: [...(member.id === meId ? [translate("you")] : []), ...(member.id === agent.billing_user ? [translate("pays")] : [])],
+    suffix: member.id === meId ? translate("(you)") : "",
+    note: member.id !== agent.billing_user ? ""
+      : member.id === meId ? translate("uses your providers and subscriptions")
+        : translate("uses {user}'s providers and subscriptions", { user: billing?.name || billing?.id || agent.billing_user }),
   }));
+}
+// What identifies the open agent's pending invitations (pure): a change means someone answered, so the members changed.
+function shareSignature(invitations, agentId) {
+  if (!invitations || !agentId) return null;
+  return outgoingFor(invitations, agentId).map((item) => item.id).sort().join(",");
 }
 function outgoingFor(invitations, agentId) {
   return (invitations?.outgoing ?? []).filter((item) => item.agent_id === agentId && (item.status ?? "pending") === "pending");
@@ -855,8 +868,8 @@ function translateInterface() {
     ["model-zdr-warning", "ZDR is not required for your next selection. Providers may retain your prompts and replies. Your OpenRouter account may still enforce ZDR."],
     ["tab-chats", "Chats"], ["tab-agents", "Agents"],
     ["agent-hidden-label", "Hidden"],
-    ["agent-share-legend", "Share"], ["agent-share-leave-note", "Leave stops your access; Unshare gives every member a private copy."], ["agent-share-invite", "Invite"], ["agent-leave", "Leave"], ["agent-unshare", "Unshare"],
-    ["agent-share-hint", "Invite another user by their user id. They get access to this agent and all its chats, using your keys and Claude subscription."],
+    ["agent-share-legend", "Share"], ["agent-share-invite", "Invite"], ["agent-leave", "Leave"], ["agent-unshare", "Unshare"],
+    ["agent-share-hint", "Invite another user by their user id. They get access to this agent and all its chats."],
     ["agent-hidden-hint", "A hidden agent is left out of the agent selectors and listed under Hidden agents. You can still talk to it with @ and open a chat with it from here."],
     ["agent-open-chat", "Open chat with this agent"],
     ["agent-new-label", "New agent"], ["agents-empty", "Select an agent to edit it, or create a new one."],
@@ -1874,6 +1887,7 @@ function openAgent(agentId) {
   state.agentForm.originalId = agent.id;
   resetDream(agent.id);
   $("agent-error").textContent = "";
+  $("agent-share-error").textContent = "";
   $("agent-status").textContent = "";
   fillAgentForm(agent);
   $("agent-delete").hidden = false;
@@ -1886,6 +1900,7 @@ function openNewAgent() {
   state.agentForm.originalId = null;
   resetDream();
   $("agent-error").textContent = "";
+  $("agent-share-error").textContent = "";
   $("agent-status").textContent = "";
   fillAgentForm({
     name: "", id: "", description: "",
@@ -1931,7 +1946,7 @@ function fillAgentForm(agent) {
   $("agent-description").value = agent.description ?? "";
   $("agent-avatar-free").checked = agent.avatar_style === "free";
   $("agent-hidden").checked = Boolean(agent.hidden);
-  const sharedNote = sharedAgentNote(agent, tr);
+  const sharedNote = sharedAgentNote(agent, tr, state.user?.id);
   $("agent-shared-note").textContent = sharedNote;
   $("agent-shared-note").hidden = !sharedNote;
   renderShareList();
@@ -2267,8 +2282,6 @@ function drawApprovalRules(entries) {
   const rules = entries.filter((entry) => entry.learned); // the others are in the rule editor
   state.agentForm.learnedEntries = rules;
   state.agentForm.learned = rules.map((entry) => entry.rule);
-  const open = chats.find((chat) => chat.id === state.chatId && chat.agent_id === state.agentId);
-  if (open?.unread && !document.hidden) markChatRead(open.agent_id, open.id);
   list.replaceChildren(...rules.map((entry) => {
     const item = document.createElement("li");
     const text = Object.assign(document.createElement("span"), { className: "approval-rule-text", textContent: approvalRuleText(entry.rule) });
@@ -3003,8 +3016,12 @@ $("agent-delete").addEventListener("click", async () => {
     resetDream();
     setAgentFormOpen(false);
     setDreamHash("agents");
-    await refreshAgents(agentId, null);
     $("agent-status").textContent = tr("Agent deleted.");
+    try {
+      await refreshAgents(agentId, null);
+    } catch {
+      await chatGone(state.agentId, state.chatId, session);  // the delete worked: only the views are stale, no error
+    }
   } catch (err) {
     if (session === state.session) $("agent-error").textContent = err.message;
   } finally {
@@ -3054,8 +3071,14 @@ async function refreshInvitations() {
   try {
     const data = await api("/api/invitations");
     if (session !== state.session) return;
+    const before = shareSignature(state.invitations, state.agentForm.originalId);
     state.invitations = data;
     renderInvitations();
+    // the open agent's Share section follows the invitations: a status change (accepted, declined) refreshes the members
+    if (state.agentForm.originalId && before !== null && before !== shareSignature(data, state.agentForm.originalId)) {
+      await loadAgentConfigs();
+      if (session === state.session) renderShareList();
+    }
   } catch {
     // the next poll retries; a failed poll must not break the page
   }
@@ -3073,6 +3096,34 @@ async function showAgentOrEmpty(session) {
   if (!state.agentId || !agents.some((agent) => agent.id === state.agentId)) {
     await selectAgent(state.preferences?.agent_id && agents.some((a) => a.id === state.preferences.agent_id) ? state.preferences.agent_id : agents[0].id);
   }
+}
+
+// A poll of the open chat answered 404: the agent or chat is no longer reachable (left, unshared, deleted). Stop the polls
+// for it and open a reachable agent or the empty state; no error is shown.
+let chatGoneBusy = false;
+async function chatGone(agentId, chatId, session) {
+  if (chatGoneBusy || session !== state.session || agentId !== state.agentId || chatId !== state.chatId) return;
+  chatGoneBusy = true;
+  try {
+    liveSync.key = null;
+    processPanel.key = null;
+    clearTimeout(taskPollTimer);
+    const me = await api("/api/me");
+    if (session !== state.session || !state.user) return;
+    state.user.agents = me.agents;
+    renderAgentOptions();
+    renderAgentsEmpty();
+    await loadAgentConfigs();
+    if (me.agents.some((agent) => agent.id === agentId)) {
+      state.chatId = null;  // the agent is still there: only the chat is gone
+      await refreshChats();
+    } else {
+      state.agentId = null;
+      state.chatId = null;
+      await refreshPreferences();
+      await showAgentOrEmpty(session);
+    }
+  } catch { /* the next page load shows it */ } finally { chatGoneBusy = false; }
 }
 
 async function answerInvitation(id, action) {
@@ -3096,13 +3147,15 @@ function renderShareList() {
   const agentId = state.agentForm.originalId;
   const agent = state.agentConfigs.find((item) => item.id === agentId);
   $("agent-share-section").hidden = !agentId;
-  $("agent-leave").hidden = !agent?.shared;
+  const alone = Boolean(agent?.shared) && (agent.members ?? []).length <= 1;
+  $("agent-leave").hidden = !agent?.shared || alone;  // the only member cannot leave: only Unshare
   $("agent-unshare").hidden = !agent?.shared;
+  $("agent-share-leave-note").textContent = tr(alone ? "You are the only member." : "Leave stops your access; Unshare gives every member a private copy.");
   $("agent-share-leave-box").hidden = !agent?.shared;
   $("agent-share-members").replaceChildren(...(agentId ? memberRows(agent, state.user?.id, tr) : []).map((row) => {
     const li = document.createElement("li");
     const label = document.createElement("span");
-    label.textContent = row.name;
+    label.textContent = row.suffix ? `${row.name} ${row.suffix}` : row.name;
     li.append(label);
     if (row.id !== row.name && !(row.you && !agent?.shared)) {
       const id = document.createElement("span");
@@ -3110,10 +3163,10 @@ function renderShareList() {
       id.textContent = ` · ${row.id}`;
       label.append(id);
     }
-    if (row.tags.length) {
+    if (row.note) {
       const tag = document.createElement("span");
       tag.className = "share-tag";
-      tag.textContent = row.tags.join(" · ");
+      tag.textContent = row.note;
       label.append(tag);
     }
     return li;
@@ -6724,8 +6777,9 @@ async function pollProcesses() {
       if (ended) expectWakeUntil = Date.now() + WAKE_GRACE_MS;  // its wake reply is on the way: let the task poll find it
       if (ended || ids.length) ensureTaskPolling();
     }
-  } catch {
-    // the panel is a convenience: a failed poll keeps the last list
+  } catch (err) {
+    // the panel is a convenience: a failed poll keeps the last list; a 404 means the chat is out of reach
+    if (err?.status === 404) chatGone(agentId, chatId, session);
   }
 }
 
@@ -6782,8 +6836,9 @@ async function taskPoll() {
         }
       }
     }
-  } catch {
+  } catch (err) {
     again = false;
+    if (err?.status === 404) chatGone(agentId, chatId, session);
   }
   taskPollRunning = false;
   // nothing runs: keep a slow look so a task the server revives meanwhile (`task_send` on a finished one) shows up
@@ -10207,7 +10262,9 @@ setInterval(async () => {
     liveSync.key = key;
     liveSync.seen = current;
     if (liveSyncAction(previous, current, isGenerating(agentId, chatId)) === "reload") await openChatNow(chatId);
-  } catch { /* the next tick tries again */ } finally { liveSync.busy = false; }
+  } catch (err) {
+    if (err?.status === 404) chatGone(agentId, chatId, session);  // else: the next tick tries again
+  } finally { liveSync.busy = false; }
 }, LIVE_SYNC_MS);
 
 // ---- notifications: the bell, the scans and the display (DOM)

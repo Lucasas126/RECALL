@@ -132,3 +132,21 @@ class ServiceMoveTests(AdminFixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RoundThreeServiceTests(ServiceMoveTests):
+    def test_deleting_a_private_copy_after_unshare_leaves_clean_preferences(self) -> None:
+        space_id = self.service.share_agent("user-a", "bot", ["user-b"])
+        self.service.update_preferences("user-b", UserPreferences(agent_id="bot", default_agent_id="bot"))
+        self.service.unshare_agent("user-b", space_id, "bot")
+        self.service.delete_agent("user-b", "bot")
+        prefs = self.service.get_preferences("user-b")  # must not raise "not owned"
+        self.assertIsNone(prefs["agent_id"])
+
+    def test_only_member_cannot_leave_with_a_clear_message(self) -> None:
+        from src.service.chat import InvitationError
+        self.service.share_agent("user-a", "bot", ["user-b"])
+        self.service.leave_shared("user-b", "bot")
+        with self.assertRaises(InvitationError) as ctx:
+            self.service.leave_shared("user-a", "bot")
+        self.assertIn("Use Unshare", str(ctx.exception))
