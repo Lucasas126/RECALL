@@ -365,8 +365,9 @@ function splitHiddenAgents(agents) {
 // The line on a shared agent's settings page ("" for an own agent).
 function sharedAgentNote(agent, translate) {
   if (!agent?.shared) return "";
-  const text = translate("Shared agent · uses the keys and Claude subscription of {user}");
-  return text.replace("{user}", agent.billing_user || translate("the space owner"));
+  return translate("Shared agent · uses the keys and Claude subscription of {user}", {
+    user: agent.billing_user || translate("the space owner"),
+  });
 }
 
 // Query string of the chat list request: the open chat is kept (an empty one is not pruned) and hidden chats are asked for.
