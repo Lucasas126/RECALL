@@ -1420,7 +1420,7 @@ function userAuthor(shared, user, message = null) {
   return shared && user?.name ? { name: user.name } : null;
 }
 
-// What the open chat of a shared agent needs after a poll of its summary: "reload" when the other member added turns or
+// What the open chat needs after a poll of its summary: "reload" when another member or device added turns or
 // a reply started (the reload attaches to a running reply), else "none". `previous` is the last summary seen
 // ({turns, active}) and `busyHere` says this page sends or follows a reply itself (it already shows everything).
 function liveSyncAction(previous, current, busyHere) {
@@ -10381,7 +10381,8 @@ setInterval(() => {
   refreshInvitations();
 }, 4000);
 
-// A shared agent's chat is open: the other member's messages and streaming reply show here at once. The server pushes a
+// Any open chat: what another member of a shared agent, or the same person on another device or tab, sends and the
+// streaming reply show here at once. The server pushes a
 // change notice over one EventSource per page (only while the tab is visible); each notice runs the same check as the
 // poll of the open chat's summary, which stays as a slow fallback (every LIVE_SYNC_SLOW_MS) while the stream is open and
 // healthy and returns to LIVE_SYNC_MS when it fails or closes.
@@ -10401,10 +10402,10 @@ function liveSyncClose() {
   liveSync.sourceKey = null;
 }
 
-// Keeps the stream matching the open chat: one for a shared agent's chat while the tab is visible, none otherwise.
+// Keeps the stream matching the open chat: one while the tab is visible, none otherwise.
 function liveSyncStream() {
-  const shared = Boolean(state.user?.agents?.find((a) => a.id === state.agentId)?.shared);
-  const key = state.user && state.chatId && shared && !document.hidden ? chatKey(state.agentId, state.chatId) : null;
+  // every open chat: other members of a shared agent, or the same person on another device or tab
+  const key = state.user && state.chatId && !document.hidden ? chatKey(state.agentId, state.chatId) : null;
   if (liveSync.sourceKey !== key) liveSyncClose();
   if (!key || liveSync.source || Date.now() < liveSync.retryAt || typeof EventSource === "undefined") return;
   const agentId = state.agentId;
@@ -10424,7 +10425,6 @@ async function liveSyncCheck(pushed = false) {
   if (document.hidden || !state.user || !state.chatId || state.modelBusy || liveSync.busy) return;
   const agentId = state.agentId;
   const chatId = state.chatId;
-  if (!state.user.agents?.find((a) => a.id === agentId)?.shared) { liveSync.key = null; return; }
   if (!pushed && Date.now() - liveSync.last < liveSyncDelay(Boolean(liveSync.source))) return;
   const key = chatKey(agentId, chatId);
   const session = state.session;
