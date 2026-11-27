@@ -14,6 +14,7 @@ sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases b
   - Members see each other's messages and replies instantly (server push, `GET /api/agents/{a}/chats/{c}/events`, SSE), with a slow poll as fallback.
   - Admin `space` and `agent share|unshare` commands. A user removed by hand breaks the spaces they belong to: run `space remove-member` first.
 - Fix (web): the agent editor no longer throws "chats is not defined" when it draws approval rules (it affected every agent editor since mid-November).
+- Web UI: the plan usage panel names the subscription, the account e-mail and the plan ("Claude subscription · user@example.com · Max"), shown only to the user whose login it is.
 - Mentions: `@agent` is recognised anywhere in a message (start or after a space, not in emails), also for private agents; the first valid mention decides and only one agent runs per message.
 
 ## 0.6.2 (26 November 2026)
