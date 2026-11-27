@@ -40,6 +40,7 @@ function harness({ preferencesDelay = 0, chatDelay = 0, listed = true } = {}) {
     chatKey: (a, c) => `${a}/${c}`, isGenerating: () => false, forgetApprovals: () => {}, renderMessages: () => log.push("render"),
     followReply: () => {}, updateBusy: () => {}, syncApprovals: () => {}, ensureTaskPolling: () => {}, startProcessPolling: () => {},
     highlightChat: (agentId, chatId) => { log.push(`highlight ${agentId}/${chatId}`); return listed; },
+    focusComposer: () => log.push("focus"),
     renderChatHeader: () => {}, refreshChats: async () => log.push("refreshChats"), activateView: () => {}, showUsage: () => {},
   });
   vm.runInContext(
