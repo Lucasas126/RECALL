@@ -384,8 +384,8 @@ class PickupTests(MemoryFixture):
         def say():
             list(service.send("user-a", "bot", chat, "hi"))
             for slot in service._slots.values():
-                if slot.worker is not None:
-                    slot.worker.join(3)
+                for worker in list(slot.workers.values()):
+                    worker.join(3)
 
         say()
         say()

@@ -48,8 +48,8 @@ class CrossProcessFixture(asyn.AsyncFixture):
     def _close(self, service: ChatService) -> None:
         service.close()
         for slot in list(service._slots.values()):
-            if slot.worker is not None:
-                slot.worker.join(3)
+            for worker in list(slot.workers.values()):
+                worker.join(3)
 
     @property
     def remote(self):

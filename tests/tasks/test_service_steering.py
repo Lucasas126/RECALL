@@ -66,13 +66,14 @@ class SteeringFixture(unittest.TestCase):
         self.addCleanup(self._finish_workers)
         self.chat = self.service.create_chat("user-one", "agent-one")["id"]
 
-    def _finish_workers(self) -> None:
+    def _finish_workers(self, service: ChatService | None = None) -> None:
+        """Wait for every chat worker of the service (each chat has its own), so none writes after the folder is removed."""
         for _, release in self.gates.values():
             release.set()
-        for slot in self.service._slots.values():
+        for slot in (service or self.service)._slots.values():
             with slot.state:
-                worker = slot.worker
-            if worker is not None:
+                workers = list(slot.workers.values())
+            for worker in workers:
                 worker.join(3)
                 self.assertFalse(worker.is_alive(), "service worker did not finish")
 
