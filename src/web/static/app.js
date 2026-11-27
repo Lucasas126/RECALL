@@ -8006,6 +8006,12 @@ function addMessage(role, parent = state.view ?? $("messages"), author = null) {
         memoryIndicator.replaceChildren(button);
       } else memoryIndicator.textContent = summary;
     },
+    reveal() {  // a bubble made without knowing whether the agent answers: shown by the first output
+      el.style.display = "";
+    },
+    hide() {
+      el.style.display = "none";
+    },
     discard() {  // the run produced no reply (a message to a person): drop the empty bubble
       el.remove();
     },
@@ -8564,6 +8570,8 @@ async function dispatchMessage(content, attachments, edit = null) {
   const mentioned = !edit && !command ? mentionedAgent(content, state.user?.agents, state.agentId) : null;
   const author = mentioned ? replyAuthor(mentioned, null, state.user?.agents, state.agentId) : null;
   const reply = addMessage(command ? "command" : "assistant", state.view, author);
+  // a message to a person is only delivered: its bubble stays hidden until the agent really produces output
+  if (!edit && !command && !startsAgentReply(content, state.user?.agents, state.agentId, state.user?.id)) reply.hide();
   const request = {
     userId: state.user.id, agentId: state.agentId, chatId: state.chatId,
     session: state.session, controller: new AbortController(), reply,
@@ -8687,6 +8695,17 @@ function composerMentionPlan(text, trigger, agents, agentId, meId) {
   if (!used[0].person) return { notice: true, items: [] };
   const taken = new Set(used.map((item) => item.id));
   return { notice: false, items: all.filter((item) => item.person && !taken.has(item.id)) };
+}
+
+// Whether a sent message makes the agent answer (pure): false when its first valid mention is a person of the shared
+// agent's space (the message is only delivered), so no reply bubble is shown for it.
+function startsAgentReply(text, agents, agentId, meId) {
+  const byId = new Map(composerMentionItems(agents, agentId, meId).map((item) => [item.id.toLowerCase(), item]));
+  for (const m of String(text ?? "").matchAll(/(?<!\S)@([a-z0-9][a-z0-9_-]{0,63})(?=[\s.,;:!?]|$)/gi)) {
+    const item = byId.get(m[1].toLowerCase());
+    if (item) return !item.person;
+  }
+  return true;
 }
 
 function composerCandidates(trigger) {
@@ -8990,6 +9009,7 @@ function handleEvent(raw, request) {
     }
   }
   const payload = data ? JSON.parse(data) : "";
+  if (event !== "delivered" && event !== "transcript" && event !== "done") reply.reveal?.();
   if (event === "text") reply.text(payload);
   else if (event === "reasoning") reply.thinking(payload);
   else if (event === "tool_start") reply.toolStart(payload);
