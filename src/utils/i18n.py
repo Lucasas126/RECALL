@@ -168,6 +168,7 @@ _SPANISH = {
     "I could not read the current agent.": "No se ha podido consultar el agente actual.",
     "Current agent:\n{name} ({agent_id})": "Agente actual:\n{name} ({agent_id})",
     "\n\n_[Interrupted — your latest message is being processed.]_": "\n\n_[Interrumpido: se está procesando tu último mensaje.]_",
+    "_(Message delivered to the member; the agent does not reply.)_": "_(Mensaje entregado al miembro; el agente no responde.)_",
     "_(The model returned no text.)_": "_(El modelo no ha devuelto texto.)_",
     "⬅️ Previous": "⬅️ Anterior",
     "➡️ Next": "➡️ Siguiente",
