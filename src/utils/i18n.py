@@ -511,6 +511,7 @@ _SPANISH = {
     "Summarize the older part of this chat": "Resume la parte más antigua de este chat",
     "Show the Claude plan usage": "Muestra el uso del plan de Claude",
     "Suggestions": "Sugerencias",
+    "Only one agent can be mentioned per message": "Solo se puede mencionar a un agente por mensaje",
     "person": "persona",
     "Claude plan usage": "Uso del plan de Claude",
     "You have no Claude login of your own, so there is no plan usage to show.": "No tienes un login de Claude propio, así que no hay uso del plan que mostrar.",

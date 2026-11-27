@@ -58,6 +58,51 @@ class PersonMentionTests(steering.SteeringFixture):
         self.assertEqual(self.service._mention_target("user-one", "agent-one", "@agent-two do it"), ("agent-two", "do it"))
         self.assertIsNone(self.service._person_mention("user-one", "agent-one", "user-a", "@agent-two do it"))
 
+    def test_mention_anywhere_and_several_people_make_one_people_message(self) -> None:
+        self.SHARED = True
+        events = self._say("hey @user-b, and also @nova: ping")
+        self.assertEqual([(e.kind, e.data) for e in events], [("delivered", {"to": "user-b"})])
+        self.assertEqual(self._calls(), 0)
+        self.assertEqual(len(self._stored()), 1)
+
+    def test_person_then_agent_is_a_people_message(self) -> None:
+        self.SHARED = True
+        self.assertEqual(self.service._person_mention("user-one", "agent-one", "user-a", "@user-b ask @agent-two"), "user-b")
+        self.assertIsNone(self.service._mention_target("user-one", "agent-one", "@user-b ask @agent-two", "user-a"))
+        events = self._say("@user-b ask @agent-two")
+        self.assertEqual([e.kind for e in events], ["delivered"])
+        self.assertEqual(self._calls(), 0)
+
+    def test_agent_then_person_routes_to_the_agent_and_the_person_is_plain_text(self) -> None:
+        self.SHARED = True
+        self.assertEqual(
+            self.service._mention_target("user-one", "agent-one", "@agent-two tell @user-b", "user-a"),
+            ("agent-two", "tell @user-b"),
+        )
+        self.assertIsNone(self.service._person_mention("user-one", "agent-one", "user-a", "@agent-two tell @user-b"))
+        self.assertEqual(
+            self.service._mention_target("user-one", "agent-one", "hi @agent-two, tell @user-b", "user-a"),
+            ("agent-two", "hi @agent-two, tell @user-b"),
+        )
+
+    def test_two_agents_only_the_first_acts(self) -> None:
+        self.SHARED = True
+        self.AGENTS = ["agent-one", "agent-two", "agent-three"]
+        self.assertEqual(
+            self.service._mention_target("user-one", "agent-one", "@agent-three then @agent-two"),
+            ("agent-three", "then @agent-two"),
+        )
+        self.assertEqual(
+            self.service._mention_target("user-one", "agent-one", "x @agent-two and @agent-three")[0], "agent-two",
+        )
+
+    def test_unknown_first_mention_is_skipped(self) -> None:
+        self.SHARED = True
+        self.assertEqual(self.service._person_mention("user-one", "agent-one", "user-a", "@nobody @user-b hi"), "user-b")
+
+    def test_private_agent_people_ids_are_plain_text(self) -> None:
+        self.assertIsNone(self.service._person_mention("user-one", "agent-one", "user-a", "hello @user-b"))
+
     def test_later_reply_sees_the_turn_with_the_author_prefix(self) -> None:
         self.SHARED = True
         self._say("@user-b hello there")

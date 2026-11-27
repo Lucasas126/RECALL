@@ -81,7 +81,7 @@ from src.agent.toolsets.delegate import TaskError
 from src.service.agent_admin import AgentAdmin
 from src.service.agent_permissions import AgentPermissions
 from src.service.tasks import FINAL_STATES, TaskManager
-from src.service.mentions import MENTION_CONTEXT_CHARS, chat_excerpt, mention_chat_title, mention_prompt, parse_mention
+from src.service.mentions import MENTION_CONTEXT_CHARS, chat_excerpt, mention_chat_title, mention_prompt, find_mentions, strip_start_mention
 from src.agent.toolsets.processes import process_registry, process_wake_block, process_wake_frame
 from src.terminal.approvals import ApprovalBroker, ApprovalNotFound
 from src.terminal.output import clean, redact
@@ -2180,12 +2180,12 @@ class ChatService:
         a `[NAME]` prefix. Callers set it only when the owner is not the person; an edit without it keeps the
         original turn's author.
 
-        A person's message starting with `@<agent_id>` of another agent of the same user is answered by that agent
-        instead (see `_send_mention`). `mention_meta` is only set by that path and stored on the mentioned agent's turn.
+        A person's message with `@<agent_id>` (anywhere, first valid mention wins) of another agent of the same user is
+        answered by that agent instead (see `_send_mention`). `mention_meta` is only set by that path and stored on the mentioned agent's turn.
         """
         conversations = self._conversations(user_id, agent_id)
         if not internal_task and rewind_to is None and mention_meta is None:
-            target = self._mention_target(user_id, agent_id, text)
+            target = self._mention_target(user_id, agent_id, text, author)
             if target is not None:
                 return self._send_mention(
                     user_id, agent_id, chat_id, target[0], target[1], text,
@@ -2292,30 +2292,40 @@ class ChatService:
 
     # ------------------------------------------------------------------ @mentions of another agent
 
-    def _mention_target(self, user_id: str, agent_id: str, text: str) -> Optional[tuple[str, str]]:
-        """`(other_agent_id, rest)` when the message mentions another agent of the same user, else None."""
-        parsed = parse_mention(text)
-        if parsed is None or parsed[0] == agent_id:
-            return None
-        if parsed[0] not in (self._user(user_id).agents or []):
-            return None  # unknown id: a normal message to this agent
-        return parsed
+    def _first_mention(self, user_id: str, agent_id: str, author: Optional[str], text: str) -> Optional[tuple]:
+        """The FIRST valid mention anywhere in the text decides: `("agent", id, rest)`, `("person", id)` or None.
 
-    def _person_mention(self, user_id: str, agent_id: str, author: Optional[str], text: str) -> Optional[str]:
-        """The member id when a person of a shared agent writes `@<member id>` (a message to people), else None.
-
-        Only in a space's agent, and only for another member; an id that is also an agent of the space is the agent's.
+        Valid: another agent of the same user, or (in a space's agent, from a member) another member of the space; an
+        id that is also an agent is the agent's. Unknown ids are plain text. Later mentions never change the outcome:
+        after an agent every other mention is ignored; after a person only more people can follow (an agent never runs).
         """
-        if not author:
+        found = find_mentions(text)
+        if not found:
             return None
         owner = self._user(user_id)
-        parsed = parse_mention(text)
-        if owner.kind != "space" or parsed is None:
+        agents = set(owner.agents or [])
+        members = {m.lower() for m in owner.members} if owner.kind == "space" and author else set()
+        for target, start, end in found:
+            if target in agents:
+                if target == agent_id:
+                    continue
+                rest = strip_start_mention(text, end) if not text[:start].strip() else text
+                return ("agent", target, rest)
+            if target in members and target != author:
+                return ("person", target)
+        return None
+
+    def _mention_target(self, user_id: str, agent_id: str, text: str, author: Optional[str] = None) -> Optional[tuple[str, str]]:
+        """`(other_agent_id, rest)` when the first valid mention is another agent of the same user, else None."""
+        first = self._first_mention(user_id, agent_id, author, text)
+        return (first[1], first[2]) if first and first[0] == "agent" else None
+
+    def _person_mention(self, user_id: str, agent_id: str, author: Optional[str], text: str) -> Optional[str]:
+        """The member id when the first valid mention is a person of a shared agent (a message to people), else None."""
+        if not author:
             return None
-        target = parsed[0]
-        if target == author or target == agent_id or target in (owner.agents or []):
-            return None
-        return target if target in {m.lower() for m in owner.members} else None
+        first = self._first_mention(user_id, agent_id, author, text)
+        return first[1] if first and first[0] == "person" else None
 
     def _send_to_person(
         self, user_id: str, agent_id: str, chat_id: str, text: str, author: str, person: str,

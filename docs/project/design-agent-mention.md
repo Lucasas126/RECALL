@@ -4,7 +4,7 @@ Status: implemented (see the architecture page, section "@mentions of another ag
 
 ## Behaviour
 
-A user message in agent A's chat that starts with `@<agent_id>` (an existing agent of the same user, not A)
+A user message in agent A's chat that contains `@<agent_id>` (anywhere, after a space or at the start; the first valid mention wins, at most one agent) (an existing agent of the same user, not A)
 is answered by agent B instead of A. A does not run on that turn. An unknown id, A's own id or an id
 of another user leaves the message as a normal message to A.
 
