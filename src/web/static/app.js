@@ -872,6 +872,7 @@ function translateInterface() {
     ["agent-delegation-parallel-label", "Parallel tasks per chat"],
     ["agent-delegation-parallel-hint", "Can only lower the application's limit. Empty uses the application's limit."],
     ["agent-delegation-timeout-label", "Time limit per task"], ["agent-delegation-tokens-label", "Token limit per task"],
+    ["agent-delegation-tokens-hint", "Input plus output tokens of one task, summed over every model call (cached reads included). 0 = no limit, not recommended."],
     ["agent-delegation-targets-label", "Agents it may hand tasks to"],
     ["agent-delegation-model-label", "Default worker model"],
     ["agent-delegation-model-hint", "Model of fresh workers when the agent names none. Empty uses the model of the chat."],

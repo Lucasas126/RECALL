@@ -142,14 +142,15 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(
             (settings.max_parallel_per_parent, settings.max_parallel_per_user, settings.timeout_seconds,
              settings.max_tokens, settings.result_max_chars),
-            (5, 10, 600, 0, 8000),
+            (5, 10, 600, 5_000_000, 8000),
         )
         self.assertEqual(SUBAGENTS, settings, "settings.yaml carries the same numbers")
         with self.assertRaises(ValueError):
             SubagentSettings.model_validate({"max_depth": 2})
 
-    def test_no_token_cap_by_default_and_the_lowest_set_cap_wins(self) -> None:
-        self.assertEqual(task_limits(None).max_tokens, 0)
+    def test_five_million_token_cap_by_default_zero_means_no_cap_and_the_lowest_cap_wins(self) -> None:
+        self.assertEqual(task_limits(None).max_tokens, 5_000_000)
+        self.assertEqual(SubagentSettings(max_tokens=0).max_tokens, 0)
         self.assertEqual(task_limits(AgentDelegationConfig(max_tokens=5000)).max_tokens, 5000)
         with self.assertRaises(ValueError):
             SubagentSettings(max_tokens=500)
@@ -381,7 +382,7 @@ class TaskStartToolTests(SubagentFixture):
     def test_the_tool_and_the_system_prompt_state_the_limits(self) -> None:
         agent = self._factory("user-one", "agent-one", self.chat)
         spec = next(s for s in agent._tool_specs if s["function"]["name"] == "task_start")["function"]
-        for needle in ("5 running task(s) per chat", "10 per user", "10 min", "no token cap", "max_tokens", "8000 chars", "depth 1", "rate limit"):
+        for needle in ("5 running task(s) per chat", "10 per user", "10 min", "5,000,000 tokens", "max_tokens", "8000 chars", "depth 1", "rate limit"):
             self.assertIn(needle, spec["description"])
         self.assertEqual(spec["parameters"]["properties"]["tools"]["items"]["enum"], ["web"])
         self.assertEqual(spec["parameters"]["required"], ["goal"])

@@ -996,6 +996,7 @@ _SPANISH = {
     "Can only lower the application's limit. Empty uses the application's limit.": "Solo puede bajar el límite de la aplicación. Vacío usa el límite de la aplicación.",
     "Time limit per task": "Límite de tiempo por tarea",
     "Token limit per task": "Límite de tokens por tarea",
+    "Input plus output tokens of one task, summed over every model call (cached reads included). 0 = no limit, not recommended.": "Tokens de entrada más salida de una tarea, sumados en todas las llamadas al modelo (lecturas de caché incluidas). 0 = sin límite, no recomendado.",
     "Agents it may hand tasks to": "Agentes a los que puede encargar tareas",
     "Without any, it can only use fresh workers. An agent that can write its own memory keeps what it learns from the task.": "Sin ninguno, solo puede usar trabajadores nuevos. Un agente que puede escribir su propia memoria conserva lo que aprende de la tarea.",
     "You have no other agents.": "No tienes otros agentes.",
