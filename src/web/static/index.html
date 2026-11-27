@@ -188,16 +188,20 @@
             <fieldset id="agent-share-section" class="agent-section" hidden>
               <legend id="agent-share-legend">Share</legend>
               <p id="agent-share-hint" class="model-note">Invite another user by their user id. They get access to this agent and all its chats, using your keys and Claude subscription.</p>
-              <div class="share-row">
+              <ul id="agent-share-members" class="share-list share-members"></ul>
+              <div id="agent-share-form" class="share-row">
                 <input id="agent-share-user" maxlength="100" autocomplete="off" aria-label="User id">
-                <button id="agent-share-invite" type="button">Invite</button>
-              </div>
-              <ul id="agent-share-list" class="share-list"></ul>
-              <div class="share-row">
-                <button id="agent-leave" type="button" hidden>Leave</button>
-                <button id="agent-unshare" type="button" class="danger" hidden>Unshare</button>
+                <button id="agent-share-invite" type="button" class="primary">Invite</button>
               </div>
               <p id="agent-share-error" class="error" role="alert"></p>
+              <ul id="agent-share-list" class="share-list"></ul>
+              <div id="agent-share-leave-box" class="share-leave" hidden>
+                <p id="agent-share-leave-note" class="model-note">Leave stops your access; Unshare gives every member a private copy.</p>
+                <div class="share-row">
+                  <button id="agent-leave" type="button" hidden>Leave</button>
+                  <button id="agent-unshare" type="button" class="danger" hidden>Unshare</button>
+                </div>
+              </div>
             </fieldset>
             <fieldset id="agent-avatar-section" class="agent-section">
               <legend id="agent-avatar-legend">Profile picture</legend>

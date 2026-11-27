@@ -42,7 +42,7 @@ from src.config.field_defaults import agent_defaults
 from src.config.secrets import fingerprint as secrets_fingerprint, get_secret
 from src.config.zdr import chat_zdr, zdr_required
 from src.service.invitations import ACCEPTED, DECLINED, PENDING, REVOKED, InvitationStore
-from src.config.spaces import SpaceError, is_space_id, resolve_owner, scaled_user_chars, spaces_of
+from src.config.spaces import SpaceError, is_space_id, member_names, resolve_owner, scaled_user_chars, spaces_of
 from src.config.settings import (
     AGENT_MAX_TOOL_HOPS, APPROVAL_EXPLAIN, ASSOC, CHAT_NAMING, CONFIG_DIR, DATA_DIR, ORCHESTRATOR, PDF, SPEECH_TO_TEXT, TAVILY, TELEGRAM_ALLOWED_USERS_ENV, current_mcp_settings,
     SUBAGENTS, TERMINAL, UPLOADS, VIDEO_DECOMPOSITION, WEB_PUBLIC_URL, memory_limits,
@@ -632,6 +632,11 @@ class ChatService:
         """`(owner, space_id)` for the person's own agents (space_id None) and then each of their spaces."""
         return [(person_id, None), *((space_id, space_id) for space_id in self._spaces_of(person_id))]
 
+    @staticmethod
+    def _members_view(space) -> list[dict]:
+        """The members of a space as `{id, name}` (the display name of each user), in member order."""
+        return [{"id": member, "name": name} for member, name in member_names(space, CONFIG_DIR).items()]
+
     def _own_agents(self, owner: str, space_id: str | None) -> list[dict]:
         user = self._user(owner)
         agents = []
@@ -644,7 +649,7 @@ class ChatService:
             else:
                 agents.append({"id": cfg.id, "name": cfg.name, "avatar": self._agent_avatar_view(owner, cfg), "hidden": cfg.hidden})
             if space_id is not None:
-                agents[-1].update(shared=True, space_id=space_id, billing_user=user.billing_user)
+                agents[-1].update(shared=True, space_id=space_id, billing_user=user.billing_user, members=self._members_view(user))
         return agents
 
     def list_agents(self, user_id: str) -> list[dict]:
@@ -664,7 +669,8 @@ class ChatService:
                     logger.error("agent list: %s/%s: %s", owner, agent_id, reason)
                     view = {"id": agent_id, "name": agent_id, "broken": True, "error": reason}
                 if space_id is not None:
-                    view.update(shared=True, space_id=space_id, billing_user=self._user(owner).billing_user)
+                    space = self._user(owner)
+                    view.update(shared=True, space_id=space_id, billing_user=space.billing_user, members=self._members_view(space))
                 views.append(view)
         return views
 
