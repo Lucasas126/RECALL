@@ -37,7 +37,10 @@ test("shared agents get their own section; a hidden shared one stays under Hidde
 test("the shared note names the billing user and is empty for own agents", () => {
   const tr = (text, values = {}) => text.replace(/\{(\w+)\}/g, (_, key) => values[key]);  // like the page's tr()
   assert.equal(api.sharedAgentNote({ id: "nova" }, tr), "");
-  assert.equal(api.sharedAgentNote({ shared: true, billing_user: "user-a" }, tr), "Shared agent · uses the keys and Claude subscription of user-a");
+  assert.equal(api.sharedAgentNote({ shared: true, billing_user: "user-a" }, tr), "Shared agent · uses the providers and subscriptions of user-a");
+  const agent = { shared: true, billing_user: "user-a", members: [{ id: "user-a", name: "Ana" }, { id: "user-b", name: "Ben" }] };
+  assert.equal(api.sharedAgentNote(agent, tr, "user-b"), "Shared agent · uses the providers and subscriptions of Ana");
+  assert.equal(api.sharedAgentNote(agent, tr, "user-a"), "Shared agent · uses your providers and subscriptions");
   assert.match(api.sharedAgentNote({ shared: true }, tr), /the space owner/);
 });
 

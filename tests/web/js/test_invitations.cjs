@@ -14,7 +14,8 @@ const tr = (text, values = {}) => text.replace(/\{(\w+)\}/g, (_, key) => values[
 test("the invitation text names the inviter and the agent, the note the billing user", () => {
   const invitation = { agent_id: "nova", agent_name: "Nova", inviter: "user-a", inviter_name: "User A", billing_user: "user-a" };
   assert.equal(api.invitationText(invitation, tr), "User A wants to share Nova with you");
-  assert.equal(api.invitationNote(invitation, tr), "It uses the keys and Claude subscription of user-a. Every member sees all its chats.");
+  assert.equal(api.invitationNote(invitation, tr), "It uses the providers and subscriptions of User A. Every member sees all its chats.");
+  assert.equal(api.invitationNote({ ...invitation, billing_name: "Ana" }, tr), "It uses the providers and subscriptions of Ana. Every member sees all its chats.");
   assert.equal(api.invitationText({ agent_id: "nova", inviter: "user-a" }, tr), "user-a wants to share nova with you");
 });
 

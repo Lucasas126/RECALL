@@ -1170,7 +1170,8 @@ class ChatService:
                 incoming.append({
                     "id": record["id"], "agent_id": record["agent_id"], "agent_name": record["agent_name"],
                     "inviter": record["inviter"], "inviter_name": self._display_name(record["inviter"]),
-                    "billing_user": record["billing_user"], "created": record["created"],
+                    "billing_user": record["billing_user"], "billing_name": self._display_name(record["billing_user"]),
+                    "created": record["created"],
                 })
             elif self._can_manage_invitation(person, record):
                 outgoing.append({

@@ -363,10 +363,12 @@ function splitHiddenAgents(agents) {
 }
 
 // The line on a shared agent's settings page ("" for an own agent).
-function sharedAgentNote(agent, translate) {
+function sharedAgentNote(agent, translate, me = null) {
   if (!agent?.shared) return "";
-  return translate("Shared agent · uses the keys and Claude subscription of {user}", {
-    user: agent.billing_user || translate("the space owner"),
+  if (agent.billing_user && agent.billing_user === me) return translate("Shared agent · uses your providers and subscriptions");
+  const payer = (agent.members ?? []).find((member) => member.id === agent.billing_user);
+  return translate("Shared agent · uses the providers and subscriptions of {user}", {
+    user: payer?.name || agent.billing_user || translate("the space owner"),
   });
 }
 
@@ -499,8 +501,8 @@ function invitationText(invitation, translate) {
   });
 }
 function invitationNote(invitation, translate) {
-  return translate("It uses the keys and Claude subscription of {user}. Every member sees all its chats.", {
-    user: invitation.billing_user || invitation.inviter,
+  return translate("It uses the providers and subscriptions of {user}. Every member sees all its chats.", {
+    user: invitation.billing_name || invitation.inviter_name || invitation.billing_user || invitation.inviter,
   });
 }
 // The Share block's member rows (pure): who has access, "(you)" after your name, and whose providers and subscriptions the
@@ -867,7 +869,7 @@ function translateInterface() {
     ["tab-chats", "Chats"], ["tab-agents", "Agents"],
     ["agent-hidden-label", "Hidden"],
     ["agent-share-legend", "Share"], ["agent-share-invite", "Invite"], ["agent-leave", "Leave"], ["agent-unshare", "Unshare"],
-    ["agent-share-hint", "Invite another user by their user id. They get access to this agent and all its chats, using your providers and subscriptions."],
+    ["agent-share-hint", "Invite another user by their user id. They get access to this agent and all its chats."],
     ["agent-hidden-hint", "A hidden agent is left out of the agent selectors and listed under Hidden agents. You can still talk to it with @ and open a chat with it from here."],
     ["agent-open-chat", "Open chat with this agent"],
     ["agent-new-label", "New agent"], ["agents-empty", "Select an agent to edit it, or create a new one."],
@@ -1944,7 +1946,7 @@ function fillAgentForm(agent) {
   $("agent-description").value = agent.description ?? "";
   $("agent-avatar-free").checked = agent.avatar_style === "free";
   $("agent-hidden").checked = Boolean(agent.hidden);
-  const sharedNote = sharedAgentNote(agent, tr);
+  const sharedNote = sharedAgentNote(agent, tr, state.user?.id);
   $("agent-shared-note").textContent = sharedNote;
   $("agent-shared-note").hidden = !sharedNote;
   renderShareList();
