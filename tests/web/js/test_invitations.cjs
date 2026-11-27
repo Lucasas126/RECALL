@@ -7,7 +7,7 @@ const vm = require("node:vm");
 const source = readFileSync(path.join(__dirname, "..", "..", "..", "src", "web", "static", "app.js"), "utf8");
 const code = source.match(/\/\/ ---- settings helpers[\s\S]*?\/\/ ---- end settings helpers/)[0];
 const context = vm.createContext({});
-vm.runInContext(`${code}\nthis.api = { invitationText, invitationNote, memberRows, outgoingFor, navAttentionLevel };`, context);
+vm.runInContext(`${code}\nthis.api = { invitationText, invitationNote, memberRows, shareSignature, outgoingFor, navAttentionLevel };`, context);
 const api = context.api;
 const tr = (text, values = {}) => text.replace(/\{(\w+)\}/g, (_, key) => values[key]);  // like the page's tr()
 
@@ -35,14 +35,24 @@ test("the menu dot takes the strongest of chats and invitations", () => {
   assert.equal(api.navAttentionLevel("approval", 1), "approval");
 });
 
-test("the members list marks you and who pays; a private agent is only you", () => {
-  const tr2 = (text) => ({ "Only you": "Only you", you: "you", pays: "pays" })[text] ?? text;
-  const shared = { shared: true, billing_user: "user-a", members: [{ id: "user-a", name: "User A" }, { id: "user-b", name: "User B" }] };
+test("the members list puts (you) after the name and says whose providers are used", () => {
+  const tr2 = (text, values = {}) => ({ "Only you": "Only you", "(you)": "(you)",
+    "uses your providers and subscriptions": "uses your providers and subscriptions",
+    "uses {user}'s providers and subscriptions": "uses {user}'s providers and subscriptions" })[text]?.replace(/\{(\w+)\}/g, (_, k) => values[k]) ?? text;
+  const shared = { shared: true, billing_user: "user-a", members: [{ id: "user-a", name: "Ana" }, { id: "user-b", name: "Ben" }] };
   const rows = JSON.parse(JSON.stringify(api.memberRows(shared, "user-b", tr2)));
-  assert.deepEqual(rows.map((r) => [r.id, r.name, r.you, r.tags]), [
-    ["user-a", "User A", false, ["pays"]], ["user-b", "User B", true, ["you"]]]);
-  assert.deepEqual([...api.memberRows({ shared: true, billing_user: "user-b", members: [{ id: "user-b", name: "" }] }, "user-b", tr2)[0].tags], ["you", "pays"]);
+  assert.deepEqual(rows.map((r) => [r.id, r.name, r.you, r.suffix, r.note]), [
+    ["user-a", "Ana", false, "", "uses Ana's providers and subscriptions"], ["user-b", "Ben", true, "(you)", ""]]);
+  const own = api.memberRows({ shared: true, billing_user: "user-b", members: [{ id: "user-b", name: "" }] }, "user-b", tr2)[0];
+  assert.equal(own.note, "uses your providers and subscriptions");
   const solo = api.memberRows({ id: "nova" }, "user-a", tr2);
   assert.equal(solo.length, 1);
   assert.equal(solo[0].name, "Only you");
+});
+
+test("the share signature changes when an outgoing invitation of the open agent is answered", () => {
+  const before = { outgoing: [{ id: "i1", agent_id: "nova", status: "pending" }] };
+  assert.equal(api.shareSignature(before, "nova"), "i1");
+  assert.equal(api.shareSignature({ outgoing: [] }, "nova"), "");
+  assert.equal(api.shareSignature(before, null), null);
 });
