@@ -61,6 +61,8 @@ Shared agents (see `shared-agents.md`; the web UI invites people, the CLI is for
 | `space delete --space S --yes` | only a space without agents |
 | `agent share --user U --agent A --with V` / `agent unshare --space S --agent A --yes` | move an agent into a space, or give it back (copies to each member) |
 
+No user-delete command exists: a user removed by hand makes their spaces unusable until `space remove-member` is run, so run it first.
+
 ## Secrets
 
 | Command | What it does |

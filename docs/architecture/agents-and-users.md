@@ -88,7 +88,7 @@ Implemented:
   shared agents carry a "shared" tag.
 - **Live sync.** `ChatService.changes` (`src/service/live.py`) is an in-process notifier per `(owner, agent, chat)`: send, `@person` delivery, edit/rewind, reply start/end, rename and delete publish a kind; nothing is kept without subscribers. `GET /api/agents/{id}/chats/{chat}/events` (same membership 404) streams `event: change` `{kind}` as SSE with a keepalive comment every 20 s. The web client opens one EventSource for the open chat of a shared agent while the tab is visible and runs its summary check on each notice; the 1.5 s poll stays as a fallback (every 15 s while the stream is healthy).
 
-Planned: notifications to every member and Telegram per speaker (step 6). User view: [shared agents](../user-guide/shared-agents.md).
+Notifications go to every member; Telegram replies only to the speaker. A user removed by hand makes their spaces unusable until `space remove-member` is run. User view: [shared agents](../user-guide/shared-agents.md).
 
 ## isolation
 

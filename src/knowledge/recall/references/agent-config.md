@@ -133,7 +133,7 @@ Enabling a server for an agent is one of three steps (catalog, user connection, 
 | `terminal_backends` | named machines agents may use |
 | `approval_rules` | user layer of approval rules (`{default, rules}`) |
 | `max_level` | required; highest agent `level`; only an admin sets it (`user set`) |
-| `kind`, `members`, `billing_user` | spaces (shared agents, in progress: no web UI yet): `kind: space` with `members` (user ids) and `billing_user` (a member whose keys and Claude login it uses); no password, never logs in, `max_level` must not be declared (lowest of the members). Forbidden on `kind: user` |
+| `kind`, `members`, `billing_user` | spaces (shared agents): `kind: space` with `members` (user ids) and `billing_user` (a member whose keys and Claude login it uses); no password, never logs in, `max_level` must not be declared (lowest of the members). Forbidden on `kind: user` |
 
 Provider options: `ollama.host`; `claude_subscription` takes `claude_config_dir` (inside the user's own config folder), `command` (a bare executable name), `claude_code_telemetry`, `timeout_seconds`; `openrouter.api_key` is an env var NAME.
 

@@ -5,7 +5,16 @@ sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases b
 
 ## Unreleased
 
-- Shared agents: several users can use one agent (same SOUL, memory, chats, tools; level = lowest member's; the creator's keys and Claude subscription pay). Share from the agent settings by user id; the invited person accepts or declines in the Agents tab. Messages carry the speaker's name and `USER.md` has one section per member. Leave, or unshare (copies for everyone, automations paused). New `space` and `agent share|unshare` admin commands and `/api/invitations` routes. Notifications to every member and Telegram per speaker are still in progress. See [shared agents](../user-guide/shared-agents.md).
+- Shared agents: several users use one agent (same SOUL, memory, mind palace, skills, tools and chats). See [shared agents](../user-guide/shared-agents.md).
+  - Share from the agent settings by user id. The invited person gets an invitation with Accept or Decline (a dot marks the Agents tab and menu button). The Share section lists the members and who pays ("uses <Name>'s providers and subscriptions"). `/api/invitations` routes.
+  - The level is the lowest member's; the creator pays. Each message shows the author's name and the model sees a `[NAME]` prefix; `USER.md` has one section per member.
+  - Leave or unshare: unshare gives each member a private copy (automations paused); an orphan data folder is moved to `.trash` instead of blocking.
+  - Notifications go to every member. Telegram replies only to the person speaking, and the router and default agent include shared agents.
+  - `@name` works anywhere in a message, one agent at most, people never mixed with agents. `@person` is a message to people: the agent does not run.
+  - Members see each other's messages and replies instantly (server push, `GET /api/agents/{a}/chats/{c}/events`, SSE), with a slow poll as fallback.
+  - Admin `space` and `agent share|unshare` commands. A user removed by hand breaks the spaces they belong to: run `space remove-member` first.
+- Fix (web): the agent editor no longer throws "chats is not defined" when it draws approval rules (it affected every agent editor since mid-November).
+- Mentions: `@agent` is recognised anywhere in a message (start or after a space, not in emails), also for private agents; the first valid mention decides and only one agent runs per message.
 
 ## 0.6.2 (26 November 2026)
 

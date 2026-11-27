@@ -18,11 +18,11 @@ Any member can invite more people to an already shared agent. The agent must be 
 - Memory, mind palace, skills, chats and approvals (the first decision on an approval card wins).
 - Tools, terminal backends, MCP servers and user folders, as set on the agent.
 - All members are equal: any of them can edit the agent, invite, unshare or delete it.
-- The permission **level** is the lowest `max_level` among the members. If a member's ceiling is lower than the agent's level, what is above it is disabled, not deleted. If a member can no longer be read (removed or broken account), the shared agent is unavailable until fixed.
+- The permission **level** is the lowest `max_level` among the members. If a member's ceiling is lower than the agent's level, what is above it is disabled, not deleted. If a member can no longer be read (removed or broken account), the shared agent is unavailable until fixed. RECALL has no user-delete command: before removing a user by hand, run `space remove-member` for each space they belong to.
 
 ## Who pays
 
-The shared agent uses the **creator's** provider keys and Claude subscription (the user who first shared it). The agent shows "Shared agent · uses the keys and Claude subscription of user-a". Any member may change the provider settings of the shared agent.
+The shared agent uses the **creator's** providers and subscriptions (the user who first shared it). The agent shows "It uses the providers and subscriptions of user-a"; the Share section lists the members and who pays. Any member may change the provider settings of the shared agent.
 
 ## Who is speaking
 
@@ -40,13 +40,17 @@ Private agents cannot @mention, delegate to or list a shared agent, and the shar
 
 In a shared agent's chat, typing `@` also suggests the other members (name, `@<user id>` and "person"). A message with `@<member id>` anywhere is for that person (`@id` after a space or at the start, followed by a space, punctuation or the end; emails like `a@b.com` do not count): it is stored in the chat with your name and the other member sees it, but the agent does not run (no model call, no reply). The agent reads it later as normal history, with your `[NAME]` prefix. If the id is also an agent of the space, the agent answers as usual. In a private agent `@<member id>` is a normal message. The first valid mention decides: after an agent mention every other mention (agents or people) is plain text; after a person mention only more people can follow and an agent mention does not run. At most one agent per message: after an agent mention the `@` popup only shows "Only one agent can be mentioned per message", and after a person it offers only the other people.
 
+## Live sync
+
+Members see each other's messages and replies as they happen (server push; a slow poll is the fallback). A dot on the Agents tab and menu button shows a pending invitation.
+
 ## Automations
 
 Automations move with the agent. Copies made by unshare start **paused**; resume them in the Automations dialog.
 
 ## Telegram
 
-A member may pick a shared agent in their own Telegram bot like any agent. The reply goes only to the person talking; the chat also appears on the web for every member. Planned (in progress): notifications and automation results to every member, and Telegram per speaker.
+A member may pick a shared agent in their own Telegram bot like any agent. The reply goes only to the person talking; the chat also appears on the web for every member. Notifications and automation results go to every member. The router and default agent also offer your shared agents.
 
 ## Admin
 
