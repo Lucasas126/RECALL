@@ -1324,10 +1324,20 @@ html.resizing-sidebar #app { transition: none; }
 #agent-share-error:empty { display: none; }
 .share-leave { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
 .share-leave .model-note { margin: 0; }
-.tabs #tab-agents { position: relative; }
-.tabs #tab-agents { position: relative; }
-.tabs #tab-agents[data-attention]::after { content: ""; position: absolute; top: 4px; right: -10px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg, var(--panel)); }
+.tabs #tab-agents, .tabs #tab-chats { position: relative; }
+.tabs #tab-agents[data-attention]::after, .tabs #tab-chats[data-attention]::after { content: ""; position: absolute; top: 4px; right: -10px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg, var(--panel)); }
 /* Menu button: the theme-colour dot of the chat rows, for a chat the collapsed list hides (approval also tints the button, like its row) */
 .nav-toggle { position: relative; }
 .nav-toggle[data-attention]::after { content: ""; position: absolute; top: 7px; right: 7px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg, var(--panel)); }
 .nav-toggle[data-attention="approval"] { background: var(--accent-soft); color: var(--text); }
+.tabs #tab-chats[data-attention="approval"], .tabs #tab-chats[data-attention="approval"]:hover:not(:disabled) { color: var(--text); background: var(--accent-soft); border-radius: 6px; padding-inline: 8px; margin-inline: -8px; }
+.tabs #tab-chats[data-attention="approval"]::after { right: -2px; }   /* the 8px of padding pushed the dot out; same spot as without the tint */   /* tinted like the menu button; the negative margin keeps the tabs where they are */
+/* The dot belongs to the button only while the panel is hidden; with the panel open the tabs and rows show it */
+@media (min-width: 801px) {
+  html:not(.panel-collapsed) .nav-toggle[data-attention]::after { display: none; }
+  html:not(.panel-collapsed) .nav-toggle[data-attention="approval"] { background: none; color: var(--muted); }
+}
+@media (max-width: 800px) {
+  body.nav-open .nav-toggle[data-attention]::after { display: none; }
+  body.nav-open .nav-toggle[data-attention="approval"] { background: none; color: var(--muted); }
+}
