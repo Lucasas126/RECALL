@@ -77,9 +77,8 @@ def _owner(service: ChatService, session: "TelegramSession", agent_id: str) -> s
 
 
 def _remember_agent(service: ChatService, session: "TelegramSession", agent_id: str) -> None:
-    """Save `agent_id` as the person's preferred agent; a shared agent is not one of their own, so it is not saved."""
-    if _owner(service, session, agent_id) == session.user_id:
-        service.update_preferences(session.user_id, UserPreferences(agent_id=agent_id))
+    """Save `agent_id` (own or shared) as the person's preferred agent."""
+    service.update_preferences(session.user_id, UserPreferences(agent_id=agent_id))
 
 
 @dataclass

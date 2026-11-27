@@ -1066,7 +1066,9 @@ class ChatService:
         self._forget_slot(owner, agent_id)
         self._good_agents.pop((owner, agent_id), None)
         if not is_space_id(owner):  # a space has no preferences
-            self._replace_preferred_agent(owner, agent_id, None)
+            # shared with the owner, the agent stays theirs to pick: keep what points at it
+            if agent_id not in {agent for _, agent in self._routable_agents(owner)}:
+                self._replace_preferred_agent(owner, agent_id, None)
 
     def _agent_arrived(self, owner: str, agent_id: str) -> None:
         """A new owner got the agent: rebuild its index (queued; the data folder came without `.index`)."""
@@ -1424,27 +1426,29 @@ class ChatService:
         resolved = UserPreferences.model_validate({
             "language": saved.language_for(user.language),
         } | saved.model_dump(exclude_unset=True))
+        # the person's own agents and those of their spaces (ids never clash across them)
+        reachable = dict((agent, owner) for owner, agent in reversed(self._routable_agents(user.id)))
         agent_id = resolved.agent_id
         if agent_id is None:
-            agent_id = user.agents[0] if user.agents else None
+            agent_id = next(iter(self._routable_agents(user.id)), (None, None))[1]
         if agent_id is not None:
             self._check_id("agent", agent_id, UnknownAgent)
-            if agent_id not in user.agents:
+            if agent_id not in reachable:
                 raise UnknownAgent(
                     "agent '{agent_id}' is not owned by user '{user_id}'", agent_id=agent_id, user_id=user.id,
                 )
             try:
-                load_agent_config(user.id, agent_id)
+                load_agent_config(reachable[agent_id], agent_id)
             except FileNotFoundError as exc:
                 raise UnknownAgent("unknown agent: {agent_id}", agent_id=agent_id) from exc
         for chosen in (resolved.default_agent_id, resolved.core_agent_id):
             if chosen is not None:
                 self._check_id("agent", chosen, UnknownAgent)
-                if chosen not in user.agents:
+                if chosen not in reachable:
                     raise UnknownAgent(
                         "agent '{agent_id}' is not owned by user '{user_id}'", agent_id=chosen, user_id=user.id,
                     )
-                self._agent_config(user.id, chosen)
+                self._agent_config(reachable[chosen], chosen)
         return resolved.model_copy(update={
             "agent_id": agent_id,
             "default_llm_model": resolved.default_llm_model or user.models.chat,
@@ -1612,9 +1616,10 @@ class ChatService:
             saved = self._preferences.get(user_id).default_agent_id
         except (PreferencesError, OSError, ValueError):
             saved = None
-        if saved in user.agents:
+        reachable = [agent for _, agent in self._routable_agents(user.id)]
+        if saved in reachable:
             return saved
-        return user.agents[0] if user.agents else None
+        return reachable[0] if reachable else None
 
     def orchestrator_core_agent(self, user_id: str) -> Optional[str]:
         """The user's core agent (fallback when unsure) when it still exists, else None."""
@@ -1623,7 +1628,7 @@ class ChatService:
             core = self._preferences.get(user_id).core_agent_id
         except (ServiceError, PreferencesError, OSError, ValueError):
             return None
-        return core if core in user.agents else None
+        return core if core in {agent for _, agent in self._routable_agents(user.id)} else None
 
     def route_message(self, user_id: str, text: str) -> Optional[RouteDecision]:
         """Ask the decision model which of the user's agents suits `text`; None means "use the default agent".
