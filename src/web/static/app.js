@@ -8924,6 +8924,14 @@ async function streamReply(content, attachments, request, editIndex = null, reco
   await readEvents(res, request);
 }
 
+// The server marks a chat unread when its reply ends, even with the chat open. A reply watched to the end in a visible
+// tab, in the chat still open, is read: clear the mark. The server sets it just after the stream closes, so the call
+// waits a moment. A reply that ends in another chat or a hidden tab stays unread.
+const REPLY_SEEN_DELAY_MS = 1500;
+function markReplySeen(request, watched) {
+  if (watched) setTimeout(() => markChatRead(request.agentId, request.chatId), REPLY_SEEN_DELAY_MS);
+}
+
 // Feeds the SSE frames of a response into the request's reply until the stream ends.
 async function readEvents(res, request) {
   const reader = res.body.getReader();
@@ -8944,6 +8952,7 @@ async function readEvents(res, request) {
     if (sameSession(request) && !request.done) {
       throw new Error(tr("Response stream ended before completion"));
     }
+    if (request.done && sameSession(request)) markReplySeen(request, isCurrent(request) && !document.hidden);
   } finally {
     reader.releaseLock();
     request.reply?.settleSteps?.();  // a step still running when the stream ends (error, abort) becomes "stopped"
