@@ -42,7 +42,7 @@ In a shared agent's chat, typing `@` also suggests the other members (name, `@<u
 
 ## Live sync
 
-Members see each other's messages and replies as they happen (server push; a slow poll is the fallback). A dot on the Agents tab and menu button shows a pending invitation.
+Members see each other's messages and replies as they happen (server push; a slow poll is the fallback). The same works for any chat you have open on two devices or tabs. A dot on the Agents tab and menu button shows a pending invitation.
 
 ## Automations
 
