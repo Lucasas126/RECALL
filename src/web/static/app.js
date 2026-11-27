@@ -10319,18 +10319,55 @@ setInterval(() => {
   refreshInvitations();
 }, 4000);
 
-// A shared agent's chat is open: the other member's messages and streaming reply show here within about a second. The
-// summary of the open chat is asked every LIVE_SYNC_MS (only while the tab is visible); a change reloads the chat.
+// A shared agent's chat is open: the other member's messages and streaming reply show here at once. The server pushes a
+// change notice over one EventSource per page (only while the tab is visible); each notice runs the same check as the
+// poll of the open chat's summary, which stays as a slow fallback (every LIVE_SYNC_SLOW_MS) while the stream is open and
+// healthy and returns to LIVE_SYNC_MS when it fails or closes.
 const LIVE_SYNC_MS = 1500;
-const liveSync = { key: null, seen: null, busy: false };
-setInterval(async () => {
+const LIVE_SYNC_SLOW_MS = 15000;
+const LIVE_SYNC_RETRY_MS = 15000;
+const liveSync = { key: null, seen: null, busy: false, source: null, sourceKey: null, last: 0, retryAt: 0 };
+
+// How often the summary poll runs (pure): slow while the push stream is open, else fast.
+function liveSyncDelay(streamOpen) {
+  return streamOpen ? LIVE_SYNC_SLOW_MS : LIVE_SYNC_MS;
+}
+
+function liveSyncClose() {
+  liveSync.source?.close();
+  liveSync.source = null;
+  liveSync.sourceKey = null;
+}
+
+// Keeps the stream matching the open chat: one for a shared agent's chat while the tab is visible, none otherwise.
+function liveSyncStream() {
+  const shared = Boolean(state.user?.agents?.find((a) => a.id === state.agentId)?.shared);
+  const key = state.user && state.chatId && shared && !document.hidden ? chatKey(state.agentId, state.chatId) : null;
+  if (liveSync.sourceKey !== key) liveSyncClose();
+  if (!key || liveSync.source || Date.now() < liveSync.retryAt || typeof EventSource === "undefined") return;
+  const agentId = state.agentId;
+  const chatId = state.chatId;
+  const source = new EventSource(chatsUrl(`/${chatId}/events`));
+  liveSync.source = source;
+  liveSync.sourceKey = key;
+  source.addEventListener("change", () => { if (liveSync.source === source) liveSyncCheck(true); });
+  source.onerror = () => {  // closed, unreachable or 404: fall back to the fast poll, which handles a lost chat
+    if (liveSync.source !== source) return;
+    liveSyncClose();
+    liveSync.retryAt = Date.now() + LIVE_SYNC_RETRY_MS;
+  };
+}
+
+async function liveSyncCheck(pushed = false) {
   if (document.hidden || !state.user || !state.chatId || state.modelBusy || liveSync.busy) return;
   const agentId = state.agentId;
   const chatId = state.chatId;
   if (!state.user.agents?.find((a) => a.id === agentId)?.shared) { liveSync.key = null; return; }
+  if (!pushed && Date.now() - liveSync.last < liveSyncDelay(Boolean(liveSync.source))) return;
   const key = chatKey(agentId, chatId);
   const session = state.session;
   liveSync.busy = true;
+  liveSync.last = Date.now();
   try {
     const data = await api(chatsUrl(`/${chatId}?limit=1`));
     if (session !== state.session || key !== chatKey(state.agentId, state.chatId)) return;
@@ -10340,9 +10377,15 @@ setInterval(async () => {
     liveSync.seen = current;
     if (liveSyncAction(previous, current, isGenerating(agentId, chatId)) === "reload") await openChatNow(chatId);
   } catch (err) {
-    if (err?.status === 404) chatGone(agentId, chatId, session);  // else: the next tick tries again
+    if (err?.status === 404) { liveSyncClose(); chatGone(agentId, chatId, session); }  // else: the next tick tries again
   } finally { liveSync.busy = false; }
+}
+
+setInterval(() => {
+  liveSyncStream();
+  liveSyncCheck();
 }, LIVE_SYNC_MS);
+document.addEventListener("visibilitychange", () => { if (document.hidden) liveSyncClose(); });
 
 // ---- notifications: the bell, the scans and the display (DOM)
 const NOTIFY_STORE = "notifyBell";

@@ -7,8 +7,8 @@ const vm = require("node:vm");
 // liveSyncAction and userAuthor of app.js, loaded without the page
 const source = readFileSync(path.join(__dirname, "..", "..", "..", "src", "web", "static", "app.js"), "utf8");
 const take = (name) => source.match(new RegExp(`function ${name}\\([\\s\\S]*?\\r?\\n\\}\\r?\\n`))[0];
-const context = vm.createContext({});
-vm.runInContext([take("liveSyncAction"), take("userAuthor"), "this.liveSyncAction = liveSyncAction; this.userAuthor = userAuthor;"].join("\n"), context);
+const context = vm.createContext({ LIVE_SYNC_MS: 1500, LIVE_SYNC_SLOW_MS: 15000 });
+vm.runInContext([take("liveSyncAction"), take("liveSyncDelay"), take("userAuthor"), "this.liveSyncAction = liveSyncAction; this.liveSyncDelay = liveSyncDelay; this.userAuthor = userAuthor;"].join("\n"), context);
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
 test("no baseline or a page that is busy itself does nothing", () => {
@@ -37,4 +37,9 @@ test("author label of a stored turn: the stored name, else the id, else none", (
   assert.deepEqual(plain(context.userAuthor(false, null, { author: "user-b", author_name: "Ben" })), { name: "Ben" });
   assert.deepEqual(plain(context.userAuthor(false, null, { author: "user-b" })), { name: "user-b" });
   assert.equal(context.userAuthor(false, null, { role: "user" }), null);
+});
+
+test("the summary poll is slow while the push stream is open and fast otherwise", () => {
+  assert.equal(context.liveSyncDelay(true), 15000);
+  assert.equal(context.liveSyncDelay(false), 1500);
 });
