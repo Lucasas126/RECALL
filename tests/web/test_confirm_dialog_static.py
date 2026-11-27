@@ -27,7 +27,7 @@ class ConfirmDialogStaticTests(unittest.TestCase):
 
     def test_texts_are_set_with_textcontent_and_cancel_is_focused_for_danger(self) -> None:
         self.assertIn('$("confirm-message").textContent = spec.message', APP_JS)
-        self.assertIn('(spec.danger ? $("confirm-cancel") : $("confirm-ok")).focus()', APP_JS)
+        self.assertIn('else (spec.danger ? $("confirm-cancel") : $("confirm-ok")).focus()', APP_JS)
 
     def test_styles_cover_danger_and_mobile(self) -> None:
         self.assertIn("#confirm-dialog::backdrop", STYLE_CSS)
