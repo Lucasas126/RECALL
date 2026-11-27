@@ -30,7 +30,7 @@ class ServiceMoveTests(AdminFixture):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def test_busy_refused_then_share_updates_preferences_and_reindexes(self) -> None:
+    def test_busy_refused_then_share_keeps_preferences_and_reindexes(self) -> None:
         slot = self.service._slot("user-a", "bot")
         slot.active["chat"] = object()
         with self.assertRaises(AgentBusy):
@@ -38,9 +38,8 @@ class ServiceMoveTests(AdminFixture):
         slot.active.clear()
         space_id = self.service.share_agent("user-a", "bot", ["user-b"])
         self.assertEqual(self.reindexed, [(space_id, "bot", True)])
-        prefs = self.service._preferences.get("user-a")
-        self.assertIsNone(prefs.agent_id)
-        self.assertIsNone(prefs.default_agent_id)
+        prefs = self.service._preferences.get("user-a")  # still reachable through the space: nothing to drop
+        self.assertEqual((prefs.agent_id, prefs.default_agent_id), ("bot", "bot"))
 
     def test_running_task_and_process_count_as_busy(self) -> None:
         self.assertFalse(self.service._agent_in_use("user-a", "bot"))
@@ -62,6 +61,13 @@ class ServiceMoveTests(AdminFixture):
         self.assertEqual(plan, {"user-a": "bot", "user-b": "bot"})
         self.assertEqual(all_spaces(self.config_dir), [])
 
+
+    def test_preferences_of_a_member_who_leaves_drop_the_agent(self) -> None:
+        self.service.share_agent("user-a", "bot", ["user-b"])
+        self.service.update_preferences("user-b", UserPreferences(agent_id="bot"))
+        self.service.leave_shared("user-b", "bot")
+        self.assertIsNone(self.service._preferences.get("user-b").agent_id)
+        self.assertEqual(self.service._preferences.get("user-a").agent_id, "bot")
 
 if __name__ == "__main__":
     unittest.main()

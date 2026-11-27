@@ -1241,6 +1241,7 @@ class ChatService:
         if not remaining:
             raise InvitationError("you are the only member; unshare the agent instead")
         target = self._regroup(person, owner, agent_id, remaining)
+        self._replace_preferred_agent(person, agent_id, None)  # the agent is out of their reach now
         self._audit_invitation([target, person], "leave_shared_agent", agent=agent_id, actor=person, space=target)
         return target
 
