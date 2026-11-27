@@ -18,7 +18,7 @@ Any member can invite more people to an already shared agent. The agent must be 
 - Memory, mind palace, skills, chats and approvals (the first decision on an approval card wins).
 - Tools, terminal backends, MCP servers and user folders, as set on the agent.
 - All members are equal: any of them can edit the agent, invite, unshare or delete it.
-- The permission **level** is the lowest `max_level` among the members. If a member's ceiling is lower than the agent's level, what is above it is disabled, not deleted. If a member can no longer be read (removed or broken account), the shared agent is unavailable until fixed. RECALL has no user-delete command: before removing a user by hand, run `space remove-member` for each space they belong to.
+- The permission **level** is the lowest `max_level` among the members. If a member's ceiling is lower than the agent's level, what is above it is disabled, not deleted. If a member can no longer be read (folder removed by hand or broken account), the shared agent is unavailable until fixed or until `space remove-member` takes them out. Deleting a user with `delete-user` (or the trash button in Settings > Users) does this for you: shared agents stay with the other members.
 
 ## Who pays
 

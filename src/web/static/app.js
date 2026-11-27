@@ -153,6 +153,12 @@ function confirmDialog(options) {
     $("confirm-message").textContent = spec.message;
     $("confirm-ok").textContent = spec.confirmLabel;
     $("confirm-cancel").textContent = spec.cancelLabel;
+    const input = $("confirm-input");
+    input.hidden = !spec.requireText;
+    input.value = "";
+    input.setAttribute("aria-label", spec.inputLabel);
+    $("confirm-ok").disabled = Boolean(spec.requireText);
+    input.oninput = () => { $("confirm-ok").disabled = !confirmTextMatches(spec.requireText, input.value); };
     $("confirm-ok").classList.toggle("danger", spec.danger);
     $("confirm-ok").classList.toggle("primary", !spec.danger);
     dialog.dataset.danger = String(spec.danger);
@@ -164,10 +170,11 @@ function confirmDialog(options) {
     dialog.returnValue = "";
     dialog.addEventListener("close", finish);
     dialog.showModal();
-    (spec.danger ? $("confirm-cancel") : $("confirm-ok")).focus();
+    if (spec.requireText) input.focus();
+    else (spec.danger ? $("confirm-cancel") : $("confirm-ok")).focus();
   }));
 }
-$("confirm-ok").addEventListener("click", () => $("confirm-dialog").close("ok"));
+$("confirm-ok").addEventListener("click", () => { if (!$("confirm-ok").disabled) $("confirm-dialog").close("ok"); });
 $("confirm-cancel").addEventListener("click", () => $("confirm-dialog").close("cancel"));
 $("confirm-dialog").addEventListener("click", (event) => { if (event.target === event.currentTarget) event.currentTarget.close("cancel"); });
 
@@ -190,7 +197,14 @@ function confirmSpec(options, translate) {
     confirmLabel: spec.confirmLabel || translate("Confirm"),
     cancelLabel: spec.cancelLabel || translate("Cancel"),
     danger: Boolean(spec.danger),
+    requireText: spec.requireText ? String(spec.requireText) : "",  // the text the person must type before Confirm works
+    inputLabel: spec.inputLabel ? String(spec.inputLabel) : "",
   };
+}
+
+// True when the typed text equals the required one exactly (no trimming, no case folding); always true when none is required.
+function confirmTextMatches(required, typed) {
+  return !required || String(typed ?? "") === String(required);
 }
 
 // Runs the given async tasks one after the other, so two confirmations are never open together.
@@ -3590,7 +3604,39 @@ function userAdminItem(user) {
     row.append(select, apply);
   }
   item.append(row, note);
+  const lastAdmin = user.max_level === "admin" && state.adminUsers.filter((other) => other.max_level === "admin").length < 2;
+  if (!user.self && !lastAdmin) {
+    const del = Object.assign(document.createElement("button"), { type: "button", className: "icon-btn danger" });
+    del.innerHTML = ICONS.trash;
+    del.title = tr("Delete user");
+    del.setAttribute("aria-label", tr("Delete user {user}", { user: user.id }));
+    del.addEventListener("click", () => deleteUserAdmin(user));
+    row.append(del);
+  }
   return item;
+}
+
+async function deleteUserAdmin(user) {
+  const session = state.session;
+  const ok = await confirmDialog({
+    title: tr("Delete user {user}", { user: user.id }),
+    message: tr("This permanently deletes the user, their agents, chats, memories and files. Agents shared with other people stay with them. To confirm, type the user id: {user}", { user: user.id }),
+    confirmLabel: tr("Delete user"), danger: true, requireText: user.id, inputLabel: tr("User id"),
+  });
+  if (!ok || session !== state.session) return;
+  $("users-status").textContent = "";
+  try {
+    const result = await api(`/api/admin/users/${encodeURIComponent(user.id)}`, { method: "DELETE", body: JSON.stringify({ confirm: user.id }) });
+    if (session !== state.session) return;
+    state.adminUsers = state.adminUsers.filter((item) => item.id !== user.id);
+    renderUsersAdmin();
+    const notes = [tr("User {user} deleted.", { user: user.id })];
+    if (result.leftovers.secrets.length) notes.push(tr("Remove these secrets by hand: {names}", { names: result.leftovers.secrets.join(", ") }));
+    if (result.leftovers.telegram) notes.push(tr("Remove the user's entry from {name} by hand.", { name: result.leftovers.telegram_variable }));
+    $("users-status").textContent = notes.join(" ");
+  } catch (err) {
+    if (session === state.session) $("users-status").textContent = err.message;
+  }
 }
 
 // ---- user onboarding wizard (administrators): create the user, give provider access, first agent, review

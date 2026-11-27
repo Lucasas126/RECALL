@@ -91,7 +91,7 @@ One operation, used by share (user to space) and unshare (space to user, once pe
 
 - `python -m src.admin space list|show|create|add-member|remove-member|delete`.
 - Audit entries of a space record the member who acted.
-- RECALL has no user-delete command. A user removed by hand makes the spaces they belong to unusable (fail closed) until `space remove-member` is run; run it first.
+- `delete-user` (CLI and admin screen) handles spaces: shared agents regroup to the remaining members (the next member pays) and a space whose only member is deleted goes with its agents. A user removed by hand still makes their spaces unusable (fail closed) until `space remove-member` is run.
 
 ## Steps
 

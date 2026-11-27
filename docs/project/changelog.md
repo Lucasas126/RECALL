@@ -5,6 +5,7 @@ sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases b
 
 ## Unreleased
 
+- Delete a user: `python -m src.admin delete-user --user U --yes --confirm U` and a trash button in Settings > Users (type the user id to confirm). Removes the user's config and data and their invitations; shared agents stay with the other members. Secrets and `TELEGRAM_ALLOWED_USERS` are not edited: the names to remove by hand are listed.
 - Shared agents: several users use one agent (same SOUL, memory, mind palace, skills, tools and chats). See [shared agents](../user-guide/shared-agents.md).
   - Share from the agent settings by user id. The invited person gets an invitation with Accept or Decline (a dot marks the Agents tab and menu button). The Share section lists the members and who pays ("uses <Name>'s providers and subscriptions"). `/api/invitations` routes.
   - The level is the lowest member's; the creator pays. Each message shows the author's name and the model sees a `[NAME]` prefix; `USER.md` has one section per member.
@@ -12,7 +13,7 @@ sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases b
   - Notifications go to every member. Telegram replies only to the person speaking, and the router and default agent include shared agents.
   - `@name` works anywhere in a message, one agent at most, people never mixed with agents. `@person` is a message to people: the agent does not run.
   - Members see each other's messages and replies instantly (server push, `GET /api/agents/{a}/chats/{c}/events`, SSE), with a slow poll as fallback.
-  - Admin `space` and `agent share|unshare` commands. A user removed by hand breaks the spaces they belong to: run `space remove-member` first.
+  - Admin `space` and `agent share|unshare` commands.
 - Web UI: any open chat follows changes made elsewhere at once (another tab or device of the same person, or another member of a shared agent): the server pushes a notice (`GET /api/agents/{a}/chats/{c}/events`, SSE) and the page reloads the chat or attaches to the running reply; a slow poll is the fallback.
 - Fix (web): the agent editor no longer throws "chats is not defined" when it draws approval rules (it affected every agent editor since mid-November).
 - Web UI: the plan usage panel names the subscription, the account e-mail and the plan ("Claude subscription · user@example.com · Max"), shown only to the user whose login it is.

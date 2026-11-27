@@ -2783,6 +2783,41 @@ class ChatService:
         row = next(row for row in self.user_overview() if row["id"] == user_id)
         return {**row, "self": False, "generated_password": result["generated"]}
 
+    def delete_user(self, admin_id: str | None, user_id: str, *, confirm: str) -> dict:
+        """An administrator deletes a user for good (config, data, invitations); shared agents stay with the other
+        members. Secrets are never edited: `leftovers` names what is still to remove by hand."""
+        from src.admin.delete_user import delete_user as delete_files
+
+        if admin_id is not None:
+            self._require_administrator(admin_id)
+        self._check_id("user", user_id, UnknownManagedUser)
+        if is_space_id(user_id):
+            raise InputError("'{user_id}' is a space, not a user", code="user_delete_failed", user_id=user_id)
+        try:
+            load_user(user_id)
+        except FileNotFoundError as exc:
+            raise UnknownManagedUser("unknown user: {user_id}", user_id=user_id) from exc
+        try:
+            result = delete_files(
+                user_id, confirm=confirm, actor=admin_id, config_dir=CONFIG_DIR, data_dir=DATA_DIR,
+                is_busy=self._agent_in_use, create_space=self._agent_mover()._create_space,
+                on_removed=self._agent_moved_away, on_created=self._agent_arrived,
+            )
+        except admin_users.AdminError as exc:
+            raise InputError(str(exc), code="user_delete_failed") from exc
+        self._good_users.pop(user_id, None)
+        for key in [k for k in self._good_agents if k[0] == user_id]:
+            self._good_agents.pop(key, None)
+        with self._slots_guard:
+            for key in [k for k in self._slots if k[0] == user_id]:
+                self._slots.pop(key, None)
+        self._availability.forget()
+        logger.info("administrator %s deleted user %s", admin_id or "cli", user_id)
+        if admin_id is not None:
+            self._admin_audit(admin_id, admin_id, "delete_user", deleted=user_id, agents=result["agents"],
+                              leftover_secrets=result["leftovers"]["secrets"])
+        return result
+
     def _admin_audit(self, admin_id: str, user_id: str, action: str, **fields) -> None:
         """One line per administrator action on a user, in that user's data folder; never a secret value."""
         path = Path(DATA_DIR) / user_id / ADMIN_AUDIT_FILE
