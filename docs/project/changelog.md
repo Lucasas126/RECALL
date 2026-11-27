@@ -3,7 +3,7 @@
 The notes of each release are on the GitHub Releases page. This file groups what changed by topic, starting with 0.4.0, which
 sums up everything since 0.2.0 (5 November 2026): 0.2.x and 0.3.x, 34 releases between 5 and 15 November.
 
-## Unreleased
+## 0.7.0 (27 November 2026)
 
 - Delete a user: `python -m src.admin delete-user --user U --yes --confirm U` and a trash button in Settings > Users (type the user id to confirm). Removes the user's config and data and their invitations; shared agents stay with the other members. Secrets and `TELEGRAM_ALLOWED_USERS` are not edited: the names to remove by hand are listed.
 - Shared agents: several users use one agent (same SOUL, memory, mind palace, skills, tools and chats). See [shared agents](../user-guide/shared-agents.md).
