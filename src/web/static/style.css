@@ -1303,13 +1303,22 @@ html.resizing-sidebar #app { transition: none; }
 }
 
 /* Shared-agent invitations: the block on the Agents tab and the Share fieldset; the dot reuses the menu-button dot */
-.invitations { flex: 1 1 100%; display: grid; gap: 10px; }
-.invitation { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
-.invitation p { margin: 0 0 4px; }
-.invitation-actions, .share-row { display: flex; gap: 8px; margin-top: 6px; }
+.invitations { flex: 1 1 100%; width: 100%; max-width: 640px; margin: 0 auto; display: grid; gap: 8px; align-content: start; }
+.invitations h3 { margin: 0; }
+.invitation { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.invitation p { margin: 0 0 2px; }
+.invitation-actions, .share-row { display: flex; gap: 8px; }
+.invitation-actions { margin-top: 8px; }
+.share-row { margin: 0; }
 .share-row input { flex: 1; min-width: 0; }
-.share-list { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 6px; }
-.share-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.share-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.share-list:empty { display: none; }
+.share-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.share-list li .share-id, .share-list li .share-tag { color: var(--muted); font-size: .85em; }
+.share-list li .share-tag { margin-left: 6px; }
+#agent-share-error:empty { display: none; }
+.share-leave { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
+.share-leave .model-note { margin: 0; }
 .tabs #tab-agents { position: relative; }
 .tabs #tab-agents { position: relative; }
 .tabs #tab-agents[data-attention]::after { content: ""; position: absolute; top: 4px; right: -10px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg, var(--panel)); }

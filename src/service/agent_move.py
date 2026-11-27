@@ -15,6 +15,7 @@ import logging
 import re
 import secrets
 import shutil
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -35,6 +36,11 @@ AUDIT_FILE = "admin_audit.jsonl"
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _USER_MD = MEMORY_FILES["user"]
 _SKIP = {".index"}
+
+
+def _orphan_field(path: str | None) -> dict[str, str]:
+    """Audit field for a data folder without configuration that was moved aside to make room."""
+    return {"orphan_data_moved_to": path} if path else {}
 
 
 class MoveError(InputError):
@@ -80,7 +86,7 @@ class AgentMover:
         created = space is None
         space_id = space.id if space else self._create_space(owner_user, everyone[1:], None)
         try:
-            self._transfer(owner_user, space_id, config, copy=False, paused=False, user_md=self._share_user_md(owner_user, config))
+            orphan = self._transfer(owner_user, space_id, config, copy=False, paused=False, user_md=self._share_user_md(owner_user, config))
         except BaseException:
             if created:
                 shutil.rmtree(self.config_dir / space_id, ignore_errors=True)
@@ -90,7 +96,7 @@ class AgentMover:
         self._audit(owner_user, "share_agent", agent=agent_id, space=space_id, members=everyone, dropped_targets=dropped)
         self._safely(self._on_removed, owner_user, agent_id)
         self._safely(self._on_created, space_id, agent_id)
-        self._audit(space_id, "share_agent", agent=agent_id, from_user=owner_user, members=everyone)
+        self._audit(space_id, "share_agent", agent=agent_id, from_user=owner_user, members=everyone, **_orphan_field(orphan))
         return space_id
 
     def regroup_agent(self, space_id: str, agent_id: str, members: list[str], actor: str) -> str:
@@ -126,7 +132,7 @@ class AgentMover:
             target_id = target.id
         user_md = self._read_user_md(space_id, agent_id)
         try:
-            self._transfer(space_id, target_id, config, copy=False, paused=False, user_md=user_md)
+            orphan = self._transfer(space_id, target_id, config, copy=False, paused=False, user_md=user_md)
         except BaseException:
             if created:
                 shutil.rmtree(self.config_dir / target_id, ignore_errors=True)
@@ -139,7 +145,7 @@ class AgentMover:
         self._audit(space_id, "regroup_agent", agent=agent_id, actor=actor, to_space=target_id, members=everyone, dropped_targets=dropped)
         self._safely(self._on_removed, space_id, agent_id)
         self._safely(self._on_created, target_id, agent_id)
-        self._audit(target_id, "regroup_agent", agent=agent_id, actor=actor, from_space=space_id, members=everyone)
+        self._audit(target_id, "regroup_agent", agent=agent_id, actor=actor, from_space=space_id, members=everyone, **_orphan_field(orphan))
         return target_id
 
     def unshare_agent(self, space_id: str, agent_id: str, actor: str) -> dict[str, str]:
@@ -161,11 +167,14 @@ class AgentMover:
         for member in space.members:
             self._check_fits(config, {member: self.store.user(member).max_level}, space.terminal_backends, f"the account of '{member}'")
         done: list[tuple[str, str]] = []
+        orphans: dict[str, str] = {}
         try:
             for member, new_id in plan.items():
                 text = join_memory(self._entries(sections, member)) if not single else self._flat(sections)
-                self._transfer(space_id, member, config, copy=True, paused=not single, user_md=text, new_id=new_id)
+                orphan = self._transfer(space_id, member, config, copy=True, paused=not single, user_md=text, new_id=new_id)
                 done.append((member, new_id))
+                if orphan:
+                    orphans[member] = orphan
         except BaseException:
             for member, new_id in done:
                 self._undo_target(member, new_id)
@@ -177,7 +186,8 @@ class AgentMover:
             shutil.rmtree(self.config_dir / space_id, ignore_errors=True)  # its data folder stays
         for member, new_id in plan.items():
             self._drop_targets(member, only=new_id)
-            self._audit(member, "unshare_agent", agent=agent_id, new_id=new_id, space=space_id, actor=actor)
+            self._audit(member, "unshare_agent", agent=agent_id, new_id=new_id, space=space_id, actor=actor,
+                        **_orphan_field(orphans.get(member)))
             self._safely(self._on_created, member, new_id)
         self._safely(self._on_removed, space_id, agent_id)
         self._audit(space_id, "unshare_agent", agent=agent_id, actor=actor, members=list(space.members), dropped_targets=dropped)
@@ -186,14 +196,20 @@ class AgentMover:
     # ------------------------------------------------------------------ steps
 
     def _transfer(self, source: str, target: str, config: AgentConfig, *, copy: bool, paused: bool, user_md: str,
-                  new_id: str | None = None) -> None:
-        """Make the agent exist for `target` (config, data, avatar, automations). `copy=False` also removes the source."""
+                  new_id: str | None = None) -> str | None:
+        """Make the agent exist for `target` (config, data, avatar, automations). `copy=False` also removes the source.
+
+        A data folder left at the destination by an agent that no longer has a configuration (deleted agents keep their
+        data) is moved aside to `.trash/` first; returns its path relative to the owner's data folder, else None."""
         new_id = new_id or config.id
         target_user = self._target_user(target)
         moved = self._fit_level(config.model_copy(update={"id": new_id}), target_user)
         data_target = self.data_dir / target / new_id
+        trashed: Path | None = None
         if data_target.exists():
-            raise MoveError("data already exists for agent '{agent_id}' of '{owner}'", agent_id=new_id, owner=target)
+            if new_id in target_user.agents:
+                raise MoveError("data already exists for agent '{agent_id}' of '{owner}'", agent_id=new_id, owner=target)
+            trashed = self._trash_orphan(target, new_id)
         tmp = self.data_dir / target / f".move-{secrets.token_hex(4)}"
         made_config = made_avatar = False
         automation_paths: list[Path] = []
@@ -220,6 +236,8 @@ class AgentMover:
             if made_config:
                 shutil.rmtree(data_target, ignore_errors=True)
                 self._undo_target(target, new_id, data=False)
+            if trashed is not None and not data_target.exists():
+                trashed.rename(data_target)  # the move failed: give the old folder back
             for path in automation_paths:
                 path.unlink(missing_ok=True)
             if made_avatar:
@@ -227,6 +245,20 @@ class AgentMover:
             raise
         if not copy:
             self._remove_source(source, config.id)
+        return trashed.relative_to(self.data_dir / target).as_posix() if trashed else None
+
+    def _trash_orphan(self, owner: str, agent_id: str) -> Path:
+        """Move the data folder of an agent without configuration to `<owner>/.trash/<agent>-<timestamp>` (never deleted)."""
+        folder = self.data_dir / owner / ".trash"
+        folder.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        destination = folder / f"{agent_id}-{stamp}"
+        number = 1
+        while destination.exists():
+            number += 1
+            destination = folder / f"{agent_id}-{stamp}-{number}"
+        (self.data_dir / owner / agent_id).rename(destination)
+        return destination
 
     def _tree(self, root: Path) -> dict[str, int]:
         """Relative path -> size of every file under `root`, without the index and USER.md (rewritten on a move)."""
@@ -333,8 +365,7 @@ class AgentMover:
     def _free_id(self, member: str, agent_id: str, space_id: str) -> str:
         for number in range(1, 100):
             candidate = agent_id if number == 1 else f"{agent_id[:60]}-{number}"
-            if agent_id_conflict(member, candidate, self.config_dir, ignore=space_id) is None \
-                    and not (self.data_dir / member / candidate).exists():
+            if agent_id_conflict(member, candidate, self.config_dir, ignore=space_id) is None:  # an orphan folder is moved aside later
                 return candidate
         raise MoveError("no free id for agent '{agent_id}' in the account of '{owner}'", agent_id=agent_id, owner=member)
 
