@@ -37,7 +37,7 @@ class TaskLimits:
     max_parallel_per_user: int
     max_launches_per_turn: int
     timeout_seconds: int
-    max_tokens: int  # 0 = no cap per task
+    max_tokens: int  # 0 = no cap per task (not recommended)
     result_max_chars: int
     rate_limit_cooldown_seconds: int
     depth: int = 1
@@ -45,10 +45,10 @@ class TaskLimits:
 
 
 def _token_clause(limits: TaskLimits) -> str:
-    """' and N tokens' when a cap is set, else a hint that `max_tokens` can set one for a task."""
+    """' and N tokens' when a cap is set, else a warning that the task has no cap."""
     if limits.max_tokens:
-        return f" and {limits.max_tokens:,} tokens"
-    return " (no token cap unless you pass `max_tokens`)"
+        return f" and {limits.max_tokens:,} tokens (`max_tokens` can only lower it)"
+    return " (no token cap: not recommended, pass `max_tokens` to set one)"
 
 
 def task_limits(delegation: AgentDelegationConfig | None) -> TaskLimits:

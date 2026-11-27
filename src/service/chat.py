@@ -767,6 +767,11 @@ class ChatService:
             self.send_system(
                 record["user"], record["agent"], record["chat_id"], block, source="process", frame=process_wake_frame,
             )
+            # The agent may have read the final state between the check above and the queueing (the registry flips
+            # `done` before this hook runs, so a `process_wait` returns first): `mark_seen` then found nothing queued.
+            # Look again now that the block is queued; a wake that already started is left alone.
+            if registry.get(record["user"], record["id"]).get("seen"):
+                self._drop_seen_process_wake(record)
         except (UnknownChat, ProcessError, ValueError):
             pass  # the chat or the record is gone: nobody to tell
         except Exception:
@@ -1272,10 +1277,13 @@ class ChatService:
         for record in registry.list(user_id):
             if record["state"] == "running" and record.get("agent") == agent_id and record.get("chat_id"):
                 running[record["chat_id"]] = running.get(record["chat_id"], 0) + 1
+        delegated = self._tasks.parent_activity(user_id, agent_id)  # subagent tasks per parent chat, read once
         summaries = [
             {
                 **conversations.summary(chat_id, days), "active": chat_id in busy,
                 "processes": running.get(chat_id, 0),  # background processes still running for this chat
+                "tasks": delegated.get(chat_id, {}).get("running", 0),  # subagent tasks it launched that are still running
+                "task_results": delegated.get(chat_id, {}).get("arriving", 0),  # finished tasks whose result is on its way to it
                 "pending_approvals": len(self._approvals.pending(user_id, agent_id, chat_id)),  # tools waiting for a go-ahead
                 "unread": conversations.has_unread(chat_id),  # a reply finished that nobody has opened (kept on the server)
             }

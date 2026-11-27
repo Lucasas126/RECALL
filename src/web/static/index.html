@@ -414,6 +414,7 @@
               <div class="setting-row">
                 <div class="setting-main">
                   <label for="agent-delegation-tokens" id="agent-delegation-tokens-label">Token limit per task</label>
+                  <p id="agent-delegation-tokens-hint" class="model-note">Input plus output tokens of one task, summed over every model call (cached reads included). 0 = no limit, not recommended.</p>
                 </div>
                 <div class="setting-control"><input id="agent-delegation-tokens" type="text" inputmode="numeric" autocomplete="off" data-number data-unit="tokens" data-step="10000"><button type="button" class="icon-btn setting-reset">↺</button></div>
                 <p class="setting-default model-note"></p>
@@ -1122,6 +1123,16 @@
     <p id="task-dialog-banner-text" class="task-internal-banner" role="status">Internal worker chat: read-only, not part of your chat list. Use Steer on the task card to correct it.</p>
     <div id="task-dialog-messages" role="log"></div>
   </dialog>
+  <dialog id="confirm-dialog" role="alertdialog" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+    <div class="confirm-body">
+      <h2 id="confirm-title"></h2>
+      <p id="confirm-message"></p>
+      <div class="confirm-actions">
+        <button id="confirm-cancel" type="button"></button>
+        <button id="confirm-ok" type="button" class="primary"></button>
+      </div>
+    </div>
+  </dialog>
   <dialog id="model-dialog" aria-labelledby="model-title">
     <div class="model-heading">
       <h2 id="model-title">Models</h2>
@@ -1186,6 +1197,7 @@
 
   <script src="/static/vendor/marked.umd.js"></script>
   <script src="/static/vendor/purify.min.js"></script>
+  <script src="/static/vendor/highlight.min.js"></script>
   <script src="/static/vendor/panzoom.min.js"></script>
   <script src="/static/app.js"></script>
 </body>
