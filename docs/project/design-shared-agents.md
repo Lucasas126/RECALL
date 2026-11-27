@@ -1,6 +1,6 @@
 # Design: agents shared between users
 
-Status: steps 1-5 implemented; 6 in progress; 7 done (docs). Step 1: model, derived level, login refusal, `resolve_owner`, admin CLI. Step 2: web access by membership (`agent_owner` dependency on every `/api/agents/{id}/...` route, space agents in the listings with `shared`/`space_id`; a space with an unreadable member fails closed even after it was valid once). Step 3: speaker. Step 4: move. Step 5: invitations, accept/decline/revoke, leave, unshare, web UI. Steps are built one branch at a time off `feat/shared-agents`.
+Status: all steps implemented: model and derived level, web access by membership, speaker, move, invitations and leave/unshare, notifications to every member, Telegram per speaker, docs. Follow-ups done after the trial: member list and billing name in the Share section, live sync over SSE, `@person` messages, mentions anywhere in a message, orphan data folders moved to `.trash`, router and default agent include shared agents. Steps were built one branch at a time off `feat/shared-agents`.
 
 ## Goal
 
@@ -46,8 +46,7 @@ arbitrary path.
 - `/api/chats` and the agents list include the spaces' agents; agents tab gets a "Shared" section (like
   "Hidden"); chat list items of a space agent get a "shared" tag. `hidden` is a property of the shared agent,
   the same for every member.
-- Sync between members uses what already syncs two tabs of one user: chat list polling, `followReply` on a
-  running reply, per-chat approvals. Approval cards appear in every member's view of the chat; the first
+- Sync between members: server push (SSE, one stream per open chat) with a slow poll as fallback, and per-chat approvals. Approval cards appear in every member's view of the chat; the first
   decision wins.
 
 ## Who is speaking
@@ -61,9 +60,8 @@ arbitrary path.
 ## Telegram and notifications
 
 - Telegram: a member may pick a space agent in their own bot like any agent; the reply goes only to that
-  member. The chat shows on the web for every member; it is not mirrored to other members' Telegram.
-- Notifications (`notify_telegram`, automation results, bell): to every member by default. Later: a target
-  list or a group chat id.
+  member. The chat shows on the web for every member; it is not mirrored to other members' Telegram. The router and the default agent include a person's shared agents. No Telegram invitation notice (dropped).
+- Notifications (`notify_telegram`, automation results, bell): to every member.
 
 ## Sharing, invitations and leaving
 
@@ -93,17 +91,17 @@ One operation, used by share (user to space) and unshare (space to user, once pe
 
 - `python -m src.admin space list|show|create|add-member|remove-member|delete`.
 - Audit entries of a space record the member who acted.
-- Deleting a user removes them from their spaces (the space lives on while it has members).
+- RECALL has no user-delete command. A user removed by hand makes the spaces they belong to unusable (fail closed) until `space remove-member` is run; run it first.
 
 ## Steps
 
 1. Space model and storage: `kind: space`, `members`, `billing_user`, derived `max_level`, login refused,
    `resolve_owner`, admin CLI. Tests. **Done** (`src/config/spaces.py`, `src/admin/spaces.py`; a declared `max_level` on a space is refused).
-2. Web access by membership, "Shared" section, "shared" tag, isolation of mentions and delegation.
+2. Web access by membership, "Shared" section, "shared" tag, isolation of mentions and delegation. **Done.**
 3. Speaker: `author` in the JSONL, `[NAME]` prefix, `USER.md` sections and limit. **Done** (author, prefix and name in the UI; `src/agent/user_sections.py`; limit scaled in the memory tool, the prompt counter, `ChatService.get_memory`/`update_memory` and so the web route; a hand edit of USER.md only has to fit the scaled limit, its sections are free text).
 4. Move: share an existing agent into a space and unshare (copies), with prechecks and index rebuild. **Done** (`src/service/agent_move.py`, `agent share|unshare`; `.index` is not copied, the index is rebuilt after the move; the CLI cannot see running replies of a server process, so stop them first).
 5. Invitations: request, accept, decline, revoke, leave, unshare; UI. **Done** (`src/service/invitations.py`, `ChatService` methods, `/api/invitations` routes, Share block and Agents tab in the web UI).
-6. Notifications to every member; Telegram per speaker. **In progress.**
+6. Notifications to every member; Telegram per speaker. **Done** (every member gets the notification; Telegram answers only the speaker).
 7. Docs (`docs/architecture/agents-and-users.md`, permissions, user guide, built-in `recall` skill). **Done.**
 
 Before deploy: back up config and data, then test the release on a throwaway instance with two test users.

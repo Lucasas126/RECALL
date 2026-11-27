@@ -100,6 +100,8 @@ A space (`space-<8 hex>`) is a pseudo-user that owns shared agents; it never log
 | `agent share --user U --agent A --with V [--with W ...]` | move U's agent into the space of U plus the others (reused or created) |
 | `agent unshare --space S --agent A [--actor M] --yes` | move the agent back to the only member, else copy it to each member (copies' automations paused) |
 
+RECALL has no user-delete command. A user removed by hand (their folder or `user.yaml`) makes every space they belong to unusable (fail closed) until `space remove-member` is run, so run it first for each space (`space list` shows the members).
+
 The CLI cannot see replies running in the server: stop them first. Invitations are made in the web UI.
 
 ## Credentials
