@@ -93,6 +93,14 @@ class SharedAgentMemberTests(SharedAgentFixture):
         self.assertEqual(agents[SHARED]["space_id"], SPACE)
         self.assertNotIn("shared", agents["agent-one"])
 
+    def test_the_shared_agent_lists_its_members_with_their_names(self) -> None:
+        client = self._client_as("user-one")
+        for items in (client.get("/api/agents").json(), client.get("/api/me").json()["agents"]):
+            shared = next(a for a in items if a["id"] == SHARED)
+            self.assertIn("user-one", [m["id"] for m in shared["members"]])
+            self.assertTrue(all(m["name"] for m in shared["members"]))
+            self.assertNotIn("members", next(a for a in items if a["id"] == "agent-one"))
+
     def test_a_member_opens_chats_sends_and_reads(self) -> None:
         client = self._client_as("user-one")
         chat = client.post(f"/api/agents/{SHARED}/chats").json()["id"]

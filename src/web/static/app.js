@@ -503,6 +503,14 @@ function invitationNote(invitation, translate) {
     user: invitation.billing_user || invitation.inviter,
   });
 }
+// The Share block's member rows (pure): who has access, "you", and who pays (the billing user). A private agent: only you.
+function memberRows(agent, meId, translate) {
+  if (!agent?.shared) return [{ id: meId, name: translate("Only you"), you: true, tags: [] }];
+  return (agent.members ?? []).map((member) => ({
+    id: member.id, name: member.name || member.id, you: member.id === meId,
+    tags: [...(member.id === meId ? [translate("you")] : []), ...(member.id === agent.billing_user ? [translate("pays")] : [])],
+  }));
+}
 function outgoingFor(invitations, agentId) {
   return (invitations?.outgoing ?? []).filter((item) => item.agent_id === agentId && (item.status ?? "pending") === "pending");
 }
@@ -847,7 +855,7 @@ function translateInterface() {
     ["model-zdr-warning", "ZDR is not required for your next selection. Providers may retain your prompts and replies. Your OpenRouter account may still enforce ZDR."],
     ["tab-chats", "Chats"], ["tab-agents", "Agents"],
     ["agent-hidden-label", "Hidden"],
-    ["agent-share-legend", "Share"], ["agent-share-invite", "Invite"], ["agent-leave", "Leave"], ["agent-unshare", "Unshare"],
+    ["agent-share-legend", "Share"], ["agent-share-leave-note", "Leave stops your access; Unshare gives every member a private copy."], ["agent-share-invite", "Invite"], ["agent-leave", "Leave"], ["agent-unshare", "Unshare"],
     ["agent-share-hint", "Invite another user by their user id. They get access to this agent and all its chats, using your keys and Claude subscription."],
     ["agent-hidden-hint", "A hidden agent is left out of the agent selectors and listed under Hidden agents. You can still talk to it with @ and open a chat with it from here."],
     ["agent-open-chat", "Open chat with this agent"],
@@ -3037,6 +3045,20 @@ async function refreshInvitations() {
   }
 }
 
+// After the agent list changed under the open view (accept, leave, unshare): the empty "no agents" state gives way to the
+// first agent, and a person left without agents sees the empty state.
+async function showAgentOrEmpty(session) {
+  if (session !== state.session || !state.user) return;
+  const agents = state.user.agents;
+  if (!agents.length) {
+    if (state.agentId) await selectAgent(null);
+    return;
+  }
+  if (!state.agentId || !agents.some((agent) => agent.id === state.agentId)) {
+    await selectAgent(state.preferences?.agent_id && agents.some((a) => a.id === state.preferences.agent_id) ? state.preferences.agent_id : agents[0].id);
+  }
+}
+
 async function answerInvitation(id, action) {
   const session = state.session;
   $("agent-error").textContent = "";
@@ -3044,7 +3066,11 @@ async function answerInvitation(id, action) {
     await api(`/api/invitations/${encodeURIComponent(id)}/${action}`, { method: "POST" });
     if (session !== state.session) return;
     await refreshInvitations();
-    if (action === "accept") await refreshAgentsAfterTool();
+    if (action === "accept") {
+      await refreshAgentsAfterTool();
+      await refreshPreferences();
+      await showAgentOrEmpty(session);
+    }
   } catch (err) {
     if (session === state.session) $("agent-error").textContent = err.message;
   }
@@ -3056,6 +3082,26 @@ function renderShareList() {
   $("agent-share-section").hidden = !agentId;
   $("agent-leave").hidden = !agent?.shared;
   $("agent-unshare").hidden = !agent?.shared;
+  $("agent-share-leave-box").hidden = !agent?.shared;
+  $("agent-share-members").replaceChildren(...(agentId ? memberRows(agent, state.user?.id, tr) : []).map((row) => {
+    const li = document.createElement("li");
+    const label = document.createElement("span");
+    label.textContent = row.name;
+    li.append(label);
+    if (row.id !== row.name && !(row.you && !agent?.shared)) {
+      const id = document.createElement("span");
+      id.className = "share-id";
+      id.textContent = ` · ${row.id}`;
+      label.append(id);
+    }
+    if (row.tags.length) {
+      const tag = document.createElement("span");
+      tag.className = "share-tag";
+      tag.textContent = row.tags.join(" · ");
+      label.append(tag);
+    }
+    return li;
+  }));
   const pending = agentId ? outgoingFor(state.invitations, agentId) : [];
   $("agent-share-list").replaceChildren(...pending.map((invitation) => {
     const li = document.createElement("li");
@@ -3084,7 +3130,9 @@ async function shareAction(url, body, moved) {
       setAgentFormOpen(false);
       setDreamHash("agents");
       await refreshAgents(agentId, null);
+      await refreshPreferences();
       await refreshChats();
+      await showAgentOrEmpty(session);
     }
     await refreshInvitations();
   } catch (err) {
@@ -3092,12 +3140,20 @@ async function shareAction(url, body, moved) {
   }
 }
 
-$("agent-share-invite").addEventListener("click", async () => {
+// The block sits inside the agent form, so Enter in the field would submit (save) that form: it is intercepted and runs the
+// same invite handler as the button; an empty field does nothing.
+async function inviteFromField() {
   const agentId = state.agentForm.originalId;
   const userId = $("agent-share-user").value.trim();
   if (!agentId || !userId) return;
   await shareAction(`/api/agents/${encodeURIComponent(agentId)}/invitations`, { user_id: userId }, false);
   if (!$("agent-share-error").textContent) $("agent-share-user").value = "";
+}
+$("agent-share-invite").addEventListener("click", inviteFromField);
+$("agent-share-user").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.isComposing) return;
+  event.preventDefault();
+  inviteFromField();
 });
 $("agent-leave").addEventListener("click", async () => {
   const agentId = state.agentForm.originalId;
