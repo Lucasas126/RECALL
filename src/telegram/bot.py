@@ -2028,6 +2028,9 @@ async def _send_generation(
                 content.append("notice", event.text)
             elif event.kind == "speaker" and event.data:  # an @mentioned agent answers: say who
                 content.append("notice", _speaker_line(event.data))
+            elif event.kind == "delivered":  # a message to another member: the agent does not reply
+                await stream.finish([(message(language, "_(Message delivered to the member; the agent does not reply.)_"), [])])
+                return
             elif event.kind == "approval" and event.data:
                 await _send_approval(context, state, session, chat.id, event.data, language, stream)
                 continue

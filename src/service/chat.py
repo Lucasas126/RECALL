@@ -339,13 +339,14 @@ class ChatEvent:
     short AI explanation of a card that is already shown), or `task_started` (a task was
     launched while its `task_start` call is still running, e.g. `wait=true`; `data`: task_id, goal, title, chat_id of the
     worker), or `transcript` (what speech-to-text heard in the message's recordings, `data`: transcripts, one per
-    recording in order, sent before the reply). The reply resumes by itself
+    recording in order, sent before the reply), or `delivered` (the message was for another member of a shared agent's
+    space, `data`: to; the agent does not reply and it is the only event). The reply resumes by itself
     once the approval is answered through `resolve_approval`, times out or is cancelled.
     Non-streaming replies arrive as `tool` events followed by one `text` event. All events
     carry a generation id so adapters can distinguish overlapping deliveries.
     """
 
-    kind: Literal["reasoning", "text", "tool_start", "tool", "usage", "interrupted", "memory", "notice", "approval", "approval_resolved", "approval_explanation", "task_started", "transcript", "speaker"]
+    kind: Literal["reasoning", "text", "tool_start", "tool", "usage", "interrupted", "memory", "notice", "approval", "approval_resolved", "approval_explanation", "task_started", "transcript", "speaker", "delivered"]
     text: str = ""
     data: Optional[dict] = None
     generation_id: str = ""
@@ -2190,6 +2191,8 @@ class ChatService:
                     user_id, agent_id, chat_id, target[0], target[1], text,
                     stream=stream, attachments=attachments, channel=channel,
                 )
+            if rewind_to is None and (person := self._person_mention(user_id, agent_id, author, text)) is not None:
+                return self._send_to_person(user_id, agent_id, chat_id, text, author, person, attachments, channel)
         if not internal_task:
             try:
                 is_task_chat = conversations.is_task_chat(chat_id)
@@ -2297,6 +2300,41 @@ class ChatService:
         if parsed[0] not in (self._user(user_id).agents or []):
             return None  # unknown id: a normal message to this agent
         return parsed
+
+    def _person_mention(self, user_id: str, agent_id: str, author: Optional[str], text: str) -> Optional[str]:
+        """The member id when a person of a shared agent writes `@<member id>` (a message to people), else None.
+
+        Only in a space's agent, and only for another member; an id that is also an agent of the space is the agent's.
+        """
+        if not author:
+            return None
+        owner = self._user(user_id)
+        parsed = parse_mention(text)
+        if owner.kind != "space" or parsed is None:
+            return None
+        target = parsed[0]
+        if target == author or target == agent_id or target in (owner.agents or []):
+            return None
+        return target if target in {m.lower() for m in owner.members} else None
+
+    def _send_to_person(
+        self, user_id: str, agent_id: str, chat_id: str, text: str, author: str, person: str,
+        attachments: Optional[list[dict]], channel: Optional[str],
+    ) -> Iterator[ChatEvent]:
+        """Store a message addressed to another member of the space: the agent does not run (no model call, no reply)."""
+        conversations = self._conversations(user_id, agent_id)
+        self._require_chat(conversations, chat_id)
+        if conversations.is_task_chat(chat_id):
+            raise InputError("this is an internal task chat: steer the task instead")
+        if attachments:
+            raise InputError("a message to a person cannot carry attachments")
+        conversations.append(
+            chat_id, "user", text, author=author,
+            **({"channel": channel} if channel in ("web", "telegram") else {}),
+        )
+        self._forget_cached_agent(user_id, agent_id, chat_id)  # the agent's next turn reloads the chat with it
+        self._mark_unread(user_id, agent_id, chat_id)
+        return iter([ChatEvent("delivered", data={"to": person})])
 
     def _send_mention(
         self, user_id: str, origin_id: str, origin_chat: str, target_id: str, rest: str, original: str, *,

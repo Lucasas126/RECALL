@@ -256,7 +256,7 @@ def _event_stream(events, language: str, user_id: str, agent_id: str, chat_id: s
                 data = {"content": event.text, **(event.data or {})}
             else:
                 data = (
-                    event.data if event.kind in ("tool_start", "tool", "memory", "approval", "approval_resolved", "approval_explanation", "speaker", "task_started", "transcript")
+                    event.data if event.kind in ("tool_start", "tool", "memory", "approval", "approval_resolved", "approval_explanation", "speaker", "task_started", "transcript", "delivered")
                     else event.text
                 )
             yield _sse(event.kind, data, generation_id)

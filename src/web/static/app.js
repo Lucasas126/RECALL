@@ -8006,6 +8006,9 @@ function addMessage(role, parent = state.view ?? $("messages"), author = null) {
         memoryIndicator.replaceChildren(button);
       } else memoryIndicator.textContent = summary;
     },
+    discard() {  // the run produced no reply (a message to a person): drop the empty bubble
+      el.remove();
+    },
     settleMemory() {
       // a search still running when the reply ends, fails or is interrupted was not used
       if (memoryIndicator?.dataset.state === "searching") this.memory({ state: "skipped" });
@@ -8656,10 +8659,23 @@ function composerInsert(text, trigger, item) {
 
 const composerPopup = { trigger: null, items: [], index: 0, dismissed: null };
 
+// The "@" suggestions (pure): the other agents, then, only in a shared agent's chat, the other members of its space.
+// An id that is also an agent of the user is listed once, as the agent (the agent wins on the server too).
+function composerMentionItems(agents, agentId, meId) {
+  const list = agents ?? [];
+  const others = list.filter((a) => a.id !== agentId);
+  const open = list.find((a) => a.id === agentId);
+  if (!open?.shared) return others;
+  const taken = new Set(list.map((a) => a.id));
+  const people = (open.members ?? []).filter((m) => m.id !== meId && !taken.has(m.id))
+    .map((m) => ({ id: m.id, name: m.name || m.id, person: true }));
+  return [...others, ...people];
+}
+
 function composerCandidates(trigger) {
   const items = trigger.kind === "command"
     ? COMPOSER_COMMANDS.map((c) => ({ id: c.id, description: tr(c.description) }))
-    : (state.user?.agents ?? []).filter((a) => a.id !== state.agentId);
+    : composerMentionItems(state.user?.agents, state.agentId, state.user?.id);
   return composerFilter(items, trigger.query);
 }
 
@@ -8691,7 +8707,7 @@ function renderComposerPopup() {
     label.textContent = trigger.kind === "command" ? `/${item.id}` : (item.name ?? item.id);
     const detail = document.createElement("span");
     detail.className = "composer-detail";
-    detail.textContent = trigger.kind === "command" ? item.description : `@${item.id}`;
+    detail.textContent = trigger.kind === "command" ? item.description : (item.person ? `@${item.id} · ${tr("person")}` : `@${item.id}`);
     row.append(label, detail);
     row.addEventListener("click", () => pickComposerItem(item));
     return row;
@@ -8948,6 +8964,7 @@ function handleEvent(raw, request) {
   else if (event === "memory") reply.memory(payload);
   else if (event === "notice") reply.notice(payload);
   else if (event === "speaker") reply.speaker(payload);
+  else if (event === "delivered") reply.discard?.();  // a message to a person: the agent does not reply
   else if (event === "transcript") request.userMessage?.transcripts(payload.transcripts || []);
   else if (event === "working") reply.working(payload);
   else if (event === "chat_replaced") adoptReplacedChat(request, payload);
