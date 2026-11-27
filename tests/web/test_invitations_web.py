@@ -31,7 +31,7 @@ class InvitationRouteTests(SharedAgentFixture):
         incoming = three.get("/api/invitations").json()
         self.assertEqual(incoming["pending_count"], 1)
         self.assertEqual(set(incoming["incoming"][0]),
-                         {"id", "agent_id", "agent_name", "inviter", "inviter_name", "billing_user", "created"})
+                         {"id", "agent_id", "agent_name", "inviter", "inviter_name", "billing_user", "billing_name", "created"})
         self.assertEqual(one.get("/api/invitations").json()["outgoing"][0]["invitee"], "user-three")
         done = three.post(f"/api/invitations/{created.json()['id']}/accept")
         self.assertEqual(done.status_code, 200, done.text)
