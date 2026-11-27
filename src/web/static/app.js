@@ -3153,22 +3153,26 @@ function renderShareList() {
   $("agent-share-leave-note").textContent = tr(alone ? "You are the only member." : "Leave stops your access; Unshare gives every member a private copy.");
   $("agent-share-leave-box").hidden = !agent?.shared;
   $("agent-share-members").replaceChildren(...(agentId ? memberRows(agent, state.user?.id, tr) : []).map((row) => {
+    // name (and id) on the first line, whose providers on a muted second line: "Ana (you) @ana" / "uses your providers..."
     const li = document.createElement("li");
+    const who = document.createElement("span");
+    who.className = "share-who";
     const label = document.createElement("span");
     label.textContent = row.suffix ? `${row.name} ${row.suffix}` : row.name;
-    li.append(label);
     if (row.id !== row.name && !(row.you && !agent?.shared)) {
       const id = document.createElement("span");
       id.className = "share-id";
-      id.textContent = ` · ${row.id}`;
+      id.textContent = ` @${row.id}`;
       label.append(id);
     }
+    who.append(label);
     if (row.note) {
       const tag = document.createElement("span");
       tag.className = "share-tag";
       tag.textContent = row.note;
-      label.append(tag);
+      who.append(tag);
     }
+    li.append(who);
     return li;
   }));
   const pending = agentId ? outgoingFor(state.invitations, agentId) : [];
