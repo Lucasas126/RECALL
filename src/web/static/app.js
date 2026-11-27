@@ -1377,6 +1377,22 @@ function replyAuthor(authorId, storedName, agents, currentId) {
   return { id, name: agent?.name ?? storedName ?? id ?? "", avatar: agent?.avatar ?? null };
 }
 
+// Who wrote a user bubble in a shared agent's chat: a stored turn's author, or (a live message of this page) the
+// logged-in person. Own agents show no author.
+function userAuthor(shared, user, message = null) {
+  if (message) return message.author ? { name: message.author_name || message.author } : null;
+  return shared && user?.name ? { name: user.name } : null;
+}
+
+// What the open chat of a shared agent needs after a poll of its summary: "reload" when the other member added turns or
+// a reply started (the reload attaches to a running reply), else "none". `previous` is the last summary seen
+// ({turns, active}) and `busyHere` says this page sends or follows a reply itself (it already shows everything).
+function liveSyncAction(previous, current, busyHere) {
+  if (!previous || !current || busyHere) return "none";
+  if (current.turns !== previous.turns) return "reload";
+  return current.active && !previous.active ? "reload" : "none";
+}
+
 // The agent a message @mentions (same rule as the server: `@<id>` at the start, then a space or the end), when it is
 // another existing agent of the user; else null. Lets the reply bubble show the right author before the first event.
 function mentionedAgent(text, agents, currentId) {
@@ -5572,7 +5588,7 @@ function drawMessages(container, messages, { usage }) {
     }
     const author = m.role === "assistant" && m.author_agent
       ? replyAuthor(m.author_agent, m.author_name, state.user?.agents, state.agentId)
-      : m.role === "user" && m.author ? { name: m.author_name || m.author } : null;
+      : m.role === "user" ? userAuthor(false, null, m) : null;
     const view = addMessage(m.role, container, author);
     if (m.role === "user" && m.index != null) setEditable(view.el, m.index);
     if (m.associative_skipped) view.memory({ state: "skipped" });
@@ -8422,7 +8438,7 @@ async function dispatchMessage(content, attachments, edit = null) {
     state.usages.delete(key);  // the numbers of the removed replies no longer describe the chat
     $("usage").hidden = true;
   }
-  const userMessage = addMessage("user", state.view);
+  const userMessage = addMessage("user", state.view, userAuthor(state.user?.agents?.find((a) => a.id === state.agentId)?.shared, state.user));
   userMessage.text(content);
   userMessage.attachments(edit ? edit.shown : attachments);
   // /dream and /compact are answered by RECALL itself (not stored, not the model): shown as a system reply
@@ -10114,6 +10130,29 @@ setInterval(() => {
   refreshChats().catch(() => {});
   refreshInvitations();
 }, 4000);
+
+// A shared agent's chat is open: the other member's messages and streaming reply show here within about a second. The
+// summary of the open chat is asked every LIVE_SYNC_MS (only while the tab is visible); a change reloads the chat.
+const LIVE_SYNC_MS = 1500;
+const liveSync = { key: null, seen: null, busy: false };
+setInterval(async () => {
+  if (document.hidden || !state.user || !state.chatId || state.modelBusy || liveSync.busy) return;
+  const agentId = state.agentId;
+  const chatId = state.chatId;
+  if (!state.user.agents?.find((a) => a.id === agentId)?.shared) { liveSync.key = null; return; }
+  const key = chatKey(agentId, chatId);
+  const session = state.session;
+  liveSync.busy = true;
+  try {
+    const data = await api(chatsUrl(`/${chatId}?limit=1`));
+    if (session !== state.session || key !== chatKey(state.agentId, state.chatId)) return;
+    const current = { turns: data.chat.turns, active: Boolean(data.chat.active) };
+    const previous = liveSync.key === key ? liveSync.seen : null;
+    liveSync.key = key;
+    liveSync.seen = current;
+    if (liveSyncAction(previous, current, isGenerating(agentId, chatId)) === "reload") await openChatNow(chatId);
+  } catch { /* the next tick tries again */ } finally { liveSync.busy = false; }
+}, LIVE_SYNC_MS);
 
 // ---- notifications: the bell, the scans and the display (DOM)
 const NOTIFY_STORE = "notifyBell";
