@@ -511,6 +511,7 @@ _SPANISH = {
     "Summarize the older part of this chat": "Resume la parte más antigua de este chat",
     "Show the Claude plan usage": "Muestra el uso del plan de Claude",
     "Suggestions": "Sugerencias",
+    "person": "persona",
     "Claude plan usage": "Uso del plan de Claude",
     "You have no Claude login of your own, so there is no plan usage to show.": "No tienes un login de Claude propio, así que no hay uso del plan que mostrar.",
     "No Claude login was found for you; run `claude auth login` first.": "No se encontró un login de Claude para ti; ejecuta antes `claude auth login`.",

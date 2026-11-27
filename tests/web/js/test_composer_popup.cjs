@@ -65,3 +65,22 @@ test("the command list is the three slash commands, each described", () => {
   assert.deepEqual(plain(context.COMPOSER_COMMANDS.map((c) => c.id)), ["dream", "compact", "usage"]);
   assert.ok(context.COMPOSER_COMMANDS.every((c) => c.description.length > 0));
 });
+
+test("at-sign suggestions list the other members only in a shared agent, never yourself", () => {
+  const match = source.match(/function composerMentionItems\([\s\S]*?\n}\n/);
+  assert.ok(match, "composerMentionItems not found in app.js");
+  const local = vm.createContext({});
+  vm.runInContext(`${match[0]}\nthis.composerMentionItems = composerMentionItems;`, local);
+  const members = [{ id: "user-a", name: "Ana" }, { id: "user-b", name: "Ben" }, { id: "nova", name: "Nova person" }];
+  const agents = [
+    { id: "team", name: "Team", shared: true, members },
+    { id: "nova", name: "Nova" },
+    { id: "solo", name: "Solo", members },
+  ];
+  const ids = (list) => plain(list).map((i) => i.id);
+  assert.deepEqual(ids(local.composerMentionItems(agents, "team", "user-a")), ["nova", "solo", "user-b"]);
+  const person = plain(local.composerMentionItems(agents, "team", "user-a")).find((i) => i.id === "user-b");
+  assert.deepEqual(person, { id: "user-b", name: "Ben", person: true });
+  assert.deepEqual(ids(local.composerMentionItems(agents, "solo", "user-a")), ["team", "nova"]);  // private: no people
+  assert.deepEqual(ids(local.composerMentionItems(undefined, "x", "user-a")), []);
+});

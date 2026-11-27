@@ -36,6 +36,10 @@ Private agents cannot @mention, delegate to or list a shared agent, and the shar
 - **Unshare** (any member): with one member left, the agent moves back to that person. With several, **every member gets a private copy** (chats, memory, automations) and the shared agent is removed. In a copy `USER.md` keeps only that person's section, keys and MCP tokens are not copied (each copy uses its owner's own provider settings), the level is capped by the owner's ceiling, and a clashing agent id gets `-2`.
 - A space with no agents left is deleted.
 
+## Writing to a person
+
+In a shared agent's chat, typing `@` also suggests the other members (name, `@<user id>` and "person"). A message that starts with `@<member id>` is for that person: it is stored in the chat with your name and the other member sees it, but the agent does not run (no model call, no reply). The agent reads it later as normal history, with your `[NAME]` prefix. If the id is also an agent of the space, the agent answers as usual. In a private agent `@<member id>` is a normal message.
+
 ## Automations
 
 Automations move with the agent. Copies made by unshare start **paused**; resume them in the Automations dialog.
