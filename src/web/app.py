@@ -171,6 +171,10 @@ class MaxLevelIn(BaseModel):
     max_level: LevelField
 
 
+class UserDeleteIn(BaseModel):
+    confirm: str = Field(max_length=64)  # the user id again
+
+
 class UserCreateIn(BaseModel):
     id: str = Field(max_length=64)
     name: str = Field(default="", max_length=200)
@@ -934,6 +938,10 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
         return service.create_user(
             user_id, body.id, name=body.name, language=body.language, max_level=level, password=body.password,
         )
+
+    @app.delete("/api/admin/users/{target_id}")
+    def admin_delete_user(target_id: str, body: UserDeleteIn, user_id: str = Depends(current_user)):
+        return service.delete_user(user_id, target_id, confirm=body.confirm)
 
     @app.put("/api/admin/users/{target_id}/provider-key")
     def admin_set_user_key(target_id: str, body: UserKeyIn, user_id: str = Depends(current_user)):

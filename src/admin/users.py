@@ -215,6 +215,10 @@ def _build_parser() -> argparse.ArgumentParser:
     setp = sub.add_parser("set-password", help="replace a user's web password (other keys are kept)")
     setp.add_argument("user_id")
     setp.add_argument("--generate", action="store_true", help="generate a strong password and print it once")
+    delete = sub.add_parser("delete-user", help="delete a user for good: config, data, invitations (secrets are listed, not edited)")
+    delete.add_argument("--user", required=True, help="user id to delete")
+    delete.add_argument("--confirm", default="", metavar="USER", help="the user id again, typed exactly")
+    delete.add_argument("--yes", action="store_true", help="confirm (together with --confirm)")
     route = sub.add_parser(
         "route-test", help="show how the Telegram orchestrator would rank a user's agents for a message",
     )
@@ -330,6 +334,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "route-test":
         return route_test(args.user, args.text, force=args.force)
+    if args.command == "delete-user":
+        from src.admin import delete_user as delete_commands
+
+        return delete_commands.run(args)
     if args.command == "terminal-test":
         return terminal_test(args.user, args.backend)
     if args.command in ("agent", "user"):
