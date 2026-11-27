@@ -84,3 +84,22 @@ test("at-sign suggestions list the other members only in a shared agent, never y
   assert.deepEqual(ids(local.composerMentionItems(agents, "solo", "user-a")), ["team", "nova"]);  // private: no people
   assert.deepEqual(ids(local.composerMentionItems(undefined, "x", "user-a")), []);
 });
+
+test("at-sign plan: one agent per message, only people after a person", () => {
+  const load = (name) => source.match(new RegExp(`function ${name}\\([\\s\\S]*?\\n}\\n`))[0];
+  const local = vm.createContext({});
+  vm.runInContext(`${load("composerMentionItems")}\n${load("composerMentionPlan")}\nthis.plan = composerMentionPlan;`, local);
+  const members = [{ id: "user-a", name: "Ana" }, { id: "user-b", name: "Ben" }, { id: "user-c", name: "Cy" }];
+  const agents = [{ id: "team", name: "Team", shared: true, members }, { id: "nova", name: "Nova" }, { id: "sage", name: "Sage" }];
+  const plan = (text) => {
+    const at = text.lastIndexOf("@");
+    return plain(local.plan(text, { start: at, end: text.length }, agents, "team", "user-a"));
+  };
+  const ids = (p) => p.items.map((i) => i.id);
+  assert.deepEqual(ids(plan("@")), ["nova", "sage", "user-b", "user-c"]);
+  assert.deepEqual(plan("hi @nova and @"), { notice: true, items: [] });
+  assert.deepEqual(plan("@sage, then @n"), { notice: true, items: [] });
+  assert.deepEqual(ids(plan("@user-b and @")), ["user-c"]);
+  assert.deepEqual(ids(plan("@nobody and @")), ["nova", "sage", "user-b", "user-c"]);  // unknown ids are plain text
+  assert.deepEqual(ids(plan("mail a@nova.io @")), ["nova", "sage", "user-b", "user-c"]);
+});

@@ -8672,11 +8672,42 @@ function composerMentionItems(agents, agentId, meId) {
   return [...others, ...people];
 }
 
+// What "@" offers given the mentions already in the text (pure; the server applies the same rule: the first valid
+// mention decides). {notice: true} after an agent mention (one agent per message); only people after a person mention.
+function composerMentionPlan(text, trigger, agents, agentId, meId) {
+  const all = composerMentionItems(agents, agentId, meId);
+  const rest = text.slice(0, trigger.start) + text.slice(trigger.end);
+  const byId = new Map(all.map((item) => [item.id.toLowerCase(), item]));
+  const used = [];
+  for (const m of rest.matchAll(/(?<!\S)@([a-z0-9][a-z0-9_-]{0,63})(?=[\s.,;:!?]|$)/gi)) {
+    const item = byId.get(m[1].toLowerCase());
+    if (item) used.push(item);
+  }
+  if (!used.length) return { notice: false, items: all };
+  if (!used[0].person) return { notice: true, items: [] };
+  const taken = new Set(used.map((item) => item.id));
+  return { notice: false, items: all.filter((item) => item.person && !taken.has(item.id)) };
+}
+
 function composerCandidates(trigger) {
-  const items = trigger.kind === "command"
-    ? COMPOSER_COMMANDS.map((c) => ({ id: c.id, description: tr(c.description) }))
-    : composerMentionItems(state.user?.agents, state.agentId, state.user?.id);
-  return composerFilter(items, trigger.query);
+  if (trigger.kind === "command") {
+    return composerFilter(COMPOSER_COMMANDS.map((c) => ({ id: c.id, description: tr(c.description) })), trigger.query);
+  }
+  const plan = composerMentionPlan($("input").value, trigger, state.user?.agents, state.agentId, state.user?.id);
+  return plan.notice ? { notice: true } : composerFilter(plan.items, trigger.query);
+}
+
+function renderComposerNotice() {
+  const list = $("composer-popup");
+  const row = document.createElement("li");
+  row.className = "composer-detail";
+  row.setAttribute("aria-disabled", "true");
+  row.textContent = tr("Only one agent can be mentioned per message");
+  list.replaceChildren(row);
+  list.setAttribute("aria-label", tr("Suggestions"));
+  list.hidden = false;
+  $("input").setAttribute("aria-expanded", "false");
+  $("input").removeAttribute("aria-activedescendant");
 }
 
 function closeComposerPopup() {
@@ -8729,6 +8760,11 @@ function updateComposerPopup() {
     return;
   }
   const items = composerCandidates(trigger);
+  if (items.notice) {  // one agent per message: a single row that cannot be picked
+    closeComposerPopup();
+    renderComposerNotice();
+    return;
+  }
   if (!items.length) { closeComposerPopup(); return; }
   const same = composerPopup.trigger && composerPopup.trigger.kind === trigger.kind && composerPopup.trigger.start === trigger.start;
   composerPopup.index = same ? Math.min(composerPopup.index, items.length - 1) : 0;
