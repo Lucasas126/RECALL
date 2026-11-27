@@ -71,6 +71,7 @@ class TelegramZdrTextTests(unittest.IsolatedAsyncioTestCase):
 
     def test_selecting_a_claude_model_under_zdr_adds_no_zdr_line(self) -> None:
         service = Mock()
+        service.agent_owner.side_effect = lambda person, agent: person
         service.set_chat_model.return_value = {
             "provider": "claude_subscription", "id": "claude_subscription:opus", "zdr": False, "require_zdr": True,
         }
@@ -83,6 +84,7 @@ class TelegramZdrTextTests(unittest.IsolatedAsyncioTestCase):
 
     def test_selecting_a_model_without_zdr_adds_no_zdr_line(self) -> None:
         service = Mock()
+        service.agent_owner.side_effect = lambda person, agent: person
         service.set_chat_model.return_value = {
             "provider": "claude_subscription", "id": "claude_subscription:opus", "zdr": False, "require_zdr": False,
         }
@@ -95,6 +97,7 @@ class TelegramZdrTextTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_current_model_command_without_zdr_has_no_zdr_line(self) -> None:
         service = Mock()
+        service.agent_owner.side_effect = lambda person, agent: person
         service.get_chat.return_value = {"model": {"provider": "openrouter", "id": "vendor/model", "zdr": False,
                                                    "require_zdr": False}, "model_override": None}
         state = TelegramBotState(service, {123: TelegramSession("u", "a", "c")})
@@ -107,6 +110,7 @@ class TelegramZdrTextTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_current_model_command_has_no_zdr_line_for_claude(self) -> None:
         service = Mock()
+        service.agent_owner.side_effect = lambda person, agent: person
         service.get_chat.return_value = {"model": {"provider": "claude_subscription", "id": "claude_subscription:sonnet",
                                                    "zdr": False, "require_zdr": True},
                                          "model_override": {"id": "claude_subscription:sonnet"}}
@@ -122,6 +126,7 @@ class TelegramZdrTextTests(unittest.IsolatedAsyncioTestCase):
 class TelegramFavoritePickerTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.service = Mock()
+        self.service.agent_owner.side_effect = lambda person, agent: person
         self.service.list_favorite_models.return_value = ["vendor/11", "vendor/10", "vendor/retired"]
         self.models = [
             {"id": f"vendor/{index}", "name": f"Model {index}", "pricing": {"prompt": str(index), "completion": "0"}}

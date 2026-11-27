@@ -648,6 +648,7 @@ html.resizing-header, html.resizing-header * { cursor: row-resize !important; us
 @media (max-width: 800px) { #chat-title-wrap { display: none; } }
 .msg.assistant[data-author]::before { content: attr(data-author); display: block; margin-bottom: 8px; color: var(--accent); font: 600 .6875rem/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; white-space: nowrap; }
 .msg.assistant[data-author=""]::before { display: none; }
+.msg.user[data-author]::before { content: attr(data-author); display: block; margin-bottom: 4px; color: var(--muted); font-size: .75em; font-weight: 650; }
 
 /* Polish */
 input:focus, textarea:focus, select:focus { border-color: var(--accent); }
@@ -1158,8 +1159,9 @@ html.resizing-sidebar #app { transition: none; }
 .usage-dot[data-level="warn"] { background: #e0b341; opacity: 1; }
 .usage-dot[data-level="high"] { background: #e07a3f; opacity: 1; }
 .usage-dot[data-level="crit"] { background: #d9534f; opacity: 1; }
-#claude-usage-body { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 30; display: flex; flex-direction: column; gap: 8px; width: 210px; max-width: calc(100vw - 2 * var(--gutter)); padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--raised); box-shadow: 0 6px 24px rgba(0, 0, 0, .35);  overflow: visible; }
+#claude-usage-body { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 30; display: flex; flex-direction: column; gap: 8px; width: 240px; max-width: calc(100vw - 2 * var(--gutter)); padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--raised); box-shadow: 0 6px 24px rgba(0, 0, 0, .35);  overflow: visible; }
 #claude-usage-body[hidden] { display: none; }
+.usage-account { color: var(--text); font-size: 11px; overflow-wrap: anywhere; padding-bottom: 6px; border-bottom: 1px solid var(--line-strong); }
 .usage-row .usage-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; color: var(--text); }
 .usage-row .usage-reset { color: var(--muted); font-size: 11px; }
 .usage-bar { height: 4px; margin: 4px 0 0; border-radius: 3px; background: var(--shade); overflow: hidden; }
@@ -1283,6 +1285,7 @@ html.resizing-sidebar #app { transition: none; }
 #user-wizard button { margin-top: 8px; }
 #user-wizard code { overflow-wrap: anywhere; }
 
+.shared-tag { display: inline-block; padding: 0 6px; border-radius: 999px; border: 1px solid var(--muted); color: var(--muted); font-size: 0.7em; font-weight: 500; vertical-align: middle; }
 /* the in-app confirmation: a small modal over everything, destructive ones with a red confirm button */
 #confirm-dialog { color: var(--text); background: var(--panel); border: 1px solid var(--line-strong); border-radius: 14px; box-shadow: var(--shadow); width: min(420px, calc(100vw - 32px)); max-width: calc(100vw - 32px); padding: 0; }
 #confirm-dialog::backdrop { background: var(--backdrop); }
@@ -1300,6 +1303,30 @@ html.resizing-sidebar #app { transition: none; }
   .confirm-actions button { width: 100%; min-height: 44px; }
 }
 
+/* Shared-agent invitations: the block on the Agents tab and the Share fieldset; the dot reuses the menu-button dot */
+.invitations { flex: 0 0 auto; width: 100%; max-width: 640px; margin: 0 auto; display: grid; gap: 8px; align-content: start; }
+.invitations h3 { margin: 0; }
+/* with the editor open the view is a column: the block is a compact unit above it, aligned with it (no stretch) */
+/* the same centred card whether the agent list or an editor is open (the editor turns the view into a column) */
+#agents-view:has(#agent-editor:not([hidden])) > .invitations { align-self: center; min-height: 0; margin-bottom: 8px; }
+.invitation { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.invitation p { margin: 0 0 2px; }
+.invitation-actions, .share-row { display: flex; gap: 8px; }
+.invitation-actions { margin-top: 8px; }
+.share-row { margin: 0; }
+.share-row input { flex: 1; min-width: 0; }
+.share-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.share-list:empty { display: none; }
+.share-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.share-list li .share-id, .share-list li .share-tag { color: var(--muted); font-size: .85em; }
+.share-list li .share-who { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.share-list li .share-who .share-tag { font-size: .8em; }
+#agent-share-error:empty { display: none; }
+.share-leave { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
+.share-leave .model-note { margin: 0; }
+.tabs #tab-agents { position: relative; }
+.tabs #tab-agents { position: relative; }
+.tabs #tab-agents[data-attention]::after { content: ""; position: absolute; top: 4px; right: -10px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg, var(--panel)); }
 /* Menu button: the theme-colour dot of the chat rows, for a chat the collapsed list hides (approval also tints the button, like its row) */
 .nav-toggle { position: relative; }
 .nav-toggle[data-attention]::after { content: ""; position: absolute; top: 7px; right: 7px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg, var(--panel)); }

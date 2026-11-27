@@ -87,6 +87,27 @@ configuration, logs the error, shows a notice with the reason in the next chat m
 `agent check`. `settings.yaml`, `.env` and `RECALL_*` variables still need a restart. The CLI cannot see a reply that is running in
 the web process, so rename and delete agents while they are idle.
 
+## Shared agents (spaces)
+
+A space (`space-<8 hex>`) is a pseudo-user that owns shared agents; it never logs in and its `max_level` is the lowest of its members. See [shared agents](shared-agents.md).
+
+| Command | What it does |
+| --- | --- |
+| `space list` / `space show --space S` | spaces with members, payer, derived level and agents |
+| `space create --billing-user U [--member V ...] [--name N]` | create a space; copies U's provider, models, Claude login and backends settings (names only) |
+| `space add-member` / `space remove-member --space S --user U` | refused on an agent id clash or when a level would fall below an agent's; removing the payer needs `--new-billing-user` |
+| `space delete --space S --yes` | only a space without agents |
+| `agent share --user U --agent A --with V [--with W ...]` | move U's agent into the space of U plus the others (reused or created) |
+| `agent unshare --space S --agent A [--actor M] --yes` | move the agent back to the only member, else copy it to each member (copies' automations paused) |
+
+## Deleting a user
+
+`python -m src.admin delete-user --user U --yes --confirm U` (the id typed again) deletes the user's configuration folder (including a Claude login folder inside it) and their data folder. Refused: yourself (web), a space id, the last administrator, a wrong `--confirm`, an agent of the user with a reply, task or process running (the CLI cannot see live replies: stop them first and restart the server). Shared agents stay with the remaining members (the next member pays and their provider settings are copied); a space where the user was the only member is deleted with its agents. Invitations from or to the user are removed.
+
+Secrets are never edited. The command prints what to remove by hand: the variable NAMES only the user referenced (remove them with the secrets file / `set-secret`) and whether the user's id is still mapped in `TELEGRAM_ALLOWED_USERS`. In the web UI administrators do the same from Settings > Users (trash button, type the user id to confirm; `DELETE /api/admin/users/{id}` with `{"confirm": id}`). The action is audited in the administrator's `admin_audit.jsonl`.
+
+The CLI cannot see replies running in the server: stop them first. Invitations are made in the web UI.
+
 ## Credentials
 
 Provider keys are variables named in `user.yaml` (`provider.api_key`). Besides the environment and `.env`, RECALL reads

@@ -49,6 +49,47 @@ Model ids and providers belong to the **user**, not the agent: the user's defaul
 `chat_config.model` or a chat has its own selection (precedence: chat > agent > user; see
 [models and providers](../user-guide/models-and-providers.md)). Embeddings use the user configuration.
 
+## Shared agents (spaces)
+
+A space is a pseudo-user (`kind: space`, id `space-<8 hex>`) that owns agents shared by several member users; it has no
+password and never logs in. Design and plan: [shared agents](../project/design-shared-agents.md).
+
+Implemented:
+
+- A space's `max_level` is derived: the lowest `max_level` of its members. A missing or invalid member makes the space
+  unusable (fail closed: its agents answer 404 and are left out of listings, even if it was valid before).
+- Data stays keyed by `(owner, agent)`, where the owner is the user or the space. Every `/api/agents/{agent_id}/...` route
+  resolves the owner with `ChatService.agent_owner(person, agent)`: the person's own agent first, else the agent of a
+  space they belong to, else the person's own id (so a non-member gets the same 404 as for another user's agent).
+  What is per person (preferences, language, usage, audit) keeps using the logged-in person.
+- `GET /api/agents` and `GET /api/chats` include the space agents and their chats with `shared: true` and `space_id`; all
+  members see the same chats and approvals.
+- The admin user list (`/api/admin/users`, `user_overview`) does not list spaces; the admin CLI has `space` commands.
+- The list of spaces is cached and reused while the `space-*` folders and their `user.yaml` files are unchanged.
+
+- **Owner resolution** is by id: agent ids must be unique across a person's private agents and their spaces; a clash is refused
+  at share and accept time. `resolve_owner(user, agent)` in `src/config/spaces.py` is the single lookup.
+- **Isolation.** Private agents cannot @mention, delegate to or list a space's agents, and the other way round; inside one
+  space they work as between agents of one user.
+- **Billing.** The space has a `billing_user` (the creator). Its provider settings, secret variable names and Claude login are
+  copied at creation; Claude login and usage resolve against that user's folder only.
+- **Speaker.** A message to a space agent is stored with `author` and sent with a `[NAME]` prefix. `USER.md` has one
+  `## <member id>` section per member (`src/agent/user_sections.py`), limit scaled by member count (max 5x).
+- **Moving** (`src/service/agent_move.py`, `AgentMover`): share moves the agent from a user to a space, unshare moves it back to
+  the only member or copies it to each member, and leaving regroups it into the space of the remaining members. Each move needs
+  the agent idle (no active or queued reply, checked under the slot lock), moves config, data, avatar and automations (copies
+  start paused), does not copy `.index` (reindexed in the new owner), and writes an audit entry in each affected owner.
+  Unshare copies drop keys and MCP tokens and cap the level by the user's `max_level`.
+- **Invitations** (`src/service/invitations.py`): one JSON file per invitation in `<data>/.invitations/` (`pending`, `accepted`,
+  `declined`, `revoked`), written atomically and serialised by a lock. `ChatService.invite|accept|decline|revoke|leave_shared`
+  with routes `POST /api/agents/{id}/invitations`, `GET /api/invitations`, `POST /api/invitations/{id}/accept|decline|revoke`,
+  `POST /api/agents/{id}/leave|unshare`. Nothing moves until accept; any member may invite or revoke.
+- **Web.** The agent settings have a Share block, the Agents tab a "Shared" section, the pending invitations and a dot; chats of
+  shared agents carry a "shared" tag.
+- **Live sync.** `ChatService.changes` (`src/service/live.py`) is an in-process notifier per `(owner, agent, chat)`: send, `@person` delivery, edit/rewind, reply start/end, rename and delete publish a kind; nothing is kept without subscribers. `GET /api/agents/{id}/chats/{chat}/events` (same membership 404) streams `event: change` `{kind}` as SSE with a keepalive comment every 20 s. The web client opens one EventSource for the open chat of any agent (another member, or the same person on another device or tab) while the tab is visible and runs its summary check on each notice; the 1.5 s poll stays as a fallback (every 15 s while the stream is healthy).
+
+Notifications go to every member; Telegram replies only to the speaker. `delete-user` (admin CLI, or the trash button in Settings > Users) takes a user out of their spaces first: shared agents stay with the other members. A user folder removed by hand instead makes their spaces unusable until `space remove-member` is run. User view: [shared agents](../user-guide/shared-agents.md).
+
 ## isolation
 
 Isolation is enforced in one place: the per-agent `SourceRegistry` (path resolution and traversal guard) and the per-agent

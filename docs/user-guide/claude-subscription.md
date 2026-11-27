@@ -225,7 +225,9 @@ unlocked by a flag.
 Next to the message box the web UI shows how much of the Claude plan is used: the
 5-hour session and the week (plus the Opus and Sonnet weekly windows when the plan
 has them). Folded, it shows one coloured dot per window; unfolded, a bar with the
-percentage and the time until the window resets. Green is below 50 %, yellow from
+percentage and the time until the window resets, under a header line that says which
+subscription and account the numbers belong to (for example `Claude subscription ·
+user@example.com · Pro`). Green is below 50 %, yellow from
 50 %, orange from 80 % and red from 95 %. The strip remembers whether it was open
 and refreshes every two minutes while the tab is visible.
 
@@ -239,6 +241,10 @@ How it works, so you can judge it:
 - Only the user's own login is used, with the same rule as the chat models (a login
   folder of their own, or being listed in `default_login_users`). Answers are cached
   for a minute per user.
+- The header comes from `claude auth status` (account e-mail and plan), read together
+  with the usage and cached with it. The e-mail is only in the answer to the user it
+  belongs to, never in logs or in other users' answers; if the CLI does not report it,
+  the header shows what is known and the bars still work.
 - The endpoint is not a documented public API and can change; when it fails, the
   strip hides itself and nothing else is affected.
 - An expired token is not refreshed by RECALL (the CLI does that on its next run),

@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from src.config.levels import Level, check_agent_level, effective_agent_level, parse_level, required_level
 from src.config.models import AgentConfig, UserConfig
+from src.config.spaces import SpaceError, agent_id_conflict, resolve_space
 from src.config.yaml_files import load_yaml_file
 from src.terminal.rules import ApprovalRule, ApprovalRuleList, rule_key
 from src.utils.avatars import AvatarStore
@@ -147,6 +148,28 @@ class AgentStore:
             user = self._read_user(user_id)
             self._check_level(user, config)
             self._ensure_free(user_id, config.id, user)
+            path = self._agents_dir(user_id) / f"{config.id}.yaml"
+            if path.exists():
+                raise AgentConflict("The agent file '{file}' already exists.", file=path.name)
+            self._write_agent(path, config)
+            try:
+                self._write_user_agents(user_id, [*user.agents, config.id])
+            except BaseException:
+                path.unlink(missing_ok=True)
+                raise
+            return config
+
+    def adopt(self, user_id: str, config: AgentConfig) -> AgentConfig:
+        """Add an agent moved or copied from another owner: like `create` without the id clash check across owners.
+
+        The caller (the agent move, `src/service/agent_move.py`) has already checked that the id is free for every
+        person concerned; the level rule and the existing-file rule still apply.
+        """
+        with self._locked(user_id):
+            user = self._read_user(user_id)
+            self._check_level(user, config)
+            if config.id in user.agents or self._is_defined(user_id, config.id):
+                raise AgentConflict("An agent with the id '{agent_id}' already exists.", agent_id=config.id)
             path = self._agents_dir(user_id) / f"{config.id}.yaml"
             if path.exists():
                 raise AgentConflict("The agent file '{file}' already exists.", file=path.name)
@@ -397,6 +420,15 @@ class AgentStore:
     def _ensure_free(self, user_id: str, agent_id: str, user: UserConfig) -> None:
         if agent_id in user.agents or self._is_defined(user_id, agent_id):
             raise AgentConflict("An agent with the id '{agent_id}' already exists.", agent_id=agent_id)
+        if user.kind == "space":  # also free for every member: their own agents and their other spaces
+            for member in user.members:
+                if agent_id_conflict(member, agent_id, self.config_dir, ignore=user_id) is not None:
+                    raise AgentConflict(
+                        "An agent with the id '{agent_id}' already exists for a member of this space.", agent_id=agent_id,
+                    )
+        else:  # and not in a space of the user's
+            if agent_id_conflict(user_id, agent_id, self.config_dir) is not None:
+                raise AgentConflict("An agent with the id '{agent_id}' already exists in one of your spaces.", agent_id=agent_id)
 
     def _is_defined(self, user_id: str, agent_id: str) -> bool:
         try:
@@ -442,7 +474,11 @@ class AgentStore:
                 "Invalid user configuration '{file}': {details}",
                 file=path.name, details="; ".join(error["msg"] for error in exc.errors()),
             ) from exc
-        return check_user_folder(user, user_id)
+        user = check_user_folder(user, user_id)
+        try:
+            return resolve_space(user, self.config_dir)
+        except SpaceError as exc:
+            raise AgentConfigError("Invalid user configuration '{file}': {details}", file=path.name, details=str(exc)) from exc
 
     def _read(self, path: Path) -> AgentConfig:
         try:

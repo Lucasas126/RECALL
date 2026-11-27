@@ -49,6 +49,20 @@ python -m src.admin agent create --user user-a --id travel --name Travel --set d
 
 Creating users and passwords stays with `python -m src.admin create-user [--max-level L]` (default `collaborator`) and `python -m src.admin set-password`, which the user runs himself (hidden prompt). Administrators (`max_level: admin`) can also create users in the web UI: Settings > Users > Add user (wizard: user, provider key or Claude sign-in, first agent; `POST /api/admin/users` and siblings; the key is write-only and audited without its value in `<data>/<user>/admin_audit.jsonl`). `python -m src.admin version` prints the running version (and the image build id when set). Other checks: `python -m src.admin terminal-test --user U --backend B` (ssh backends) and `python -m src.admin route-test "text" --user U`.
 
+## Spaces
+
+Shared agents (see `shared-agents.md`; the web UI invites people, the CLI is for admins). A space (`space-<8 hex>`) is a pseudo-user with `members`; it never logs in and its `max_level` is the lowest of its members.
+
+| Command | Does |
+| --- | --- |
+| `space list` / `space show --space S` | spaces with members, payer, derived level, agents |
+| `space create --billing-user U [--member V ...] [--name N]` | copies U's provider, models, Claude login and backends settings (NAMES only) |
+| `space add-member` / `remove-member --space S --user U` | refused on agent id clash or a level below an agent; removing the payer needs `--new-billing-user` |
+| `space delete --space S --yes` | only a space without agents |
+| `agent share --user U --agent A --with V` / `agent unshare --space S --agent A --yes` | move an agent into a space, or give it back (copies to each member) |
+
+`delete-user --user U --yes --confirm U` deletes config and data; shared agents stay with the other members (payer moves). Secrets are not touched: it lists the variable NAMES and any `TELEGRAM_ALLOWED_USERS` entry to remove by hand. Also in Settings > Users (trash button).
+
 ## Secrets
 
 | Command | What it does |

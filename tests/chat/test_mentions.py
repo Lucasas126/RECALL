@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.service.mentions import chat_excerpt, mention_chat_title, mention_prompt, parse_mention, reply_label
+from src.service.mentions import chat_excerpt, mention_chat_title, mention_prompt, parse_mention, parse_mentions, reply_label
 
 
 class ParseMentionTests(unittest.TestCase):
@@ -12,8 +12,23 @@ class ParseMentionTests(unittest.TestCase):
         self.assertEqual(parse_mention("@nova"), ("nova", ""))
 
     def test_no_mention(self) -> None:
-        for text in ("hello @sage", "@ sage hi", "@sage,hi", "email@sage x", "", None):
+        for text in ("hello @sage", "@ sage hi", "email@sage x", "", None):
             self.assertIsNone(parse_mention(text))
+
+    def test_mentions_anywhere(self) -> None:
+        self.assertEqual(parse_mentions("@nova hi"), ["nova"])
+        self.assertEqual(parse_mentions("hi @nova please"), ["nova"])
+        self.assertEqual(parse_mentions("thanks @Nova"), ["nova"])
+        self.assertEqual(parse_mentions("@a1 and\n@b2, then @c3."), ["a1", "b2", "c3"])
+        for text in ("hey @nova.", "ask @nova, ok", "(@nova)x", "see @nova!", "@nova?"):
+            self.assertEqual(parse_mentions(text)[:1], ["nova"] if not text.startswith("(") else [])
+
+    def test_email_like_and_word_inner_text_is_not_a_mention(self) -> None:
+        for text in ("mail a@b.com now", "x@nova", "@ nova", "@@nova", "a@nova.io", None, ""):
+            self.assertEqual(parse_mentions(text), [])
+
+    def test_start_mention_strips_a_separator(self) -> None:
+        self.assertEqual(parse_mention("@sage, what now?"), ("sage", "what now?"))
 
 
 class ExcerptTests(unittest.TestCase):

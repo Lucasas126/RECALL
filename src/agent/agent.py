@@ -27,7 +27,7 @@ from src.agent.toolsets.secrets import secrets_notice
 from src.agent.toolsets.terminal import terminal_notice
 from src.agent.toolsets.mcp import build_mcp_tools
 from src.config.ceiling import refusal as level_refusal, restrict_config, tool_allowed
-from src.config.loader import load_agent
+from src.config.loader import load_agent, load_user
 from src.config.models import ModelsConfig, ResolvedAgent
 from src.config.settings import AGENT_MAX_TOOL_HOPS, TAVILY
 from src.config.zdr import chat_zdr
@@ -158,7 +158,8 @@ def provider_settings(config: ResolvedAgent) -> dict:
     """The user's provider settings, as `provider_for` takes them."""
     return {
         "main": config.provider_name, "main_api_key": config.api_key, "openrouter": config.openrouter,
-        "ollama": config.ollama, "claude": config.claude_subscription, "user_id": config.user_id,
+        "ollama": config.ollama, "claude": config.claude_subscription,
+        "user_id": config.claude_user_id or config.user_id,  # whose folder holds the Claude login
     }
 
 
@@ -188,6 +189,14 @@ def model_provider(config: ResolvedAgent, model: str) -> LLMProvider:
 
 
 STOPPED_WHILE_RUNNING = "stopped by the user while running; the command was killed and may have had partial effects"
+
+
+def _author_name(user_id: str) -> str:
+    """The speaker's display name, upper-cased, in a shared agent's messages; the id when it cannot be read."""
+    try:
+        return (load_user(user_id).name or user_id).upper()
+    except Exception:  # a member who left or an unreadable file must not break the replay of the chat
+        return user_id
 
 
 class Agent:
@@ -225,6 +234,7 @@ class Agent:
         self._disposable, self._task = self._chat_kind(chat_id)
         # called with (input tokens, output tokens) after each model call; the task manager's token watchdog
         self.usage_hook: Callable[[int, int], None] | None = None
+        self.speaker: str | None = None  # space agents: the member whose message this turn answers (USER.md section)
         if self._task is not None:
             self._become_worker(self._task)
         self._base_tool_specs, self._base_tool_handlers = self._build_base_tools()
@@ -418,7 +428,7 @@ class Agent:
         config = load_agent(user_id, agent_id)
         provider = main_provider(config)
         sources = SourceRegistry.for_agent(config.user_id, config.id, **chat_folder_options(config))
-        profile = load_profile(sources, recall_knowledge=config.recall_knowledge)
+        profile = load_profile(sources, recall_knowledge=config.recall_knowledge, space_members=config.space_members)
         logger.debug(
             "loaded agent user=%s agent=%s provider=%s model=%s",
             config.user_id, config.id, config.provider_name, config.models.chat,
@@ -552,7 +562,7 @@ class Agent:
         self, user_input: str, stream: Optional[bool] = None,
         cancellation: CancellationToken | None = None,
         *, continuation: bool = False, attachments: Optional[list[dict]] = None,
-        meta: Optional[dict] = None, channel: Optional[str] = None,
+        meta: Optional[dict] = None, channel: Optional[str] = None, author: Optional[str] = None, speaker: Optional[str] = None,
     ) -> Union[str, Iterator[tuple[str, str | dict]]]:
         """Send a user message and return the reply, updating conversation memory.
 
@@ -560,9 +570,11 @@ class Agent:
         the accepted input and partial reply as an interrupted turn, then raises
         GenerationCancelled. A steering continuation retains the active turn even without memory.
         `channel` (`web`, `telegram`) is where the message came from; it is stored on the turn and shown to the model.
+        `author` (a user id) is who wrote it in a shared agent: stored on the turn and shown as a `[NAME]` prefix.
         """
         if stream is None:
             stream = self.config.stream
+        self.speaker = speaker  # per turn: a turn without one (automation, task) falls back to the billing member
         attachments = attachments or []
         if not continuation:
             self._drop_tool_images()
@@ -597,13 +609,14 @@ class Agent:
         self.last_usage = ""
         self.last_latency_report = ""
         self.last_reply = ""
+        extra_author = {"author": author} if author else {}
         try:
             if cancellation is not None:
                 cancellation.raise_if_cancelled()
         except GenerationCancelled:
             self._cancellation = cancellation
-            self.messages.append({"role": "user", "content": self._stamped(user_content, ts, channel)})
-            self._log_turn("user", user_content, ts=ts, **dict(meta or {}, channel=channel))
+            self.messages.append({"role": "user", "content": self._stamped(user_content, ts, channel, author)})
+            self._log_turn("user", user_content, ts=ts, **dict(meta or {}, channel=channel, **extra_author))
             self._remember_interrupted("", "")
             raise
         if self._associative_enabled():
@@ -612,8 +625,8 @@ class Agent:
             self._assoc_job = associative.RecallJob(
                 self, list(self.messages[1:]), user_input, chat_id=self.chat_id,
             ).start()
-        self.messages.append({"role": "user", "content": self._stamped(user_content, ts, channel)})
-        self._log_turn("user", user_content, ts=ts, **dict(meta or {}, channel=channel))  # `meta`: source/task_ids of a wake turn
+        self.messages.append({"role": "user", "content": self._stamped(user_content, ts, channel, author)})
+        self._log_turn("user", user_content, ts=ts, **dict(meta or {}, channel=channel, **extra_author))  # `meta`: source/task_ids of a wake turn
         if not continuation:
             self._guard_context()
         self._refresh_mcp_tools()
@@ -665,10 +678,16 @@ class Agent:
         return parts
 
     @staticmethod
-    def _stamped(content: str | list[dict], ts: str, channel: Optional[str] = None) -> str | list[dict]:
-        """Prefix a user turn with its local timestamp (and channel, when known) so the model knows when and where."""
+    def _stamped(
+        content: str | list[dict], ts: str, channel: Optional[str] = None, author: Optional[str] = None,
+    ) -> str | list[dict]:
+        """Prefix a user turn with its local timestamp (and channel, when known) so the model knows when and where.
+
+        In a shared agent `author` (a user id) puts `[NAME] ` in front: who wrote it, upper-cased display name."""
         stamp = datetime.fromisoformat(ts).isoformat(sep=" ", timespec="minutes")
         prefix = f"[{stamp} via {_CHANNEL_NAMES.get(channel, channel)}]" if channel else f"[{stamp}]"
+        if author:
+            prefix = f"[{_author_name(author)}] {prefix}"
         if isinstance(content, str):
             return f"{prefix} {content}" if content else prefix
         parts = list(content)
@@ -1109,7 +1128,7 @@ class Agent:
                 continue
             content = self._reply_content(t["content"], bool(t.get("interrupted")), bool(t.get("checkpoint")))
             if t["role"] == "user" and t.get("ts"):
-                content = self._stamped(content, t["ts"], t.get("channel"))
+                content = self._stamped(content, t["ts"], t.get("channel"), t.get("author"))
             if t["role"] == "assistant" and t.get("author_agent"):
                 # a reply of another agent the user @mentioned here: this agent did not write it
                 label = reply_label(t["author_agent"], t.get("author_name") or "")

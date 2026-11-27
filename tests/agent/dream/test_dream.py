@@ -503,6 +503,7 @@ class TelegramDreamCommandTests(unittest.TestCase):
         from src.telegram.bot import TelegramBotState, TelegramSession, dream_command
 
         service = Mock()
+        service.agent_owner.side_effect = lambda person, agent: person
         service.dream_command.return_value = "Dream session started."
         state = TelegramBotState(service, {7: TelegramSession("u", "a")})
         update = Mock()
@@ -521,6 +522,7 @@ class TelegramDreamCommandTests(unittest.TestCase):
         for handler, expected in ((dream_start_command, "/dream start"), (dream_cancel_command, "/dream cancel")):
             with self.subTest(handler=handler.__name__):
                 service = Mock()
+                service.agent_owner.side_effect = lambda person, agent: person
                 service.dream_command.return_value = "Done."
                 state = TelegramBotState(service, {7: TelegramSession("u", "a")})
                 update = Mock()
@@ -537,6 +539,7 @@ class TelegramDreamCommandTests(unittest.TestCase):
         from src.telegram import bot
 
         service = Mock()
+        service.agent_owner.side_effect = lambda person, agent: person
         service.login.return_value = {"agents": []}
         with patch.object(bot, "load_allowed_users", return_value={}):
             app = bot.build_application("123:abc", service, dream_scheduler=False)

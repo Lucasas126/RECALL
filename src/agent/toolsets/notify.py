@@ -6,7 +6,8 @@ from collections import deque
 from typing import TYPE_CHECKING, Annotated, Callable
 
 from src.agent.tooling import tool
-from src.config.settings import TELEGRAM_ALLOWED_USERS_ENV
+from src.config.settings import CONFIG_DIR, TELEGRAM_ALLOWED_USERS_ENV
+from src.config.spaces import notification_targets
 from src.providers.telegram_notify import TelegramNotifier
 from src.utils.logger import get_logger
 
@@ -72,17 +73,24 @@ def build_notify_tools(
         notifier = factory()
         if notifier is None:
             return "error: Telegram is not set up on this server (no bot token), so nothing was sent"
-        if not notifier.linked(user_id):
+        people = [person for person in notification_targets(user_id, CONFIG_DIR) if notifier.linked(person)]
+        if not people:
             return "error: this user has no Telegram account linked, so nothing was sent"
-        wait = _take_slot(user_id, agent_id)
-        if wait is not None:
-            return f"error: limit of {MAX_PER_HOUR} notices an hour reached; try again in {wait // 60 + 1} minutes"
-        try:
-            notifier.send_markdown(user_id, text)
-        except Exception as exc:
-            _forget_slot(user_id, agent_id)
-            logger.warning("notify_telegram failed for %s/%s: %s", user_id, agent_id, exc)
-            return f"error: Telegram did not accept the message ({exc})"
-        return "sent to the user's Telegram chat"
+        delivered, errors = 0, []
+        for person in people:
+            wait = _take_slot(person, agent_id)
+            if wait is not None:
+                errors.append(f"limit of {MAX_PER_HOUR} notices an hour reached; try again in {wait // 60 + 1} minutes")
+                continue
+            try:
+                notifier.send_markdown(person, text)
+                delivered += 1
+            except Exception as exc:  # one member's failure never stops the others
+                _forget_slot(person, agent_id)
+                logger.warning("notify_telegram failed for %s/%s (member %s): %s", user_id, agent_id, person, exc)
+                errors.append(f"Telegram did not accept the message ({exc})")
+        if not delivered:
+            return f"error: {errors[0]}"
+        return "sent to the user's Telegram chat" if not errors else f"sent to {delivered} of {len(people)} members' Telegram chats"
 
     return [notify_telegram]

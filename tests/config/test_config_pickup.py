@@ -36,16 +36,15 @@ class PickupFixture(AdminFixture):
 
     def finish_workers(self) -> None:
         for slot in self.service._slots.values():
-            worker = slot.worker
-            if worker is not None:
+            for worker in list(slot.workers.values()):
                 worker.join(3)
 
     def say(self, text: str = "hi") -> tuple[str, list[str]]:
         """(the reply text, the notice texts) of one message."""
         events = list(self.service.send("user-a", "bot", self.chat, text))
         for slot in self.service._slots.values():
-            if slot.worker is not None:
-                slot.worker.join(3)
+            for worker in list(slot.workers.values()):
+                worker.join(3)
         reply = "".join(e.text for e in events if e.kind == "text")
         return reply, [e.text for e in events if e.kind == "notice"]
 

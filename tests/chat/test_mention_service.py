@@ -66,10 +66,17 @@ class MentionServiceTests(steering.SteeringFixture):
         self.assertEqual(len(labeled), 2)
 
     def test_unknown_or_own_id_is_a_normal_message(self) -> None:
-        for text in ("@nobody hi", "@agent-one hi", "hi @agent-two"):
+        for text in ("@nobody hi", "@agent-one hi", "mail me@agent-two.io"):
             list(self._send(text))
         self.assertEqual(len(self.calls[B]), 0)
         self.assertEqual(len(self.calls[A]), 3)
+
+    def test_mention_in_the_middle_or_at_the_end_routes_and_keeps_the_text(self) -> None:
+        for text in ("hi @agent-two, what now?", "what now @agent-two"):
+            list(self._send(text))
+            prompt = self.calls[B][-1][-1]["content"] if isinstance(self.calls[B][-1], list) else str(self.calls[B][-1])
+            self.assertIn(text, prompt)
+        self.assertEqual(len(self.calls[A]), 0)
 
     def test_edits_and_task_messages_never_mention(self) -> None:
         list(self._send("Hello"))

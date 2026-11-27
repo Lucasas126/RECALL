@@ -153,6 +153,12 @@ function confirmDialog(options) {
     $("confirm-message").textContent = spec.message;
     $("confirm-ok").textContent = spec.confirmLabel;
     $("confirm-cancel").textContent = spec.cancelLabel;
+    const input = $("confirm-input");
+    input.hidden = !spec.requireText;
+    input.value = "";
+    input.setAttribute("aria-label", spec.inputLabel);
+    $("confirm-ok").disabled = Boolean(spec.requireText);
+    input.oninput = () => { $("confirm-ok").disabled = !confirmTextMatches(spec.requireText, input.value); };
     $("confirm-ok").classList.toggle("danger", spec.danger);
     $("confirm-ok").classList.toggle("primary", !spec.danger);
     dialog.dataset.danger = String(spec.danger);
@@ -164,10 +170,11 @@ function confirmDialog(options) {
     dialog.returnValue = "";
     dialog.addEventListener("close", finish);
     dialog.showModal();
-    (spec.danger ? $("confirm-cancel") : $("confirm-ok")).focus();
+    if (spec.requireText) input.focus();
+    else (spec.danger ? $("confirm-cancel") : $("confirm-ok")).focus();
   }));
 }
-$("confirm-ok").addEventListener("click", () => $("confirm-dialog").close("ok"));
+$("confirm-ok").addEventListener("click", () => { if (!$("confirm-ok").disabled) $("confirm-dialog").close("ok"); });
 $("confirm-cancel").addEventListener("click", () => $("confirm-dialog").close("cancel"));
 $("confirm-dialog").addEventListener("click", (event) => { if (event.target === event.currentTarget) event.currentTarget.close("cancel"); });
 
@@ -190,7 +197,14 @@ function confirmSpec(options, translate) {
     confirmLabel: spec.confirmLabel || translate("Confirm"),
     cancelLabel: spec.cancelLabel || translate("Cancel"),
     danger: Boolean(spec.danger),
+    requireText: spec.requireText ? String(spec.requireText) : "",  // the text the person must type before Confirm works
+    inputLabel: spec.inputLabel ? String(spec.inputLabel) : "",
   };
+}
+
+// True when the typed text equals the required one exactly (no trimming, no case folding); always true when none is required.
+function confirmTextMatches(required, typed) {
+  return !required || String(typed ?? "") === String(required);
 }
 
 // Runs the given async tasks one after the other, so two confirmations are never open together.
@@ -351,10 +365,25 @@ function selectableAgents(agents, keepId = null) {
   return (agents ?? []).filter((agent) => !agent.hidden || agent.id === keepId);
 }
 
-// The Settings > Agents list: the agents that are shown and, below, the hidden ones (a broken file has no flag: shown).
+// The Settings > Agents list: own agents, the shared ones (from a space) and the hidden ones; a hidden agent, shared or
+// not, goes only under Hidden (a broken file has no flag: shown).
 function splitHiddenAgents(agents) {
   const list = agents ?? [];
-  return { shown: list.filter((agent) => !agent.hidden), hidden: list.filter((agent) => agent.hidden) };
+  return {
+    shown: list.filter((agent) => !agent.hidden && !agent.shared),
+    shared: list.filter((agent) => !agent.hidden && agent.shared),
+    hidden: list.filter((agent) => agent.hidden),
+  };
+}
+
+// The line on a shared agent's settings page ("" for an own agent).
+function sharedAgentNote(agent, translate, me = null) {
+  if (!agent?.shared) return "";
+  if (agent.billing_user && agent.billing_user === me) return translate("Shared agent · uses your providers and subscriptions");
+  const payer = (agent.members ?? []).find((member) => member.id === agent.billing_user);
+  return translate("Shared agent · uses the providers and subscriptions of {user}", {
+    user: payer?.name || agent.billing_user || translate("the space owner"),
+  });
 }
 
 // Query string of the chat list request: the open chat is kept (an empty one is not pruned) and hidden chats are asked for.
@@ -477,6 +506,44 @@ function settingsChanges(current, original, defaults) {
     if (change !== undefined) changes[key] = change;
   }
   return changes;
+}
+// Shared-agent invitations: the texts and the nav dot (pure). The dot has several sources (invitations, chat
+// notifications): it shows while any of them wants it.
+function invitationText(invitation, translate) {
+  return translate("{inviter} wants to share {agent} with you", {
+    inviter: invitation.inviter_name || invitation.inviter, agent: invitation.agent_name || invitation.agent_id,
+  });
+}
+function invitationNote(invitation, translate) {
+  return translate("It uses the providers and subscriptions of {user}. Every member sees all its chats.", {
+    user: invitation.billing_name || invitation.inviter_name || invitation.billing_user || invitation.inviter,
+  });
+}
+// The Share block's member rows (pure): who has access, "(you)" after your name, and whose providers and subscriptions the
+// agent uses (the billing user). A private agent: only you.
+function memberRows(agent, meId, translate) {
+  if (!agent?.shared) return [{ id: meId, name: translate("Only you"), you: true, suffix: "", note: "" }];
+  const members = agent.members ?? [];
+  const billing = members.find((member) => member.id === agent.billing_user);
+  return members.map((member) => ({
+    id: member.id, name: member.name || member.id, you: member.id === meId,
+    suffix: member.id === meId ? translate("(you)") : "",
+    note: member.id !== agent.billing_user ? ""
+      : member.id === meId ? translate("uses your providers and subscriptions")
+        : translate("uses {user}'s providers and subscriptions", { user: billing?.name || billing?.id || agent.billing_user }),
+  }));
+}
+// What identifies the open agent's pending invitations (pure): a change means someone answered, so the members changed.
+function shareSignature(invitations, agentId) {
+  if (!invitations || !agentId) return null;
+  return outgoingFor(invitations, agentId).map((item) => item.id).sort().join(",");
+}
+function outgoingFor(invitations, agentId) {
+  return (invitations?.outgoing ?? []).filter((item) => item.agent_id === agentId && (item.status ?? "pending") === "pending");
+}
+// The menu-button dot: the strongest level among the chats' and the invitations' ("approval" over "ready").
+function navAttentionLevel(chatLevel, invitations) {
+  return chatLevel === "approval" ? "approval" : chatLevel || (invitations > 0 ? "ready" : "");
 }
 // ---- end settings helpers
 
@@ -815,6 +882,8 @@ function translateInterface() {
     ["model-zdr-warning", "ZDR is not required for your next selection. Providers may retain your prompts and replies. Your OpenRouter account may still enforce ZDR."],
     ["tab-chats", "Chats"], ["tab-agents", "Agents"],
     ["agent-hidden-label", "Hidden"],
+    ["agent-share-legend", "Share"], ["agent-share-invite", "Invite"], ["agent-leave", "Leave"], ["agent-unshare", "Unshare"],
+    ["agent-share-hint", "Invite another user by their user id. They get access to this agent and all its chats."],
     ["agent-hidden-hint", "A hidden agent is left out of the agent selectors and listed under Hidden agents. You can still talk to it with @ and open a chat with it from here."],
     ["agent-open-chat", "Open chat with this agent"],
     ["agent-new-label", "New agent"], ["agents-empty", "Select an agent to edit it, or create a new one."],
@@ -1344,6 +1413,22 @@ function replyAuthor(authorId, storedName, agents, currentId) {
   return { id, name: agent?.name ?? storedName ?? id ?? "", avatar: agent?.avatar ?? null };
 }
 
+// Who wrote a user bubble in a shared agent's chat: a stored turn's author, or (a live message of this page) the
+// logged-in person. Own agents show no author.
+function userAuthor(shared, user, message = null) {
+  if (message) return message.author ? { name: message.author_name || message.author } : null;
+  return shared && user?.name ? { name: user.name } : null;
+}
+
+// What the open chat needs after a poll of its summary: "reload" when another member or device added turns or
+// a reply started (the reload attaches to a running reply), else "none". `previous` is the last summary seen
+// ({turns, active}) and `busyHere` says this page sends or follows a reply itself (it already shows everything).
+function liveSyncAction(previous, current, busyHere) {
+  if (!previous || !current || busyHere) return "none";
+  if (current.turns !== previous.turns) return "reload";
+  return current.active && !previous.active ? "reload" : "none";
+}
+
 // The agent a message @mentions (same rule as the server: `@<id>` at the start, then a space or the end), when it is
 // another existing agent of the user; else null. Lets the reply bubble show the right author before the first event.
 function mentionedAgent(text, agents, currentId) {
@@ -1713,7 +1798,7 @@ function showTab(tab) {
   $("new-chat-row").hidden = agents;
   $("agent-list").hidden = !agents;
   $("agent-new").hidden = !agents;
-  if (agents) return loadAgentConfigs();
+  if (agents) { refreshInvitations(); return loadAgentConfigs(); }
   stopDreamPoll();
   setDreamHash(state.agentId && state.chatId ? chatHash(state.agentId, state.chatId) : null);
   return Promise.resolve();
@@ -1750,6 +1835,7 @@ function agentListItem(agent) {
   name.className = "title";
   name.textContent = agent.name;
   if (agent.hidden) name.prepend(hiddenIcon(), " ");
+  if (agent.shared) name.append(" ", sharedTag());
   if (agent.level) name.append(" ", levelBadge(agent.level));
   button.append(name);
   if (agent.description) {
@@ -1773,6 +1859,14 @@ function agentListItem(agent) {
   return item;
 }
 
+function sharedTag() {
+  const tag = document.createElement("span");
+  tag.className = "shared-tag";
+  tag.textContent = tr("shared");
+  tag.title = tr("Shared agent");
+  return tag;
+}
+
 function hiddenIcon() {
   const icon = document.createElement("span");
   icon.className = "hidden-icon";
@@ -1783,7 +1877,7 @@ function hiddenIcon() {
 
 // Two sections, both always shown: the agents, then the hidden agents (with a hint while there are none).
 function renderAgentList() {
-  const { shown, hidden } = splitHiddenAgents(state.agentConfigs);
+  const { shown, shared, hidden } = splitHiddenAgents(state.agentConfigs);
   const heading = (text) => {
     const li = document.createElement("li");
     li.className = "agent-section";
@@ -1796,6 +1890,7 @@ function renderAgentList() {
   empty.textContent = tr("No hidden agents. Hide an agent in its editor to list it here.");
   $("agent-list").replaceChildren(
     heading("Agents"), ...shown.map(agentListItem),
+    ...(shared.length ? [heading("Shared agents"), ...shared.map(agentListItem)] : []),
     ...(state.showHiddenAgents ? [heading("Hidden agents"), ...(hidden.length ? hidden.map(agentListItem) : [empty])] : []),
   );
 }
@@ -1807,6 +1902,7 @@ function openAgent(agentId) {
   state.agentForm.originalId = agent.id;
   resetDream(agent.id);
   $("agent-error").textContent = "";
+  $("agent-share-error").textContent = "";
   $("agent-status").textContent = "";
   fillAgentForm(agent);
   $("agent-delete").hidden = false;
@@ -1819,6 +1915,7 @@ function openNewAgent() {
   state.agentForm.originalId = null;
   resetDream();
   $("agent-error").textContent = "";
+  $("agent-share-error").textContent = "";
   $("agent-status").textContent = "";
   fillAgentForm({
     name: "", id: "", description: "",
@@ -1864,6 +1961,10 @@ function fillAgentForm(agent) {
   $("agent-description").value = agent.description ?? "";
   $("agent-avatar-free").checked = agent.avatar_style === "free";
   $("agent-hidden").checked = Boolean(agent.hidden);
+  const sharedNote = sharedAgentNote(agent, tr, state.user?.id);
+  $("agent-shared-note").textContent = sharedNote;
+  $("agent-shared-note").hidden = !sharedNote;
+  renderShareList();
   syncAgentHiddenIcon();
   $("agent-open-chat").hidden = !state.agentForm.originalId;  // a new agent has no chat until it is saved
   $("agent-avatar-error").textContent = "";
@@ -2196,8 +2297,6 @@ function drawApprovalRules(entries) {
   const rules = entries.filter((entry) => entry.learned); // the others are in the rule editor
   state.agentForm.learnedEntries = rules;
   state.agentForm.learned = rules.map((entry) => entry.rule);
-  const open = chats.find((chat) => chat.id === state.chatId && chat.agent_id === state.agentId);
-  if (open?.unread && !document.hidden) markChatRead(open.agent_id, open.id);
   list.replaceChildren(...rules.map((entry) => {
     const item = document.createElement("li");
     const text = Object.assign(document.createElement("span"), { className: "approval-rule-text", textContent: approvalRuleText(entry.rule) });
@@ -2932,13 +3031,233 @@ $("agent-delete").addEventListener("click", async () => {
     resetDream();
     setAgentFormOpen(false);
     setDreamHash("agents");
-    await refreshAgents(agentId, null);
     $("agent-status").textContent = tr("Agent deleted.");
+    try {
+      await refreshAgents(agentId, null);
+    } catch {
+      await chatGone(state.agentId, state.chatId, session);  // the delete worked: only the views are stale, no error
+    }
   } catch (err) {
     if (session === state.session) $("agent-error").textContent = err.message;
   } finally {
     if (session === state.session) setAgentBusy(false);
   }
+});
+
+// ------------------------------------------------------------------ shared agent invitations
+
+function renderInvitations() {
+  const data = state.invitations ?? { incoming: [], outgoing: [], pending_count: 0 };
+  paintNavAttention();
+  if (data.pending_count > 0) $("tab-agents").dataset.attention = "ready";
+  else delete $("tab-agents").dataset.attention;
+  const box = $("invitations-block");
+  box.hidden = !data.incoming.length;
+  box.replaceChildren(...(data.incoming.length ? [Object.assign(document.createElement("h3"), { textContent: tr("Invitations") })] : []),
+    ...data.incoming.map((invitation) => {
+      const item = document.createElement("div");
+      item.className = "invitation";
+      const text = document.createElement("p");
+      text.textContent = invitationText(invitation, tr);
+      const note = document.createElement("p");
+      note.className = "model-note";
+      note.textContent = invitationNote(invitation, tr);
+      const actions = document.createElement("div");
+      actions.className = "invitation-actions";
+      const accept = document.createElement("button");
+      accept.type = "button";
+      accept.className = "primary";
+      accept.textContent = tr("Accept");
+      accept.addEventListener("click", () => answerInvitation(invitation.id, "accept"));
+      const decline = document.createElement("button");
+      decline.type = "button";
+      decline.textContent = tr("Decline");
+      decline.addEventListener("click", () => answerInvitation(invitation.id, "decline"));
+      actions.append(accept, decline);
+      item.append(text, note, actions);
+      return item;
+    }));
+  renderShareList();
+}
+
+async function refreshInvitations() {
+  if (!state.user) return;
+  const session = state.session;
+  try {
+    const data = await api("/api/invitations");
+    if (session !== state.session) return;
+    const before = shareSignature(state.invitations, state.agentForm.originalId);
+    state.invitations = data;
+    renderInvitations();
+    // the open agent's Share section follows the invitations: a status change (accepted, declined) refreshes the members
+    if (state.agentForm.originalId && before !== null && before !== shareSignature(data, state.agentForm.originalId)) {
+      await loadAgentConfigs();
+      if (session === state.session) renderShareList();
+    }
+  } catch {
+    // the next poll retries; a failed poll must not break the page
+  }
+}
+
+// After the agent list changed under the open view (accept, leave, unshare): the empty "no agents" state gives way to the
+// first agent, and a person left without agents sees the empty state.
+async function showAgentOrEmpty(session) {
+  if (session !== state.session || !state.user) return;
+  const agents = state.user.agents;
+  if (!agents.length) {
+    if (state.agentId) await selectAgent(null);
+    return;
+  }
+  if (!state.agentId || !agents.some((agent) => agent.id === state.agentId)) {
+    await selectAgent(state.preferences?.agent_id && agents.some((a) => a.id === state.preferences.agent_id) ? state.preferences.agent_id : agents[0].id);
+  }
+}
+
+// A poll of the open chat answered 404: the agent or chat is no longer reachable (left, unshared, deleted). Stop the polls
+// for it and open a reachable agent or the empty state; no error is shown.
+let chatGoneBusy = false;
+async function chatGone(agentId, chatId, session) {
+  if (chatGoneBusy || session !== state.session || agentId !== state.agentId || chatId !== state.chatId) return;
+  chatGoneBusy = true;
+  try {
+    liveSync.key = null;
+    processPanel.key = null;
+    clearTimeout(taskPollTimer);
+    const me = await api("/api/me");
+    if (session !== state.session || !state.user) return;
+    state.user.agents = me.agents;
+    renderAgentOptions();
+    renderAgentsEmpty();
+    await loadAgentConfigs();
+    if (me.agents.some((agent) => agent.id === agentId)) {
+      state.chatId = null;  // the agent is still there: only the chat is gone
+      await refreshChats();
+    } else {
+      state.agentId = null;
+      state.chatId = null;
+      await refreshPreferences();
+      await showAgentOrEmpty(session);
+    }
+  } catch { /* the next page load shows it */ } finally { chatGoneBusy = false; }
+}
+
+async function answerInvitation(id, action) {
+  const session = state.session;
+  $("agent-error").textContent = "";
+  try {
+    await api(`/api/invitations/${encodeURIComponent(id)}/${action}`, { method: "POST" });
+    if (session !== state.session) return;
+    await refreshInvitations();
+    if (action === "accept") {
+      await refreshAgentsAfterTool();
+      await refreshPreferences();
+      await showAgentOrEmpty(session);
+    }
+  } catch (err) {
+    if (session === state.session) $("agent-error").textContent = err.message;
+  }
+}
+
+function renderShareList() {
+  const agentId = state.agentForm.originalId;
+  const agent = state.agentConfigs.find((item) => item.id === agentId);
+  $("agent-share-section").hidden = !agentId;
+  const alone = Boolean(agent?.shared) && (agent.members ?? []).length <= 1;
+  $("agent-leave").hidden = !agent?.shared || alone;  // the only member cannot leave: only Unshare
+  $("agent-unshare").hidden = !agent?.shared;
+  $("agent-share-leave-note").textContent = tr(alone ? "You are the only member." : "Leave stops your access; Unshare gives every member a private copy.");
+  $("agent-share-leave-box").hidden = !agent?.shared;
+  $("agent-share-members").replaceChildren(...(agentId ? memberRows(agent, state.user?.id, tr) : []).map((row) => {
+    // name (and id) on the first line, whose providers on a muted second line: "Ana (you) @ana" / "uses your providers..."
+    const li = document.createElement("li");
+    const who = document.createElement("span");
+    who.className = "share-who";
+    const label = document.createElement("span");
+    label.textContent = row.suffix ? `${row.name} ${row.suffix}` : row.name;
+    if (row.id !== row.name && !(row.you && !agent?.shared)) {
+      const id = document.createElement("span");
+      id.className = "share-id";
+      id.textContent = ` @${row.id}`;
+      label.append(id);
+    }
+    who.append(label);
+    if (row.note) {
+      const tag = document.createElement("span");
+      tag.className = "share-tag";
+      tag.textContent = row.note;
+      who.append(tag);
+    }
+    li.append(who);
+    return li;
+  }));
+  const pending = agentId ? outgoingFor(state.invitations, agentId) : [];
+  $("agent-share-list").replaceChildren(...pending.map((invitation) => {
+    const li = document.createElement("li");
+    const name = document.createElement("span");
+    name.textContent = `${invitation.invitee} · ${tr("pending")}`;
+    const revoke = document.createElement("button");
+    revoke.type = "button";
+    revoke.textContent = tr("Revoke");
+    revoke.addEventListener("click", () => shareAction(`/api/invitations/${encodeURIComponent(invitation.id)}/revoke`, {}, false));
+    li.append(name, revoke);
+    return li;
+  }));
+}
+
+// One call of the Share block; `moved` = the agent list changes (leave, unshare), so the agents and chats are reloaded.
+async function shareAction(url, body, moved) {
+  const session = state.session;
+  const agentId = state.agentForm.originalId;
+  $("agent-share-error").textContent = "";
+  try {
+    await api(url, { method: "POST", body: JSON.stringify(body) });
+    if (session !== state.session) return;
+    if (moved) {
+      state.agentForm.originalId = null;
+      resetDream();
+      setAgentFormOpen(false);
+      setDreamHash("agents");
+      await refreshAgents(agentId, null);
+      await refreshPreferences();
+      await refreshChats();
+      await showAgentOrEmpty(session);
+    }
+    await refreshInvitations();
+  } catch (err) {
+    if (session === state.session) $("agent-share-error").textContent = err.message;
+  }
+}
+
+// The block sits inside the agent form, so Enter in the field would submit (save) that form: it is intercepted and runs the
+// same invite handler as the button; an empty field does nothing.
+async function inviteFromField() {
+  const agentId = state.agentForm.originalId;
+  const userId = $("agent-share-user").value.trim();
+  if (!agentId || !userId) return;
+  await shareAction(`/api/agents/${encodeURIComponent(agentId)}/invitations`, { user_id: userId }, false);
+  if (!$("agent-share-error").textContent) $("agent-share-user").value = "";
+}
+$("agent-share-invite").addEventListener("click", inviteFromField);
+$("agent-share-user").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.isComposing) return;
+  event.preventDefault();
+  inviteFromField();
+});
+$("agent-leave").addEventListener("click", async () => {
+  const agentId = state.agentForm.originalId;
+  if (!agentId || !(await confirmDialog({
+    title: tr("Leave agent"), message: tr("You will lose access to this agent and its chats. Nothing is deleted."),
+    confirmLabel: tr("Leave"),
+  }))) return;
+  await shareAction(`/api/agents/${encodeURIComponent(agentId)}/leave`, {}, true);
+});
+$("agent-unshare").addEventListener("click", async () => {
+  const agentId = state.agentForm.originalId;
+  if (!agentId || !(await confirmDialog({
+    title: tr("Unshare agent"), message: tr("Every member gets a private copy of this agent and its chats; the shared agent is removed."),
+    confirmLabel: tr("Unshare"), danger: true,
+  }))) return;
+  await shareAction(`/api/agents/${encodeURIComponent(agentId)}/unshare`, {}, true);
 });
 
 // ------------------------------------------------------------------ shared settings
@@ -3285,7 +3604,39 @@ function userAdminItem(user) {
     row.append(select, apply);
   }
   item.append(row, note);
+  const lastAdmin = user.max_level === "admin" && state.adminUsers.filter((other) => other.max_level === "admin").length < 2;
+  if (!user.self && !lastAdmin) {
+    const del = Object.assign(document.createElement("button"), { type: "button", className: "icon-btn danger" });
+    del.innerHTML = ICONS.trash;
+    del.title = tr("Delete user");
+    del.setAttribute("aria-label", tr("Delete user {user}", { user: user.id }));
+    del.addEventListener("click", () => deleteUserAdmin(user));
+    row.append(del);
+  }
   return item;
+}
+
+async function deleteUserAdmin(user) {
+  const session = state.session;
+  const ok = await confirmDialog({
+    title: tr("Delete user {user}", { user: user.id }),
+    message: tr("This permanently deletes the user, their agents, chats, memories and files. Agents shared with other people stay with them. To confirm, type the user id: {user}", { user: user.id }),
+    confirmLabel: tr("Delete user"), danger: true, requireText: user.id, inputLabel: tr("User id"),
+  });
+  if (!ok || session !== state.session) return;
+  $("users-status").textContent = "";
+  try {
+    const result = await api(`/api/admin/users/${encodeURIComponent(user.id)}`, { method: "DELETE", body: JSON.stringify({ confirm: user.id }) });
+    if (session !== state.session) return;
+    state.adminUsers = state.adminUsers.filter((item) => item.id !== user.id);
+    renderUsersAdmin();
+    const notes = [tr("User {user} deleted.", { user: user.id })];
+    if (result.leftovers.secrets.length) notes.push(tr("Remove these secrets by hand: {names}", { names: result.leftovers.secrets.join(", ") }));
+    if (result.leftovers.telegram) notes.push(tr("Remove the user's entry from {name} by hand.", { name: result.leftovers.telegram_variable }));
+    $("users-status").textContent = notes.join(" ");
+  } catch (err) {
+    if (session === state.session) $("users-status").textContent = err.message;
+  }
 }
 
 // ---- user onboarding wizard (administrators): create the user, give provider access, first agent, review
@@ -3941,9 +4292,12 @@ function markChatRead(agentId, chatId) {
 
 // The side panel is collapsed on a phone, so the row dots are out of sight: the menu buttons repeat the strongest one
 // (a command waits for approval, or an answer is unread) from the chats other than the open one.
-function paintNavAttention(chats) {
+// Pending shared-agent invitations add a dot too. Called without chats it reuses the last list.
+function paintNavAttention(chats = state.navChats ?? []) {
+  state.navChats = chats;
   const others = chats.filter((chat) => !(chat.id === state.chatId && chat.agent_id === state.agentId));
-  const level = others.some((chat) => chat.pending_approvals > 0) ? "approval" : others.some((chat) => chat.unread) ? "ready" : "";
+  const chatLevel = others.some((chat) => chat.pending_approvals > 0) ? "approval" : others.some((chat) => chat.unread) ? "ready" : "";
+  const level = navAttentionLevel(chatLevel, state.invitations?.pending_count ?? 0);
   for (const button of document.querySelectorAll(".nav-toggle")) {
     if (level) button.dataset.attention = level;
     else delete button.dataset.attention;
@@ -3991,6 +4345,7 @@ async function refreshChats() {
       const agent = document.createElement("span");
       agent.className = "chat-agent";
       agent.textContent = chat.agent_name;
+      if (chat.shared) agent.append(" ", sharedTag());
       meta.append(title, agent);
       const del = document.createElement("button");
       del.className = "del";
@@ -5392,7 +5747,8 @@ function drawMessages(container, messages, { usage }) {
       continue;
     }
     const author = m.role === "assistant" && m.author_agent
-      ? replyAuthor(m.author_agent, m.author_name, state.user?.agents, state.agentId) : null;
+      ? replyAuthor(m.author_agent, m.author_name, state.user?.agents, state.agentId)
+      : m.role === "user" ? userAuthor(false, null, m) : null;
     const view = addMessage(m.role, container, author);
     if (m.role === "user" && m.index != null) setEditable(view.el, m.index);
     if (m.associative_skipped) view.memory({ state: "skipped" });
@@ -6472,8 +6828,9 @@ async function pollProcesses() {
       if (ended) expectWakeUntil = Date.now() + WAKE_GRACE_MS;  // its wake reply is on the way: let the task poll find it
       if (ended || ids.length) ensureTaskPolling();
     }
-  } catch {
-    // the panel is a convenience: a failed poll keeps the last list
+  } catch (err) {
+    // the panel is a convenience: a failed poll keeps the last list; a 404 means the chat is out of reach
+    if (err?.status === 404) chatGone(agentId, chatId, session);
   }
 }
 
@@ -6530,8 +6887,9 @@ async function taskPoll() {
         }
       }
     }
-  } catch {
+  } catch (err) {
     again = false;
+    if (err?.status === 404) chatGone(agentId, chatId, session);
   }
   taskPollRunning = false;
   // nothing runs: keep a slow look so a task the server revives meanwhile (`task_send` on a finished one) shows up
@@ -7528,6 +7886,7 @@ function addMessage(role, parent = state.view ?? $("messages"), author = null) {
   el.className = `msg ${role}`;
   if (role === "assistant") el.dataset.author = author ? author.name : currentAgentName();
   else if (role === "command") el.dataset.author = "RECALL";
+  else if (role === "user" && author) el.dataset.author = author.name;  // a shared agent: who wrote it
   let body = document.createElement("div");
   body.className = "body";
   let raw = "";
@@ -7693,6 +8052,15 @@ function addMessage(role, parent = state.view ?? $("messages"), author = null) {
         button.addEventListener("click", () => openMemoryDialog(summary, shown, query));
         memoryIndicator.replaceChildren(button);
       } else memoryIndicator.textContent = summary;
+    },
+    reveal() {  // a bubble made without knowing whether the agent answers: shown by the first output
+      el.style.display = "";
+    },
+    hide() {
+      el.style.display = "none";
+    },
+    discard() {  // the run produced no reply (a message to a person): drop the empty bubble
+      el.remove();
     },
     settleMemory() {
       // a search still running when the reply ends, fails or is interrupted was not used
@@ -8241,7 +8609,7 @@ async function dispatchMessage(content, attachments, edit = null) {
     state.usages.delete(key);  // the numbers of the removed replies no longer describe the chat
     $("usage").hidden = true;
   }
-  const userMessage = addMessage("user", state.view);
+  const userMessage = addMessage("user", state.view, userAuthor(state.user?.agents?.find((a) => a.id === state.agentId)?.shared, state.user));
   userMessage.text(content);
   userMessage.attachments(edit ? edit.shown : attachments);
   // /dream and /compact are answered by RECALL itself (not stored, not the model): shown as a system reply
@@ -8249,6 +8617,8 @@ async function dispatchMessage(content, attachments, edit = null) {
   const mentioned = !edit && !command ? mentionedAgent(content, state.user?.agents, state.agentId) : null;
   const author = mentioned ? replyAuthor(mentioned, null, state.user?.agents, state.agentId) : null;
   const reply = addMessage(command ? "command" : "assistant", state.view, author);
+  // a message to a person is only delivered: its bubble stays hidden until the agent really produces output
+  if (!edit && !command && !startsAgentReply(content, state.user?.agents, state.agentId, state.user?.id)) reply.hide();
   const request = {
     userId: state.user.id, agentId: state.agentId, chatId: state.chatId,
     session: state.session, controller: new AbortController(), reply,
@@ -8344,11 +8714,66 @@ function composerInsert(text, trigger, item) {
 
 const composerPopup = { trigger: null, items: [], index: 0, dismissed: null };
 
+// The "@" suggestions (pure): the other agents, then, only in a shared agent's chat, the other members of its space.
+// An id that is also an agent of the user is listed once, as the agent (the agent wins on the server too).
+function composerMentionItems(agents, agentId, meId) {
+  const list = agents ?? [];
+  const others = list.filter((a) => a.id !== agentId);
+  const open = list.find((a) => a.id === agentId);
+  if (!open?.shared) return others;
+  const taken = new Set(list.map((a) => a.id));
+  const people = (open.members ?? []).filter((m) => m.id !== meId && !taken.has(m.id))
+    .map((m) => ({ id: m.id, name: m.name || m.id, person: true }));
+  return [...others, ...people];
+}
+
+// What "@" offers given the mentions already in the text (pure; the server applies the same rule: the first valid
+// mention decides). {notice: true} after an agent mention (one agent per message); only people after a person mention.
+function composerMentionPlan(text, trigger, agents, agentId, meId) {
+  const all = composerMentionItems(agents, agentId, meId);
+  const rest = text.slice(0, trigger.start) + text.slice(trigger.end);
+  const byId = new Map(all.map((item) => [item.id.toLowerCase(), item]));
+  const used = [];
+  for (const m of rest.matchAll(/(?<!\S)@([a-z0-9][a-z0-9_-]{0,63})(?=[\s.,;:!?]|$)/gi)) {
+    const item = byId.get(m[1].toLowerCase());
+    if (item) used.push(item);
+  }
+  if (!used.length) return { notice: false, items: all };
+  if (!used[0].person) return { notice: true, items: [] };
+  const taken = new Set(used.map((item) => item.id));
+  return { notice: false, items: all.filter((item) => item.person && !taken.has(item.id)) };
+}
+
+// Whether a sent message makes the agent answer (pure): false when its first valid mention is a person of the shared
+// agent's space (the message is only delivered), so no reply bubble is shown for it.
+function startsAgentReply(text, agents, agentId, meId) {
+  const byId = new Map(composerMentionItems(agents, agentId, meId).map((item) => [item.id.toLowerCase(), item]));
+  for (const m of String(text ?? "").matchAll(/(?<!\S)@([a-z0-9][a-z0-9_-]{0,63})(?=[\s.,;:!?]|$)/gi)) {
+    const item = byId.get(m[1].toLowerCase());
+    if (item) return !item.person;
+  }
+  return true;
+}
+
 function composerCandidates(trigger) {
-  const items = trigger.kind === "command"
-    ? COMPOSER_COMMANDS.map((c) => ({ id: c.id, description: tr(c.description) }))
-    : (state.user?.agents ?? []).filter((a) => a.id !== state.agentId);
-  return composerFilter(items, trigger.query);
+  if (trigger.kind === "command") {
+    return composerFilter(COMPOSER_COMMANDS.map((c) => ({ id: c.id, description: tr(c.description) })), trigger.query);
+  }
+  const plan = composerMentionPlan($("input").value, trigger, state.user?.agents, state.agentId, state.user?.id);
+  return plan.notice ? { notice: true } : composerFilter(plan.items, trigger.query);
+}
+
+function renderComposerNotice() {
+  const list = $("composer-popup");
+  const row = document.createElement("li");
+  row.className = "composer-detail";
+  row.setAttribute("aria-disabled", "true");
+  row.textContent = tr("Only one agent can be mentioned per message");
+  list.replaceChildren(row);
+  list.setAttribute("aria-label", tr("Suggestions"));
+  list.hidden = false;
+  $("input").setAttribute("aria-expanded", "false");
+  $("input").removeAttribute("aria-activedescendant");
 }
 
 function closeComposerPopup() {
@@ -8379,7 +8804,7 @@ function renderComposerPopup() {
     label.textContent = trigger.kind === "command" ? `/${item.id}` : (item.name ?? item.id);
     const detail = document.createElement("span");
     detail.className = "composer-detail";
-    detail.textContent = trigger.kind === "command" ? item.description : `@${item.id}`;
+    detail.textContent = trigger.kind === "command" ? item.description : (item.person ? `@${item.id} · ${tr("person")}` : `@${item.id}`);
     row.append(label, detail);
     row.addEventListener("click", () => pickComposerItem(item));
     return row;
@@ -8401,6 +8826,11 @@ function updateComposerPopup() {
     return;
   }
   const items = composerCandidates(trigger);
+  if (items.notice) {  // one agent per message: a single row that cannot be picked
+    closeComposerPopup();
+    renderComposerNotice();
+    return;
+  }
   if (!items.length) { closeComposerPopup(); return; }
   const same = composerPopup.trigger && composerPopup.trigger.kind === trigger.kind && composerPopup.trigger.start === trigger.start;
   composerPopup.index = same ? Math.min(composerPopup.index, items.length - 1) : 0;
@@ -8626,6 +9056,7 @@ function handleEvent(raw, request) {
     }
   }
   const payload = data ? JSON.parse(data) : "";
+  if (event !== "delivered" && event !== "transcript" && event !== "done") reply.reveal?.();
   if (event === "text") reply.text(payload);
   else if (event === "reasoning") reply.thinking(payload);
   else if (event === "tool_start") reply.toolStart(payload);
@@ -8636,6 +9067,7 @@ function handleEvent(raw, request) {
   else if (event === "memory") reply.memory(payload);
   else if (event === "notice") reply.notice(payload);
   else if (event === "speaker") reply.speaker(payload);
+  else if (event === "delivered") reply.discard?.();  // a message to a person: the agent does not reply
   else if (event === "transcript") request.userMessage?.transcripts(payload.transcripts || []);
   else if (event === "working") reply.working(payload);
   else if (event === "chat_replaced") adoptReplacedChat(request, payload);
@@ -9877,21 +10309,35 @@ function usageReset(iso, now = Date.now()) {
   return `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
+// "Claude subscription · user@example.com · Pro": what the numbers belong to; fields the answer lacks are left out
+function usageHeader(report) {
+  const plan = typeof report?.plan === "string" && report.plan ? report.plan[0].toUpperCase() + report.plan.slice(1) : "";
+  return [report?.label ? tr(report.label) : "", report?.account_email || "", plan].filter(Boolean).join(" · ");
+}
+
+// one block per provider, so more subscriptions can be listed later; today the only provider is the Claude subscription
+function usageProviders(report) {
+  return report?.available && report.windows?.length ? [report] : [];
+}
+
 function renderClaudeUsage(report) {
   const box = $("claude-usage");
-  const windows = report?.available ? report.windows : [];
-  box.hidden = !windows.length;
-  if (!windows.length) return setClaudeUsageOpen(false);
+  const providers = usageProviders(report);
+  box.hidden = !providers.length;
+  if (!providers.length) return setClaudeUsageOpen(false);
   const body = $("claude-usage-body");
   body.replaceChildren();
   for (const dot of box.querySelectorAll(".usage-dot")) dot.dataset.level = "";
-  for (const item of windows) {
-    const percent = Math.round(item.percent);
-    const level = usageLevel(item.percent);
-    const dot = box.querySelector(`.usage-dot[data-window="${item.key}"]`);
-    if (dot) {
-      dot.dataset.level = level;
-      dot.title = `${tr(USAGE_LABELS[item.key] ?? item.key)}: ${percent}%`;
+  for (const provider of providers) {
+    const header = usageHeader(provider);
+    if (header) body.append(element("div", { className: "usage-account", textContent: header, title: header }));
+    for (const item of provider.windows) {
+      const percent = Math.round(item.percent);
+      const level = usageLevel(item.percent);
+      const dot = box.querySelector(`.usage-dot[data-window="${item.key}"]`);
+      if (dot) {
+        dot.dataset.level = level;
+        dot.title = `${tr(USAGE_LABELS[item.key] ?? item.key)}: ${percent}%`;
     }
     const fill = element("span", {});
     fill.style.width = `${percent}%`;
@@ -9900,6 +10346,7 @@ function renderClaudeUsage(report) {
     body.append(element("div", { className: "usage-row" },
       element("div", { className: "usage-head" }, element("span", { textContent: tr(USAGE_LABELS[item.key] ?? item.key) }), element("span", { className: "usage-reset", textContent: reset }), element("strong", { textContent: `${percent}%` })),
       element("div", { className: "usage-bar" }, fill)));
+    }
   }
 }
 
@@ -9931,7 +10378,76 @@ usageTimer = setInterval(() => { if (!document.hidden) refreshClaudeUsage(); }, 
 setInterval(() => {
   if (document.hidden || !state.user || document.querySelector("#chat-list .rename-input") || !$("chat-title-input").hidden) return;
   refreshChats().catch(() => {});
+  refreshInvitations();
 }, 4000);
+
+// Any open chat: what another member of a shared agent, or the same person on another device or tab, sends and the
+// streaming reply show here at once. The server pushes a
+// change notice over one EventSource per page (only while the tab is visible); each notice runs the same check as the
+// poll of the open chat's summary, which stays as a slow fallback (every LIVE_SYNC_SLOW_MS) while the stream is open and
+// healthy and returns to LIVE_SYNC_MS when it fails or closes.
+const LIVE_SYNC_MS = 1500;
+const LIVE_SYNC_SLOW_MS = 15000;
+const LIVE_SYNC_RETRY_MS = 15000;
+const liveSync = { key: null, seen: null, busy: false, source: null, sourceKey: null, last: 0, retryAt: 0 };
+
+// How often the summary poll runs (pure): slow while the push stream is open, else fast.
+function liveSyncDelay(streamOpen) {
+  return streamOpen ? LIVE_SYNC_SLOW_MS : LIVE_SYNC_MS;
+}
+
+function liveSyncClose() {
+  liveSync.source?.close();
+  liveSync.source = null;
+  liveSync.sourceKey = null;
+}
+
+// Keeps the stream matching the open chat: one while the tab is visible, none otherwise.
+function liveSyncStream() {
+  // every open chat: other members of a shared agent, or the same person on another device or tab
+  const key = state.user && state.chatId && !document.hidden ? chatKey(state.agentId, state.chatId) : null;
+  if (liveSync.sourceKey !== key) liveSyncClose();
+  if (!key || liveSync.source || Date.now() < liveSync.retryAt || typeof EventSource === "undefined") return;
+  const agentId = state.agentId;
+  const chatId = state.chatId;
+  const source = new EventSource(chatsUrl(`/${chatId}/events`));
+  liveSync.source = source;
+  liveSync.sourceKey = key;
+  source.addEventListener("change", () => { if (liveSync.source === source) liveSyncCheck(true); });
+  source.onerror = () => {  // closed, unreachable or 404: fall back to the fast poll, which handles a lost chat
+    if (liveSync.source !== source) return;
+    liveSyncClose();
+    liveSync.retryAt = Date.now() + LIVE_SYNC_RETRY_MS;
+  };
+}
+
+async function liveSyncCheck(pushed = false) {
+  if (document.hidden || !state.user || !state.chatId || state.modelBusy || liveSync.busy) return;
+  const agentId = state.agentId;
+  const chatId = state.chatId;
+  if (!pushed && Date.now() - liveSync.last < liveSyncDelay(Boolean(liveSync.source))) return;
+  const key = chatKey(agentId, chatId);
+  const session = state.session;
+  liveSync.busy = true;
+  liveSync.last = Date.now();
+  try {
+    const data = await api(chatsUrl(`/${chatId}?limit=1`));
+    if (session !== state.session || key !== chatKey(state.agentId, state.chatId)) return;
+    const current = { turns: data.chat.turns, active: Boolean(data.chat.active) };
+    const previous = liveSync.key === key ? liveSync.seen : null;
+    liveSync.key = key;
+    liveSync.seen = current;
+    if (liveSyncAction(previous, current, isGenerating(agentId, chatId)) === "reload") await openChatNow(chatId);
+  } catch (err) {
+    if (err?.status === 404) { liveSyncClose(); chatGone(agentId, chatId, session); }  // else: the next tick tries again
+  } finally { liveSync.busy = false; }
+}
+
+setInterval(() => {
+  liveSyncStream();
+  liveSyncCheck();
+}, LIVE_SYNC_MS);
+document.addEventListener("visibilitychange", () => { if (document.hidden) liveSyncClose(); });
 
 // ---- notifications: the bell, the scans and the display (DOM)
 const NOTIFY_STORE = "notifyBell";

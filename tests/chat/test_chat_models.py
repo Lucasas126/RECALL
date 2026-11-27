@@ -217,6 +217,7 @@ class ChatModelServiceTests(ModelFixture):
         ], ["vendor/alpha", "vendor/default"])
         restarted = ChatService(agent_factory=self._factory)
         list(restarted.send("user-one", "agent-one", self.chat, "After restart"))
+        self._finish_workers(restarted)
         self.assertEqual(self.used_models[("user-one", "agent-one")][-1], "vendor/alpha")
 
     def test_selection_does_not_change_other_agents_or_users(self) -> None:
@@ -295,6 +296,7 @@ class ChatModelServiceTests(ModelFixture):
         self.assertEqual(self.used_policies[("user-one", "agent-one")], [False, True, False])
         restarted = ChatService(agent_factory=self._factory)
         list(restarted.send("user-one", "agent-one", self.chat, "After restart"))
+        self._finish_workers(restarted)
         self.assertFalse(self.used_policies[("user-one", "agent-one")][-1])
         self.service.set_chat_model("user-one", "agent-one", self.chat, "vendor/alpha")
         self.send("ZDR again")

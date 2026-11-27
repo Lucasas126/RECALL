@@ -10,17 +10,34 @@ from typing import Iterable, Optional
 
 MENTION_CONTEXT_CHARS = 4000  # max characters of the originating chat shown to the mentioned agent
 _TURN_CHARS = 1200  # max characters of one turn inside the excerpt
-_MENTION_RE = re.compile(r"^\s*@([a-z0-9][a-z0-9_-]{0,63})(?=\s|$)\s*", re.IGNORECASE)
+# `@id` at the start of the text or after whitespace (not inside an email or a word), then whitespace, . , ; : ! ? or the end.
+_MENTION_RE = re.compile(r"(?<!\S)@([a-z0-9][a-z0-9_-]{0,63})(?=[\s.,;:!?]|$)", re.IGNORECASE)
+_AFTER_START_MENTION_RE = re.compile(r"[,;:]?\s*")
+
+
+def find_mentions(text: str) -> list[tuple[str, int, int]]:
+    """Every `(id, start, end)` mention in the text, in order; ids are lower case."""
+    if not isinstance(text, str):
+        return []
+    return [(m.group(1).lower(), m.start(), m.end()) for m in _MENTION_RE.finditer(text)]
+
+
+def parse_mentions(text: str) -> list[str]:
+    """The ids of all `@id` mentions anywhere in the text, in order (repeats kept)."""
+    return [found[0] for found in find_mentions(text)]
+
+
+def strip_start_mention(text: str, end: int) -> str:
+    """The text after a mention that ends at `end`: its separator (one `,;:` and spaces) is dropped."""
+    return text[end:][_AFTER_START_MENTION_RE.match(text, end).end() - end:]
 
 
 def parse_mention(text: str) -> Optional[tuple[str, str]]:
-    """`(agent_id, rest)` when the text starts with `@<agent_id>` followed by a space or the end, else None."""
-    if not isinstance(text, str):
+    """`(agent_id, rest)` when the text starts with a mention (leading spaces allowed), else None."""
+    found = find_mentions(text)
+    if not found or text[: found[0][1]].strip():
         return None
-    match = _MENTION_RE.match(text)
-    if not match:
-        return None
-    return match.group(1).lower(), text[match.end():]
+    return found[0][0], strip_start_mention(text, found[0][2])
 
 
 def mention_chat_title(origin_name: str, text: str, words: int = 6) -> str:

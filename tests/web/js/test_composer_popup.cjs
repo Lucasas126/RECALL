@@ -65,3 +65,41 @@ test("the command list is the three slash commands, each described", () => {
   assert.deepEqual(plain(context.COMPOSER_COMMANDS.map((c) => c.id)), ["dream", "compact", "usage"]);
   assert.ok(context.COMPOSER_COMMANDS.every((c) => c.description.length > 0));
 });
+
+test("at-sign suggestions list the other members only in a shared agent, never yourself", () => {
+  const match = source.match(/function composerMentionItems\([\s\S]*?\n}\n/);
+  assert.ok(match, "composerMentionItems not found in app.js");
+  const local = vm.createContext({});
+  vm.runInContext(`${match[0]}\nthis.composerMentionItems = composerMentionItems;`, local);
+  const members = [{ id: "user-a", name: "Ana" }, { id: "user-b", name: "Ben" }, { id: "nova", name: "Nova person" }];
+  const agents = [
+    { id: "team", name: "Team", shared: true, members },
+    { id: "nova", name: "Nova" },
+    { id: "solo", name: "Solo", members },
+  ];
+  const ids = (list) => plain(list).map((i) => i.id);
+  assert.deepEqual(ids(local.composerMentionItems(agents, "team", "user-a")), ["nova", "solo", "user-b"]);
+  const person = plain(local.composerMentionItems(agents, "team", "user-a")).find((i) => i.id === "user-b");
+  assert.deepEqual(person, { id: "user-b", name: "Ben", person: true });
+  assert.deepEqual(ids(local.composerMentionItems(agents, "solo", "user-a")), ["team", "nova"]);  // private: no people
+  assert.deepEqual(ids(local.composerMentionItems(undefined, "x", "user-a")), []);
+});
+
+test("at-sign plan: one agent per message, only people after a person", () => {
+  const load = (name) => source.match(new RegExp(`function ${name}\\([\\s\\S]*?\\n}\\n`))[0];
+  const local = vm.createContext({});
+  vm.runInContext(`${load("composerMentionItems")}\n${load("composerMentionPlan")}\nthis.plan = composerMentionPlan;`, local);
+  const members = [{ id: "user-a", name: "Ana" }, { id: "user-b", name: "Ben" }, { id: "user-c", name: "Cy" }];
+  const agents = [{ id: "team", name: "Team", shared: true, members }, { id: "nova", name: "Nova" }, { id: "sage", name: "Sage" }];
+  const plan = (text) => {
+    const at = text.lastIndexOf("@");
+    return plain(local.plan(text, { start: at, end: text.length }, agents, "team", "user-a"));
+  };
+  const ids = (p) => p.items.map((i) => i.id);
+  assert.deepEqual(ids(plan("@")), ["nova", "sage", "user-b", "user-c"]);
+  assert.deepEqual(plan("hi @nova and @"), { notice: true, items: [] });
+  assert.deepEqual(plan("@sage, then @n"), { notice: true, items: [] });
+  assert.deepEqual(ids(plan("@user-b and @")), ["user-c"]);
+  assert.deepEqual(ids(plan("@nobody and @")), ["nova", "sage", "user-b", "user-c"]);  // unknown ids are plain text
+  assert.deepEqual(ids(plan("mail a@nova.io @")), ["nova", "sage", "user-b", "user-c"]);
+});

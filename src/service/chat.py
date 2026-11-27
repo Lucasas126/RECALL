@@ -19,6 +19,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.agent import compaction
+from src.service.live import ChatChanges
 from src.agent.agent import Agent, embeddings_provider, main_provider, model_provider
 from src.agent.tools import chat_folder_options
 from src.agent.dream import DEFAULT_DREAM_PROMPT
@@ -41,6 +42,8 @@ from src.config.preferences import (
 from src.config.field_defaults import agent_defaults
 from src.config.secrets import fingerprint as secrets_fingerprint, get_secret
 from src.config.zdr import chat_zdr, zdr_required
+from src.service.invitations import ACCEPTED, DECLINED, PENDING, REVOKED, InvitationStore
+from src.config.spaces import SpaceError, agent_id_conflict, is_space_id, member_names, resolve_owner, scaled_user_chars, spaces_of
 from src.config.settings import (
     AGENT_MAX_TOOL_HOPS, APPROVAL_EXPLAIN, ASSOC, CHAT_NAMING, CONFIG_DIR, DATA_DIR, ORCHESTRATOR, PDF, SPEECH_TO_TEXT, TAVILY, TELEGRAM_ALLOWED_USERS_ENV, current_mcp_settings,
     SUBAGENTS, TERMINAL, UPLOADS, VIDEO_DECOMPOSITION, WEB_PUBLIC_URL, memory_limits,
@@ -78,8 +81,8 @@ from src.service.dream import (
 from src.agent.toolsets.delegate import TaskError
 from src.service.agent_admin import AgentAdmin
 from src.service.agent_permissions import AgentPermissions
-from src.service.tasks import TaskManager
-from src.service.mentions import MENTION_CONTEXT_CHARS, chat_excerpt, mention_chat_title, mention_prompt, parse_mention
+from src.service.tasks import FINAL_STATES, TaskManager
+from src.service.mentions import MENTION_CONTEXT_CHARS, chat_excerpt, mention_chat_title, mention_prompt, find_mentions, strip_start_mention
 from src.agent.toolsets.processes import process_registry, process_wake_block, process_wake_frame
 from src.terminal.approvals import ApprovalBroker, ApprovalNotFound
 from src.terminal.output import clean, redact
@@ -248,6 +251,14 @@ class UnknownAgent(ServiceError):
     code = "unknown_agent"
 
 
+class InvitationError(ServiceError, ValueError):
+    """An invitation or leave request that cannot be done (bad invitee, duplicate, not shared)."""
+
+
+class UnknownInvitation(ServiceError):
+    code = "unknown_invitation"
+
+
 class UnknownChat(ServiceError):
     code = "unknown_chat"
 
@@ -329,13 +340,14 @@ class ChatEvent:
     short AI explanation of a card that is already shown), or `task_started` (a task was
     launched while its `task_start` call is still running, e.g. `wait=true`; `data`: task_id, goal, title, chat_id of the
     worker), or `transcript` (what speech-to-text heard in the message's recordings, `data`: transcripts, one per
-    recording in order, sent before the reply). The reply resumes by itself
+    recording in order, sent before the reply), or `delivered` (the message was for another member of a shared agent's
+    space, `data`: to; the agent does not reply and it is the only event). The reply resumes by itself
     once the approval is answered through `resolve_approval`, times out or is cancelled.
     Non-streaming replies arrive as `tool` events followed by one `text` event. All events
     carry a generation id so adapters can distinguish overlapping deliveries.
     """
 
-    kind: Literal["reasoning", "text", "tool_start", "tool", "usage", "interrupted", "memory", "notice", "approval", "approval_resolved", "approval_explanation", "task_started", "transcript", "speaker"]
+    kind: Literal["reasoning", "text", "tool_start", "tool", "usage", "interrupted", "memory", "notice", "approval", "approval_resolved", "approval_explanation", "task_started", "transcript", "speaker", "delivered"]
     text: str = ""
     data: Optional[dict] = None
     generation_id: str = ""
@@ -410,10 +422,12 @@ class _MessageRun:
     stream: Optional[bool]
     continuation: bool = False
     channel: Optional[str] = None  # where the user wrote it: "web" or "telegram" (None for system turns)
+    author: Optional[str] = None  # who wrote it in a shared (space) agent: a user id
     source: Optional[str] = None  # "task" for a wake turn written by the system, not the user
     meta: Optional[dict] = None  # persisted on the user turn (source, task_ids)
     blocks: Optional[list[str]] = None  # a wake turn's task blocks: later results merge into a queued wake
     frame: Optional[Callable[[list[str]], str]] = None  # composes `text` from `blocks`
+    speaker: Optional[str] = None  # space agents: the member who wrote it (their USER.md section); None = the space's billing user
     compact: Optional[str] = None  # a `/compact` run: its instructions ("" for none); not a reply
     compact_percent: Optional[int] = None  # a `/compact N` run: the share of the conversation to keep (None = 20)
     block_runs: Optional[list[list[str]]] = None  # the task runs each block of `blocks` reports (to drop a block already read)
@@ -464,9 +478,11 @@ class ChatService:
         self._slots_guard = threading.Lock()
         # (user, origin agent, origin chat) -> (mentioned agent, its chat) while a mention reply runs or is being copied
         self._mention_runs: dict[tuple[str, str, str], tuple[str, str]] = {}
+        self.changes = ChatChanges()  # who watches which chat: see `src/service/live.py`
         self._favorites = ModelFavorites(CONFIG_DIR)
         self._preferences = UserPreferencesStore(CONFIG_DIR)
         self._agents = AgentStore(CONFIG_DIR, DATA_DIR)
+        self._invitations = InvitationStore(DATA_DIR)
         self._uploads = UploadStore(DATA_DIR)  # server-side copies of the files users attach
         self._avatars = AvatarStore(DATA_DIR)  # profile pictures, beside (never inside) the agents' data folders
         self._permissions = AgentPermissions(self._agents)
@@ -545,8 +561,10 @@ class ChatService:
     # ------------------------------------------------------------------ users & agents
 
     def login(self, user_id: str) -> dict:
-        """Resolve an existing user and return their profile and agents; raises UnknownUser."""
+        """Resolve an existing user and return their profile and agents; raises UnknownUser (always for a space)."""
         user = self._user(user_id)
+        if user.kind != "user":
+            raise UnknownUser("unknown user: {user_id}", user_id=user_id)
         return {
             "id": user_id,
             "name": user.name,
@@ -573,34 +591,90 @@ class ChatService:
             user = self._user(user_id)
         except UnknownUser:
             raise UnknownUser("Invalid user ID or password") from None
+        if user.kind != "user":  # a space is not a person: it never logs in
+            raise UnknownUser("Invalid user ID or password")
         if not verify_password(password, user.password_hash):
             raise UnknownUser("Invalid user ID or password")
         return self.login(user_id)
 
-    def list_agents(self, user_id: str) -> list[dict]:
-        user = self._user(user_id)
+    def agent_owner(self, person_id: str, agent_id: str) -> str:
+        """The owner holding `agent_id` for a logged-in person: themself, or a space they belong to.
+
+        The data plane keeps its `(owner, agent)` keys: routes call the service with the owner returned here and keep
+        `person_id` for what is per person (preferences, language, usage, audit). An agent the person cannot reach gives
+        the person's own id, so the next check fails exactly as for another user's agent (404).
+        """
+        self._check_id("user", person_id, UnknownUser)
+        self._check_id("agent", agent_id, UnknownAgent)
+        owner = resolve_owner(person_id, agent_id, CONFIG_DIR)
+        if owner is None or owner == person_id:
+            return person_id
+        try:
+            self._user(owner)  # a space with a missing member is unusable (fail closed)
+        except (SpaceError, UnknownUser):
+            return person_id
+        return owner
+
+    def _spaces_of(self, person_id: str) -> list[str]:
+        """Ids of the usable spaces the person belongs to (a space whose member is gone is skipped and logged)."""
+        usable = []
+        for space_id in spaces_of(person_id, CONFIG_DIR):
+            try:
+                self._user(space_id)
+            except (SpaceError, UnknownUser, ValueError) as exc:
+                logger.error("space %s is unusable: %s", space_id, describe_config_error(exc))
+                continue
+            usable.append(space_id)
+        return usable
+
+    def _routable_agents(self, person_id: str) -> list[tuple[str, str]]:
+        """`(owner, agent_id)` of every agent the person can talk to: their own, then those of their spaces."""
+        return [(owner, agent_id) for owner, _ in self._owners_of(person_id) for agent_id in self._user(owner).agents]
+
+    def _owners_of(self, person_id: str) -> list[tuple[str, str | None]]:
+        """`(owner, space_id)` for the person's own agents (space_id None) and then each of their spaces."""
+        return [(person_id, None), *((space_id, space_id) for space_id in self._spaces_of(person_id))]
+
+    @staticmethod
+    def _members_view(space) -> list[dict]:
+        """The members of a space as `{id, name}` (the display name of each user), in member order."""
+        return [{"id": member, "name": name} for member, name in member_names(space, CONFIG_DIR).items()]
+
+    def _own_agents(self, owner: str, space_id: str | None) -> list[dict]:
+        user = self._user(owner)
         agents = []
         for agent_id in user.agents:
             try:
-                cfg = self._agent_config(user_id, agent_id)
+                cfg = self._agent_config(owner, agent_id)
             except Exception as exc:  # one unreadable agent file must not hide the list
-                logger.error("agent list: %s/%s: %s", user_id, agent_id, describe_config_error(exc))
+                logger.error("agent list: %s/%s: %s", owner, agent_id, describe_config_error(exc))
                 agents.append({"id": agent_id, "name": agent_id, "avatar": None, "hidden": False})
-                continue
-            agents.append({"id": cfg.id, "name": cfg.name, "avatar": self._agent_avatar_view(user_id, cfg), "hidden": cfg.hidden})
+            else:
+                agents.append({"id": cfg.id, "name": cfg.name, "avatar": self._agent_avatar_view(owner, cfg), "hidden": cfg.hidden})
+            if space_id is not None:
+                agents[-1].update(shared=True, space_id=space_id, billing_user=user.billing_user, members=self._members_view(user))
         return agents
 
+    def list_agents(self, user_id: str) -> list[dict]:
+        """The person's own agents, then those of their spaces (each marked `shared` with its `space_id`)."""
+        self._user(user_id)
+        return [agent for owner, space_id in self._owners_of(user_id) for agent in self._own_agents(owner, space_id)]
+
     def list_agent_configs(self, user_id: str) -> list[dict]:
-        """Full editable configuration of every agent the user owns."""
-        user = self._user(user_id)
+        """Full editable configuration of every agent the person owns or shares through a space."""
         views = []
-        for agent_id in user.agents:
-            try:
-                views.append(self._agent_view(user_id, self._agent_config(user_id, agent_id)))
-            except Exception as exc:  # one invalid agent file must not hide the others
-                reason = describe_config_error(exc)
-                logger.error("agent list: %s/%s: %s", user_id, agent_id, reason)
-                views.append({"id": agent_id, "name": agent_id, "broken": True, "error": reason})
+        for owner, space_id in self._owners_of(user_id):
+            for agent_id in self._user(owner).agents:
+                try:
+                    view = self._agent_view(owner, self._agent_config(owner, agent_id))
+                except Exception as exc:  # one invalid agent file must not hide the others
+                    reason = describe_config_error(exc)
+                    logger.error("agent list: %s/%s: %s", owner, agent_id, reason)
+                    view = {"id": agent_id, "name": agent_id, "broken": True, "error": reason}
+                if space_id is not None:
+                    space = self._user(owner)
+                    view.update(shared=True, space_id=space_id, billing_user=space.billing_user, members=self._members_view(space))
+                views.append(view)
         return views
 
     def agent_defaults(self, user_id: str) -> dict:
@@ -686,13 +760,16 @@ class ChatService:
             logger.exception("process automations failed")
 
     def list_automations(self, user_id: str) -> dict:
-        """The user's automations with their agent's name, newest first, for the web tab."""
+        """The person's automations and those of their spaces' agents, with the agent's name, newest first, for the web tab."""
         self._user(user_id)
-        names = {agent["id"]: agent["name"] for agent in self.list_agents(user_id)}
-        records = [
-            {**record, "agent_name": names.get(record["agent_id"], record["agent_id"])}
-            for record in self._automations.list(user_id)
-        ]
+        records = []
+        for owner, space_id in self._owners_of(user_id):
+            names = {agent["id"]: agent["name"] for agent in self._own_agents(owner, space_id)}
+            for record in self._automations.list(owner):
+                item = {**record, "agent_name": names.get(record["agent_id"], record["agent_id"])}
+                if space_id is not None:
+                    item.update(shared=True, space_id=space_id)
+                records.append(item)
         return {"automations": sorted(records, key=lambda r: r["created_at"], reverse=True)}
 
     def automation_events(self, user_id: str, since: str = "") -> dict:
@@ -710,44 +787,44 @@ class ChatService:
             after = None
         if after is None:
             return out
-        for record in self._automations.list(user_id):
-            task_id = next((e["task"] for e in reversed(record.get("history") or []) if e.get("task")), None)
-            if not task_id:
-                continue
-            try:
-                task = self._tasks.store.get(user_id, task_id)
-                ended = datetime.fromisoformat(task.get("ended_at") or "") if task else None
-            except (TaskError, ValueError):
-                continue
-            if ended is not None and ended > after:
-                out["events"].append({
-                    "automation_id": record["id"], "title": record["title"], "task_id": task_id,
-                    "status": task["status"], "ended_at": task["ended_at"],
-                })
+        for owner, _ in self._owners_of(user_id):
+            for record in self._automations.list(owner):
+                task_id = next((e["task"] for e in reversed(record.get("history") or []) if e.get("task")), None)
+                if not task_id:
+                    continue
+                try:
+                    task = self._tasks.store.get(owner, task_id)
+                    ended = datetime.fromisoformat(task.get("ended_at") or "") if task else None
+                except (TaskError, ValueError):
+                    continue
+                if ended is not None and ended > after:
+                    out["events"].append({
+                        "automation_id": record["id"], "title": record["title"], "task_id": task_id,
+                        "status": task["status"], "ended_at": task["ended_at"],
+                    })
         return out
 
-    def _own_automation(self, user_id: str, automation_id: str) -> dict:
-        self._user(user_id)
-        record = self._automations.store.get(user_id, automation_id)
-        if record is None:
-            raise UnknownAutomation("unknown automation: {automation_id}", automation_id=automation_id)
-        return record
+    def _automation_owner(self, person_id: str, automation_id: str) -> str:
+        """The owner (the person or one of their spaces) that holds the automation; UnknownAutomation otherwise."""
+        self._user(person_id)
+        for owner, _ in self._owners_of(person_id):
+            if self._automations.store.get(owner, automation_id) is not None:
+                return owner
+        raise UnknownAutomation("unknown automation: {automation_id}", automation_id=automation_id)
 
     def create_automation(self, user_id: str, agent_id: str, instruction: str, trigger: dict, title: str = "") -> dict:
-        self._owned_agent(user_id, agent_id)
-        return self._automations.create(user_id, agent_id, instruction, trigger, title=title, created_by="web")
+        owner = self.agent_owner(user_id, agent_id)
+        self._owned_agent(owner, agent_id)
+        return self._automations.create(owner, agent_id, instruction, trigger, title=title, created_by="web")
 
     def edit_automation(self, user_id: str, automation_id: str, **changes) -> dict:
-        self._own_automation(user_id, automation_id)
-        return self._automations.edit(user_id, automation_id, **changes)
+        return self._automations.edit(self._automation_owner(user_id, automation_id), automation_id, **changes)
 
     def set_automation_enabled(self, user_id: str, automation_id: str, enabled: bool) -> dict:
-        self._own_automation(user_id, automation_id)
-        return self._automations.set_enabled(user_id, automation_id, enabled)
+        return self._automations.set_enabled(self._automation_owner(user_id, automation_id), automation_id, enabled)
 
     def delete_automation(self, user_id: str, automation_id: str) -> None:
-        self._own_automation(user_id, automation_id)
-        self._automations.delete(user_id, automation_id)
+        self._automations.delete(self._automation_owner(user_id, automation_id), automation_id)
 
     @property
     def automations(self) -> AutomationService:
@@ -843,6 +920,9 @@ class ChatService:
         view = config.model_dump(mode="json")
         view["level"] = effective_agent_level(config, self._user(user_id)).label  # declared, else what its config needs
         view["avatar"] = self._agent_avatar_view(user_id, config)  # read-only: changed through the avatar routes
+        owner = self._user(user_id)
+        if owner.kind == "space":
+            view.update(shared=True, space_id=user_id, billing_user=owner.billing_user)
         return view
 
     # ------------------------------------------------------------------ profile pictures (the owner's own only)
@@ -964,6 +1044,218 @@ class ChatService:
         elif previously_indexed - {f.name for f in updated.folders if f.indexed}:
             self._purge_folder_chunks(user_id, agent_id)
         return self._agent_view(user_id, updated)
+
+    # ------------------------------------------------------------------ sharing (docs/project/design-shared-agents.md)
+
+    def _agent_mover(self):
+        from src.admin.spaces import space_create
+        from src.service.agent_move import AgentMover
+
+        return AgentMover(
+            CONFIG_DIR, DATA_DIR, create_space=space_create, is_busy=self._agent_in_use,
+            on_removed=self._agent_moved_away, on_created=self._agent_arrived,
+        )
+
+    def _agent_in_use(self, owner: str, agent_id: str) -> bool:
+        """A reply running or queued, a task of the agent running, or a background process of one of its chats."""
+        slot = self._slot(owner, agent_id)
+        if slot.active or slot.pending:
+            return True
+        for record in self._tasks.store.list(owner):
+            if record["status"] not in FINAL_STATES and agent_id in (
+                record["parent"]["agent_id"], record["child"]["agent_id"],
+            ):
+                return True
+        registry = process_registry(DATA_DIR)
+        registry.recover(owner)
+        return any(r["state"] == "running" and r.get("agent") == agent_id for r in registry.list(owner))
+
+    def _agent_moved_away(self, owner: str, agent_id: str) -> None:
+        """The agent left `owner`: drop its slot and whatever the owner's preferences point at."""
+        self._forget_slot(owner, agent_id)
+        self._good_agents.pop((owner, agent_id), None)
+        if not is_space_id(owner):  # a space has no preferences
+            # shared with the owner, the agent stays theirs to pick: keep what points at it
+            if agent_id not in {agent for _, agent in self._routable_agents(owner)}:
+                self._replace_preferred_agent(owner, agent_id, None)
+
+    def _agent_arrived(self, owner: str, agent_id: str) -> None:
+        """A new owner got the agent: rebuild its index (queued; the data folder came without `.index`)."""
+        self.reindex(owner, agent_id, full=True)
+
+    def share_agent(self, person: str, agent_id: str, members: list[str]) -> str:
+        """Move `person`'s agent into the shared space of `person` + `members`; returns the space id. Needs it idle."""
+        self._owned_agent(person, agent_id)
+        slot = self._slot(person, agent_id)
+        with slot.state:
+            if slot.active or slot.pending:
+                raise AgentBusy("wait for this agent's active and queued replies before sharing it")
+            with slot.lock:
+                return self._agent_mover().share_agent(person, agent_id, members)
+
+    def unshare_agent(self, person: str, space_id: str, agent_id: str) -> dict[str, str]:
+        """Give a shared agent back to its members (moved when alone, else copied); `person` must be a member."""
+        if person not in self._user(space_id).members:
+            raise UnknownAgent("agent '{agent_id}' is not owned by user '{user_id}'", agent_id=agent_id, user_id=person)
+        self._owned_agent(space_id, agent_id)
+        slot = self._slot(space_id, agent_id)
+        with slot.state:
+            if slot.active or slot.pending:
+                raise AgentBusy("wait for this agent's active and queued replies before unsharing it")
+            with slot.lock:
+                return self._agent_mover().unshare_agent(space_id, agent_id, person)
+
+    # ------------------------------------------------------------------ invitations to share an agent
+
+    def _invitation_store(self) -> InvitationStore:
+        return self._invitations
+
+    def _audit_invitation(self, owner_ids: list[str], action: str, **fields) -> None:
+        for owner in dict.fromkeys(owner_ids):
+            if not write_audit(Path(DATA_DIR) / owner / ADMIN_AUDIT_FILE, event="admin_action", action=action, **fields):
+                logger.error("the audit file for %s could not be written", owner)
+
+    def _held_owner(self, person: str, agent_id: str) -> str:
+        """The owner (the person or one of their spaces) that really holds the agent; UnknownAgent otherwise."""
+        owner = self.agent_owner(person, agent_id)
+        self._owned_agent(owner, agent_id)
+        return owner
+
+    def invite(self, person: str, agent_id: str, invitee_id: str) -> dict:
+        """`person` (owner or member) invites a user to share the agent; nothing moves until the invitee accepts."""
+        owner = self._held_owner(person, agent_id)
+        owner_user = self._user(owner)
+        try:
+            invitee = self._user(invitee_id)
+        except (UnknownUser, SpaceError) as exc:
+            raise InvitationError("unknown user: {user_id}", user_id=invitee_id) from exc
+        if invitee.kind != "user":
+            raise InvitationError("unknown user: {user_id}", user_id=invitee_id)
+        if invitee_id == person:
+            raise InvitationError("you cannot invite yourself")
+        if invitee_id == owner or invitee_id in owner_user.members:
+            raise InvitationError("'{user_id}' already has this agent", user_id=invitee_id)
+        if agent_id_conflict(invitee_id, agent_id, CONFIG_DIR, ignore=owner) is not None:
+            raise InvitationError("'{user_id}' already has an agent with the id '{agent_id}'", user_id=invitee_id, agent_id=agent_id)
+        store = self._invitation_store()
+        with store.lock:
+            for record in store.all():
+                if record["status"] == PENDING and record["agent_id"] == agent_id and record["invitee"] == invitee_id:
+                    raise InvitationError("'{user_id}' already has a pending invitation for this agent", user_id=invitee_id)
+            billing = owner_user.billing_user if owner_user.kind == "space" else owner
+            record = store.create(
+                agent_id=agent_id, agent_name=self._agent_config(owner, agent_id).name, owner=owner, inviter=person,
+                invitee=invitee_id, billing_user=billing,
+            )
+        self._audit_invitation([owner, person, invitee_id], "invite_to_agent", agent=agent_id, actor=person,
+                               invitee=invitee_id, invitation=record["id"])
+        return record
+
+    def _invitation(self, invitation_id: str, *, pending: bool = True) -> dict:
+        record = self._invitation_store().get(invitation_id)
+        if record is None or (pending and record["status"] != PENDING):
+            raise UnknownInvitation("unknown invitation")
+        return record
+
+    def _can_manage_invitation(self, person: str, record: dict) -> bool:
+        if record["inviter"] == person:
+            return True
+        return resolve_owner(person, record["agent_id"], CONFIG_DIR) is not None
+
+    def list_invitations(self, person: str) -> dict:
+        """Pending invitations for the person (`incoming`) and those they can revoke (`outgoing`), plus the count."""
+        self._user(person)
+        incoming, outgoing = [], []
+        for record in self._invitation_store().all():
+            if record["status"] != PENDING:
+                continue
+            if record["invitee"] == person:
+                incoming.append({
+                    "id": record["id"], "agent_id": record["agent_id"], "agent_name": record["agent_name"],
+                    "inviter": record["inviter"], "inviter_name": self._display_name(record["inviter"]),
+                    "billing_user": record["billing_user"], "billing_name": self._display_name(record["billing_user"]),
+                    "created": record["created"],
+                })
+            elif self._can_manage_invitation(person, record):
+                outgoing.append({
+                    "id": record["id"], "agent_id": record["agent_id"], "invitee": record["invitee"],
+                    "status": record["status"], "created": record["created"],
+                })
+        return {"incoming": incoming, "outgoing": outgoing, "pending_count": len(incoming)}
+
+    def _display_name(self, user_id: str) -> str:
+        try:
+            return self._user(user_id).name
+        except (UnknownUser, SpaceError):
+            return user_id
+
+    def accept(self, person: str, invitation_id: str) -> dict:
+        """The invitee joins: the agent moves into the space of its members plus the invitee. Errors leave it pending."""
+        store = self._invitation_store()
+        with store.lock:
+            record = self._invitation(invitation_id)
+            if record["invitee"] != person:
+                raise UnknownInvitation("unknown invitation")
+            agent_id = record["agent_id"]
+            try:
+                owner = self._held_owner(record["inviter"], agent_id)
+            except (UnknownAgent, UnknownUser) as exc:
+                raise InvitationError("this agent is no longer available for sharing") from exc
+            owner_user = self._user(owner)
+            if owner_user.kind == "space":
+                if person in owner_user.members:
+                    raise InvitationError("'{user_id}' already has this agent", user_id=person)
+                space_id = self._regroup(record["inviter"], owner, agent_id, [*owner_user.members, person])
+            else:
+                space_id = self.share_agent(owner, agent_id, [person])
+            record = {**record, "status": ACCEPTED, "space_id": space_id}
+            store.save(record)
+        self._audit_invitation([space_id, record["inviter"], person], "accept_invitation", agent=agent_id,
+                               actor=person, invitation=invitation_id, space=space_id)
+        return {"id": invitation_id, "agent_id": agent_id, "space_id": space_id}
+
+    def _regroup(self, person: str, space_id: str, agent_id: str, members: list[str]) -> str:
+        slot = self._slot(space_id, agent_id)
+        with slot.state:
+            if slot.active or slot.pending:
+                raise AgentBusy("wait for this agent's active and queued replies before changing who shares it")
+            with slot.lock:
+                return self._agent_mover().regroup_agent(space_id, agent_id, members, person)
+
+    def decline(self, person: str, invitation_id: str) -> None:
+        store = self._invitation_store()
+        with store.lock:
+            record = self._invitation(invitation_id)
+            if record["invitee"] != person:
+                raise UnknownInvitation("unknown invitation")
+            store.save({**record, "status": DECLINED})
+        self._audit_invitation([record["inviter"], person], "decline_invitation", agent=record["agent_id"],
+                               actor=person, invitation=invitation_id)
+
+    def revoke(self, person: str, invitation_id: str) -> None:
+        """The inviter, or any member of the agent's space, withdraws a pending invitation."""
+        store = self._invitation_store()
+        with store.lock:
+            record = self._invitation(invitation_id)
+            if not self._can_manage_invitation(person, record):
+                raise UnknownInvitation("unknown invitation")
+            store.save({**record, "status": REVOKED})
+        self._audit_invitation([record["inviter"], person, record["invitee"]], "revoke_invitation",
+                               agent=record["agent_id"], actor=person, invitation=invitation_id)
+
+    def leave_shared(self, person: str, agent_id: str) -> str:
+        """A member leaves a shared agent: it moves to the space of the remaining members; returns that space id."""
+        owner = self._held_owner(person, agent_id)
+        space = self._user(owner)
+        if space.kind != "space" or person not in space.members:
+            raise InvitationError("agent '{agent_id}' is not shared", agent_id=agent_id)
+        remaining = [m for m in space.members if m != person]
+        if not remaining:
+            raise InvitationError("You are the only member of this shared agent. Use Unshare to make it private again.")
+        target = self._regroup(person, owner, agent_id, remaining)
+        self._replace_preferred_agent(person, agent_id, None)  # the agent is out of their reach now
+        self._audit_invitation([target, person], "leave_shared_agent", agent=agent_id, actor=person, space=target)
+        return target
 
     def _purge_folder_chunks(self, user_id: str, agent_id: str) -> None:
         """After folders were removed or un-indexed: queue a reconcile that drops their chunks (best effort)."""
@@ -1147,27 +1439,29 @@ class ChatService:
         resolved = UserPreferences.model_validate({
             "language": saved.language_for(user.language),
         } | saved.model_dump(exclude_unset=True))
+        # the person's own agents and those of their spaces (ids never clash across them)
+        reachable = dict((agent, owner) for owner, agent in reversed(self._routable_agents(user.id)))
         agent_id = resolved.agent_id
         if agent_id is None:
-            agent_id = user.agents[0] if user.agents else None
+            agent_id = next(iter(self._routable_agents(user.id)), (None, None))[1]
         if agent_id is not None:
             self._check_id("agent", agent_id, UnknownAgent)
-            if agent_id not in user.agents:
+            if agent_id not in reachable:
                 raise UnknownAgent(
                     "agent '{agent_id}' is not owned by user '{user_id}'", agent_id=agent_id, user_id=user.id,
                 )
             try:
-                load_agent_config(user.id, agent_id)
+                load_agent_config(reachable[agent_id], agent_id)
             except FileNotFoundError as exc:
                 raise UnknownAgent("unknown agent: {agent_id}", agent_id=agent_id) from exc
         for chosen in (resolved.default_agent_id, resolved.core_agent_id):
             if chosen is not None:
                 self._check_id("agent", chosen, UnknownAgent)
-                if chosen not in user.agents:
+                if chosen not in reachable:
                     raise UnknownAgent(
                         "agent '{agent_id}' is not owned by user '{user_id}'", agent_id=chosen, user_id=user.id,
                     )
-                self._agent_config(user.id, chosen)
+                self._agent_config(reachable[chosen], chosen)
         return resolved.model_copy(update={
             "agent_id": agent_id,
             "default_llm_model": resolved.default_llm_model or user.models.chat,
@@ -1293,11 +1587,19 @@ class ChatService:
         return sorted(summaries, key=lambda s: s["updated"], reverse=True)
 
     def list_all_chats(self, user_id: str, keep: Optional[str] = None, include_hidden: bool = False) -> list[dict]:
-        """Chat summaries across all of the user's agents, each labelled with its agent."""
+        """Chat summaries across the person's agents and their spaces' agents, each labelled with its agent.
+
+        Chats of a shared agent also say `shared: true` and their `space_id`.
+        """
         chats = []
-        for agent in self.list_agents(user_id):
-            for chat in self.list_chats(user_id, agent["id"], keep, include_hidden):
-                chats.append({**chat, "agent_id": agent["id"], "agent_name": agent["name"]})
+        self._user(user_id)
+        for owner, space_id in self._owners_of(user_id):
+            for agent in self._own_agents(owner, space_id):
+                for chat in self.list_chats(owner, agent["id"], keep, include_hidden):
+                    labelled = {**chat, "agent_id": agent["id"], "agent_name": agent["name"]}
+                    if space_id is not None:
+                        labelled.update(shared=True, space_id=space_id)
+                    chats.append(labelled)
         return sorted(chats, key=lambda chat: chat["updated"], reverse=True)
 
     # ------------------------------------------------------------------ telegram orchestrator
@@ -1310,7 +1612,12 @@ class ChatService:
         except (ServiceError, PreferencesError, OSError, ValueError):
             return False
         enabled = ORCHESTRATOR.enabled if override is None else override
-        return enabled and len(user.agents) >= 2
+        if not enabled:
+            return False
+        try:
+            return len(self._routable_agents(user.id)) >= 2
+        except (ServiceError, OSError, ValueError):
+            return len(user.agents) >= 2
 
     def default_agent(self, user_id: str) -> Optional[str]:
         """The user's default agent: the saved `default_agent_id` while it is still one of theirs, else the first agent.
@@ -1322,9 +1629,10 @@ class ChatService:
             saved = self._preferences.get(user_id).default_agent_id
         except (PreferencesError, OSError, ValueError):
             saved = None
-        if saved in user.agents:
+        reachable = [agent for _, agent in self._routable_agents(user.id)]
+        if saved in reachable:
             return saved
-        return user.agents[0] if user.agents else None
+        return reachable[0] if reachable else None
 
     def orchestrator_core_agent(self, user_id: str) -> Optional[str]:
         """The user's core agent (fallback when unsure) when it still exists, else None."""
@@ -1333,7 +1641,7 @@ class ChatService:
             core = self._preferences.get(user_id).core_agent_id
         except (ServiceError, PreferencesError, OSError, ValueError):
             return None
-        return core if core in user.agents else None
+        return core if core in {agent for _, agent in self._routable_agents(user.id)} else None
 
     def route_message(self, user_id: str, text: str) -> Optional[RouteDecision]:
         """Ask the decision model which of the user's agents suits `text`; None means "use the default agent".
@@ -1348,8 +1656,8 @@ class ChatService:
         try:
             user = self._user(user_id)
             criteria, names = {}, {}
-            for agent_id in user.agents:
-                config = self._agent_config(user_id, agent_id)
+            for owner, agent_id in self._routable_agents(user_id):  # shared agents too; ids never clash across owners
+                config = self._agent_config(owner, agent_id)
                 names[agent_id] = config.name
                 description = (config.description or "").strip()
                 criteria[agent_id] = f"{config.name}: {description}" if description else config.name
@@ -1452,19 +1760,19 @@ class ChatService:
     def claude_login_status(self, user_id: str) -> dict:
         """Login state of the user's own Claude login folder (never reads the credential files)."""
         user = self._user(user_id)
-        if not login_allowed(user.id, user.claude_subscription):
+        if not login_allowed(user.claude_owner, user.claude_subscription):
             return {"available": False, "reason": "no_own_login"}
-        status = cli_status(resolved_settings(user.id, user.claude_subscription))
+        status = cli_status(resolved_settings(user.claude_owner, user.claude_subscription))
         return {"available": True, "cli_found": status["cli_found"], "logged_in": status["logged_in"],
                 "subscription": status.get("subscription")}
 
     def claude_login_start(self, user_id: str) -> dict:
         user = self._user(user_id)
-        return claude_signin.start(user.id, resolved_settings(user.id, user.claude_subscription))
+        return claude_signin.start(user.id, resolved_settings(user.claude_owner, user.claude_subscription))
 
     def claude_login_code(self, user_id: str, code: str) -> dict:
         user = self._user(user_id)
-        claude = resolved_settings(user.id, user.claude_subscription)
+        claude = resolved_settings(user.claude_owner, user.claude_subscription)
         status = claude_signin.submit(user.id, code, claude)
         with self._usage_lock:
             self._usage_cache.pop(user_id, None)
@@ -1478,17 +1786,31 @@ class ChatService:
     def claude_usage(self, user_id: str) -> dict:
         """Plan usage (session and week, in percent) of the user's Claude login; cached for a minute."""
         user = self._user(user_id)
-        if not login_allowed(user.id, user.claude_subscription):
+        if not login_allowed(user.claude_owner, user.claude_subscription):
             return {"available": False, "reason": "no_own_login"}
-        folder = resolved_settings(user.id, user.claude_subscription).claude_config_dir
+        folder = resolved_settings(user.claude_owner, user.claude_subscription).claude_config_dir
         with self._usage_lock:
             hit = self._usage_cache.get(user_id)
             if hit is not None and monotonic() - hit[0] < 60:
                 return hit[1]
         result = fetch_usage(folder)
+        if result.get("available"):
+            result |= self._claude_account(user)
         with self._usage_lock:
             self._usage_cache[user_id] = (monotonic(), result)
         return result
+
+    @staticmethod
+    def _claude_account(user: UserConfig) -> dict:
+        """Which subscription and account the usage belongs to, from `claude auth status`; fields the CLI does not report are omitted.
+
+        The e-mail goes only into the owner's own usage answer: it is never logged.
+        """
+        status = cli_status(resolved_settings(user.id, user.claude_subscription))
+        info = {"provider": "claude_subscription", "label": "Claude subscription"}
+        if status.get("logged_in"):
+            info |= {key: status[name] for key, name in (("account_email", "account_email"), ("plan", "subscription")) if status.get(name)}
+        return info
 
     def _remove_task_chat(self, user_id: str, agent_id: str, chat_id: str) -> None:
         """Delete a task's hidden chat that never ran (a launch that failed half-way); errors are logged, not raised."""
@@ -1626,6 +1948,7 @@ class ChatService:
                         "role", "content", "ts", "reasoning", "actions", "timeline", "interrupted", "interrupted_by", "checkpoint", "media",
                         "associative_matches", "associative_skipped", "usage", "usage_report",
                         "associative_fragments", "associative_query",
+                        "author",  # who wrote it in a shared agent
                         "source", "task_ids",  # a wake turn: a subagent result, not written by the user
                         "task_brief", "task_message",  # a worker chat's first message / follow-up, structured for the UI
                         "tokens_before", "tokens_after", "manual", "kept_percent",
@@ -1636,6 +1959,15 @@ class ChatService:
             }
             for position, t in turns
         ]
+        names: dict[str, str] = {}  # each author's display name, resolved once per call
+        for message in messages:
+            if message.get("author"):
+                if message["author"] not in names:
+                    try:
+                        names[message["author"]] = self._user(message["author"]).name or message["author"]
+                    except Exception:  # a member who left: the id stands in
+                        names[message["author"]] = message["author"]
+                message["author_name"] = names[message["author"]]
         return {
             "chat": {
                 **conversations.summary(chat_id, self._retention_days(user_id)),
@@ -1788,6 +2120,7 @@ class ChatService:
             conversations.rename(chat_id, title)
         except FileNotFoundError as exc:
             raise UnknownChat("unknown chat: {chat_id}", chat_id=chat_id) from exc
+        self.changes.publish(user_id, agent_id, chat_id, "renamed")
         return conversations.summary(chat_id, self._retention_days(user_id))
 
     @staticmethod
@@ -1822,6 +2155,7 @@ class ChatService:
             with slot.state:
                 slot.agents.pop(chat_id, None)
         self._approvals.forget_chat(user_id, agent_id, chat_id)
+        self.changes.publish(user_id, agent_id, chat_id, "deleted")
         try:
             self._agent_index(user_id, agent_id).forget_chat(chat_id)
         except Exception:  # the chat is gone; a stale index entry is dropped by the next reconcile anyway
@@ -1835,6 +2169,7 @@ class ChatService:
         rewind_to: Optional[int] = None, internal_task: bool = False, meta: Optional[dict] = None,
         channel: Optional[str] = None, mention_meta: Optional[dict] = None,
         recordings: Optional[list[Optional[str]]] = None, transcripts_in_text: bool = False,
+        author: Optional[str] = None,
     ) -> Iterator[ChatEvent]:
         """Send a user message to a chat and yield the reply as events.
 
@@ -1859,17 +2194,23 @@ class ChatService:
 
         `channel` (`web` or `telegram`) is where the person wrote; it is stored on the turn and shown to the model.
 
-        A person's message starting with `@<agent_id>` of another agent of the same user is answered by that agent
-        instead (see `_send_mention`). `mention_meta` is only set by that path and stored on the mentioned agent's turn.
+        `author` (a user id) is who wrote it in a shared (space) agent: stored on the turn and shown to the model as
+        a `[NAME]` prefix. Callers set it only when the owner is not the person; an edit without it keeps the
+        original turn's author.
+
+        A person's message with `@<agent_id>` (anywhere, first valid mention wins) of another agent of the same user is
+        answered by that agent instead (see `_send_mention`). `mention_meta` is only set by that path and stored on the mentioned agent's turn.
         """
         conversations = self._conversations(user_id, agent_id)
         if not internal_task and rewind_to is None and mention_meta is None:
-            target = self._mention_target(user_id, agent_id, text)
+            target = self._mention_target(user_id, agent_id, text, author)
             if target is not None:
                 return self._send_mention(
                     user_id, agent_id, chat_id, target[0], target[1], text,
                     stream=stream, attachments=attachments, channel=channel,
                 )
+            if rewind_to is None and (person := self._person_mention(user_id, agent_id, author, text)) is not None:
+                return self._send_to_person(user_id, agent_id, chat_id, text, author, person, attachments, channel)
         if not internal_task:
             try:
                 is_task_chat = conversations.is_task_chat(chat_id)
@@ -1884,6 +2225,7 @@ class ChatService:
         kept_recordings: list[dict] = []
         if rewind_to is not None:
             original = self._edit_target(conversations, chat_id, rewind_to)
+            author = author or original.get("author") or None
             if not attachments:
                 attachments = self._stored_attachments(original.get("content"))
                 # a PDF only lives on the turn as `media` (the model gets its text): an edit keeps it
@@ -1927,7 +2269,7 @@ class ChatService:
         if media:
             run_meta["media"] = media
         run = _MessageRun(chat_id, text, attachments, stream, meta=run_meta or None,
-                           channel=channel if channel in ("web", "telegram") else None)
+                           channel=channel if channel in ("web", "telegram") else None, author=author)
         # keep what the speech-to-text heard next to each recording, so the person can check it any time
         unheard = [item for item in media if item["modality"] == "audio" and "transcript" not in item]
         if rewind_to is not None and transcripts_in_text and not attachments_given:
@@ -1958,6 +2300,7 @@ class ChatService:
                             slot.agents.pop(chat_id, None)  # its context still holds the removed turns
                     self._enqueue(user_id, agent_id, slot, chat_id, run)
                     events = self._events(run, run.events.subscribe())
+                    self.changes.publish(user_id, agent_id, chat_id, "turn")
                     break
             if monotonic() > deadline:
                 raise AgentBusy("the chat is still replying; try again in a moment")
@@ -1968,14 +2311,60 @@ class ChatService:
 
     # ------------------------------------------------------------------ @mentions of another agent
 
-    def _mention_target(self, user_id: str, agent_id: str, text: str) -> Optional[tuple[str, str]]:
-        """`(other_agent_id, rest)` when the message mentions another agent of the same user, else None."""
-        parsed = parse_mention(text)
-        if parsed is None or parsed[0] == agent_id:
+    def _first_mention(self, user_id: str, agent_id: str, author: Optional[str], text: str) -> Optional[tuple]:
+        """The FIRST valid mention anywhere in the text decides: `("agent", id, rest)`, `("person", id)` or None.
+
+        Valid: another agent of the same user, or (in a space's agent, from a member) another member of the space; an
+        id that is also an agent is the agent's. Unknown ids are plain text. Later mentions never change the outcome:
+        after an agent every other mention is ignored; after a person only more people can follow (an agent never runs).
+        """
+        found = find_mentions(text)
+        if not found:
             return None
-        if parsed[0] not in (self._user(user_id).agents or []):
-            return None  # unknown id: a normal message to this agent
-        return parsed
+        owner = self._user(user_id)
+        agents = set(owner.agents or [])
+        members = {m.lower() for m in owner.members} if owner.kind == "space" and author else set()
+        for target, start, end in found:
+            if target in agents:
+                if target == agent_id:
+                    continue
+                rest = strip_start_mention(text, end) if not text[:start].strip() else text
+                return ("agent", target, rest)
+            if target in members and target != author:
+                return ("person", target)
+        return None
+
+    def _mention_target(self, user_id: str, agent_id: str, text: str, author: Optional[str] = None) -> Optional[tuple[str, str]]:
+        """`(other_agent_id, rest)` when the first valid mention is another agent of the same user, else None."""
+        first = self._first_mention(user_id, agent_id, author, text)
+        return (first[1], first[2]) if first and first[0] == "agent" else None
+
+    def _person_mention(self, user_id: str, agent_id: str, author: Optional[str], text: str) -> Optional[str]:
+        """The member id when the first valid mention is a person of a shared agent (a message to people), else None."""
+        if not author:
+            return None
+        first = self._first_mention(user_id, agent_id, author, text)
+        return first[1] if first and first[0] == "person" else None
+
+    def _send_to_person(
+        self, user_id: str, agent_id: str, chat_id: str, text: str, author: str, person: str,
+        attachments: Optional[list[dict]], channel: Optional[str],
+    ) -> Iterator[ChatEvent]:
+        """Store a message addressed to another member of the space: the agent does not run (no model call, no reply)."""
+        conversations = self._conversations(user_id, agent_id)
+        self._require_chat(conversations, chat_id)
+        if conversations.is_task_chat(chat_id):
+            raise InputError("this is an internal task chat: steer the task instead")
+        if attachments:
+            raise InputError("a message to a person cannot carry attachments")
+        conversations.append(
+            chat_id, "user", text, author=author,
+            **({"channel": channel} if channel in ("web", "telegram") else {}),
+        )
+        self._forget_cached_agent(user_id, agent_id, chat_id)  # the agent's next turn reloads the chat with it
+        self._mark_unread(user_id, agent_id, chat_id)
+        self.changes.publish(user_id, agent_id, chat_id, "turn")
+        return iter([ChatEvent("delivered", data={"to": person})])
 
     def _send_mention(
         self, user_id: str, origin_id: str, origin_chat: str, target_id: str, rest: str, original: str, *,
@@ -2062,6 +2451,7 @@ class ChatService:
                 mention_reply={"agent_id": target_id, "chat_id": target_chat}, **extra,
             )
             self._forget_cached_agent(user_id, origin_id, origin_chat)
+            self.changes.publish(user_id, origin_id, origin_chat, "reply_done")
         except Exception:
             logger.exception("could not copy the mention reply of %s into %s/%s", target_id, origin_id, origin_chat)
         finally:
@@ -2132,9 +2522,20 @@ class ChatService:
 
     # ------------------------------------------------------------------ subagent tasks (web API; always the session user's own)
 
+    def task_owner(self, person_id: str, task_id: str) -> str:
+        """The owner (the person or one of their spaces) whose task store holds `task_id`; UnknownTask otherwise."""
+        self._user(person_id)
+        for owner, _ in self._owners_of(person_id):
+            try:
+                self._tasks._record(owner, task_id, None)
+            except TaskError:
+                continue
+            return owner
+        raise UnknownTask("unknown task: {task_id}", task_id=task_id)
+
     def _task_record(self, user_id: str, task_id: str) -> dict:
         try:
-            return self._tasks._record(user_id, task_id, None)
+            return self._tasks._record(self.task_owner(user_id, task_id), task_id, None)
         except TaskError as exc:
             raise UnknownTask("unknown task: {task_id}", task_id=task_id) from exc
 
@@ -2168,53 +2569,65 @@ class ChatService:
     def list_tasks(
         self, user_id: str, agent_id: str | None = None, chat_id: str | None = None, status: str = "", limit: int = 0,
     ) -> dict:
-        """The user's tasks, optionally those launched from one parent chat, plus whether that chat is about to get a wake.
+        """The person's tasks and those of their spaces' agents, optionally those launched from one parent chat, plus
+        whether that chat is about to get a wake.
 
         `status` is `running` or `finished` (anything else: all); `limit` keeps the newest N. A list across chats is
         labelled with the parent agent and chat names.
         """
         if agent_id is not None:
-            self._owned_agent(user_id, agent_id)
-        tasks = self._tasks.list_view(user_id, agent_id, chat_id, status if status in ("running", "finished") else "", limit)
+            owners = [self.agent_owner(user_id, agent_id)]
+            self._owned_agent(owners[0], agent_id)
+        else:
+            owners = [owner for owner, _ in self._owners_of(user_id)]
+        tasks: list[dict] = []
+        for owner in owners:
+            batch = self._tasks.list_view(owner, agent_id, chat_id, status if status in ("running", "finished") else "", limit)
+            if agent_id is None or chat_id is None:
+                self._label_tasks(owner, batch)
+            tasks.extend(batch)
+        if len(owners) > 1:
+            tasks.sort(key=lambda task: task.get("created_at") or "")
+            if limit and limit > 0:
+                tasks = tasks[-limit:]
         out: dict = {"tasks": tasks}
-        if agent_id is None or chat_id is None:
-            self._label_tasks(user_id, tasks)
         if agent_id is not None and chat_id is not None:
-            out["active"] = self.chat_active(user_id, agent_id, chat_id)
-            out["pending_wake"] = self._tasks.pending_wake(user_id, agent_id, chat_id)
+            out["active"] = self.chat_active(owners[0], agent_id, chat_id)
+            out["pending_wake"] = self._tasks.pending_wake(owners[0], agent_id, chat_id)
         return out
 
     def get_task(self, user_id: str, task_id: str) -> dict:
-        self._task_record(user_id, task_id)
-        return self._tasks.detail(user_id, task_id)
+        return self._tasks.detail(self.task_owner(user_id, task_id), task_id)
 
     def steer_task(self, user_id: str, task_id: str, text: str) -> dict:
         """The user corrects a running task (same mechanism as the `task_steer` tool)."""
+        owner = self.task_owner(user_id, task_id)
         record = self._task_record(user_id, task_id)
         if record["status"] != "running":
             raise AgentBusy("task {task_id} is not running (status: {status})", task_id=task_id, status=record["status"])
         try:
-            return self._tasks.steer(user_id, task_id, text)
+            return self._tasks.steer(owner, task_id, text)
         except TaskError as exc:
             if "not running" in str(exc):
                 raise AgentBusy("task {task_id} is not running (status: {status})", task_id=task_id, status=record["status"]) from exc
             raise InputError(str(exc)) from exc
 
     def stop_task(self, user_id: str, task_id: str) -> dict:
+        owner = self.task_owner(user_id, task_id)
         record = self._task_record(user_id, task_id)
         try:
-            return self._tasks.stop_task(user_id, task_id)
+            return self._tasks.stop_task(owner, task_id)
         except TaskError as exc:
             raise AgentBusy("task {task_id} cannot be stopped from here (status: {status})", task_id=task_id, status=record["status"]) from exc
 
     def get_task_chat(self, user_id: str, task_id: str) -> dict:
         """The task's hidden worker chat, read-only, in the shape of `get_chat`."""
-        self._task_record(user_id, task_id)
+        owner = self.task_owner(user_id, task_id)
         try:
-            agent_id, chat_id = self._tasks.child_of(user_id, task_id)
+            agent_id, chat_id = self._tasks.child_of(owner, task_id)
         except TaskError as exc:
             raise UnknownChat("unknown chat: {chat_id}", chat_id=task_id) from exc
-        out = self.get_chat(user_id, agent_id, chat_id)
+        out = self.get_chat(owner, agent_id, chat_id)
         out["task"] = {"id": task_id, "agent_id": agent_id, "chat_id": chat_id, "internal": True}
         return out
 
@@ -2224,22 +2637,27 @@ class ChatService:
         Returns `(events, "")` to stream, `(None, "")` when nothing is running (the saved chat is complete) and
         `(None, "elsewhere")` when another process (web or Telegram) executes the task: its replies cannot be streamed from here.
         """
+        owner = self.task_owner(user_id, task_id)
         record = self._task_record(user_id, task_id)
         try:
-            agent_id, chat_id = self._tasks.child_of(user_id, task_id)
+            agent_id, chat_id = self._tasks.child_of(owner, task_id)
         except TaskError as exc:
             raise UnknownChat("unknown chat: {chat_id}", chat_id=task_id) from exc
-        if self._tasks.runs_elsewhere(user_id, record):
+        if self._tasks.runs_elsewhere(owner, record):
             return None, "elsewhere"
         try:
-            return self.follow(user_id, agent_id, chat_id), ""
+            return self.follow(owner, agent_id, chat_id), ""
         except UnknownChat:
             return None, ""
 
     def resolve_approval(
         self, user_id: str, agent_id: str, chat_id: str, approval_id: str, decision: str, scope: str = "once",
+        *, person_id: str | None = None,
     ) -> dict:
         """Approve or deny a pending approval of the chat; raises ApprovalNotFound / ApprovalForbidden.
+
+        `user_id` is the owner of the chat's agent (a space for a shared agent); `person_id` the member who answers,
+        whose language the error uses.
 
         `scope` (approve only): `once`, `session` (this exact action, until the chat ends) or `agent` (a narrow allow
         rule in the agent's configuration). When the agent rule cannot be saved the action is still approved once and
@@ -2252,7 +2670,7 @@ class ChatService:
         answer = self._approvals.answer(approval_id, user_id, decision, scope)
         result = {"status": answer.status, "scope": answer.scope}
         if answer.error is not None:
-            result["error"] = error_message(self.language(user_id), answer.error)
+            result["error"] = error_message(self.language(person_id or user_id), answer.error)
         return result
 
     # ------------------------------------------------------------------ the agent's approval rules (learned by 'always for this agent')
@@ -2312,6 +2730,8 @@ class ChatService:
         """Every user with their maximum level and the level of each agent (what the admin screen and the CLI list)."""
         rows = []
         for user_id in sorted(path.parent.name for path in CONFIG_DIR.glob("*/user.yaml") if _ID_RE.match(path.parent.name)):
+            if is_space_id(user_id):  # a space is not a person: the admin CLI lists spaces with `space list`
+                continue
             try:
                 user = load_user(user_id)
                 agents = self._agents.agent_levels(user_id, user)
@@ -2362,6 +2782,41 @@ class ChatService:
         self._admin_audit(admin_id, user_id, "create_user", max_level=result["max_level"])
         row = next(row for row in self.user_overview() if row["id"] == user_id)
         return {**row, "self": False, "generated_password": result["generated"]}
+
+    def delete_user(self, admin_id: str | None, user_id: str, *, confirm: str) -> dict:
+        """An administrator deletes a user for good (config, data, invitations); shared agents stay with the other
+        members. Secrets are never edited: `leftovers` names what is still to remove by hand."""
+        from src.admin.delete_user import delete_user as delete_files
+
+        if admin_id is not None:
+            self._require_administrator(admin_id)
+        self._check_id("user", user_id, UnknownManagedUser)
+        if is_space_id(user_id):
+            raise InputError("'{user_id}' is a space, not a user", code="user_delete_failed", user_id=user_id)
+        try:
+            load_user(user_id)
+        except FileNotFoundError as exc:
+            raise UnknownManagedUser("unknown user: {user_id}", user_id=user_id) from exc
+        try:
+            result = delete_files(
+                user_id, confirm=confirm, actor=admin_id, config_dir=CONFIG_DIR, data_dir=DATA_DIR,
+                is_busy=self._agent_in_use, create_space=self._agent_mover()._create_space,
+                on_removed=self._agent_moved_away, on_created=self._agent_arrived,
+            )
+        except admin_users.AdminError as exc:
+            raise InputError(str(exc), code="user_delete_failed") from exc
+        self._good_users.pop(user_id, None)
+        for key in [k for k in self._good_agents if k[0] == user_id]:
+            self._good_agents.pop(key, None)
+        with self._slots_guard:
+            for key in [k for k in self._slots if k[0] == user_id]:
+                self._slots.pop(key, None)
+        self._availability.forget()
+        logger.info("administrator %s deleted user %s", admin_id or "cli", user_id)
+        if admin_id is not None:
+            self._admin_audit(admin_id, admin_id, "delete_user", deleted=user_id, agents=result["agents"],
+                              leftover_secrets=result["leftovers"]["secrets"])
+        return result
 
     def _admin_audit(self, admin_id: str, user_id: str, action: str, **fields) -> None:
         """One line per administrator action on a user, in that user's data folder; never a secret value."""
@@ -2438,11 +2893,11 @@ class ChatService:
     def admin_claude_login_start(self, admin_id: str, user_id: str) -> dict:
         user = self._admin_login_user(admin_id, user_id)
         self._admin_audit(admin_id, user_id, "claude_login_start")
-        return claude_signin.start(user.id, resolved_settings(user.id, user.claude_subscription))
+        return claude_signin.start(user.id, resolved_settings(user.claude_owner, user.claude_subscription))
 
     def admin_claude_login_code(self, admin_id: str, user_id: str, code: str) -> dict:
         user = self._admin_login_user(admin_id, user_id)
-        status = claude_signin.submit(user.id, code, resolved_settings(user.id, user.claude_subscription))
+        status = claude_signin.submit(user.id, code, resolved_settings(user.claude_owner, user.claude_subscription))
         self._availability.forget()
         self._admin_audit(admin_id, user_id, "claude_login_done")
         return {"logged_in": status["logged_in"], "subscription": status.get("subscription")}
@@ -2852,6 +3307,13 @@ class ChatService:
         finally:
             run.events.unsubscribe(queue)
 
+    def watch(self, user_id: str, agent_id: str, chat_id: str) -> tuple[SimpleQueue, Callable[[], None]]:
+        """Subscribe to the chat's changes (kinds published by `ChatChanges`); returns the queue and the unsubscribe."""
+        self._owned_agent(user_id, agent_id)
+        self._require_chat(self._conversations(user_id, agent_id), chat_id)
+        queue = self.changes.subscribe(user_id, agent_id, chat_id)
+        return queue, lambda: self.changes.unsubscribe(user_id, agent_id, chat_id, queue)
+
     def follow(self, user_id: str, agent_id: str, chat_id: str) -> Iterator[ChatEvent] | None:
         """Attach to the chat's running reply: replay what it produced so far, then follow it live.
 
@@ -2885,6 +3347,7 @@ class ChatService:
                     return
                 run = pending.popleft()
                 slot.active[chat_id] = run
+            self.changes.publish(user_id, agent_id, chat_id, "reply_started")
             if run.compact is not None:
                 try:
                     text = self._manual_compaction(user_id, agent_id, slot, run)
@@ -2918,6 +3381,7 @@ class ChatService:
                 with slot.state:
                     slot.active.pop(chat_id, None)
             self._mark_unread(user_id, agent_id, chat_id)
+            self.changes.publish(user_id, agent_id, chat_id, "reply_done")
             self._compact_after_reply(slot, chat_id)
 
     def _mark_unread(self, user_id: str, agent_id: str, chat_id: str) -> None:
@@ -2988,6 +3452,8 @@ class ChatService:
             result = agent.invoke(
                 run.text, stream=run.stream, cancellation=run.cancellation,
                 continuation=run.continuation, attachments=run.attachments, meta=run.meta, channel=run.channel,
+                author=run.author,
+                speaker=run.speaker or run.author,
             )
             if memory := agent.memory_event():  # a search that already finished (replies that are not streamed)
                 yield ChatEvent("memory", data=memory, generation_id=run.generation_id)
@@ -3038,7 +3504,7 @@ class ChatService:
             user = self._user(user_id)
             if is_claude_subscription(CHAT_NAMING.model):  # ZDR is an OpenRouter filter; it never applies here
                 # runs with the requesting user's own Claude login, never another user's
-                provider = claude_subscription_provider(user.claude_subscription, user_id=user.id, purpose="chat_naming.model")
+                provider = claude_subscription_provider(user.claude_subscription, user_id=user.claude_owner, purpose="chat_naming.model")
 
                 def ask(history: list[dict]) -> dict:
                     return provider.invoke(history, CHAT_NAMING.model, stream=False, tools=[_NAMING_TOOL])
@@ -3104,7 +3570,7 @@ class ChatService:
         ]
         user = self._user(user_id)
         if is_claude_subscription(config.model):
-            provider = claude_subscription_provider(user.claude_subscription, user_id=user.id, purpose="approval_explain.model")
+            provider = claude_subscription_provider(user.claude_subscription, user_id=user.claude_owner, purpose="approval_explain.model")
             reply = provider.invoke(messages, config.model, stream=False)
         else:
             api_key = get_secret(config.api_key).strip()
@@ -3438,22 +3904,27 @@ class ChatService:
             raise UnknownDreamSession("unknown SOUL version: {version}", version=version) from exc
         return self.get_soul(user_id, agent_id)
 
-    def get_memory(self, user_id: str, agent_id: str, target: MemoryTarget) -> dict:
-        self._owned_agent(user_id, agent_id)
+    @staticmethod
+    def _memory_limit(owner: UserConfig, target: MemoryTarget) -> int:
+        """Char limit of a memory file; USER.md of a space agent scales with the members (as the memory tool does)."""
         limits = memory_limits()
+        if target == "memory":
+            return limits.memory_chars
+        return scaled_user_chars(limits.user_chars, len(owner.members)) if owner.kind == "space" else limits.user_chars
+
+    def get_memory(self, user_id: str, agent_id: str, target: MemoryTarget) -> dict:
+        owner = self._owned_agent(user_id, agent_id)
         files = self._agent_files(user_id, agent_id)
         content = files.memory_text(target)
         return {
             "target": target, "content": content, "chars": len(content),
-            "limit": limits.memory_chars if target == "memory" else limits.user_chars,
+            "limit": self._memory_limit(owner, target),
             "entries": files.memory_entries(target),
         }
 
     def update_memory(self, user_id: str, agent_id: str, target: MemoryTarget, content: str) -> dict:
         """Replace MEMORY.md or USER.md; entries are separated by a line holding only `§`."""
-        self._owned_agent(user_id, agent_id)
-        limits = memory_limits()
-        limit = limits.memory_chars if target == "memory" else limits.user_chars
+        limit = self._memory_limit(self._owned_agent(user_id, agent_id), target)
         if len(content) > limit:
             raise InputError(
                 "the {target} memory cannot exceed {limit} characters; shorten it; the limit is set in settings.yaml (memory_limits)",
@@ -3524,6 +3995,9 @@ class ChatService:
         except FileNotFoundError as e:
             self._good_users.pop(user_id, None)
             raise UnknownUser("unknown user: {user_id}", user_id=user_id) from e
+        except SpaceError:  # a space with a missing member is unusable: never fall back to its previous good config
+            self._good_users.pop(user_id, None)
+            raise
         except Exception as exc:  # invalid after an outside edit: keep serving the previous good config
             good = self._good_users.get(user_id)
             if good is None:
