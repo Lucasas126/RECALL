@@ -573,7 +573,7 @@ class SubagentSettings(BaseModel):
     max_parallel_per_user: int = Field(default=10, ge=1, le=20, strict=True)  # running tasks of one user
     max_launches_per_turn: int = Field(default=5, ge=1, le=50, strict=True)  # task_start calls in one parent turn
     timeout_seconds: int = Field(default=600, ge=10, le=3600, strict=True)  # wall clock of one task
-    max_tokens: int = Field(default=0, ge=0, le=5_000_000, strict=True)  # input + output tokens of one task; 0 = no cap
+    max_tokens: int = Field(default=5_000_000, ge=0, le=5_000_000, strict=True)  # input + output tokens of one task, summed over every model call (cached reads included); 0 = no cap (not recommended)
     result_max_chars: int = Field(default=8000, ge=500, le=100_000, strict=True)  # result text returned to the parent
     rate_limit_cooldown_seconds: int = Field(default=300, ge=60, le=86_400, strict=True)  # no launches after a 429
     max_followups: int = Field(default=5, ge=0, le=50, strict=True)  # task_send follow-ups per task

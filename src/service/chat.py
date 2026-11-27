@@ -1794,9 +1794,23 @@ class ChatService:
             if hit is not None and monotonic() - hit[0] < 60:
                 return hit[1]
         result = fetch_usage(folder)
+        if result.get("available"):
+            result |= self._claude_account(user)
         with self._usage_lock:
             self._usage_cache[user_id] = (monotonic(), result)
         return result
+
+    @staticmethod
+    def _claude_account(user: UserConfig) -> dict:
+        """Which subscription and account the usage belongs to, from `claude auth status`; fields the CLI does not report are omitted.
+
+        The e-mail goes only into the owner's own usage answer: it is never logged.
+        """
+        status = cli_status(resolved_settings(user.id, user.claude_subscription))
+        info = {"provider": "claude_subscription", "label": "Claude subscription"}
+        if status.get("logged_in"):
+            info |= {key: status[name] for key, name in (("account_email", "account_email"), ("plan", "subscription")) if status.get(name)}
+        return info
 
     def _remove_task_chat(self, user_id: str, agent_id: str, chat_id: str) -> None:
         """Delete a task's hidden chat that never ran (a launch that failed half-way); errors are logged, not raised."""

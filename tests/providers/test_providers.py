@@ -115,14 +115,15 @@ class ClaudeStatusTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def test_logged_in_status_never_carries_account_identifiers(self) -> None:
+    def test_logged_in_status_carries_the_email_but_never_the_organization(self) -> None:
         auth = '{"loggedIn": true, "authMethod": "claude.ai", "email": "user@example.com", "orgName": "Org", "subscriptionType": "pro"}'
         with patch("src.providers.claude_subscription.status._run", side_effect=_status_run(
                 {"version": (0, "2.1.316 (Claude Code)\n"), "auth": (0, auth)})):
             status = cli_status(self.settings)
         self.assertEqual(status, {"cli_found": True, "command": sys.executable, "version": "2.1.316",
-                                  "logged_in": True, "hint": None, "auth_method": "claude.ai", "subscription": "pro"})
-        self.assertNotIn("example.com", repr(status))
+                                  "logged_in": True, "hint": None, "auth_method": "claude.ai", "subscription": "pro",
+                                  "account_email": "user@example.com"})
+        self.assertNotIn("Org", repr(status))
 
     def test_logged_out_status_shows_the_login_hint(self) -> None:
         with patch("src.providers.claude_subscription.status._run", side_effect=_status_run(

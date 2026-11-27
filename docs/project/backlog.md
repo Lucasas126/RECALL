@@ -56,6 +56,8 @@ One list of ideas and planned work. Implemented behaviour is documented in the
 
 ### usage and data
 
+- **Context guard inside a long turn**: compaction and the emergency cut of the oldest messages run only when a turn starts (`_guard_context`) and after the reply, never between the model calls of one tool loop. A long task (a subagent, or a chat turn with many large tool results) keeps growing its context until the end of the turn, so with huge tool outputs it could reach the model window and fail instead of compacting. Safety net to add: check the context before each model call of the loop, with a test that feeds large tool results. Not urgent: a typical task stays far below the window and `subagents.max_tokens` stops runaway ones first.
+- **Clearer token counter**: the figure shown for a task or turn sums input, cache reads and cache writes over every model call, so it looks far larger than the context. Show new tokens, cached reads and the current context against the window (percent) separately, and decide what `max_tokens` should measure.
 - **Cost control**: spend per user, agent and day (building on `src/agent/usage.py`), shown in the web UI, optional monthly caps and a separate cap for dreams.
 - **Backup / export and import of an agent** (`SOUL.md`, memories, skills, palace, conversations); scheduled backups of `data/` for Docker.
 - **Obsidian safe/auto overlay** with optional auto-commit, designed in [overlay](../architecture/obsidian-overlay.md); today a user folder pointing at the vault is the implemented way.

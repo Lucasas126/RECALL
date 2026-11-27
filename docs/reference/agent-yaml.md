@@ -78,7 +78,7 @@ delegation:                          # the `delegate` tool group (see the delega
   allowed_groups: [web]              # groups a task may be granted; only `web` is grantable (never memory, folders, terminal, mcp, delegate)
   max_parallel: null                 # running tasks per chat, 1-10; can only lower settings.yaml subagents.max_parallel_per_parent (5)
   timeout_seconds: null              # wall clock per task, 10-3600; can only lower subagents.timeout_seconds (600)
-  max_tokens: null                   # input + output tokens per task, 1000-5000000; can only lower subagents.max_tokens (default: no cap)
+  max_tokens: null                   # input + output tokens per task, 1000-5000000; can only lower subagents.max_tokens (default: 5000000; 0 = no cap, not recommended)
   default_model: null                # model of fresh workers when task_start names none (`provider:model`); null = the model of the launching chat
   targets: []                        # other agents of this user a task may be handed to: [{agent: scout, remember: false}]; empty = fresh workers only
 ```

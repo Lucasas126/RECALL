@@ -39,7 +39,7 @@ Do not poll: after `task_start` keep helping the user and let the result arrive.
 | running tasks per chat / per user | 5 / 10 | `settings.yaml` `subagents:`; your `delegation.max_parallel` can only lower the first |
 | launches in one turn | 5 | `settings.yaml` |
 | wall clock per task | 600 s | `subagents.timeout_seconds`; `delegation.timeout_seconds` can only lower it |
-| input + output tokens per task | no cap | `subagents.max_tokens` (0 = none); `delegation.max_tokens` and `task_start(max_tokens=...)` can only lower it |
+| input + output tokens per task | 5000000 | `subagents.max_tokens` (0 = no cap, not recommended; the count sums every model call, cached reads included); `delegation.max_tokens` and `task_start(max_tokens=...)` can only lower it |
 | result text | 8000 chars | `subagents.result_max_chars`; the full text stays in the worker's hidden chat |
 | depth | 1 | fixed: a worker cannot launch tasks |
 

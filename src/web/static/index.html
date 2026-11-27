@@ -434,6 +434,7 @@
               <div class="setting-row">
                 <div class="setting-main">
                   <label for="agent-delegation-tokens" id="agent-delegation-tokens-label">Token limit per task</label>
+                  <p id="agent-delegation-tokens-hint" class="model-note">Input plus output tokens of one task, summed over every model call (cached reads included). 0 = no limit, not recommended.</p>
                 </div>
                 <div class="setting-control"><input id="agent-delegation-tokens" type="text" inputmode="numeric" autocomplete="off" data-number data-unit="tokens" data-step="10000"><button type="button" class="icon-btn setting-reset">↺</button></div>
                 <p class="setting-default model-note"></p>

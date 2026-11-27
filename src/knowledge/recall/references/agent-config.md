@@ -113,7 +113,7 @@ Enabling a server for an agent is one of three steps (catalog, user connection, 
 | `delegation.allowed_groups` | groups a task may be given: only `web` (web) |
 | `delegation.max_parallel` | running tasks per chat, 1-10; can only lower `settings.yaml` (5) |
 | `delegation.timeout_seconds` | per task, 10-3600; can only lower it (600) |
-| `delegation.max_tokens` | in + out per task; only lowers it (default: no cap) |
+| `delegation.max_tokens` | in + out per task; only lowers it (default 5000000; 0 = no cap, not recommended) |
 | `delegation.default_model` | model of fresh workers (the chat's) |
 | `delegation.targets` | other agents it may hand tasks to: `{agent, remember}`; see `references/delegation-targets.md` |
 
@@ -141,4 +141,4 @@ Backends (`terminal_backends.<name>`): `type` is `ssh` (`host`, `port`, `user`, 
 
 Preferences (`preferences.json`, Settings dialog and Telegram `/settings`) are separate from the yaml and apply from the next read. The Settings dialog has General, Models, Chats & memory, Telegram and Connections; a row's reset button stores nothing (null), so the setting follows the default again.
 
-Claude plan usage: the web chat shows a strip next to the message box (session and week, as colours and bars) and `/usage` (web chat and Telegram) answers the same numbers as text; both read the user's own Claude login and are hidden or explained when there is none.
+Claude plan usage: the web chat shows a strip next to the message box (session and week, as colours and bars, under a header with the subscription, account e-mail and plan) and `/usage` (web chat and Telegram) answers the same numbers as text; both read the user's own Claude login and are hidden or explained when there is none.
