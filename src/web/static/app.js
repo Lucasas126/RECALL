@@ -2615,6 +2615,10 @@ function renderAgentMcp(selections) {
       Object.assign(document.createElement("div"), { className: "mcp-tool-list" }),
       Object.assign(document.createElement("p"), { className: "model-note mcp-tools-status" }),
     );
+    if (server.connected) {
+      const refresh = mcpRefreshButton(server, tools.querySelector(".mcp-tools-status"), () => loadMcpTools(box, server));
+      tools.insertBefore(refresh, tools.querySelector(".mcp-tool-list"));
+    }
     options.append(readOnly.label, instructions, tools);
     box.append(enabled.label, options);
     if (selection) loadMcpTools(box, server);
@@ -2659,6 +2663,34 @@ async function loadMcpTools(box, server) {
     return item.label;
   }));
   syncMcpToolInputs(box);
+}
+
+// "Refresh tools": the server's tool list is read when its connection opens, so this reconnects and lists it again.
+// `status` shows the tool count or the error; `reload` redraws the list that uses the cache.
+function mcpRefreshButton(server, status, reload) {
+  const button = Object.assign(document.createElement("button"), {
+    type: "button", className: "mcp-refresh", textContent: tr("Refresh tools"),
+  });
+  button.addEventListener("click", async () => {
+    const session = state.session;
+    button.disabled = true;
+    status.className = "model-note mcp-tools-status";
+    status.textContent = tr("Refreshing tools…");
+    try {
+      const result = await api(`/api/mcp/${server.id}/refresh`, { method: "POST" });
+      if (session !== state.session) return;
+      state.mcpTools.delete(server.id);
+      await reload?.();
+      status.textContent = tr("{count} tools available.", { count: result.tool_count });
+    } catch (err) {
+      if (session !== state.session) return;
+      status.className = "error mcp-tools-status";
+      status.textContent = err.message;
+    } finally {
+      button.disabled = false;
+    }
+  });
+  return button;
 }
 
 function syncMcpToolInputs(box) {
@@ -4155,6 +4187,13 @@ function connectionItem(server) {
     item.append(Object.assign(document.createElement("a"), {
       href: server.auth_url, target: "_blank", rel: "noopener noreferrer", textContent: tr("Open sign-in page"),
     }));
+  }
+  if (server.connected) {
+    const actions = document.createElement("div");
+    actions.className = "agent-actions";
+    const status = Object.assign(document.createElement("span"), { className: "model-note mcp-tools-status" });
+    actions.append(mcpRefreshButton(server, status, null), status);
+    item.append(actions);
   }
   if (server.auth_type === "token") {
     item.append(tokenConnection(server));

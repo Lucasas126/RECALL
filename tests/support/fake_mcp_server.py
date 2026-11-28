@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 
 from mcp.server.mcpserver import MCPServer
 from mcp_types import ToolAnnotations
@@ -33,6 +34,23 @@ def fail() -> str:
 def hidden() -> str:
     """A tool the catalog hides."""
     return "hidden"
+
+
+# Tools that exist only while a marker file is in the working directory (the user's state folder), so a
+# test can make the server gain tools between two connections.
+if os.path.exists("late.flag"):
+    @server.tool()
+    def late() -> str:
+        """A tool added after the first connection."""
+        return "late"
+
+
+if os.path.exists("slow.flag"):
+    @server.tool()
+    def slow(seconds: float) -> str:
+        """Wait, then answer."""
+        time.sleep(seconds)
+        return "done"
 
 
 def auth() -> None:

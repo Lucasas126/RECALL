@@ -25,7 +25,7 @@ from src.core.sources.agent_files import MemoryTarget
 from src.config.preferences import PreferencesError, UserPreferences
 from src.core.sources.conversations import ChatMetadataError
 from src.providers.catalog import CatalogUnavailable
-from src.providers.mcp import McpError, McpNotConnected, UnknownMcpServer
+from src.providers.mcp import McpBusy, McpError, McpNotConnected, UnknownMcpServer
 from src.service.chat import (
     AgentBusy,
     ChatAttachment,
@@ -427,7 +427,8 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     @app.exception_handler(AgentBusy)
     @app.exception_handler(AgentConflict)
     @app.exception_handler(McpNotConnected)
-    def _agent_conflict(request: Request, exc: AgentBusy | AgentConflict | McpNotConnected):
+    @app.exception_handler(McpBusy)
+    def _agent_conflict(request: Request, exc: AgentBusy | AgentConflict | McpNotConnected | McpBusy):
         return localized_error(request, 409, exc)
 
     @app.exception_handler(MaxLevelConflict)
@@ -568,6 +569,10 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
     @app.post("/api/mcp/{server_id}/connect")
     def connect_mcp(server_id: str, user_id: str = Depends(current_user)):
         return service.connect_mcp(user_id, server_id)
+
+    @app.post("/api/mcp/{server_id}/refresh")
+    def refresh_mcp(server_id: str, user_id: str = Depends(current_user)):
+        return service.refresh_mcp(user_id, server_id)
 
     @app.put("/api/mcp/{server_id}/token")
     def set_mcp_token(server_id: str, body: McpTokenIn, user_id: str = Depends(current_user)):

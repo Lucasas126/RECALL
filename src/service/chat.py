@@ -500,6 +500,8 @@ class ChatService:
         self._dream = dream or DreamManager(self._dream_dependencies())
         self._cleanup_thread: threading.Thread | None = None
         self._cleanup_stop = threading.Event()
+        self._mcp_refresh_thread: threading.Thread | None = None
+        self._mcp_refresh_stop = threading.Event()
         self._last_cleanup = 0.0
         self._approvals = ApprovalBroker(TERMINAL.approval_timeout_seconds)
         self._tasks = TaskManager(self, DATA_DIR, origins)  # subagent tasks launched by the `delegate` tools
@@ -718,6 +720,12 @@ class ChatService:
         self._user(user_id)
         return self._mcp.set_token(user_id, server_id, token)
 
+    def refresh_mcp(self, user_id: str, server_id: str) -> dict:
+        """Restart this user's connection to the server so its tools are listed again; returns the status and tool count."""
+        self._user(user_id)
+        status = self._mcp.refresh(user_id, server_id)
+        return {**status, "tool_count": len(self._mcp.list_tools(user_id, server_id))}
+
     def disconnect_mcp(self, user_id: str, server_id: str) -> dict:
         """Stop this user's server and delete the user's stored credentials for it."""
         self._user(user_id)
@@ -726,12 +734,16 @@ class ChatService:
     def close(self) -> None:
         """Stop background resources such as MCP server processes and the dream scheduler."""
         self._cleanup_stop.set()
+        self._mcp_refresh_stop.set()
         self._tasks.stop_poller()
         self._tasks.shutdown()  # running subagent tasks end as cancelled (their partial work stays in the hidden chats)
         self._approvals.close()  # tools waiting for an approval are denied so their threads can end
         if self._cleanup_thread is not None:
             self._cleanup_thread.join(5)
             self._cleanup_thread = None
+        if self._mcp_refresh_thread is not None:
+            self._mcp_refresh_thread.join(5)
+            self._mcp_refresh_thread = None
         self._dream.stop()
         self._automations.stop()
         self._mcp.close()
@@ -906,6 +918,21 @@ class ChatService:
 
             self._cleanup_thread = threading.Thread(target=loop, daemon=True, name="disposable-cleanup")
             self._cleanup_thread.start()
+        hours = current_mcp_settings().refresh_hours
+        if self._mcp_refresh_thread is None and hours > 0:
+            self._mcp_refresh_stop.clear()
+            self._mcp_refresh_thread = threading.Thread(
+                target=self._mcp_refresh_loop, args=(hours * 3600,), daemon=True, name="mcp-refresh",
+            )
+            self._mcp_refresh_thread.start()
+
+    def _mcp_refresh_loop(self, interval_seconds: float) -> None:
+        """List the tools of idle MCP connections again every interval; the first round comes after one interval."""
+        while not self._mcp_refresh_stop.wait(interval_seconds):
+            try:
+                self._mcp.refresh_idle()
+            except Exception:
+                logger.warning("MCP tool refresh failed", exc_info=True)
 
     def _check_mcp(self, config: AgentConfig) -> None:
         for server_id in config.chat_config.mcp:
