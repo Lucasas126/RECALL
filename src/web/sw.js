@@ -11,6 +11,8 @@ const SHELL = [
   "/",
   "/static/index.html",
   "/static/style.css",
+  "/static/filepanel.css",
+  "/static/filepanel.js",
   "/static/app.js",
   "/static/appearance.js",
   "/static/vendor/marked.umd.js",

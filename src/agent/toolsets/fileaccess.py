@@ -65,3 +65,33 @@ def _from_backend(session, path: str, max_bytes: int) -> tuple[str, bytes]:
     except ValueError as exc:
         raise FileAccessError(str(exc)) from exc
     return posixpath.basename(path.rstrip("/")) or "file", data
+
+
+def check_file(agent: Agent, address: str, max_bytes: int) -> tuple[str, str, str]:
+    """(file name, root, path) of a file the agent can read, without keeping its bytes; FileAccessError when it cannot.
+
+    The same resolution, refusals and size limit as `fetch_file`. A source file is only stat-ed; a backend file goes through
+    the backend's session exactly like a fetch (approval, protected paths, audit) and the bytes are dropped. `root` is the
+    source name or `backend:<name>`; `path` is the part after the first colon.
+    """
+    name, _, rel = address.partition(":")
+    sessions = getattr(agent, "terminal_sessions", None) or {}
+    try:
+        source = agent.sources.get(name) if name else None
+    except KeyError:
+        source = None
+    if source is None:
+        file_name, _data = fetch_file(agent, address, max_bytes)  # backend, or the usual error for a bad address
+        return file_name, f"backend:{name}", rel
+    if not source.readable:
+        raise FileAccessError(f"'{source.name}' is not readable here")
+    try:
+        target = source.resolve(rel)
+    except ValueError as exc:
+        raise FileAccessError(str(exc)) from exc
+    if not target.is_file():
+        raise FileAccessError(f"'{address}' is not a file")
+    size = target.stat().st_size
+    if size > max_bytes:
+        raise FileAccessError(f"the file is {size // 1024} KiB; the limit is {max_bytes // 1024 // 1024} MiB")
+    return target.name, name, rel

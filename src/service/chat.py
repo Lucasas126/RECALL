@@ -2298,7 +2298,7 @@ class ChatService:
         run = _MessageRun(chat_id, text, attachments, stream, meta=run_meta or None,
                            channel=channel if channel in ("web", "telegram") else None, author=author)
         # keep what the speech-to-text heard next to each recording, so the person can check it any time
-        unheard = [item for item in media if item["modality"] == "audio" and "transcript" not in item]
+        unheard = [item for item in media if item.get("modality") == "audio" and "transcript" not in item]
         if rewind_to is not None and transcripts_in_text and not attachments_given:
             unheard = []  # an edit that moved the heard text into the message: the players stay without a transcript
         for item, heard in zip(unheard, transcripts):

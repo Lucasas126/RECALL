@@ -27,6 +27,7 @@ SERVICE_TEXT = {
     "charts": "draw charts and diagrams as PNG files in a writable source (tool group charts)",
     "notify": "send the user a short Telegram message, at most 30 an hour (tool group notify)",
     "files_send": "send the user a file the agent can already read (tool group files_send)",
+    "viewer": "open a file it can already read in the user's side panel (tool group viewer)",
     "identity": "change its own display name, nothing else (tool group identity)",
     "automations": "schedule things for later, at most 50 per user (tool group automations)",
     "folders_edit": "edit the user's folders (tool group folders_edit; asks)",

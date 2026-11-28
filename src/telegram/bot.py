@@ -1384,6 +1384,8 @@ async def _send_agent_files(bot, telegram_chat_id: int, files: list[dict], langu
     if that fails too the person is told which file did not go, and the reply carries on.
     """
     for item in files:
+        if item.get("type") == "file_card":  # `show_file`: a card for the web panel, nothing to send
+            continue
         try:
             header, _, payload = str(item.get("data_url", "")).partition(",")
             data = base64.b64decode(payload)
