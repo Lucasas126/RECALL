@@ -532,6 +532,16 @@ class AgentTerminalConfig(BaseModel):
         return self.backends[name].timeout_seconds or self.timeout_seconds
 
 
+class FilePanelSettings(BaseModel):
+    """Read-only file viewer/explorer (settings.yaml `file_panel:`)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    open_backends: list[str] = Field(default_factory=lambda: ["local", "dev"], max_length=50)  # browsable without approval
+    max_file_mib: int = Field(default=25, ge=1, le=1024, strict=True)
+    max_entries: int = Field(default=2000, ge=10, le=100_000, strict=True)
+
+
 class TerminalSettings(BaseModel):
     """Framework-wide terminal limits (settings.yaml `terminal:`)."""
 

@@ -7,7 +7,7 @@ from pathlib import Path
 import yaml
 
 from src.config.models import (
-    ApprovalExplainConfig, AssociativeMemoryConfig, ChatNamingConfig, ClaudeLoginSettings, IndexConfig, McpSettings, MemoryLimits, OrchestratorConfig, PdfConfig, PromptCacheConfig, SpeechToTextConfig, TavilyConfig, TerminalSettings, UploadsConfig,
+    ApprovalExplainConfig, AssociativeMemoryConfig, ChatNamingConfig, ClaudeLoginSettings, FilePanelSettings, IndexConfig, McpSettings, MemoryLimits, OrchestratorConfig, PdfConfig, PromptCacheConfig, SpeechToTextConfig, TavilyConfig, TerminalSettings, UploadsConfig,
     SubagentSettings, VideoDecompositionConfig,
 )
 
@@ -232,6 +232,9 @@ def parse_allow_local(yaml_value: object, env_value: str | None = None) -> objec
 _terminal = dict(_raw.get("terminal") or {})
 _terminal["allow_local"] = parse_allow_local(_terminal.get("allow_local"), os.environ.get("RECALL_TERMINAL_ALLOW_LOCAL"))
 TERMINAL = TerminalSettings.model_validate(_terminal)
+
+
+FILE_PANEL = FilePanelSettings.model_validate(_raw.get("file_panel") or {})
 
 
 # ------------------------------------------------------------------ approval rules (the installation layer)

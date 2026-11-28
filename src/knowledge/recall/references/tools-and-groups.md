@@ -1,6 +1,6 @@
 # Tools and tool groups
 
-The user selects tool groups per agent (`chat_config.tool_groups`, Tools tab). Without a selection you get `memory_read`, `memory_edit`, `web`, `self` and `identity`; folder groups, `charts`, `notify`, `files_send`, `automations`, `terminal`, `delegate`, `permissions` and `agents` are always explicit. `tools: false` removes all tools. `skill_view` is always available. Web tools need a Tavily key. MCP tools (`<server_id>__<tool>`) are added per agent, untrusted.
+The user selects tool groups per agent (`chat_config.tool_groups`, Tools tab). Without a selection you get `memory_read`, `memory_edit`, `web`, `self` and `identity`; folder groups, `charts`, `notify`, `files_send`, `viewer`, `automations`, `terminal`, `delegate`, `permissions` and `agents` are always explicit. `tools: false` removes all tools. `skill_view` is always available. Web tools need a Tavily key. MCP tools (`<server_id>__<tool>`) are added per agent, untrusted.
 
 Addresses are `source:path`, e.g. `mind_palace:notes/pets.md`.
 
@@ -15,13 +15,13 @@ Addresses are `source:path`, e.g. `mind_palace:notes/pets.md`.
 | `list_tags` | memory_read | tags of markdown notes with counts |
 | `find_notes_by_tag` | memory_read | notes with any (default) or all of the tags |
 | `session_search` | memory_read | search inside past conversations, this one included; meaning by default, exact text if the query is in double quotes |
-| `view_image` | memory_read | look at an image or at pages of a PDF (`<source>:<path>` or `<backend>:<path>`; `pages` like `1-3,5`, several pages come as one contact sheet, at most 6; `max_edge` 256-2048 px): the picture is shown in the next message, downscaled, and dropped at the user's next message; image-capable models only; at most 6 per user message |
+| `view_image` | memory_read | look at an image or PDF pages (`pages` like `1-3,5`, at most 6; `max_edge` 256-2048 px): shown in the next message, downscaled, dropped at the user's next message; image models only; max 6 per user message |
 | `write` | memory_edit | create or overwrite `source:path` |
 | `append` | memory_edit | append to a file (created if missing) |
 | `edit` | memory_edit | replace one unique fragment |
 | `move` | memory_edit | move or rename within the allowed sources; errors on an existing destination unless `overwrite=true` |
 | `delete` | memory_edit | delete a file |
-| `make_pdf` | memory_edit | build a PDF from a structured spec (`title`, `elements`: heading, paragraph, bullets, numbered, table, image, spacer, pagebreak; `**bold**`, `*italic*`) and save it: `path` (`<source>:<path>.pdf`, any writable source; default `mind_palace:documents/<title>.pdf`; a taken name gets a number unless `overwrite=true`); not sent, use `send_file`; check with `read`; arrows and check marks cannot be drawn (warning) |
+| `make_pdf` | memory_edit | build a PDF from a structured spec (`title`, `elements`: heading, paragraph, bullets, numbered, table, image, spacer, pagebreak; `**bold**`, `*italic*`) and save it: `path` (`<source>:<path>.pdf`, any writable source; default `mind_palace:documents/<title>.pdf`; a taken name gets a number unless `overwrite=true`); not sent, use `send_file` |
 | `render_chart` | charts | Vega-Lite spec to a PNG file; see `references/charts.md` |
 | `render_diagram` | charts | Graphviz or Mermaid to a PNG file (`charts.md`) |
 | `web_search` | web | public web search (Tavily); 1-10 results, untrusted; never send secrets |
@@ -31,7 +31,8 @@ Addresses are `source:path`, e.g. `mind_palace:notes/pets.md`.
 | `automation_pause` | automations | pause one of your automations until you resume it |
 | `automation_resume` | automations | resume a paused automation; what it missed is not replayed |
 | `automation_delete` | automations | delete one of your automations for good |
-| `send_file` | files_send | hand the user a file you can already read: `<source>:<path>`, or `<backend>:<path>` for a file on one of your terminal machines (approved like reading it); in the web chat and on Telegram; 10 MB a file; level reader |
+| `send_file` | files_send | hand the user a file you can already read: `<source>:<path>`, or `<backend>:<path>` for a file on one of your terminal machines (approved like reading it); web chat and Telegram; 10 MB a file; level reader |
+| `show_file` | viewer | open a file you can already read in the user's side panel (web card), address as `send_file`; level assistant |
 | `set_display_name` | identity | change only your own display name (max 100 chars, one line); no card, audited; new chats use it |
 | `notify_telegram` | notify | a short Markdown message to the owner's own Telegram chat; 30 an hour; level assistant; send it last |
 | `web_retrieve` | web | read a public page as markdown, optional focus query; capped, untrusted |
@@ -96,6 +97,7 @@ Addresses are `source:path`, e.g. `mind_palace:notes/pets.md`.
 | `web` | `web_search`, `web_retrieve` |
 | `notify` | `notify_telegram` |
 | `files_send` | `send_file` |
+| `viewer` | `show_file` |
 | `identity` | `set_display_name` |
 | `automations` | `automation_create`, `automation_list`, `automation_edit`, `automation_pause`, `automation_resume`, `automation_delete` |
 | `self` | `memory`, `skill_view`, `skill_manage`, `soul_edit` |

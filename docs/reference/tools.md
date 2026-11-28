@@ -93,6 +93,9 @@ The web **Agents** tab configures these groups for each agent:
   parameters, they come from the run, so an agent only sees and changes its own automations for its own user. When one fires the agent runs unattended (nobody can approve) and may use
   `notify_telegram` and `send_file`. Not available in a disposable chat or an automation's own task, so a scheduled run cannot schedule more. At most 50 per user, 6 runs an hour each.
 
+<a id="viewer"></a>
+- `viewer` (level `assistant`): `show_file(path, title="")` opens a file the agent can **already read** in the user's file panel (web only). `path` has the same format, resolution, refusals (hidden entries, protected paths, unreadable sources, backend approval and audit) and a 25 MiB limit as `send_file`, but no bytes are copied into the chat: the tool queues a `file_card` entry (see [file panel API](../architecture/file-panel-api.md#file_card-event)) that is stored with the turn and replayed on reload, and the model only gets `opened in the panel: NAME (kind)`. Not built in a disposable chat or an automation's task (nobody is looking); Telegram ignores the card.
+
 <a id="identity"></a>
 - `identity` (every level, on by default for an agent without `tool_groups`): `set_display_name(name)` changes the `name` of the agent that calls it, and nothing else (never its id, level, tool groups, rules or SOUL; it cannot name another agent). One line, not empty, at most 100 characters, no control characters. No approval card (it is harmless); the change is audited (`permission_change`, field `name`, old and new name, `decision: applied`) and saved like the agent's own `agent_update`. The chat in progress keeps its prompt; new chats use the new name. Not available in a disposable chat, a dream or an automation's task. Agents with an explicit `tool_groups` list do not get it until it is added.
 

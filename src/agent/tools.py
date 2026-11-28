@@ -8,6 +8,7 @@ from src.agent.toolsets.delegate import build_delegate_tools
 from src.agent.toolsets.editing import build_edit_tools
 from src.agent.toolsets.automations import build_automation_tools
 from src.agent.toolsets.files_send import build_files_send_tools
+from src.agent.toolsets.viewer import build_viewer_tools
 from src.agent.toolsets.identity import build_identity_tools
 from src.agent.toolsets.images import build_image_tools
 from src.agent.toolsets.charts import build_chart_tools
@@ -64,7 +65,7 @@ def chat_folder_options(config: ResolvedAgent) -> dict:
     docs = {
         "recall_docs": config.recall_knowledge,
         "uploads": any(group in groups and group_allowed(getattr(config, "level", None) or Level.MINIMAL, group)
-                       for group in ("memory_read", "files_send")),
+                       for group in ("memory_read", "files_send", "viewer")),
     }
     if not config.folders:
         return docs
@@ -115,6 +116,8 @@ def build_tools(
         base_tools.extend(build_automation_tools(agent.config))
     if "files_send" in selected and (not disposable or automation):
         base_tools.extend(build_files_send_tools(agent))
+    if "viewer" in selected and not disposable:  # a card for the person in the chat; unattended tasks have nobody looking
+        base_tools.extend(build_viewer_tools(agent))
     if "identity" in selected and not disposable:  # writes the agent's configuration: DISPOSABLE_BLOCKED_TOOLS
         base_tools.extend(build_identity_tools(agent.config))
     if "notify" in selected and (not disposable or automation):  # a worker's hidden chat never writes to the user's phone; an automation's task does

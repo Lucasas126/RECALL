@@ -66,7 +66,7 @@ def build_files_send_tools(
         except FileAccessError as exc:
             return _error(str(exc))
         size = len(data)
-        if sum(item["size"] for item in [*agent._turn_files, *agent.outbox]) + size > MAX_TURN_BYTES:
+        if sum(item.get("size", 0) for item in [*agent._turn_files, *agent.outbox]) + size > MAX_TURN_BYTES:
             return f"error: this message already carries files; the total limit is {MAX_TURN_BYTES // 1024 // 1024} MiB"
         mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
         if telegram:

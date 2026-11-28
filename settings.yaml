@@ -144,6 +144,12 @@ terminal:
   max_output_chars: 20000        # ceiling for the output returned to the model
   protected_paths: []            # extra glob patterns (repo-relative or absolute) a `local` backend may never read or use; see docs/user-guide/terminal.md
 
+# File panel (see docs/user-guide/file-panel.md): read-only browsing of an agent's sources and terminal backends
+file_panel:
+  open_backends: [local, dev]    # backends browsable without a confirmation; any other asks the user once per web session
+  max_file_mib: 25               # largest file the panel serves
+  max_entries: 2000              # entries listed per folder before the listing is truncated
+
 # Approval rules, installation layer (see docs/architecture/permissions.md and docs/user-guide/terminal.md#approval-rules).
 # Users add a layer in user.yaml and agents one in their agent file (`approval_rules:`, same shape); the verdicts of
 # every matching rule are combined (deny beats ask beats allow) and `default` of the most specific layer covers the rest.

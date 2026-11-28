@@ -50,6 +50,8 @@ from src.terminal.approvals import ApprovalForbidden, ApprovalNotFound
 from src.utils.i18n import error_code, error_message, message, messages
 from src.utils.version import app_build, app_version, version_info
 from src.config.settings import WEB_SESSION_SECRET_ENV
+from src.service.files import FileGrants
+from src.web.files_api import SID_KEY as FILES_SID_KEY, build_router as build_files_router
 
 logger = get_logger("web")
 
@@ -454,6 +456,9 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
             response.headers["Cache-Control"] = "no-cache"  # always revalidate the frontend
         return response
 
+    file_grants = FileGrants()
+    app.include_router(build_files_router(service, current_user, file_grants))
+
     # ------------------------------------------------------------------ session
 
     @app.post("/api/login")
@@ -469,6 +474,7 @@ def create_app(service: Optional[ChatService] = None, *, dream_scheduler: Option
 
     @app.post("/api/logout")
     def logout(request: Request):
+        file_grants.drop_session(request.session.get(FILES_SID_KEY, ""))
         request.session.clear()
         return {"ok": True}
 
