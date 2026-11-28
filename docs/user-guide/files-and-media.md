@@ -180,6 +180,7 @@ An agent can hand you a file and message you on Telegram, with two tool groups y
   audio and video are previewed, other files are a download link), is kept with the reply so it is still there after a reload, and, in a Telegram chat, arrives as a
   photo, audio, video or document. Up to 10 MB a file and 25 MB a reply. It opens no new access: a file on a terminal machine (`<machine>:<path>`) is fetched through the terminal and asks for the same approval card as reading it there,
   and if you are not there to answer it the send fails after the card's timeout and the agent is told.
+- `viewer` (level `assistant`): `show_file` opens a file the agent can already read in your side panel, as a card in the web chat. Nothing is copied into the chat, and it needs no download.
 - `notify` (level `assistant`): `notify_telegram` sends you a short message on Telegram, for example "tell me when you finish". It needs the bot token on the server and
   your user linked in `TELEGRAM_ALLOWED_USERS`; at most 30 an hour per agent.
 

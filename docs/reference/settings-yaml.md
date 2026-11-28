@@ -208,6 +208,17 @@ that share the API are `perplexity/pplx-decider-flash-v1.2`, `liquid/d1.1` and `
 out-of-range values stop the start-up. The per-user switch `orchestrator` and the `core_agent_id` live in the user's
 [preferences](user-yaml.md#preferences-api). Only the message text and the agents' ids, names and descriptions are sent.
 
+## file_panel
+
+Limits of the read-only [file panel](../user-guide/file-panel.md) ([API](../architecture/file-panel-api.md)); every key is optional.
+
+```yaml
+file_panel:
+  open_backends: [local, dev]  # terminal backends browsable without a confirmation; others need the user's grant (8 h per web session)
+  max_file_mib: 25             # 1-1024; larger files answer 413
+  max_entries: 2000            # 10-100000; a longer folder is listed truncated
+```
+
 ## terminal
 
 Framework-wide limits of the [terminal tool group](../user-guide/terminal.md); every key is optional and unknown keys stop the

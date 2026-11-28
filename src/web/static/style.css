@@ -689,7 +689,7 @@ details.thinking { border-left: 2px solid var(--line); padding-left: 10px; displ
 .msg.editing .attachment-audio { display: none; }  /* the chip and the text box of the editor stand in for it */
 .attachment-image, .attachment-audio, .attachment-video { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 6px; border-radius: 8px; max-width: min(100%, 360px); }
 .attachment-image img, .attachment-video video { max-width: min(320px, 70vw); max-height: 220px; border-radius: 6px; display: block; }   /* not a percentage: a percentage makes the bubble size itself from the picture's full width and leaves empty space on the right */
-.attachment-audio audio { width: min(100%, 300px); height: 36px; }
+.attachment-audio audio { width: min(300px, 70vw); height: 36px; }   /* not a percentage: the box shrinks to its content, so a percentage collapsed the player to a few pixels */
 .attachment-label { font-size: .8em; color: var(--muted); }
 .agent-files { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 0; }
 .icon-btn:hover:not(:disabled) { color: var(--text); background: var(--raised); border-color: transparent; }

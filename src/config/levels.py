@@ -65,6 +65,7 @@ SERVICE_MIN_LEVEL: dict[str, Level] = {
     "charts": Level.ASSISTANT,
     "notify": Level.ASSISTANT,
     "files_send": Level.READER,
+    "viewer": Level.ASSISTANT,
     "identity": Level.READER,
     "automations": Level.ASSISTANT,
     "folders_edit": Level.COLLABORATOR,

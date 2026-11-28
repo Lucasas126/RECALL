@@ -19,6 +19,7 @@
   <link rel="preload" href="/static/fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/static/fonts/fraunces.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/filepanel.css">
   <script src="/static/appearance.js"></script>
 </head>
 <body>
@@ -86,6 +87,7 @@
           <input id="chat-title-input" maxlength="60" hidden>
         </div>
         <button id="chat-make-disposable" type="button" hidden><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span id="chat-make-disposable-text"></span></button>
+        <button id="filepanel-toggle" type="button" class="icon-btn" aria-controls="file-panel" aria-expanded="false" title="Files" aria-label="Files"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
         <div id="header-resizer" role="separator" aria-orientation="horizontal" aria-label="Resize the header" tabindex="0"></div>
       </header>
       <div id="update-banner" role="status" hidden>
@@ -719,6 +721,16 @@
         </div>
       </section>
     </main>
+    <section id="file-panel" aria-label="Files" hidden>
+      <div id="filepanel-resizer" role="separator" aria-orientation="vertical" aria-label="Resize the file panel" tabindex="0"></div>
+      <div class="fp-tabbar">
+        <button id="fp-close" type="button" class="icon-btn" title="Close the file panel" aria-label="Close the file panel"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+        <div id="fp-tablist" role="tablist" aria-label="Open files"></div>
+      </div>
+      <div id="fp-body">
+        <div id="fp-panel-files" role="tabpanel" aria-labelledby="fp-tab-files"><div id="fp-files-body"></div></div>
+      </div>
+    </section>
   </section>
 
   <dialog id="settings-dialog" aria-labelledby="settings-title">
@@ -1220,6 +1232,7 @@
   <script src="/static/vendor/purify.min.js"></script>
   <script src="/static/vendor/highlight.min.js"></script>
   <script src="/static/vendor/panzoom.min.js"></script>
+  <script src="/static/filepanel.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

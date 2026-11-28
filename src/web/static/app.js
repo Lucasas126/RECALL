@@ -1694,6 +1694,7 @@ async function selectAgent(agentId) {
   renderMessages([]);
   setComposer(false);
   if (!agentId && state.user && !state.user.agents.length) renderNoAgents();
+  globalThis.FilePanel?.sync?.();  // the explorer follows the agent
   await refreshChats();
 }
 
@@ -7996,14 +7997,18 @@ function addMessage(role, parent = state.view ?? $("messages"), author = null) {
       el.insertBefore(attachmentBox, body);
     }
     const items = attachments.map((attachment) => attachmentView(attachment));
+    items.forEach((item, i) => { const open = globalThis.FilePanel?.attachmentButton(attachments[i], state.chatId); if (open) item.append(open); });  // opens the upload in the file panel
     if (replace) attachmentBox.replaceChildren(...items);
     else attachmentBox.append(...items);
   }
   // Files the agent hands over (`send_file`) sit in their own box at the very end of the turn: later steps and text are
   // added above it, so it never scrolls out of sight. A person's own attachments stay above the message instead.
   let agentFilesBox = null;
-  function renderAgentFiles(files) {
-    if (!files?.length) return;
+  function renderAgentFiles(files, live = false) {
+    const cards = (files || []).filter((file) => file?.type === "file_card");  // `show_file`: cards that open in the file panel
+    if (cards.length) renderFileCards(cards, live);
+    files = (files || []).filter((file) => file?.type !== "file_card");
+    if (!files.length) return;
     if (!agentFilesBox) {
       agentFilesBox = document.createElement("div");
       agentFilesBox.className = "message-attachments agent-files";
@@ -8012,6 +8017,20 @@ function addMessage(role, parent = state.view ?? $("messages"), author = null) {
         .observe(el, { childList: true });
     }
     agentFilesBox.append(...files.map((file) => attachmentView(file)));
+  }
+  let fileCardBox = null;
+  function renderFileCards(cards, live) {
+    if (!fileCardBox) {
+      fileCardBox = document.createElement("div");
+      fileCardBox.className = "file-cards";
+      el.append(fileCardBox);
+      new MutationObserver(() => { if (el.lastElementChild !== fileCardBox) el.append(fileCardBox); })
+        .observe(el, { childList: true });
+    }
+    for (const card of cards) {
+      fileCardBox.append(globalThis.FilePanel.cardElement(card));
+      if (live) globalThis.FilePanel.receiveCard(card);  // the tab appears without taking the focus
+    }
   }
   const view = {
     el,
@@ -8122,7 +8141,7 @@ function addMessage(role, parent = state.view ?? $("messages"), author = null) {
     // The final `tool` event: completes the step started above in place (same position, same open/closed state).
     action(a) {
       actionCount++;
-      if (a.files?.length) renderAgentFiles(a.files);  // `send_file`: the files the agent hands over
+      if (a.files?.length) renderAgentFiles(a.files, true);  // `send_file`: the files the agent hands over; `show_file`: file cards
       const { steps, index } = toolStepsApply(liveSteps, "tool", a);
       const started = index < liveNodes.length;
       liveSteps = steps;
