@@ -515,7 +515,12 @@
         if (JSON.stringify(explorer.roots) !== before) renderExplorer();
       } catch { /* the lock icon stays as it was */ }
     }
-    const rootLabel = (rootId) => explorer.roots.find((r) => r.id === rootId)?.label || rootId || "";
+    const ROOT_NAMES = { mind_palace: "Mind palace", conversations: "Conversations", agent: "Agent files", uploads: "Uploads", recall_docs: "RECALL docs" };
+    const AGENT_ROOTS = new Set(["mind_palace", "conversations", "agent"]);  // what belongs to one agent (uploads are the user's)
+    const nameOfRoot = (r) => (r.kind === "source" && ROOT_NAMES[r.id] ? t(ROOT_NAMES[r.id]) : r.label || r.id);
+    const rootLabel = (rootId) => { const r = explorer.roots.find((x) => x.id === rootId); return r ? nameOfRoot(r) : rootId || ""; };
+    // The display name of an agent: sources such as the mind palace belong to one agent, so the panel says which.
+    const agentName = (id) => (typeof state !== "undefined" && state.user?.agents?.find((a) => a.id === id)?.name) || id || "";
     const isLocked = (r) => r.kind === "backend" && !(r.open || r.granted);
 
     function renderExplorer() {
@@ -529,10 +534,11 @@
         button.type = "button";
         button.setAttribute("aria-pressed", String(r.id === explorer.root));
         if (isLocked(r)) { button.dataset.locked = "1"; button.append(icon("lock")); button.title = t("Needs your approval"); }
-        button.append(el("span", "", r.label || r.id));
+        button.append(el("span", "", nameOfRoot(r)));
         button.addEventListener("click", () => loadList(r.id, ""));
         rootsBar.append(button);
       }
+      nodes.unshift(el("p", "fp-agent", t("Files of {name}", { name: agentName(explorer.agent) })));
       nodes.push(rootsBar);
       if (explorer.root) {
         const nav = el("nav", "fp-crumbs");
@@ -619,7 +625,7 @@
       panel.hidden = true;
       const header = el("div", "fp-dochead");
       const title = el("div", "fp-doctitle");
-      title.append(el("strong", "fp-docname", tab.name), el("span", "fp-docpath", `${tab.root}:${tab.path}`));
+      title.append(el("strong", "fp-docname", tab.name), el("span", "fp-docpath", `${AGENT_ROOTS.has(tab.root) ? `${agentName(tab.agent)} · ` : ""}${tab.root}:${tab.path}`));
       const actions = el("div", "fp-docactions");
       const docBody = el("div", "fp-docbody");
       const entry = { panel, loaded: false, docBody, info: null, dispose: null, render: null };
@@ -846,9 +852,10 @@
       button.addEventListener("click", () => openCard(card));
       return button;
     }
-    // The chat attachment's small button: it opens the upload in the panel (root `uploads`, `<chat id>/<name>`).
+    // The chat attachment's small button: it opens the upload in the panel (root `uploads`, `<chat id>/<stored file>`, the
+    // stored file being `<timestamp>-<name>`, what the server kept on the turn).
     function attachmentButton(attachment, chatId) {
-      if (!attachment?.name || !chatId) return null;
+      if (!attachment?.name || !attachment?.file || !chatId) return null;
       const button = el("button", "attachment-open");
       button.type = "button";
       button.title = t("Open in the file panel");
@@ -857,7 +864,7 @@
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        openCard({ root: "uploads", path: `${chatId}/${attachment.name}`, name: attachment.name });
+        openCard({ root: "uploads", path: `${chatId}/${attachment.file}`, name: attachment.name });
       });
       return button;
     }
