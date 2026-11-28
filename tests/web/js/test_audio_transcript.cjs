@@ -30,4 +30,10 @@ assert.strictEqual(visibleUserText(`[AUDIO] Audio transcription:\nHello there\n\
 assert.strictEqual(visibleUserText(`look\n\n${note}\n${note.replace("voice.webm", "b.pdf")}`, []), "look");
 assert.strictEqual(visibleUserText(note, [{ modality: "image" }]), "");
 assert.strictEqual(visibleUserText("I wrote [FILE] Original of x", []), "I wrote [FILE] Original of x");
+// a message with an image keeps its content as a list of parts: the text part is cleaned, the rest is untouched
+const image = { type: "image_url", image_url: { url: "data:image/png;base64,AA" } };
+const mixed = [{ type: "text", text: `[AUDIO] Audio transcription:\nHello there\n\n${note}` }, image];
+const cleaned = visibleUserText(mixed, [{ modality: "image" }, ...audio]);
+assert.strictEqual(cleaned[0].text, "");
+assert.strictEqual(cleaned[1], image);
 console.log("ok");

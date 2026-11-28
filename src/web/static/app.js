@@ -5433,6 +5433,11 @@ function showTranscript(item, transcript) {
 // under the player instead, so those blocks are left out of the message text when the turn's recordings carry it. The
 // "[FILE] Original of ..." lines tell the agent where an upload is saved; they are for the agent only and never shown.
 function visibleUserText(text, media) {
+  // a message with an image or another file stores its content as a list of parts: clean each text part
+  if (Array.isArray(text)) {
+    const cleaned = text.map((part) => (part?.type === "text" ? { ...part, text: visibleUserText(part.text, media) } : part));
+    return cleaned.some((part, i) => part !== text[i] && part.text !== text[i].text) ? cleaned : text;
+  }
   if (typeof text !== "string") return text;
   let shown = text.replace(/^\[FILE\] Original of '.*' saved at .* \(read-only source address: [^)\n]*\)[ \t]*$/gm, "");
   for (const item of media || []) {
