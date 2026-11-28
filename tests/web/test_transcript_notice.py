@@ -8,9 +8,9 @@ class PersistentTranscriptTests(unittest.TestCase):
         self.assertIn('item["transcript"] = heard', chat)
         self.assertNotIn("🎤", chat)
         js = Path("src/web/static/app.js").read_text()
-        self.assertIn("attachment.transcript", js)
+        self.assertIn("item.transcript", js)
+        self.assertNotIn("attachment-transcript", js)  # the heard text is message text, not a caption under the player
         css = Path("src/web/static/style.css").read_text()
-        self.assertIn(".attachment-transcript", css)
         self.assertIn("#mic.recording { width: auto", css)
 
 

@@ -5413,30 +5413,23 @@ function attachmentView(attachment) {
   caption.className = "attachment-label";
   caption.textContent = label;
   item.append(media, caption);
-  if (kind === "audio" && attachment.transcript) showTranscript(item, attachment.transcript);
   return item;
 }
 
-// The text speech-to-text heard, small, under a recording's player.
-function showTranscript(item, transcript) {
-  item._attachment.transcript = transcript;
-  let heard = item.querySelector(":scope > .attachment-transcript");
-  if (!heard) {
-    heard = document.createElement("span");
-    heard.className = "attachment-transcript";
-    item.append(heard);
-  }
-  heard.textContent = transcript;
-}
-
-// The model reads a recording as "[AUDIO] Audio transcription:\n<text>" appended to the message; the person sees the text
-// under the player instead, so those blocks are left out of the message text when the turn's recordings carry it. The
+// The model reads a recording as "[AUDIO] Audio transcription:\n<text>" appended to the message; the person sees the
+// heard text as part of the message, like typed text, so only that heading is dropped when the turn's recordings carry
+// the text. The
 // "[FILE] Original of ..." lines tell the agent where an upload is saved; they are for the agent only and never shown.
 function visibleUserText(text, media) {
+  // a message with an image or another file stores its content as a list of parts: clean each text part
+  if (Array.isArray(text)) {
+    const cleaned = text.map((part) => (part?.type === "text" ? { ...part, text: visibleUserText(part.text, media) } : part));
+    return cleaned.some((part, i) => part !== text[i] && part.text !== text[i].text) ? cleaned : text;
+  }
   if (typeof text !== "string") return text;
   let shown = text.replace(/^\[FILE\] Original of '.*' saved at .* \(read-only source address: [^)\n]*\)[ \t]*$/gm, "");
   for (const item of media || []) {
-    if (item.modality === "audio" && item.transcript) shown = shown.split(`[AUDIO] Audio transcription:\n${item.transcript}`).join("");
+    if (item.modality === "audio" && item.transcript) shown = shown.split(`[AUDIO] Audio transcription:\n${item.transcript}`).join(item.transcript);
   }
   return shown === text ? text : shown.replace(/\n{3,}/g, "\n\n").trim();
 }
@@ -5853,13 +5846,11 @@ function startEdit(el) {
   cancel.textContent = tr("Cancel editing");
   actions.append(save, cancel);
   form.append(field, notice, actions);
-  // the heard text of each recording joins the message text in the one box; each recording can still be removed
+  // the heard text is already part of the message text in the one box; each recording can still be removed
   const recordingEdits = [];
-  const heardTexts = [];
   const attachmentRow = document.createElement("div");
   attachmentRow.className = "msg-edit-recordings";
   for (const item of el.querySelectorAll(".message-attachments .attachment-audio")) {
-    if (item._attachment?.transcript) heardTexts.push(item._attachment.transcript);
     // the same chip as a file waiting to be sent: its name and a cross to discard it
     const row = document.createElement("span");
     row.className = "pending-attachment msg-edit-recording";
@@ -5882,10 +5873,7 @@ function startEdit(el) {
     attachmentRow.append(row);
   }
   if (recordingEdits.length) form.insertBefore(attachmentRow, field);
-  if (heardTexts.length) {
-    field.value = [field.value.trim(), ...heardTexts].filter(Boolean).join("\n\n");
-    field.rows = Math.min(12, Math.max(3, field.value.split("\n").length));
-  }
+  field.rows = Math.min(12, Math.max(2, field.value.split("\n").length));
   const close = () => {
     form.remove();
     body.hidden = false;
@@ -8011,7 +7999,12 @@ function addMessage(role, parent = state.view ?? $("messages"), author = null) {
     // what speech-to-text heard, one text per recording of the message in order (the reply's first event)
     transcripts(texts) {
       const players = attachmentBox ? [...attachmentBox.querySelectorAll(":scope > .attachment-audio")] : [];
-      players.forEach((item, position) => { if (texts[position]) showTranscript(item, texts[position]); });
+      players.forEach((item, position) => {
+        if (!texts[position]) return;
+        item._attachment.transcript = texts[position];
+        raw = raw.trim() ? `${raw.trimEnd()}\n\n${texts[position]}` : texts[position];
+      });
+      renderBody();
     },
     // Every reasoning burst is its own segment at its place in the timeline; chunks that follow it directly join it.
     thinking(chunk) {

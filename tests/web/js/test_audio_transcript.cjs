@@ -13,10 +13,10 @@ assert(src.includes("view.text(visibleUserText(m.content, m.media))"), "history 
 assert(src.includes('event === "transcript"'), "the transcript event must be handled");
 
 const audio = [{ modality: "audio", transcript: "Hello there" }];
-assert.strictEqual(visibleUserText("[AUDIO] Audio transcription:\nHello there", audio), "");
-assert.strictEqual(visibleUserText("see this\n\n[AUDIO] Audio transcription:\nHello there", audio), "see this");
+assert.strictEqual(visibleUserText("[AUDIO] Audio transcription:\nHello there", audio), "Hello there");
+assert.strictEqual(visibleUserText("see this\n\n[AUDIO] Audio transcription:\nHello there", audio), "see this\n\nHello there");
 assert.strictEqual(
-  visibleUserText("a\n\n[AUDIO] Audio transcription:\nHello there\n\nb", audio), "a\n\nb");
+  visibleUserText("a\n\n[AUDIO] Audio transcription:\nHello there\n\nb", audio), "a\n\nHello there\n\nb");
 // without a stored transcript nothing is hidden, and plain text is untouched
 assert.strictEqual(
   visibleUserText("[AUDIO] Audio transcription:\nHello there", [{ modality: "audio" }]),
@@ -26,8 +26,14 @@ const parts = [{ type: "text", text: "x" }];
 assert.strictEqual(visibleUserText(parts, audio), parts);
 // the "[FILE] Original of ..." lines for the agent are never shown, with or without a transcript
 const note = "[FILE] Original of 'voice.webm' saved at /data/u/.uploads/c1/20261126-voice.webm (read-only source address: uploads:c1/20261126-voice.webm)";
-assert.strictEqual(visibleUserText(`[AUDIO] Audio transcription:\nHello there\n\n${note}`, audio), "");
+assert.strictEqual(visibleUserText(`[AUDIO] Audio transcription:\nHello there\n\n${note}`, audio), "Hello there");
 assert.strictEqual(visibleUserText(`look\n\n${note}\n${note.replace("voice.webm", "b.pdf")}`, []), "look");
 assert.strictEqual(visibleUserText(note, [{ modality: "image" }]), "");
 assert.strictEqual(visibleUserText("I wrote [FILE] Original of x", []), "I wrote [FILE] Original of x");
+// a message with an image keeps its content as a list of parts: the text part is cleaned, the rest is untouched
+const image = { type: "image_url", image_url: { url: "data:image/png;base64,AA" } };
+const mixed = [{ type: "text", text: `[AUDIO] Audio transcription:\nHello there\n\n${note}` }, image];
+const cleaned = visibleUserText(mixed, [{ modality: "image" }, ...audio]);
+assert.strictEqual(cleaned[0].text, "Hello there");
+assert.strictEqual(cleaned[1], image);
 console.log("ok");

@@ -681,7 +681,6 @@ details.thinking { border-left: 2px solid var(--line); padding-left: 10px; displ
 .icon-btn.recording { display: inline-flex; align-items: center; gap: 6px; width: auto; padding: 0 12px; border-radius: 18px; }
 .mic-time { font-variant-numeric: tabular-nums; font-size: .85em; font-weight: 600; }
 #composer:has(#mic.recording), #composer:has(#mic.recording):focus-within { border-color: #c0392b; box-shadow: 0 0 0 1px #c0392b; }
-.attachment-transcript { max-width: 100%; color: var(--text); font-size: 1.18em; white-space: pre-wrap; }  /* 1.18 x .85 of the attachment box = the message text size */
 .mic-level { display: inline-flex; align-items: center; gap: 2px; height: 22px; }
 .mic-level i { display: block; width: 3px; height: 20%; min-height: 3px; border-radius: 2px; background: currentColor; transition: height 60ms linear; }
 .icon-btn.recording.silent .mic-level { opacity: .45; }
