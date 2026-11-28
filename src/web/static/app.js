@@ -5460,6 +5460,16 @@ function attachmentView(attachment) {
 // heard text as part of the message, like typed text, so only that heading is dropped when the turn's recordings carry
 // the text. The
 // "[FILE] Original of ..." lines tell the agent where an upload is saved; they are for the agent only and never shown.
+// Chats written before the turn kept `uploads` still carry the stored name in the agent-only `[FILE] Original of ...` lines.
+function uploadsFromText(content) {
+  const text = Array.isArray(content) ? content.filter((p) => p?.type === "text").map((p) => p.text).join("\n") : content;
+  if (typeof text !== "string") return [];
+  const kinds = { image: /\.(png|jpe?g|gif|webp|bmp|heic)$/i, audio: /\.(webm|ogg|oga|mp3|m4a|wav|opus)$/i, video: /\.(mp4|mov|mkv|avi)$/i };
+  return [...text.matchAll(/^\[FILE\] Original of '(.*)' saved at .* \(read-only source address: uploads:[^/\n]+\/([^)\n]*)\)[ \t]*$/gm)].map((m) => ({
+    name: m[1], file: m[2], modality: Object.keys(kinds).find((k) => kinds[k].test(m[1])) || "document",
+  }));
+}
+
 function visibleUserText(text, media) {
   // a message with an image or another file stores its content as a list of parts: clean each text part
   if (Array.isArray(text)) {
@@ -5812,8 +5822,8 @@ function drawMessages(container, messages, { usage }) {
         else view.text(step.text);
       }
     } else {
-      view.text(visibleUserText(m.content, m.media));
-      if (m.media?.length) view.attachments(m.media);
+      view.text(visibleUserText(m.content, m.media), m.uploads?.length ? m.uploads : uploadsFromText(m.content));
+      if (m.media?.length) view.attachments(m.media, m.uploads?.length ? m.uploads : uploadsFromText(m.content));
     }
     if (m.interrupted) view.interrupted(null, m.interrupted_by);
     if (!usage) continue;
@@ -7989,7 +7999,7 @@ function addMessage(role, parent = state.view ?? $("messages"), author = null) {
     }
   }
   // Attachments of a message: images, audio and video play right there; anything else shows its name.
-  function renderAttachmentNames(attachments, replace = false) {
+  function renderAttachmentNames(attachments, replace = false, uploads = null) {
     if (!attachments?.length) return;
     if (!attachmentBox) {
       attachmentBox = document.createElement("div");
@@ -7997,7 +8007,15 @@ function addMessage(role, parent = state.view ?? $("messages"), author = null) {
       el.insertBefore(attachmentBox, body);
     }
     const items = attachments.map((attachment) => attachmentView(attachment));
-    items.forEach((item, i) => { const open = globalThis.FilePanel?.attachmentButton(attachments[i], state.chatId); if (open) item.append(open); });  // opens the upload in the file panel
+    // The server stores each upload as `<timestamp>-<name>` and keeps that on the turn (`uploads`, in send order): the n-th
+    // file of a kind here is the n-th stored file of that kind. Without it (a message just sent) there is no button.
+    const seen = {};
+    items.forEach((item, i) => {
+      const modality = attachments[i].modality || "";
+      const stored = (uploads || []).filter((u) => u.modality === modality)[seen[modality] = (seen[modality] ?? -1) + 1];
+      const open = stored && globalThis.FilePanel?.attachmentButton({ name: stored.name, file: stored.file }, state.chatId);
+      if (open) item.append(open);  // opens the upload in the file panel
+    });
     if (replace) attachmentBox.replaceChildren(...items);
     else attachmentBox.append(...items);
   }
@@ -8035,7 +8053,7 @@ function addMessage(role, parent = state.view ?? $("messages"), author = null) {
   const view = {
     el,
     agentFiles: renderAgentFiles,
-    text(chunk) {
+    text(chunk, uploads = null) {
       if (Array.isArray(chunk)) {
         const textParts = chunk.filter((part) => part.type === "text").map((part) => part.text);
         raw += textParts.join("");
@@ -8043,7 +8061,7 @@ function addMessage(role, parent = state.view ?? $("messages"), author = null) {
           part.type === "image_url"
             ? { name: part.name || "image", modality: "image", data_url: part.image_url?.url }
             : { name: part.name || part.type }
-        )), true);
+        )), true, uploads);
         if (textParts.join("").trim()) thinking = null;
         renderBody();
         return;
@@ -8053,7 +8071,7 @@ function addMessage(role, parent = state.view ?? $("messages"), author = null) {
       if (workingLine) { workingLine.remove(); workingLine = null; }
       renderBody();
     },
-    attachments: (items) => renderAttachmentNames(items),
+    attachments: (items, uploads) => renderAttachmentNames(items, false, uploads),
     // what speech-to-text heard, one text per recording of the message in order (the reply's first event)
     transcripts(texts) {
       const players = attachmentBox ? [...attachmentBox.querySelectorAll(":scope > .attachment-audio")] : [];

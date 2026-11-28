@@ -9,7 +9,7 @@ const start = src.indexOf("function visibleUserText(text, media)");
 const end = src.indexOf("\n}\n", start) + 3;
 assert(start > 0 && end > start, "visibleUserText not found in app.js");
 const visibleUserText = new Function(src.slice(start, end) + "; return visibleUserText;")();
-assert(src.includes("view.text(visibleUserText(m.content, m.media))"), "history must render the stripped text");
+assert(src.includes("view.text(visibleUserText(m.content, m.media),"), "history must render the stripped text");
 assert(src.includes('event === "transcript"'), "the transcript event must be handled");
 
 const audio = [{ modality: "audio", transcript: "Hello there" }];
