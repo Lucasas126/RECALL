@@ -140,6 +140,7 @@ class McpSettings(BaseModel):
 
     connect_timeout_seconds: float = Field(default=120, ge=1, le=600, allow_inf_nan=False)
     call_timeout_seconds: float = Field(default=60, ge=1, le=600, allow_inf_nan=False)
+    refresh_hours: float = Field(default=24, ge=0, le=8760, allow_inf_nan=False)  # 0 disables the automatic refresh
     servers: dict[McpServerId, McpServerConfig] = Field(default_factory=dict)
 
 

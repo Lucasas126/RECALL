@@ -120,6 +120,7 @@ approval_explain:
 mcp:
   connect_timeout_seconds: 120  # server start and tool listing (the first npx run downloads it)
   call_timeout_seconds: 60      # maximum time for one tool call
+  refresh_hours: 24             # idle connections list their tools again this often (0 = never)
   servers:
     google_calendar:
       name: Google Calendar

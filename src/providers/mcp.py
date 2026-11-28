@@ -52,6 +52,10 @@ class UnknownMcpServer(McpError, ValueError):
     """The requested server is not in the shared catalog."""
 
 
+class McpBusy(McpError):
+    """A tool call is running on the server's connection, so it cannot be restarted now."""
+
+
 class McpNotConnected(McpError):
     """The user has not connected the account the server needs."""
 
@@ -113,6 +117,21 @@ class _Connection:
         self._stop: asyncio.Event | None = None
         self._task: asyncio.Task | None = None
         self.tools: list[McpTool] = []
+        self._claims = 0  # tool calls started and not finished; a busy connection is never restarted
+        self._claims_lock = threading.Lock()
+
+    @property
+    def busy(self) -> bool:
+        with self._claims_lock:
+            return self._claims > 0
+
+    def claim(self) -> None:
+        with self._claims_lock:
+            self._claims += 1
+
+    def release(self) -> None:
+        with self._claims_lock:
+            self._claims -= 1
 
     @property
     def alive(self) -> bool:
@@ -285,7 +304,7 @@ class McpManager:
         """Call a tool and return its text content; raises McpError when the server reports an error."""
         if tool in self.server(server_id).exclude_tools:
             raise McpError("The MCP tool '{tool}' is not available.", tool=tool)
-        connection = self._connection(user_id, server_id)
+        connection = self._connection(user_id, server_id, claim=True)
         timeout = self._settings.call_timeout_seconds
         try:
             result = self._loop.run(connection.call(tool, arguments), timeout + 5)
@@ -302,12 +321,54 @@ class McpManager:
                     server=self.server(server_id).name,
                 ) from exc
             raise McpError("The MCP tool '{tool}' failed: {error}", tool=tool, error=_error_text(exc)) from exc
+        finally:
+            connection.release()
         text = _result_text(result)
         if result.is_error:
             raise McpError("The MCP tool '{tool}' failed: {error}", tool=tool, error=text or "unknown error")
         return text
 
-    def _connection(self, user_id: str, server_id: str) -> _Connection:
+    def refresh(self, user_id: str, server_id: str) -> dict:
+        """Restart the user's connection so the server's tools are listed again; returns the status.
+
+        Refused with McpBusy while a tool call runs on the connection.
+        """
+        self._refresh((user_id, server_id))
+        return self.status(user_id, server_id)
+
+    def refresh_idle(self) -> int:
+        """Refresh every open connection that is not running a tool call; busy ones wait for the next round."""
+        refreshed = 0
+        for key, connection in list(self._connections.items()):
+            if connection.busy:
+                continue
+            try:
+                self._refresh(key)
+                refreshed += 1
+            except McpError as exc:
+                logger.info("MCP server %s for user %s was not refreshed: %s", key[1], key[0], exc)
+        return refreshed
+
+    def _refresh(self, key: tuple[str, str]) -> None:
+        user_id, server_id = key
+        server = self.server(server_id)
+        if not self.is_connected(user_id, server_id):
+            raise McpNotConnected("Connect {server} in Settings before using it.", server=server.name)
+        with self._key_lock(key):
+            old = self._connections.get(key)
+            if old is not None and old.busy:
+                raise McpBusy(
+                    "The MCP server '{server}' is running a tool call; try again in a moment.", server=server.name,
+                )
+            self._close_connection(key)
+        connection = self._connection(user_id, server_id)
+        before = len(old.tools) if old is not None else None
+        logger.info(
+            "refreshed MCP server %s for user %s (%d tools%s)", server_id, user_id, len(connection.tools),
+            "" if before is None else f", was {before}",
+        )
+
+    def _connection(self, user_id: str, server_id: str, claim: bool = False) -> _Connection:
         server = self.server(server_id)
         if not self.is_connected(user_id, server_id):
             raise McpNotConnected("Connect {server} in Settings before using it.", server=server.name)
@@ -315,6 +376,8 @@ class McpManager:
         with self._key_lock(key):
             connection = self._connections.get(key)
             if connection is not None and connection.alive:
+                if claim:
+                    connection.claim()
                 return connection
             connection = _Connection(
                 self._transport(user_id, server_id), server_id,
@@ -337,6 +400,8 @@ class McpManager:
                     "Could not start the MCP server '{server}': {error}", server=server.name, error=_error_text(exc),
                 ) from exc
             self._connections[key] = connection
+            if claim:
+                connection.claim()
             logger.info("started MCP server %s for user %s (%d tools)", server_id, user_id, len(connection.tools))
             return connection
 

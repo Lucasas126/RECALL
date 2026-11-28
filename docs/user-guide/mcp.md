@@ -32,6 +32,7 @@ tools when the agent enables it **and** its user has connected it.
 mcp:
   connect_timeout_seconds: 120  # server start and tool listing (1-600)
   call_timeout_seconds: 60      # one tool call (1-600)
+  refresh_hours: 24             # idle connections list their tools again this often (0 = never)
   servers:
     google_calendar:            # id: lowercase letters, digits and _, max 32 characters
       name: Google Calendar
@@ -165,6 +166,13 @@ whose YAML references a server no longer in the catalog is an error.
   disconnecting an account applies to open chats without restarting. Tools are
   named `<server_id>__<tool>` (for example `google_calendar__list-events`) and use
   the server's own JSON schema.
+- A server's tool list is read when its connection opens and kept while the connection lives, so
+  tools a server gains later do not show up by themselves. RECALL therefore restarts the
+  connections that are idle every `mcp.refresh_hours` hours (default 24, `0` turns it off; the first
+  round comes one interval after start-up, and a connection running a tool call waits for the next
+  round). To pick up new tools at once, press **Refresh tools** next to a connected server in
+  Settings > Connections or in the agent's MCP tab (`POST /api/mcp/<server_id>/refresh`); it answers
+  409 while a tool call is running and shows the tool count or the error.
 - Tool results are returned as `{"untrusted": true, "server": ..., "content": ...}`;
   the system prompt tells the model they are data, not instructions. Errors
   reported by the server, timeouts and crashed servers become tool errors (a

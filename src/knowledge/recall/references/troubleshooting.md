@@ -50,7 +50,7 @@ Three steps, each by a different person; a server gives tools only when all thre
    - Token servers (`auth: {type: token}`, http): the user first creates a personal token in the other service (the field help says where, read-only is usually enough), then pastes it in the server's field in Connections. RECALL connects once to check it before saving; a rejected token is not kept.
    - Sign-in servers (stdio, such as a calendar): Connect shows a sign-in link, the user opens it and approves.
 3. **Agent** (the user, or an admin with `python -m src.admin agent set`): Agents > agent > MCP tab > "Enable for this agent"; `read_only` limits it to read tools. Needs level collaborator or higher.
-If tools are missing, check in this order: is the server in Settings > Connections at all (step 1), does it show connected (step 2), is it enabled on the agent (step 3); a new chat may be needed. Do not invent other steps; never ask the user to paste a token in the chat.
+If tools are missing, check in this order: is the server in Settings > Connections at all (step 1), does it show connected (step 2), is it enabled on the agent (step 3); a new chat may be needed. A server's tool list is read when its connection opens (refreshed every `mcp.refresh_hours`, default 24): for tools a server gained later, the user presses "Refresh tools" in Settings > Connections or the agent's MCP tab. Do not invent other steps; never ask the user to paste a token in the chat.
 
 ## Missing tools
 
